@@ -55,6 +55,11 @@ export function scheduleWhen(cron: string, tz: string, locale?: string): string 
   return words.replace(/^(Every \d+ hours) at :00$/, "$1")
 }
 
+/** Whether scheduleWhen's words name the zone, so a line right below them needn't say it again. */
+export function whenNamesZone(cron: string, tz: string, locale?: string): boolean {
+  return scheduleWhen(cron, tz, locale).includes(zoneLabel(tz))
+}
+
 /** Days since the epoch of `ts`'s calendar date in `tz`, so two times can be compared by day. */
 function dayNumber(ts: number, tz: string): number {
   const parts = format("en-US", { timeZone: tz, year: "numeric", month: "numeric", day: "numeric" }).formatToParts(ts)
@@ -104,8 +109,11 @@ export function plannedRun(s: Pick<Schedule, "enabled" | "nextRunAt" | "cron" | 
   }
 }
 
-/** "Tomorrow 2:00 AM · in 7h", with the zone when the reader's clock differs ("Tomorrow 2:00 AM Chicago · in 7h"). */
-export function nextRunText(ts: number, tz: string, now: number, opts: { locale?: string; readerTz?: string } = {}): string {
+/**
+ * "Tomorrow 2:00 AM · in 7h", with the zone when the reader's clock differs ("Tomorrow 2:00 AM Chicago · in 7h").
+ * `zone: false` leaves it out, for a line that sits under words that already name it.
+ */
+export function nextRunText(ts: number, tz: string, now: number, opts: { locale?: string; readerTz?: string; zone?: boolean } = {}): string {
   const at = runDayTime(ts, tz, now, opts.locale)
-  return `${sameClock(ts, tz, opts.readerTz) ? at : `${at} ${zoneLabel(tz)}`} · ${untilText(ts, now)}`
+  return `${opts.zone === false || sameClock(ts, tz, opts.readerTz) ? at : `${at} ${zoneLabel(tz)}`} · ${untilText(ts, now)}`
 }

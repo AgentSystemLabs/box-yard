@@ -2,7 +2,7 @@ import { AppLink } from "./ui"
 // Hooks: automations on task events. One panel serves a project's Hooks tab (the Captain's hooks) and the
 // global section in Settings (the Coordinator's). A list with on/off switches and a "Recent runs" view as
 // tabs, the templates not added yet below the list, and a centered editor Modal with a live preview of the prompt.
-import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useSearchParams } from "wouter"
 import { ChevronDown, ChevronRight, GitMerge, History, Pencil, Plus, Trash2, Webhook } from "lucide-react"
 import {
@@ -33,6 +33,7 @@ import {
   filterRuns,
   filtersSummary,
   insertVariable,
+  limitsSummary,
   parseRunFilter,
   previewVars,
   runCounts,
@@ -61,7 +62,7 @@ import {
   type HookVariable,
   type HookWithLastRun,
 } from "../../../shared/hooks"
-import { Button, Chip, Empty, Field, FieldGroup, FormNote, Select, TOUCH_SIZE, TimeAgo, cx, inputClass } from "./ui"
+import { Button, Chip, Empty, Field, FieldGroup, FormNote, Select, TOUCH_FIELD, TOUCH_SIZE, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { Modal } from "./Modal"
 import { SettingsField, SearchHighlight, useSettingsSearching } from "../lib/settingsSearch"
@@ -85,10 +86,12 @@ export function HooksPanel({ projectId, intro = true }: { projectId: string | nu
   const fromTemplate = useHookFromTemplate()
   const [params] = useSearchParams()
   const [picked, setView] = useState<"list" | "runs">(() => (params.get(VIEW_PARAM) === "runs" ? "runs" : "list"))
-  const view = searching ? "list" : picked
   const [listFilter, setListFilter] = useState<HookListFilter>("all")
   const [editing, setEditing] = useState<{ hook: Hook | null; draft: HookDraft } | null>(null)
   const list = hooks.data ?? []
+  // No hooks and no runs: there is nothing to switch between, so the tabs wait until there is.
+  const tabbed = list.length > 0 || Boolean(runs.data?.length)
+  const view = searching || (!tabbed && !hooks.isLoading && !runs.isLoading) ? "list" : picked
   // A handful of hooks needs no All/On/Off filter: the switches already show which are on.
   const filterable = list.length >= FILTER_FROM
   const shown = searching || !filterable ? list : filterHooks(list, listFilter)
@@ -123,25 +126,34 @@ export function HooksPanel({ projectId, intro = true }: { projectId: string | nu
     </>
   )
 
+  // Without an intro beside it, New hook would have a row to itself: once there is a list it shares the tabs' row
+  // (still a full-width first line on a phone).
+  const besideTabs = !intro && list.length > 0
+  const newHook = (className?: string) => (
+    <SettingsField label="New hook" keywords="automations events triggers" className={className}><Button type="button" variant="primary" className={cx(TOUCH_SIZE, "w-full @lg:w-auto")} onClick={() => setEditing({ hook: null, draft: emptyDraft() })}>
+      <Plus className="h-4 w-4" /> New hook
+    </Button></SettingsField>
+  )
+
   return (
     <section className="@container space-y-4" data-testid="hooks-panel">
-      <div className="flex flex-col gap-3 @lg:flex-row @lg:items-start @lg:justify-end">
-        {intro && (
-          <p className="min-w-0 flex-1 text-sm text-zinc-500">
-            {projectId
-              ? "Automations on this project's task events, run by its Captain. A hook sends a prompt to the task, the Captain or the Coordinator, or starts a task, when a task finishes, opens a PR, fails, needs you, or its PR merges."
-              : "Global hooks run on every project's task events. Project hooks are on each project's Hooks tab."}
-          </p>
-        )}
-        <SettingsField label="New hook" keywords="automations events triggers"><Button type="button" variant="primary" className={cx(TOUCH_SIZE, "w-full @lg:w-auto")} onClick={() => setEditing({ hook: null, draft: emptyDraft() })}>
-          <Plus className="h-4 w-4" /> New hook
-        </Button></SettingsField>
-      </div>
+      {!besideTabs && (
+        <div className="flex flex-col gap-3 @lg:flex-row @lg:items-start @lg:justify-end">
+          {intro && (
+            <p className="min-w-0 flex-1 text-sm text-zinc-500">
+              {projectId
+                ? "Automations on this project's task events, run by its Captain. A hook sends a prompt to the task, the Captain or the Coordinator, or starts a task, when a task finishes, opens a PR, fails, needs you, or its PR merges."
+                : "Global hooks run on every project's task events. Project hooks are on each project's Hooks tab."}
+            </p>
+          )}
+          {newHook()}
+        </div>
+      )}
 
       {/* No hooks yet: the templates are the way in, so they lead. With hooks, the list leads and they follow it. */}
       {!hooks.isLoading && list.length === 0 && templateCards}
 
-      <div className="flex flex-wrap items-center gap-2">
+      {tabbed && <div className="flex flex-wrap items-center gap-2">
         <Segmented
           label="Hooks views"
           id={tabsId}
@@ -162,10 +174,11 @@ export function HooksPanel({ projectId, intro = true }: { projectId: string | nu
             options={HOOK_LIST_FILTERS.map((f) => ({ key: f.key, label: f.label, count: filterHooks(list, f.key).length }))}
           />
         )}
-      </div>
+        {besideTabs && newHook("order-first w-full @lg:order-none @lg:ml-auto @lg:w-auto")}
+      </div>}
 
       {/* The tab's panel: the list with the templates left to add, or the runs. */}
-      <div role="tabpanel" id={`${tabsId}-panel-${view}`} aria-labelledby={`${tabsId}-tab-${view}`} className="space-y-4">
+      <div role={tabbed ? "tabpanel" : undefined} id={`${tabsId}-panel-${view}`} aria-labelledby={tabbed ? `${tabsId}-tab-${view}` : undefined} className="space-y-4">
       {view === "list" ? (
         hooks.isLoading ? <Loading count={2} label="Loading hooks" /> : list.length === 0 ? (
           <Empty icon={<Webhook className="h-8 w-8" />} title="No hooks yet">
@@ -180,7 +193,8 @@ export function HooksPanel({ projectId, intro = true }: { projectId: string | nu
                 hook={h}
                 enabled={on[h.id] ?? h.enabled}
                 onEnabled={(enabled) => setOn((o) => ({ ...o, [h.id]: enabled }))}
-                onEdit={() => setEditing({ hook: h, draft: draftFromHook(h) })}
+                // The editor opens with the row's switch as it shows, saved or not.
+                onEdit={() => setEditing({ hook: h, draft: draftFromHook({ ...h, enabled: on[h.id] ?? h.enabled }) })}
               /></SettingsField>
             ))}
           </ul>
@@ -205,7 +219,8 @@ const FILTER_FROM = 5
  * pressed buttons, not tabs. They're buttons, not links: the panel can live inside the Settings dialog.
  *
  * Tabs are one stop in the Tab order: ← and → (Home, End) move between them, and the view follows. `id` names them
- * (`<id>-tab-<key>`) and the panel each controls (`<id>-panel-<key>`), which the caller renders with role="tabpanel".
+ * (`<id>-tab-<key>`) and the panel the selected one controls (`<id>-panel-<key>`), which the caller renders with
+ * role="tabpanel". Only that panel is in the page, so only its tab points at one.
  */
 function Segmented<K extends string>({
   label,
@@ -244,7 +259,7 @@ function Segmented<K extends string>({
             type="button"
             role={tabs ? "tab" : undefined}
             id={tabs && id ? `${id}-tab-${o.key}` : undefined}
-            aria-controls={tabs && id ? `${id}-panel-${o.key}` : undefined}
+            aria-controls={tabs && id && on ? `${id}-panel-${o.key}` : undefined}
             tabIndex={tabs && !on ? -1 : undefined}
             aria-selected={tabs ? on : undefined}
             aria-pressed={tabs ? undefined : on}
@@ -334,6 +349,7 @@ function HookRow({ hook: h, enabled, onEnabled, onEdit }: { hook: HookWithLastRu
       <div className="-mr-1 flex shrink-0 items-center">
         <Button type="button" size="sm" variant="ghost" className={TOUCH_SIZE} onClick={onEdit} title="Edit hook" aria-label={`Edit ${h.name}`}>
           <Pencil className="h-3.5 w-3.5" />
+          <span className="hidden @lg:inline">Edit</span>
         </Button>
         <Button
           type="button"
@@ -430,7 +446,7 @@ function RunsView({ runs, hooks, loading }: { runs: HookRun[]; hooks: Hook[]; lo
           options={RUN_FILTERS.map((f) => ({ key: f.key, label: f.label, count: counts[f.key] }))}
         />
         {names.length > 1 && (
-          <Select size="sm" className={cx(TOUCH_SIZE, "w-full @lg:w-56")} value={hookId ?? ""} onChange={(e) => setHookId(e.target.value || null)} aria-label="Filter by hook">
+          <Select size="sm" className={cx(TOUCH_FIELD, "w-full @lg:w-56")} value={hookId ?? ""} onChange={(e) => setHookId(e.target.value || null)} aria-label="Filter by hook">
             <option value="">Every hook</option>
             {names.map(([id, name]) => (
               <option key={id} value={id}>
@@ -490,6 +506,9 @@ function RunRow({ run: r }: { run: HookRun }) {
 
 // ------------------------------------------------------------------ editor
 
+/** The editor is wide from here (Tailwind's `@lg`): Preview and limits opens with it. */
+const WIDE_EDITOR_REM = 32
+
 function HookEditor({
   projectId,
   hook,
@@ -512,11 +531,21 @@ function HookEditor({
   const [filtersOpen, setFiltersOpen] = useState(() => draftToInput(initial, projectId).filters !== undefined && Object.keys(draftToInput(initial, projectId).filters).length > 0)
   const [sampleTask, setSampleTask] = useState("")
   const promptRef = useRef<HTMLTextAreaElement>(null)
+  // Until the prompt has had the focus its cursor is at 0, which isn't where anyone put it: a variable goes at the end.
+  const promptTouched = useRef(false)
+  // Preview and limits: open where there's room, a closed row on a phone. A limit that stops the save keeps it open.
+  const editorRef = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState(false)
+  useLayoutEffect(() => {
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+    if ((editorRef.current?.clientWidth ?? 0) >= WIDE_EDITOR_REM * rem) setMore(true)
+  }, [])
   // The variable whose chip has the focus or was tapped last: the line under the chips says what it stands for.
   const [hintVar, setHintVar] = useState<HookVariable | null>(null)
   // Nothing nags on open: the reason by the button is a quiet hint until a field was changed or left.
   const [blurred, setBlurred] = useState(false)
   const reasonId = useId()
+  const nameId = useId()
   const set = <K extends keyof HookDraft>(key: K, value: HookDraft[K]) => setD((x) => ({ ...x, [key]: value }))
   const problems = draftProblems(d)
   const warnings = draftWarnings(d)
@@ -525,6 +554,8 @@ function HookEditor({
   const project = projects.data?.find((p) => p.id === projectId)
   const input = draftToInput(d, projectId)
   const filterCount = Object.keys(input.filters).length
+  const limitStops = draftProblems({ ...d, maxFiresPerTask: "1" }).length < problems.length
+  const moreOpen = more || limitStops
 
   // Real tasks to preview with: this project's (or any, for a global hook), PRs first.
   const candidates = useMemo(
@@ -541,7 +572,8 @@ function HookEditor({
 
   const addVariable = (name: string) => {
     const el = promptRef.current
-    const { text, cursor } = insertVariable(d.prompt, name, el?.selectionStart ?? d.prompt.length, el?.selectionEnd ?? d.prompt.length)
+    const at = promptTouched.current ? el : null
+    const { text, cursor } = insertVariable(d.prompt, name, at?.selectionStart ?? d.prompt.length, at?.selectionEnd ?? d.prompt.length)
     set("prompt", text)
     requestAnimationFrame(() => {
       el?.focus()
@@ -583,7 +615,7 @@ function HookEditor({
         </>
       }
     >
-      <div data-testid="hook-editor" className="@container space-y-5" onBlur={() => setBlurred(true)}>
+      <div ref={editorRef} data-testid="hook-editor" className="@container space-y-5" onBlur={() => setBlurred(true)}>
         {!hook && templates.length > 0 && (
           <FieldGroup label="Start from">
             <div className="flex flex-wrap gap-1.5">
@@ -605,13 +637,27 @@ function HookEditor({
           </p>
         )}
 
-        <Field label="Name">
-          <input autoFocus={!hook} className={cx(inputClass, TOUCH_SIZE)} value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="Merge when ready" />
-        </Field>
+        {/* The name and the switch share a row. Not Field: its <label> would take the switch in too. */}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5">
+          <label htmlFor={nameId} className="col-span-full block text-xs font-medium tracking-wide whitespace-nowrap text-zinc-400 uppercase">
+            Name
+          </label>
+          <input id={nameId} autoFocus={!hook} className={cx(inputClass, TOUCH_FIELD)} value={d.name} onChange={(e) => set("name", e.target.value)} placeholder="Merge when ready" />
+          {/* The switch names itself; the words beside it are the same ones, shorter on a 320px phone. */}
+          <div className="flex items-center gap-1 text-sm whitespace-nowrap text-zinc-300">
+            <Switch checked={d.enabled} onChange={(v) => set("enabled", v)} label={d.enabled ? "Hook is on" : "Hook is off"} title={d.enabled ? "Turn the hook off" : "Turn the hook on"} />
+            <span aria-hidden className="@xs:hidden">
+              {d.enabled ? "On" : "Off"}
+            </span>
+            <span aria-hidden className="hidden @xs:inline">
+              {d.enabled ? "Hook is on" : "Hook is off"}
+            </span>
+          </div>
+        </div>
 
         <div className="grid gap-4 @lg:grid-cols-2">
           <Field label="When" hint={triggerHint(d.trigger)}>
-            <Select className={cx(TOUCH_SIZE, "w-full")} value={d.trigger} onChange={(e) => set("trigger", e.target.value as HookDraft["trigger"])}>
+            <Select className={cx(TOUCH_FIELD, "w-full")} value={d.trigger} onChange={(e) => set("trigger", e.target.value as HookDraft["trigger"])}>
               {HOOK_TRIGGERS.map((t) => (
                 <option key={t} value={t}>
                   {TRIGGER_INFO[t].label}
@@ -620,7 +666,7 @@ function HookEditor({
             </Select>
           </Field>
           <Field label="Then" hint={actionHint(d.action)}>
-            <Select className={cx(TOUCH_SIZE, "w-full")} value={d.action} onChange={(e) => set("action", e.target.value as HookDraft["action"])}>
+            <Select className={cx(TOUCH_FIELD, "w-full")} value={d.action} onChange={(e) => set("action", e.target.value as HookDraft["action"])}>
               {HOOK_ACTIONS.map((a) => (
                 <option key={a} value={a}>
                   {ACTION_INFO[a].label}
@@ -640,7 +686,7 @@ function HookEditor({
             <div className="space-y-4 border-t border-zinc-800/80 p-3">
               {!projectId && (
                 <Field label="Project">
-                  <Select className={cx(TOUCH_SIZE, "w-full")} value={d.projectFilter} onChange={(e) => set("projectFilter", e.target.value)}>
+                  <Select className={cx(TOUCH_FIELD, "w-full")} value={d.projectFilter} onChange={(e) => set("projectFilter", e.target.value)}>
                     <option value="">Every project</option>
                     {projects.data?.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -652,10 +698,10 @@ function HookEditor({
               )}
               <div className="grid gap-4 @lg:grid-cols-2">
                 <Field label="Title matches" hint="A regular expression, ignoring case.">
-                  <input className={cx(inputClass, TOUCH_SIZE, "font-mono")} value={d.titleRegex} onChange={(e) => set("titleRegex", e.target.value)} placeholder="^(fix|feat)" />
+                  <input className={cx(inputClass, TOUCH_FIELD, "font-mono")} value={d.titleRegex} onChange={(e) => set("titleRegex", e.target.value)} placeholder="^(fix|feat)" />
                 </Field>
                 <Field label="Prompt matches">
-                  <input className={cx(inputClass, TOUCH_SIZE, "font-mono")} value={d.promptRegex} onChange={(e) => set("promptRegex", e.target.value)} placeholder="deploy|release" />
+                  <input className={cx(inputClass, TOUCH_FIELD, "font-mono")} value={d.promptRegex} onChange={(e) => set("promptRegex", e.target.value)} placeholder="deploy|release" />
                 </Field>
               </div>
               <FieldGroup label="Started by" hint="None picked: anyone.">
@@ -669,10 +715,10 @@ function HookEditor({
               </FieldGroup>
               <div className="grid gap-4 @lg:grid-cols-2">
                 <Field label="PR has a label" hint="Any of these, comma-separated.">
-                  <input className={cx(inputClass, TOUCH_SIZE)} value={d.labels} onChange={(e) => set("labels", e.target.value)} placeholder="automerge" />
+                  <input className={cx(inputClass, TOUCH_FIELD)} value={d.labels} onChange={(e) => set("labels", e.target.value)} placeholder="automerge" />
                 </Field>
                 <Field label="Skip PRs labelled">
-                  <input className={cx(inputClass, TOUCH_SIZE)} value={d.excludeLabels} onChange={(e) => set("excludeLabels", e.target.value)} placeholder="no-automerge" />
+                  <input className={cx(inputClass, TOUCH_FIELD)} value={d.excludeLabels} onChange={(e) => set("excludeLabels", e.target.value)} placeholder="no-automerge" />
                 </Field>
               </div>
               <div className="flex flex-col gap-2 text-sm text-zinc-300 @lg:flex-row @lg:flex-wrap @lg:gap-x-5">
@@ -696,7 +742,7 @@ function HookEditor({
 
         {d.action === "create_task" && (
           <Field label="New task's title" hint="Variables work here too.">
-            <input className={cx(inputClass, TOUCH_SIZE)} value={d.taskTitle} onChange={(e) => set("taskTitle", e.target.value)} placeholder="Review {task_title}" />
+            <input className={cx(inputClass, TOUCH_FIELD)} value={d.taskTitle} onChange={(e) => set("taskTitle", e.target.value)} placeholder="Review {task_title}" />
           </Field>
         )}
 
@@ -727,7 +773,10 @@ function HookEditor({
           <textarea
             ref={promptRef}
             aria-label="Prompt"
-            className={cx(inputClass, "min-h-32 font-mono text-[13px] leading-relaxed @lg:text-xs")}
+            onFocus={() => {
+              promptTouched.current = true
+            }}
+            className={cx(inputClass, "min-h-32 font-mono text-[13px] leading-relaxed @lg:text-xs pointer-coarse:text-base")}
             rows={6}
             value={d.prompt}
             onChange={(e) => {
@@ -743,46 +792,52 @@ function HookEditor({
           ))}
         </div>
 
-        <div className="space-y-2 rounded-xl border border-zinc-800/80 bg-zinc-950/50 p-3" data-testid="hook-preview">
-          <div className="flex flex-col gap-2 @lg:flex-row @lg:items-center">
-            <span className="text-xs font-medium tracking-wide text-zinc-400 uppercase">Preview</span>
-            <Select size="sm" className={cx(TOUCH_SIZE, "w-full @lg:ml-auto @lg:w-64")} value={sampleTask} onChange={(e) => setSampleTask(e.target.value)} aria-label="Preview with">
-              <option value="">Sample values</option>
-              {candidates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.prUrl ? "PR · " : ""}
-                  {t.title}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {d.action === "create_task" && <div className="text-xs text-zinc-400">Task: <span className="text-zinc-200">{renderHookTemplate(d.taskTitle, vars) || "(no title)"}</span></div>}
-          <div className="text-[11px] font-semibold text-yard-400">Hook: {d.name.trim() || "(unnamed)"}</div>
-          <div className="max-h-56 overflow-y-auto text-sm whitespace-pre-wrap wrap-anywhere text-zinc-200">{rendered || <span className="text-zinc-600">The prompt shows here with its variables filled in.</span>}</div>
-          <p className="text-[11px] text-zinc-500">
-            {d.action === "send_to_task"
-              ? `The agent gets it as a message from the hook (not from ${ownerName}); its transcript labels it like this.`
-              : d.action === "create_task"
-                ? "The new task starts with this prompt."
-                : `The ${d.action === "message_captain" ? "Captain" : "Coordinator"} gets it as a message from the hook.`}{" "}
-            Every fire also goes to the Captain and the Coordinator as an update.
-          </p>
-        </div>
+        <div className="rounded-xl border border-zinc-800/80">
+          <button type="button" onClick={() => setMore(limitStops || !more)} className="flex min-h-11 w-full flex-wrap items-center gap-x-2 px-3 py-2 text-left text-sm text-zinc-300 pointer-fine:@lg:min-h-0" aria-expanded={moreOpen}>
+            {moreOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            Preview and limits
+            <span className="text-xs text-zinc-500">{limitsSummary(d)}</span>
+          </button>
+          {moreOpen && (
+            <div className="space-y-4 border-t border-zinc-800/80 p-3">
+              <div className="space-y-2 rounded-lg bg-zinc-950/50 p-3" data-testid="hook-preview">
+                <div className="flex flex-col gap-2 @lg:flex-row @lg:items-center">
+                  <span className="text-xs font-medium tracking-wide text-zinc-400 uppercase">Preview</span>
+                  <Select size="sm" className={cx(TOUCH_FIELD, "w-full @lg:ml-auto @lg:w-64")} value={sampleTask} onChange={(e) => setSampleTask(e.target.value)} aria-label="Preview with">
+                    <option value="">Sample values</option>
+                    {candidates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.prUrl ? "PR · " : ""}
+                        {t.title}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                {d.action === "create_task" && <div className="text-xs text-zinc-400">Task: <span className="text-zinc-200">{renderHookTemplate(d.taskTitle, vars) || "(no title)"}</span></div>}
+                <div className="text-[11px] font-semibold text-yard-400">Hook: {d.name.trim() || "(unnamed)"}</div>
+                <div className="max-h-56 overflow-y-auto text-sm whitespace-pre-wrap wrap-anywhere text-zinc-200">{rendered || <span className="text-zinc-600">The prompt shows here with its variables filled in.</span>}</div>
+                <p className="text-[11px] text-zinc-500">
+                  {d.action === "send_to_task"
+                    ? `The agent gets it as a message from the hook (not from ${ownerName}); its transcript labels it like this.`
+                    : d.action === "create_task"
+                      ? "The new task starts with this prompt."
+                      : `The ${d.action === "message_captain" ? "Captain" : "Coordinator"} gets it as a message from the hook.`}{" "}
+                  Every fire also goes to the Captain and the Coordinator as an update.
+                </p>
+              </div>
 
-        <div className="flex flex-col gap-3 text-sm text-zinc-300 @lg:flex-row @lg:flex-wrap @lg:items-center @lg:gap-x-6">
-          {/* Not a <label>: the switch names itself, and the word beside it only shows its state. */}
-          <div className="flex items-center gap-1">
-            <Switch checked={d.enabled} onChange={(v) => set("enabled", v)} label="Hook is on" title={d.enabled ? "Turn the hook off" : "Turn the hook on"} />
-            <span aria-hidden>{d.enabled ? "On" : "Off"}</span>
-          </div>
-          <label className="flex items-center gap-2 whitespace-nowrap">
-            At most
-            <input type="number" min={1} max={50} className={cx(inputClass, TOUCH_SIZE, "max-w-20")} value={d.maxFiresPerTask} onChange={(e) => set("maxFiresPerTask", e.target.value)} />
-            fires per task
-          </label>
-          <Check checked={d.allowSelfTrigger} onChange={(v) => set("allowSelfTrigger", v)}>
-            Fire on its own turns too
-          </Check>
+              <div className="flex flex-col gap-3 text-sm text-zinc-300 @lg:flex-row @lg:flex-wrap @lg:items-center @lg:gap-x-6">
+                <label className="flex items-center gap-2 whitespace-nowrap">
+                  At most
+                  <input type="number" min={1} max={50} className={cx(inputClass, TOUCH_FIELD, "max-w-20")} value={d.maxFiresPerTask} onChange={(e) => set("maxFiresPerTask", e.target.value)} />
+                  fires per task
+                </label>
+                <Check checked={d.allowSelfTrigger} onChange={(v) => set("allowSelfTrigger", v)}>
+                  Fire on its own turns too
+                </Check>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </Modal>
