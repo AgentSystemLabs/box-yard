@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img">
-  <title>Box Yard</title>
-  <!-- The Y-brace crate: one amber rounded square split by a Y-shaped gap into a light top, an amber plank and a dark
-       plank. The gap is left empty, so the Y shows whatever is behind the logo. -->
-  <path d="M30.56 12.17A70 70 0 0 1 70 0H186A70 70 0 0 1 225.44 12.17L128 109.62Z" fill="#fcd34d"/>
-  <path d="M12.17 30.56L115 133.38V256H70A70 70 0 0 1 0 186V70A70 70 0 0 1 12.17 30.56Z" fill="#f59e0b"/>
-  <path d="M243.83 30.56L141 133.38V256H186A70 70 0 0 0 256 186V70A70 70 0 0 0 243.83 30.56Z" fill="#b45309"/>
-</svg>
