@@ -17,8 +17,12 @@ is a different authority.
 
 The deployment still has one OS owner and a shared team login. This work adds
 task containment, not per-user isolation. Local and SSH runners are intentionally
-unsandboxed. Captains and the Coordinator retain their privileged host CLIs; a
-malicious repository influencing those agents remains a separate trust boundary.
+unsandboxed. Manager launch configuration omits Claude's shell/edit tools and
+disables Codex shell features with a read-only sandbox (`server/chatAgent.ts:21`,
+`server/codex.ts:128`). This is source evidence, not a runtime enforcement test.
+Captains and the Coordinator still have privileged MCP tools that can dispatch
+work to existing host tasks or change control-plane state. Worker messages and
+repository content influencing those decisions remain a separate trust boundary.
 
 ## Findings addressed
 
@@ -110,7 +114,30 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    that runtime. This is a version/advisory finding, not an executed exploit.
    See the [host assessment and proposed upgrade](docker-desktop-upgrade-assessment.md)
    and [Docker's announcement](https://docs.docker.com/security/security-announcements/#docker-desktop-4443-security-update-cve-2025-9074).
-2. **High — reachable control-plane or daemon services remain decisive.**
+2. **High — worker messages can relay instructions into greater authority.**
+   A worker can message its own Captain (`server/tasks.ts:8133`), and content can
+   reach the Coordinator through reports or configured hooks
+   (`server/hooks.ts:371`). Captain messages carry server-derived agent metadata
+   and a "Not a message from Cody" label (`server/captains.ts:179`, `:758`), with
+   project scoping and rate limits. These are useful attribution, not authorization
+   for the actions a model subsequently chooses. If a recipient follows malicious
+   instructions, `send_to_task` can instruct an already local/SSH task without a
+   runner change or fresh human elevation (`server/mcp.ts:1531`, `:1568`).
+   Workers can also message existing tasks directly: `deliverAgentMessage` checks
+   status-only project boundaries but not execution-trust differences
+   (`server/tasks.ts:8062`). The Coordinator can change global settings, including
+   the default runner, through `update_settings` (`server/mcp.ts:2619`).
+   The runner ceiling prevents broadening the isolated task's own execution
+   authority; it does not propagate untrusted message provenance into these
+   privileged decisions. A possible sequence is malicious worker message →
+   Captain forwards a purported repair → existing local agent executes it with
+   host permissions. Model compliance is a precondition; this sequence was not
+   executed against any live agent. Enforce server-side authorization tied to
+   message origin and the approved action/target across messages, reports, hooks
+   and mixed-source turns. A worker's claim that the human approved something
+   must never itself supply authority. Manager shell restrictions alone do not
+   close this indirect execution path. This remains unresolved in this PR.
+3. **High — reachable control-plane or daemon services remain decisive.**
    Container-to-host/LAN networking is not denied by this PR. A reachable
    unauthenticated/open Box Yard API, leaked shared team credential, unauthenticated
    daemon TCP endpoint, or other vulnerable host service can defeat isolation.
@@ -119,13 +146,13 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    forward team API tokens into worker environments. Desktop has its own VM and
    networking backend, so Linux bridge/firewall assumptions are insufficient.
    [Docker Desktop networking](https://docs.docker.com/desktop/features/networking/)
-3. **High — old shared Redis credentials require rollout action.** Old workers
+4. **High — old shared Redis credentials require rollout action.** Old workers
    can keep the old unrestricted authority until retired and credentials rotated.
    Existing Redis directory/notes data and server-side publishing/cleanup are not
    erased by this PR. New file-based events are still forgeable within a shared
    worker filesystem; this change does not isolate tasks from root in their own
    shared container.
-4. **High — Upstash SDK framing can buffer before application limits.** The
+5. **High — Upstash SDK framing can buffer before application limits.** The
    installed `@upstash/box` 0.7.x SDK's `_parseExecStream` can retain an unterminated
    exit-event payload before yielding any callback. Its `_execStream` also retains
    yielded output. Callback byte caps reduce ordinary output accumulation but
@@ -133,7 +160,7 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    can still cause server memory pressure. A separately reviewed bounded raw
    transport or a provider-fixed parser is required; no private SDK method override
    or unverified provider protocol replacement is included here.
-5. **High — shared worker and credential scope remain broad.** Root-capable tasks
+6. **High — shared worker and credential scope remain broad.** Root-capable tasks
    on one project's shared container can read or modify other tasks, mirrors,
    identity state and task-scoped secrets accessible there. Credentials intentionally
    supplied to a repo can be used by arbitrary repo code. Use narrowly scoped Git
@@ -141,7 +168,7 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    The Docker image's non-root account has passwordless sudo; `USER` alone is not
    a non-root security boundary (`docker/Dockerfile:35`). No per-task OS boundary
    or credential broker is added.
-6. **Medium/High — aggregate denial of service and runtime hardening remain.**
+7. **Medium/High — aggregate denial of service and runtime hardening remain.**
    Per-file caps do not impose lifetime artifact/log/event quotas, disk quotas,
    concurrent restore limits, network rate limits, or Git-pack CPU/memory limits.
    Malformed Git data still reaches Git during reconstruction. Docker run arguments
@@ -155,7 +182,9 @@ bounds do not promise a fixed process RSS or limit total retained data over time
 ## Verification actually performed
 
 Static review covered the changed dispatch, MCP/API, provider, restore and artifact
-paths, plus the installed SDK parser. Offline fixtures exercised the real relevant
+paths, plus the installed SDK parser and worker/manager message routing. Message
+review verified routing, labels and tool authorization in source; it did not test
+whether a live model would obey malicious content. Offline fixtures exercised the real relevant
 dispatch/restore/read code. No container escape, hostile live request, credential
 read, network enumeration, daemon reconfiguration or production data deletion ran.
 
@@ -193,7 +222,9 @@ or Linux-host runtime validation has occurred.
 4. Confirm authenticated control-plane access, absence of team tokens in worker
    environments, daemon access restrictions and the intended host/LAN network
    boundary without exploiting them.
-5. Review the remaining provider buffering, aggregate quotas, shared-project trust,
+5. Review message-origin authorization before treating manager or task-to-task
+   messaging as a safe boundary between isolated and host-authorized agents.
+   Review the remaining provider buffering, aggregate quotas, shared-project trust,
    image pinning and container hardening as follow-up work. A revert restores the
    previous weaker behavior; it does not reset saved ceilings, rotate credentials,
    undo human elevations or roll back runtime upgrades.
