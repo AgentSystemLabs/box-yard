@@ -73,6 +73,7 @@ try {
         await page.mouse.up()
       }
     }
+    if (tag === "400-100-touch") await page.screenshot({ path: `${out}/before-${tag}.png` })
     await drag(parent, -72)
     await action().waitFor()
     assert.equal(await action().innerText(), "Delete", `${tag}: clearly labelled`)
