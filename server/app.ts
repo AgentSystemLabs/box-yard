@@ -1373,6 +1373,13 @@ export function createBoxYard(
     if (!task) return void res.status(404).json({ error: "Task not found" })
     res.json(task)
   })
+  // Explicit human elevation is unavailable in open/no-password mode and absent from MCP.
+  api.post("/tasks/:id/runner-elevation", (req, res) => {
+    if (!auth.enabled || !auth.isAuthed(req)) return void res.status(403).json({ error: "Authenticated human approval is required" })
+    const { runner, confirm } = parse(z.object({ runner: z.enum(["local", "ssh"]), confirm: z.literal(true) }).strict(), req.body)
+    tasks.elevateRunner(req.params.id!, runner)
+    res.json({ approved: runner })
+  })
   api.get("/tasks/:id/messages", (req, res) => {
     res.json(store.listTaskMessages(req.params.id!, 1000))
   })

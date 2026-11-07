@@ -805,7 +805,10 @@ export class TaskManager {
     this.artifacts = deps.artifacts
     this.settings = deps.settings
     this.uploads = deps.uploads
-    this.reader = new EventReader(deps.provider, deps.redis)
+    // Workers never receive shared Redis authority. Poll their task-local event file instead.
+    this.reader = new EventReader(deps.provider, null)
+    // Capture legacy tasks before a later project-default change can grant host execution.
+    for (const row of this.store.listTaskRows()) this.runnerCeiling(row)
     this.sleep = new SleepWatch()
     const githubFetch = deps.github?.fetch ?? (this.c.mock ? null : fetch)
     this.githubFetch = githubFetch
@@ -1161,6 +1164,36 @@ export class TaskManager {
     if (problem) throw new BadRequestError(`Can't run it on ${RUNNER_PHRASE[runner]}: ${problem}.`)
   }
 
+  /** Server-owned and deliberately absent from worker config, archives and MCP schemas. */
+  private runnerCeiling(row: TaskRow, visiting = new Set<string>()): "isolated" | "local" | "ssh" {
+    const key = `runner_ceiling:${row.id}`
+    const saved = this.store.getKv(key)
+    if (saved === "isolated" || saved === "local" || saved === "ssh") return saved
+    if (visiting.has(row.id)) return "isolated"
+    visiting.add(row.id)
+    const runner = row.box_id ? boxRunner(row.box_id) : this.store.taskRunner(row)
+    let ceiling: "isolated" | "local" | "ssh" = runner === "local" || runner === "ssh" ? runner : "isolated"
+    const parent = row.parent_task_id ? this.store.getTaskRow(row.parent_task_id) : null
+    if (parent && this.runnerCeiling(parent, visiting) !== ceiling) ceiling = "isolated"
+    this.store.setKv(key, ceiling)
+    return ceiling
+  }
+
+  private requireContainment(row: TaskRow, runner: Runner) {
+    const ceiling = this.runnerCeiling(row)
+    if ((runner === "local" || runner === "ssh") && ceiling !== runner) {
+      throw new BadRequestError(`Task containment forbids ${runner} execution. An authenticated human must explicitly elevate this task first.`)
+    }
+  }
+
+  /** Called only by the authenticated browser API, never a worker event or a model tool. */
+  elevateRunner(taskId: string, runner: "local" | "ssh") {
+    const row = this.requireRow(taskId)
+    if (row.current_turn_id) throw new BadRequestError("Stop the task before elevating its runner")
+    this.store.setKv(`runner_ceiling:${taskId}`, runner)
+    this.addEvent(taskId, `An authenticated human approved ${runner} execution for this task. Existing descendants retain their containment.`)
+  }
+
   /**
    * Pin a task to a runner from its next turn on (send_to_task runs_on). Placement moves its workspace there when
    * nothing would be lost (toLocal / fromLocal), else it stays where it is and its log says why. Check with
@@ -1168,6 +1201,7 @@ export class TaskManager {
    */
   setRunsOn(taskId: string, runner: Runner, machineLabel: string | null = null, gpuPick: GpuPick | null = null, boxSize: BoxSize | null = null) {
     const row = this.requireRow(taskId)
+    this.requireContainment(row, runner)
     const label = runner === "ssh" ? normalizeLabel(machineLabel) : null
     const gpu = runner === "gpu" && gpuPick ? this.gpuPickOf(gpuPick) : null
     const had = taskGpuPick(row)
@@ -1175,6 +1209,7 @@ export class TaskManager {
     if (size && !isBoxSize(size)) throw new BadRequestError(`Unknown box size "${size}"`)
     if (row.runs_on === runner && (row.machine_label ?? null) === label && had?.provider === gpu?.provider && (had?.type ?? null) === (gpu?.type ?? null) && had?.size === gpu?.size && (row.box_size ?? null) === size) return
     this.requireIdentityRunner(row.project_id, runner)
+    if (runner !== "local" && runner !== "ssh") this.store.setKv(`runner_ceiling:${row.id}`, "isolated")
     this.store.updateTask(row.id, { runsOn: runner, machineLabel: label, gpuProvider: gpu?.provider ?? null, gpuType: gpu?.type ?? null, gpuSize: gpu?.size ?? null, boxSize: size })
     const where = runner === "ssh" ? labelPhrase(label) : gpu ? `${gpuPickLabel(gpu.provider, gpu.type)}${gpu.size ? ` · ${daytonaSize(gpu.size)!.label}` : ""}` : size ? `an Upstash box, ${size} or larger` : RUNNER_PHRASE[runner]
     this.addEvent(row.id, `Runs on ${where} from its next turn on (this task only, over its project's "Runs on").`)
@@ -1195,6 +1230,11 @@ export class TaskManager {
       if (!input.prompt.trim()) throw new BadRequestError("prompt is required")
       if (input.boxSize && (input.runsOn !== "box" || !isBoxSize(input.boxSize))) throw new BadRequestError("boxSize needs runsOn box and a small, medium or large size")
       if (input.runsOn) this.requireIdentityRunner(project.id, input.runsOn)
+      if (input.subtask) {
+        const parent = this.requireRow(input.subtask.parentId)
+        if (parent.project_id !== input.projectId) throw new BadRequestError("Sub-tasks must belong to their parent's project")
+        this.requireContainment(parent, input.runsOn ?? this.store.taskRunner(parent))
+      }
       return project
     })
     const batchId = inputs.length > 1 ? `batch_${randomUUID().replace(/-/g, "").slice(0, 12)}` : null
@@ -1215,6 +1255,10 @@ export class TaskManager {
           gpu: input.runsOn === "gpu" && input.gpu ? this.gpuPickOf(input.gpu) : null,
           branch: projects[i]!.repo ? branchName({ title: input.title, prompt: input.prompt, occupied: this.taskBranches(projects[i]!.repo!) }) : null,
         })
+        // Pin the effective runner at creation; project edits cannot elevate a queued task.
+        const effective = input.runsOn ?? (input.subtask ? this.store.taskRunner(this.requireRow(input.subtask.parentId)) : this.store.projectRunner(input.projectId))
+        this.store.updateTask(task.id, { runsOn: effective })
+        this.store.setKv(`runner_ceiling:${task.id}`, effective === "local" || effective === "ssh" ? effective : "isolated")
         // Only these newly created tasks may resolve a convention before their first checkout. Existing tasks,
         // including legacy boxyard/* branches and archive/recap restores, never enter the naming path.
         if (task.branch) this.store.setKv(`branch_naming:${task.id}`, task.branch)
@@ -3827,8 +3871,13 @@ export class TaskManager {
       return null
     }
     // A sub-task with runs_on "same" goes where its parent is, in its parent's slot (schedulePass), while it's there.
+    try { this.requireContainment(row, this.store.taskRunner(row)) } catch (err) {
+      this.setWaitReason(row.id, errorMessage(err))
+      return null
+    }
     const withParent = this.parentBox(row)
     if (withParent) {
+      this.requireContainment(row, boxRunner(withParent))
       if (row.box_id === withParent) return withParent
       if (!row.box_id) return this.assign(row.id, withParent)
     }
@@ -5773,6 +5822,7 @@ export class TaskManager {
 
   /** Give a task a home on a box, with its own block of preview ports. */
   private assign(taskId: string, boxId: string, opts: { touch?: boolean } = {}): string {
+    this.requireContainment(this.requireRow(taskId), boxRunner(boxId))
     const used = new Set(
       this.store
         .listTaskRows({ boxId })
@@ -5979,6 +6029,8 @@ export class TaskManager {
     /** And codex-auth.json, the Codex login for this turn. */
     let codexWaiting = false
     try {
+      this.requireContainment(row, boxRunner(boxId))
+      this.requireContainment(row, this.store.taskRunner(row))
       await this.provider.wake(boxId)
       const project = this.store.getProject(row.project_id)
       if (!project) throw new Error("Project was deleted")
@@ -6564,7 +6616,7 @@ export class TaskManager {
       // Where the runner keeps the turn's signing key: the box's memory when it has a tmpfs for secrets (Docker).
       secretsDir: provider.secretsDir ?? null,
       publicUrl: this.c.publicUrl || null,
-      redis: this.redis ? { url: this.c.redisUrl, token: this.c.redisToken, key: redisEventsKey(row.id) } : null,
+      redis: null,
       // A sub-task's runner offers message_parent (server/subtasks.ts).
       parentTaskId: row.parent_task_id ?? null,
       // Its connectors: MCP servers naming each secret as ${VAR} (the runner adds them to mcp.json), and the values,
@@ -7828,9 +7880,10 @@ export class TaskManager {
     if (problem) return refuse(problem)
     const env = this.store.taskEnv(parent.id)
     const agentCli = taskAgentCli(parent)
-    const own = parseRunsOn(parent.runs_on)
+    const own = parent.box_id ? boxRunner(parent.box_id) : this.store.taskRunner(parent)
     try {
       for (const runner of new Set(asks.map((a) => a.runsOn).filter((r): r is Runner => r !== "same"))) {
+        this.requireContainment(parent, runner)
         await this.requireRunner(runner, parent.project_id, env, { agentCli, model: parent.model })
       }
     } catch (err) {
