@@ -4,6 +4,9 @@
 export const TEST_INCLUDE = ["test/**/*.test.ts"]
 
 export const SLOW_TESTS: Record<string, string> = {
+  "test/safe-archive.test.ts": "Real archive validation, staging and repacking fixtures",
+  "test/worker-files.test.ts": "Isolated worker subprocess/file-read fixtures",
+  "test/task-containment.test.ts": "Offline full task-manager dispatch and placement fixture",
   "test/github-reference-route.test.ts": "Full Box Yard server/HTTP fixture",
   "test/automation-status-only-mcp.test.ts": "Full server/task-manager MCP fixture",
   "test/agent-logins.e2e.test.ts": "End-to-end runner/server integration",

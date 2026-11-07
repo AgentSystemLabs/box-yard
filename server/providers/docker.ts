@@ -1,3 +1,4 @@
+import { readWorkerFile, type WorkerReadOptions } from "../workerFiles.js"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import net from "node:net"
@@ -337,12 +338,8 @@ export class DockerProvider implements BoxProvider {
     if (r.code !== 0) throw new Error(`Couldn't write ${filePath} in container ${this.containerName(boxId)}: ${r.stderr.trim().slice(-300)}`)
   }
 
-  async readFile(boxId: string, filePath: string): Promise<Buffer> {
-    const r = await this.withStart(boxId, (bin) => docker(bin, ["exec", this.containerName(boxId), "cat", "--", filePath], { timeoutMs: 120_000 }))
-    if (r.code === 0) return r.stdout
-    const err = new Error(`Couldn't read ${filePath} in container ${this.containerName(boxId)}: ${r.stderr.trim().slice(-300)}`) as NodeJS.ErrnoException
-    if (/no such file/i.test(r.stderr)) err.code = "ENOENT"
-    throw err
+  async readFile(boxId: string, filePath: string, opts?: WorkerReadOptions): Promise<Buffer> {
+    return readWorkerFile(this, boxId, filePath, opts)
   }
 
   async uploadFile(boxId: string, localPath: string, destination: string): Promise<void> {

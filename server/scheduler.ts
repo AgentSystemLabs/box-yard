@@ -283,6 +283,7 @@ export class Scheduler {
     if (s.target === "orchestrator") return this.startOrchestratorRun(s, opts.reason, at, runNumber, opts.missed)
     const projectId = s.projectId!
     const previous = s.lastTaskId ? this.store.getTask(s.lastTaskId) : null
+    const runner = s.runsOn ?? this.store.projectRunner(projectId)
     const lines = [
       s.prompt,
       "",
@@ -296,7 +297,10 @@ export class Scheduler {
         `Box Yard was offline at the planned time${opts.missed && opts.missed > 1 ? ` and missed ${opts.missed} runs` : ""}; this one run catches up.`,
       )
     }
-    if (previous) {
+    if (previous && !this.tasks.mayDeliverTaskOutput(previous.id, runner)) {
+      // IDs and status are server-owned. Neither a worker title nor its summary is safe to carry across here.
+      lines.push(`The previous run was task ${previous.id}, which ended as ${previous.status}. Its text is withheld across the host authority boundary; a human can review its task page.`)
+    } else if (previous) {
       lines.push(
         `The previous run was task ${previous.id} ("${previous.title}"), which ended as ${previous.status}.` +
           (previous.summary ? ` Its summary: ${previous.summary}` : ""),
@@ -315,7 +319,8 @@ export class Scheduler {
       title: `${s.name} · ${fmtTime(at, s.timezone, true)}`,
       prompt: lines.join("\n"),
       scheduleId: s.id,
-      runsOn: s.runsOn,
+      // Pin what was checked above; a subsequent project default change cannot widen this run's placement.
+      runsOn: runner,
     })
     this.store.updateSchedule(s.id, {
       lastRunAt: this.now(),

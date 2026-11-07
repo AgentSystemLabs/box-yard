@@ -1,3 +1,4 @@
+import type { WorkerReadOptions } from "../workerFiles.js"
 import type { UsageSource, WorkerSize } from "../../shared/types.js"
 
 export interface ExecResult {
@@ -80,7 +81,7 @@ export interface BoxProvider {
    */
   hold(boxId: string, command: string, signal: AbortSignal): Promise<void>
   writeFile(boxId: string, filePath: string, content: string | Buffer): Promise<void>
-  readFile(boxId: string, filePath: string): Promise<Buffer>
+  readFile(boxId: string, filePath: string, opts?: WorkerReadOptions): Promise<Buffer>
   /** One upload; callers go through putFile (server/upload.ts), which splits files over `maxUploadBytes`. */
   uploadFile(boxId: string, localPath: string, destination: string): Promise<void>
   /** The largest file one uploadFile call may send (Upstash Box: 100 MB). Unset: no limit. */

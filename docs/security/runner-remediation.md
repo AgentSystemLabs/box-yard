@@ -1,0 +1,250 @@
+# Runner isolation remediation and remaining risk
+
+Review date: 2026-11-07. This follow-up implements fixes separately from the
+[audit-only PR #17](https://github.com/AgentSystemLabs/box-yard/pull/17).
+It does **not** establish that arbitrary hostile code is safe on the current host.
+The security PR requires review and must not auto-merge. No live workload, daemon,
+credential, or host configuration was changed during verification.
+
+## Threat model and authority
+
+A task can execute arbitrary commands, modify its repository and worker files, and
+forge worker output/events. Claude, Codex, and Cursor shell access is intentional.
+The protected boundary is the host, its services and credentials, other projects,
+the Docker daemon, and the control plane. A repository-scoped Git push credential
+is an intentional capability; permission to dispatch an unsandboxed host command
+is a different authority.
+
+The deployment still has one OS owner and a shared team login. This work adds
+task containment, not per-user isolation. Local and SSH runners are intentionally
+unsandboxed. Manager launch configuration omits Claude's shell/edit tools and
+disables Codex shell features with a read-only sandbox (`server/chatAgent.ts:21`,
+`server/codex.ts:128`). This is source evidence, not a runtime enforcement test.
+Captains and the Coordinator still have privileged MCP tools that can dispatch
+work to existing host tasks or change control-plane state. Worker messages and
+repository content influencing those decisions remain a separate trust boundary.
+
+## Findings addressed
+
+Source references below refer to this remediation branch. Use the named functions
+if subsequent changes move line numbers.
+
+| Original risk | Preconditions and impact | Change and evidence |
+| --- | --- | --- |
+| **Critical: worker delegation could select an unsandboxed runner** | An isolated task emits a local/SSH child request, changes the effective default, or reuses placement/retry paths. Host execution bypasses the container without a kernel escape. | `server/tasks.ts:1169` stores a server-only ceiling, validates child ancestry/project, and checks the actual provider at assignment and launch (`:5830`, `:6029`). `place` checks requested and inherited placement (`:3871`). Choosing isolation narrows authority; switching a project default cannot widen existing tasks. |
+| **High: privileged tool delegation could broaden runner trust** | Worker/repository content persuades a privileged control-plane agent to create or control host tasks or automation. | **Partial mitigation:** `server/mcp.ts:439` validates one-off overrides against server-trusted human picks; create/batch validate before writes. Model arguments cannot supply a pick. Matching host defaults and existing host targets remain allowed, and whole-turn picks are too broad for hostile persistent context. This is not the permanent manager boundary proposed below. |
+| **High: direct worker messages/reports cross into host task authority** | An isolated worker addresses an existing local/SSH task, sends an FYI, or returns a report/question to a host parent. | `TaskManager.deliverAgentMessage` rejects delivery across different host authority before queue/history writes. `reportToParent` withholds report bodies/questions; `writeSubtasksFile` rechecks saved reports and withholds child titles. Claimed worker inputs are checked again at launch/steer, including recovered claims and attachments. Already delivered history/context is not erased; broader manager and indirect content paths remain open below. |
+| **High: task-derived automation loses source containment** | A task hook creates work on a changed host project default, or a schedule carries an earlier isolated title/summary into a later host run. | `TaskManager.createTaskFromTask` retains the hook source's actual runner and checks its ceiling, including recursive hooks. `Scheduler.startRun` pins the resolved target and withholds previous output that cannot enter that host authority. Manual, timed and catch-up fixtures cover default changes. Other automation actions and manager-created persistent state remain outside this partial fix. |
+| **Critical: hostile workspace archives could write or execute outside their intended state** | A task-controlled TAR is restored, potentially on a later local runner. Sibling members, links, server config and Git hooks/config turn restoration into host writes or execution. | `server/safeArchive.ts:49` parses into fresh private staging before any provider upload. `server/tasks.ts:6671` uploads only canonical output, rejects an existing destination, extracts into a new staging directory, and restores a server-selected Git origin before reconstruction. |
+| **High: worker output/file reads could exhaust host memory** | A hostile process emits excessive output or advertises a small artifact while returning large content. | `server/workerFiles.ts:35` caps incoming bytes independently of worker stat or event size. Artifact dispatch (`server/tasks.ts:7325`) enforces 25 MiB and a task-workspace root. Local, Docker CLI and SSH collectors bound output before retaining it; Daytona bounds HTTP bodies before JSON decoding. Upstash limitations remain below. |
+| **High: shared worker Redis authority** | A worker holds shared Redis credentials and can read project information or forge another task's control events. | New worker configuration has `redis: null` (`server/tasks.ts:6630`), and server event reading uses worker files, not Redis (`:810`). New workers receive no Redis bus credentials from this path. This removes that authority rather than trying to enforce a task prefix with an unrestricted Redis token. **Existing credentials and workers are not revoked by this code.** |
+
+## Containment behavior
+
+- A server KV record carries `isolated`, `local`, or `ssh` authority. Worker
+  configuration, archives, events and MCP schemas cannot set it. Legacy rows are
+  initialized when the manager starts; conflicting parent ancestry fails closed.
+- Children inherit the parent's ceiling. `same` and default delegation resolve
+  from the actual parent runner. Direct child creation, recursive delegation,
+  stored placement, default changes and launch/retry all enforce the boundary.
+  A folder-backed local provider cannot masquerade as an isolated provider.
+- A task moved into isolation loses its prior host authority. A later host move
+  needs fresh human elevation. Elevating a parent does not elevate existing
+  descendants. Active turns cannot have their ceiling widened.
+- The explicit elevation API requires enabled authentication, an authenticated
+  session and confirmation. Authenticated browser runner selections and trusted
+  server-side whole-message runner picks preserve normal human workflows.
+  Open-access mode cannot call the elevation API. A whole-message selection does
+  not authorize arbitrary future model actions after hostile content is read;
+  replacing that manager capability is a pending product/security decision.
+- A team credential is still a powerful control-plane credential, not a
+  task-scoped token. Other trusted REST task/project/settings routes remain
+  available to an authenticated operator. An exposed open-access server can also
+  create new top-level host tasks: the ceiling does not make that deployment safe.
+
+## Archive acceptance and compatibility
+
+Compressed input is a regular file up to 512 MiB. Expanded TAR data is limited to
+512 MiB, each file to 128 MiB, members to 50,000, and extension metadata to 64 KiB.
+Validation and canonical repacking each have a 60-second deadline. Parsing is
+incremental, checks TAR checksums and complete end markers, and never gives
+untrusted headers to the system extractor.
+
+Every member belongs to the server-selected task root. Absolute paths, traversal,
+backslashes, control characters, duplicate/case/Unicode-normalized aliases, links,
+devices, FIFOs and unsupported metadata are rejected. PAX paths and GNU long names
+are supported; ownership, ACLs, xattrs and special mode bits are not restored.
+Files are created exclusively in a fresh private directory with owner-only modes.
+
+Server-owned task/run/auth/signing/control files are discarded. Git config, hooks,
+worktree/submodule indirections and object alternates are discarded before Git
+runs. Minimal trusted Git config is written; an empty alternates marker allows
+the existing server-controlled mirror relink. The canonical archive contains only
+the validated tree. Archive creation disables macOS AppleDouble metadata.
+
+Normal whole, partial, thin and Git-first reconstruction remains covered by the
+existing integration tests, including sequence preservation. Archives containing
+links, unsupported Git layouts/platform metadata or oversized content now fail
+closed and remain retained for recovery. Custom Git config and hooks do not
+survive restore. Worktrees/submodules may require a fresh checkout. The existing
+recap/fresh-checkout recovery path may run after refusal; it is not proof that
+every archived unpushed file was recovered. No automatic archive deletion was
+added.
+
+## Resource bounds and their limits
+
+Worker file reads default to 32 MiB and cannot request more. The worker opens a
+regular nonblocking file, checks its resolved workspace boundary and actual size,
+and reads at most the limit plus one; the server separately caps encoded bytes
+and validates decoded length. Artifact reads use 25 MiB even when the event lies
+about size. Files outside `work/`, including worker control files, are refused.
+Repositories sharing a worker remain mutually untrusted within that same worker;
+this root check is not a sandbox against a concurrent root process there.
+
+Buffered command output is capped at 8 MiB, with a bounded stderr tail (64 KiB or
+64,000 bytes depending on transport). Overflow fails with exit 153 or a bounded
+transport error. Docker/SSH/local stream callback failures terminate the collector;
+Daytona response iteration stops before an oversized body is JSON-decoded.
+The Upstash exec wrapper uses a temporary worker-side stderr file and a random
+delimiter; this is output framing, not a cryptographic trust mechanism. These
+bounds do not promise a fixed process RSS or limit total retained data over time.
+
+## Remaining risks, sorted by urgency
+
+1. **Critical — installed Docker Desktop is vulnerable.** Read-only inspection
+   found Desktop 4.43.2. Docker's advisory says CVE-2025-9074 allows a malicious
+   container to reach the Engine and create containers without a mounted socket;
+   the fix is 4.44.3 and ECI does not mitigate it. The source fixes cannot repair
+   that runtime. This is a version/advisory finding, not an executed exploit.
+   See the [host assessment and proposed upgrade](docker-desktop-upgrade-assessment.md)
+   and [Docker's announcement](https://docs.docker.com/security/security-announcements/#docker-desktop-4443-security-update-cve-2025-9074).
+2. **High — worker messages can relay instructions into greater authority.**
+   A worker can message its own Captain (`server/tasks.ts:8133`), and content can
+   reach the Coordinator through reports or configured hooks
+   (`server/hooks.ts:371`). Captain messages carry server-derived agent metadata
+   and a "Not a message from Cody" label (`server/captains.ts:179`, `:758`), with
+   project scoping and rate limits. These are useful attribution, not authorization
+   for the actions a model subsequently chooses. If a recipient follows malicious
+   instructions, `send_to_task` can instruct an already local/SSH task without a
+   runner change or fresh human elevation (`server/mcp.ts:1531`, `:1568`).
+   The branch now rejects direct isolated-worker delivery into host task queues or
+   histories and withholds child report bodies from host parents. Those checks do
+   not constrain a manager relaying the same text. The Coordinator can change global settings, including
+   the default runner, through `update_settings` (`server/mcp.ts:2619`).
+   The runner ceiling prevents broadening the isolated task's own execution
+   authority; it does not propagate untrusted message provenance into these
+   privileged decisions. A possible sequence is malicious worker message →
+   Captain forwards a purported repair → existing local agent executes it with
+   host permissions. Model compliance is a precondition; this sequence was not
+   executed against any live agent. Enforce a permanent server-owned manager
+   capability ceiling regardless of message origin or retained model context.
+   Any exceptional approval must bind the exact action/target and payload, not a
+   whole human turn or a model-accessible token. A worker's claim that the human approved something
+   must never itself supply authority. Manager shell restrictions alone do not
+   close this indirect execution path. This remains unresolved in this PR. The
+   [manager authority review](manager-authority-review.md) records the verified
+   paths, proposed permanent restrictions and their compatibility impact.
+3. **High — reachable control-plane or daemon services remain decisive.**
+   Container-to-host/LAN networking is not denied by this PR. A reachable
+   unauthenticated/open Box Yard API, leaked shared team credential, unauthenticated
+   daemon TCP endpoint, or other vulnerable host service can defeat isolation.
+   No live endpoint probing or credential tests were authorized/performed.
+   Operators must restrict ingress/egress and require authentication; do not
+   forward team API tokens into worker environments. Desktop has its own VM and
+   networking backend, so Linux bridge/firewall assumptions are insufficient.
+   [Docker Desktop networking](https://docs.docker.com/desktop/features/networking/)
+4. **High — old shared Redis credentials require rollout action.** Old workers
+   can keep the old unrestricted authority until retired and credentials rotated.
+   Existing Redis directory/notes data and server-side publishing/cleanup are not
+   erased by this PR. New file-based events are still forgeable within a shared
+   worker filesystem; this change does not isolate tasks from root in their own
+   shared container.
+5. **High — Upstash SDK framing can buffer before application limits.** The
+   installed `@upstash/box` 0.7.x SDK's `_parseExecStream` can retain an unterminated
+   exit-event payload before yielding any callback. Its `_execStream` also retains
+   yielded output. Callback byte caps reduce ordinary output accumulation but
+   cannot bound this pre-parser path. A hostile Upstash worker with output access
+   can still cause server memory pressure. A separately reviewed bounded raw
+   transport or a provider-fixed parser is required; no private SDK method override
+   or unverified provider protocol replacement is included here.
+6. **High — shared worker and credential scope remain broad.** Root-capable tasks
+   on one project's shared container can read or modify other tasks, mirrors,
+   identity state and task-scoped secrets accessible there. Credentials intentionally
+   supplied to a repo can be used by arbitrary repo code. Use narrowly scoped Git
+   and model credentials and avoid mixing hostile trust domains on one worker.
+   The Docker image's non-root account has passwordless sudo; `USER` alone is not
+   a non-root security boundary (`docker/Dockerfile:35`). No per-task OS boundary
+   or credential broker is added.
+7. **Medium/High — aggregate denial of service and runtime hardening remain.**
+   Per-file caps do not impose lifetime artifact/log/event quotas, disk quotas,
+   concurrent restore limits, network rate limits, or Git-pack CPU/memory limits.
+   Malformed Git data still reaches Git during reconstruction. Docker run arguments
+   set CPU/memory and PID limits, but this PR does not add a capability drop,
+   `no-new-privileges`, read-only root filesystem, user namespaces, network policy
+   or stronger image provenance (`server/providers/docker.ts:200`). Default
+   seccomp is useful and should not be disabled; it is not an escape guarantee.
+   [Docker Engine security](https://docs.docker.com/engine/security/),
+   [Docker seccomp](https://docs.docker.com/engine/security/seccomp/).
+
+## Verification actually performed
+
+Static review covered the changed dispatch, MCP/API, provider, restore and artifact
+paths, plus the installed SDK parser and worker/manager message routing. Message
+review verified routing, labels and tool authorization in source; it did not test
+whether a live model would obey malicious content. Offline fixtures exercised the real relevant
+dispatch/restore/read code. No container escape, hostile live request, credential
+read, network enumeration, daemon reconfiguration or production data deletion ran.
+
+- `test/task-containment.test.ts`: real task dispatch for all three harnesses;
+  recursive/same/default children; forged placement and folder-local fallback;
+  persistence after restart and project-default change; authenticated elevation
+  API and composer; trusted versus model-supplied MCP runner picks; Redis omitted.
+  It also covers isolated-to-host direct messages/FYIs and withheld child reports,
+  including old saved reports/child titles checked when preparing the parent's
+  wait file and queued/recovered worker inputs checked at launch/steer. Real hook
+  and scheduler fixtures cover recursive task-derived creation and previous
+  output carried across changed defaults, including manual/timed/catch-up runs.
+- `test/safe-archive.test.ts`: sibling/traversal/link/special/alias/truncation/bounds
+  fixtures, PAX long paths, actual restore rejection before upload, malicious Git
+  hook/config removal, and a pre-existing destination symlink with an untouched
+  fixture sentinel. Only temporary fixtures were used.
+- `test/worker-files.test.ts`: real file/output collectors, dishonest size,
+  overflow cancellation, regular-file/workspace checks and real artifact dispatch.
+  The Docker CLI collector test uses a Node subprocess, not a live daemon.
+- `test/daytona.test.ts`: synthetic streamed HTTP response cancelled at its byte
+  bound before full JSON retention.
+- Existing archive integration coverage: seven files, 58 passing tests (whole/
+  partial/thin/Git-first, streaming/shutdown); focused provider coverage: five
+  files, 94 passing tests. No provider purchase/live smoke test was performed.
+- The latest containment, hooks, schedules, subtask and steer regression run passed
+  65 tests in five files. All four requested reviews reported; the complete
+  82-tool proposed manager catalog matches the actual registrations. One review
+  supplied source-derived test seams without dependencies/runtime coverage; the
+  primary workspace executed the real regression tests above.
+
+The final stable-HEAD gate and its exact results belong in the remediation PR.
+Passing tests demonstrate these cases, not the absence of escapes. The read-only
+host inventory is explicitly separate in the upgrade assessment. No post-upgrade
+or Linux-host runtime validation has occurred.
+
+## Review and rollout
+
+1. Review the security PR at high risk; preserve `no-automerge`. Audit PR #17 is
+   evidence only and remains a separate review decision.
+2. Obtain owner approval for the Desktop maintenance window/runbook before any
+   host change. Until then, the runtime finding remains unresolved.
+3. Deploy the reviewed code with new worker configuration; retire legacy workers
+   and rotate shared Redis authority in an approved window. Do not assume a code
+   deployment revokes old credentials.
+4. Confirm authenticated control-plane access, absence of team tokens in worker
+   environments, daemon access restrictions and the intended host/LAN network
+   boundary without exploiting them.
+5. Obtain the owner's decision on contained-only managers versus an exact-action
+   approval broker, including the documented loss of host-task/administration and
+   unrestricted connector workflows. Review implementation across dispatch,
+   automation, callbacks, external connectors and alternate REST paths before
+   treating model messaging as a safe boundary into host-authorized agents.
+   Review the remaining provider buffering, aggregate quotas, shared-project trust,
+   image pinning and container hardening as follow-up work. A revert restores the
+   previous weaker behavior; it does not reset saved ceilings, rotate credentials,
+   undo human elevations or roll back runtime upgrades.

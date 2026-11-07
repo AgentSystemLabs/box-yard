@@ -230,10 +230,11 @@ describe("restores never send one file over the box's upload limit", () => {
     park(r, t)
     // The reason names the step that failed: the box refused the whole archive, then its first part under the 100 MB
     // its refusal states (capped at the archive's size).
-    const part = uploadPartBytes(size - 1)
-    const reason = `uploading its ${uploadSize(size)} archive to the box failed: part 1 of ${Math.ceil(size / part)} (${uploadSize(part)}) failed: ${TOO_BIG}`
-
     const back = await nextTurn(r, t.id)
+    // Sanitizing/repacking changes the compressed size; errors describe the validated upload.
+    const restoredSize = r.provider.restoreUploads(t.id)[0]!.bytes
+    const part = uploadPartBytes(restoredSize - 1)
+    const reason = `uploading its ${uploadSize(restoredSize)} archive to the box failed: part 1 of ${Math.ceil(restoredSize / part)} (${uploadSize(part)}) failed: ${TOO_BIG}`
     // One try: the whole archive, then its first part, are refused, and a refusal for size isn't retried.
     expect(r.provider.restoreUploads(t.id)).toEqual([
       expect.objectContaining({ ok: false, dest: expect.stringMatching(/\.tgz$/) }),
@@ -265,22 +266,22 @@ describe("restores never send one file over the box's upload limit", () => {
     const r = await start({ limit: 1 * MB, advertise: true })
     const p = await call<Project>(r, "POST", "/api/projects", { name: "royale" })
     const t = await restedTask(r, p.id, "broken archive")
-    // Not a gzip file: tar fails on every try.
+    // Not a gzip file: validation fails before any upload.
     fs.writeFileSync(r.yard.store.getTaskRow(t.id)!.archive_path!, random(64 * KB))
     park(r, t)
 
     const back = await nextTurn(r, t.id)
-    expect(r.provider.restoreUploads(t.id).length).toBe(2)
+    expect(r.provider.restoreUploads(t.id).length).toBe(0)
     expect(turnJson(r, back.boxId!, t.id).resume).toBe(false)
     expect(events(r, t.id).filter((e) => e.startsWith("Couldn't restore the workspace archive"))).toHaveLength(1)
-    // The reason names the step: the upload worked, tar didn't.
-    expect(events(r, t.id).find((e) => e.startsWith("Couldn't restore the workspace archive"))).toMatch(/^Couldn't restore the workspace archive on box \S+ \(unpacking its archive on the box failed: \S/)
+    // Invalid input is rejected before the worker receives an archive.
+    expect(events(r, t.id).find((e) => e.startsWith("Couldn't restore the workspace archive"))).toMatch(/^Couldn't restore the workspace archive on box \S+ \(incorrect header check\)/)
     expect(fs.existsSync(path.join(r.dataDir, "archives", `${t.id}.unrestored.tgz`))).toBe(true)
 
     // The folder is there now: the next turn doesn't touch the old archive again.
     const again = await nextTurn(r, t.id)
     expect(again.boxId).toBe(back.boxId)
-    expect(r.provider.restoreUploads(t.id).length).toBe(2)
+    expect(r.provider.restoreUploads(t.id).length).toBe(0)
     expect(turnJson(r, back.boxId!, t.id).resume).toBe(true)
     expect(events(r, t.id).filter((e) => e.startsWith("Couldn't restore the workspace archive"))).toHaveLength(1)
   })

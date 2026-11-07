@@ -78,6 +78,18 @@ export function createBody(input: CreateSandboxInput): Record<string, unknown> {
   }
 }
 
+/** Bound before JSON/Buffer decoding: sandbox-controlled output must not make the host buffer an unlimited body. */
+async function boundedBody(res: Response, max = 8 * 1024 * 1024): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let bytes = 0
+  if (res.body) for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+    bytes += chunk.byteLength
+    if (bytes > max) throw new DaytonaError("Daytona response exceeds its byte limit", 413)
+    chunks.push(Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
+}
+
 export class DaytonaApi {
   constructor(
     private readonly key: () => string,
@@ -115,7 +127,7 @@ export class DaytonaApi {
         continue
       }
       if (res.ok) return res
-      const text = await res.text().catch(() => "")
+      const text = await boundedBody(res, 64 * 1024).then(b => b.toString()).catch(() => "Response omitted (read failed or too large)")
       let detail = text.slice(0, 300)
       try {
         const j = JSON.parse(text) as { message?: string | string[]; error?: string }
@@ -132,7 +144,7 @@ export class DaytonaApi {
 
   private async json<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await this.send(method, `${this.base}${path}`, body === undefined ? {} : { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } })
-    const text = await res.text()
+    const text = (await boundedBody(res)).toString()
     return (text ? JSON.parse(text) : null) as T
   }
 
@@ -216,7 +228,7 @@ export class DaytonaApi {
       timeoutMs: (timeoutSec + 60) * 1000,
       signal,
     })
-    const r = (await res.json()) as { exitCode?: number; result?: string }
+    const r = JSON.parse((await boundedBody(res)).toString()) as { exitCode?: number; result?: string }
     return { exitCode: typeof r?.exitCode === "number" ? r.exitCode : -1, result: typeof r?.result === "string" ? r.result : "" }
   }
 
@@ -231,7 +243,7 @@ export class DaytonaApi {
   /** A file from the sandbox. Throws with `code: "ENOENT"` when it isn't there. */
   async download(sb: Pick<DaytonaSandbox, "id" | "toolboxProxyUrl">, path: string, timeoutMs = 10 * 60_000): Promise<Buffer> {
     const res = await this.fetchFile(sb, path, timeoutMs)
-    return Buffer.from(await res.arrayBuffer())
+    return boundedBody(res, 32 * 1024 * 1024)
   }
 
   /** A file from the sandbox, handed over piece by piece as it arrives (an archive needn't fit in memory). */

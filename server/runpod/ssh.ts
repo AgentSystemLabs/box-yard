@@ -72,6 +72,8 @@ export class SshPool {
       const out: Buffer[] = []
       let stderr = ""
       let done = false
+      let outputBytes = 0
+      let failure = ""
       const finish = (r: SshRunResult) => {
         if (done) return
         done = true
@@ -88,15 +90,22 @@ export class SshPool {
           }, opts.timeoutMs)
         : undefined
       child.stdout.on("data", (d: Buffer) => {
-        if (opts.onOutput) opts.onOutput(d.toString("utf8"))
-        else out.push(d)
+        if (failure) return
+        try {
+          if (opts.onOutput) opts.onOutput(d.toString("utf8"))
+          else {
+            outputBytes += d.length
+            if (outputBytes > 8 * 1024 * 1024) throw new Error("SSH output exceeds its byte limit")
+            out.push(d)
+          }
+        } catch (e) { failure = (e as Error).message; out.length = 0; child.kill("SIGKILL") }
       })
       child.stderr.on("data", (d: Buffer) => {
-        if (opts.onOutput) opts.onOutput(d.toString("utf8"))
-        else stderr += d.toString("utf8")
+        try { if (!failure && opts.onOutput) opts.onOutput(d.toString("utf8")) } catch (e) { failure = (e as Error).message; child.kill("SIGKILL") }
+        stderr = (stderr + d.toString("utf8")).slice(-64_000)
       })
       child.on("error", (err) => finish({ exitCode: 255, stdout: Buffer.concat(out), stderr: stderr + err.message }))
-      child.on("close", (code) => finish({ exitCode: code ?? 255, stdout: Buffer.concat(out), stderr }))
+      child.on("close", (code) => finish({ exitCode: failure ? 153 : code ?? 255, stdout: Buffer.concat(out), stderr: failure || stderr }))
       child.stdin.on("error", () => {})
       if (opts.input instanceof fs.ReadStream) opts.input.pipe(child.stdin)
       else child.stdin.end(opts.input ?? "")

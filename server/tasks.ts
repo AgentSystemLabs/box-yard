@@ -1,3 +1,4 @@
+import { validateTaskArchive } from "./safeArchive.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url"
 import type { Config } from "./config.js"
 import { harnessHandoffKey, type HarnessHandoff, type TaskContinuation } from "../shared/taskContinuation.js"
 import type { Hub } from "./hub.js"
-import type { BoxRow, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
+import type { BoxRow, PendingInput, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
 import { BadRequestError, ConflictError, NotFoundError, cloneUrl, githubSlug, boxRowCost, meterTick, normalizeBoxSize, sourceOf, taskAgentCli, taskGpuPick } from "./store.js"
 import type { BoxProvider, BoxUsageProbe, ExecResult } from "./providers/types.js"
 import { providerOf, q, tasksRootOf } from "./providers/types.js"
@@ -805,7 +806,10 @@ export class TaskManager {
     this.artifacts = deps.artifacts
     this.settings = deps.settings
     this.uploads = deps.uploads
-    this.reader = new EventReader(deps.provider, deps.redis)
+    // Workers never receive shared Redis authority. Poll their task-local event file instead.
+    this.reader = new EventReader(deps.provider, null)
+    // Capture legacy tasks before a later project-default change can grant host execution.
+    for (const row of this.store.listTaskRows()) this.runnerCeiling(row)
     this.sleep = new SleepWatch()
     const githubFetch = deps.github?.fetch ?? (this.c.mock ? null : fetch)
     this.githubFetch = githubFetch
@@ -1161,6 +1165,91 @@ export class TaskManager {
     if (problem) throw new BadRequestError(`Can't run it on ${RUNNER_PHRASE[runner]}: ${problem}.`)
   }
 
+  /** Server-owned and deliberately absent from worker config, archives and MCP schemas. */
+  private runnerCeiling(row: TaskRow, visiting = new Set<string>()): "isolated" | "local" | "ssh" {
+    const key = `runner_ceiling:${row.id}`
+    const saved = this.store.getKv(key)
+    if (saved === "isolated" || saved === "local" || saved === "ssh") return saved
+    if (visiting.has(row.id)) return "isolated"
+    visiting.add(row.id)
+    const runner = row.box_id ? boxRunner(row.box_id) : this.store.taskRunner(row)
+    let ceiling: "isolated" | "local" | "ssh" = runner === "local" || runner === "ssh" ? runner : "isolated"
+    const parent = row.parent_task_id ? this.store.getTaskRow(row.parent_task_id) : null
+    if (parent && this.runnerCeiling(parent, visiting) !== ceiling) ceiling = "isolated"
+    this.store.setKv(key, ceiling)
+    return ceiling
+  }
+
+  private physicalRunner(boxId: string): Runner {
+    if (!this.c.mock && providerOf(this.provider, boxId).name === "local") return "local"
+    return boxRunner(boxId)
+  }
+
+  private requireContainment(row: TaskRow, runner: Runner) {
+    const ceiling = this.runnerCeiling(row)
+    if ((runner === "local" || runner === "ssh") && ceiling !== runner) {
+      throw new BadRequestError(`Task containment forbids ${runner} execution. An authenticated human must explicitly elevate this task first.`)
+    }
+  }
+
+  /** Managers never acquire host execution authority from task/model content, even for an already-hosted task. */
+  requireIsolatedTask(taskId: string) {
+    const row = this.requireRow(taskId)
+    const runner = row.box_id ? this.physicalRunner(row.box_id) : this.store.taskRunner(row)
+    if (this.runnerCeiling(row) !== "isolated" || runner === "local" || runner === "ssh") {
+      throw new BadRequestError("Manager authority is limited to isolated tasks. Host task actions require a human to use the task page directly.")
+    }
+  }
+
+  /** Model-to-model messages cannot cross into a different host authority, including informational reports. */
+  private mayDeliverAgentInput(from: TaskRow, to: TaskRow): boolean {
+    const target = this.runnerCeiling(to)
+    const placed = to.box_id ? this.physicalRunner(to.box_id) : this.store.taskRunner(to)
+    return (target === "isolated" || target === this.runnerCeiling(from)) && this.mayDeliverTaskOutput(from.id, placed)
+  }
+
+  /** A queue claim is not authority: placement may have changed since a worker sent this input. */
+  private taskInputs(row: TaskRow, inputs: PendingInput[]): PendingInput[] {
+    return inputs.map(input => {
+      if (!input.source.startsWith("agent:")) return input
+      const from = this.store.getTaskRow(input.source.slice("agent:".length))
+      if (from && this.mayDeliverAgentInput(from, row)) return input
+      // Preserve the claim/id for ordinary delivery accounting, but send no source-controlled bytes or files.
+      return { ...input, source: "system", content: "Task output withheld across the host authority boundary. A human can review the source task page.", attachments: [] }
+    })
+  }
+
+  /** Output cannot acquire host authority merely because a later automation run has a different default. */
+  mayDeliverTaskOutput(taskId: string, runner: Runner): boolean {
+    if (runner !== "local" && runner !== "ssh") return true
+    const row = this.requireRow(taskId)
+    return this.runnerCeiling(row) === runner && (!row.box_id || this.physicalRunner(row.box_id) === runner)
+  }
+
+  /** A task-derived hook is a new top-level task, but its output must retain the source's containment. */
+  createTaskFromTask(sourceId: string, input: Pick<NewTask, "projectId" | "title" | "prompt" | "source">): Task {
+    const source = this.requireRow(sourceId)
+    if (input.projectId !== source.project_id) throw new BadRequestError("Task-derived work must remain in its source project")
+    const runner = source.box_id ? this.physicalRunner(source.box_id) : this.store.taskRunner(source)
+    this.requireContainment(source, runner)
+    return this.createTask({
+      ...input,
+      runsOn: runner,
+      machineLabel: runner === "ssh" ? source.machine_label : null,
+      gpu: runner === "gpu" ? taskGpuPick(source) : null,
+      boxSize: runner === "box" && isBoxSize(source.box_size) ? source.box_size : null,
+    })
+  }
+
+  /** Called only for authenticated human approval (API confirmation or a trusted whole-message runner pick). */
+  elevateRunner(taskId: string, runner: "local" | "ssh") {
+    const row = this.requireRow(taskId)
+    if (this.runnerCeiling(row) === runner) return
+    if (row.current_turn_id) throw new BadRequestError("Stop the task before elevating its runner")
+    this.store.setKv(`runner_ceiling:${taskId}`, runner)
+    this.addEvent(taskId, `An authenticated human approved ${runner} execution for this task. Existing descendants retain their containment.`)
+  }
+
   /**
    * Pin a task to a runner from its next turn on (send_to_task runs_on). Placement moves its workspace there when
    * nothing would be lost (toLocal / fromLocal), else it stays where it is and its log says why. Check with
@@ -1168,6 +1257,7 @@ export class TaskManager {
    */
   setRunsOn(taskId: string, runner: Runner, machineLabel: string | null = null, gpuPick: GpuPick | null = null, boxSize: BoxSize | null = null) {
     const row = this.requireRow(taskId)
+    this.requireContainment(row, runner)
     const label = runner === "ssh" ? normalizeLabel(machineLabel) : null
     const gpu = runner === "gpu" && gpuPick ? this.gpuPickOf(gpuPick) : null
     const had = taskGpuPick(row)
@@ -1175,6 +1265,7 @@ export class TaskManager {
     if (size && !isBoxSize(size)) throw new BadRequestError(`Unknown box size "${size}"`)
     if (row.runs_on === runner && (row.machine_label ?? null) === label && had?.provider === gpu?.provider && (had?.type ?? null) === (gpu?.type ?? null) && had?.size === gpu?.size && (row.box_size ?? null) === size) return
     this.requireIdentityRunner(row.project_id, runner)
+    if (runner !== "local" && runner !== "ssh") this.store.setKv(`runner_ceiling:${row.id}`, "isolated")
     this.store.updateTask(row.id, { runsOn: runner, machineLabel: label, gpuProvider: gpu?.provider ?? null, gpuType: gpu?.type ?? null, gpuSize: gpu?.size ?? null, boxSize: size })
     const where = runner === "ssh" ? labelPhrase(label) : gpu ? `${gpuPickLabel(gpu.provider, gpu.type)}${gpu.size ? ` · ${daytonaSize(gpu.size)!.label}` : ""}` : size ? `an Upstash box, ${size} or larger` : RUNNER_PHRASE[runner]
     this.addEvent(row.id, `Runs on ${where} from its next turn on (this task only, over its project's "Runs on").`)
@@ -1195,6 +1286,11 @@ export class TaskManager {
       if (!input.prompt.trim()) throw new BadRequestError("prompt is required")
       if (input.boxSize && (input.runsOn !== "box" || !isBoxSize(input.boxSize))) throw new BadRequestError("boxSize needs runsOn box and a small, medium or large size")
       if (input.runsOn) this.requireIdentityRunner(project.id, input.runsOn)
+      if (input.subtask) {
+        const parent = this.requireRow(input.subtask.parentId)
+        if (parent.project_id !== input.projectId) throw new BadRequestError("Sub-tasks must belong to their parent's project")
+        this.requireContainment(parent, input.runsOn ?? this.store.taskRunner(parent))
+      }
       return project
     })
     const batchId = inputs.length > 1 ? `batch_${randomUUID().replace(/-/g, "").slice(0, 12)}` : null
@@ -1215,6 +1311,10 @@ export class TaskManager {
           gpu: input.runsOn === "gpu" && input.gpu ? this.gpuPickOf(input.gpu) : null,
           branch: projects[i]!.repo ? branchName({ title: input.title, prompt: input.prompt, occupied: this.taskBranches(projects[i]!.repo!) }) : null,
         })
+        // Persist authority separately from the runner setting; defaults may move between isolated providers.
+        const effective = input.runsOn ?? (input.subtask ? this.store.taskRunner(this.requireRow(input.subtask.parentId)) : this.store.projectRunner(input.projectId))
+        if (input.subtask) this.store.updateTask(task.id, { runsOn: effective })
+        this.store.setKv(`runner_ceiling:${task.id}`, effective === "local" || effective === "ssh" ? effective : "isolated")
         // Only these newly created tasks may resolve a convention before their first checkout. Existing tasks,
         // including legacy boxyard/* branches and archive/recap restores, never enter the naming path.
         if (task.branch) this.store.setKv(`branch_naming:${task.id}`, task.branch)
@@ -1621,7 +1721,7 @@ export class TaskManager {
       return result("after_turn", note)
     }
     const claim = steerClaim(turnId)
-    const claimed = this.store.claimSteer(taskId, claim)
+    const claimed = this.taskInputs(row, this.store.claimSteer(taskId, claim))
     if (!claimed.length) return result("already_delivered")
     const ids = claimed.map((i) => i.id)
     this.addEvent(row.id, `${who} requested steering ${them} into the running turn; delivery has not been acknowledged yet.`, { kind: "steer", queued })
@@ -3827,8 +3927,13 @@ export class TaskManager {
       return null
     }
     // A sub-task with runs_on "same" goes where its parent is, in its parent's slot (schedulePass), while it's there.
+    try { this.requireContainment(row, this.store.taskRunner(row)) } catch (err) {
+      this.setWaitReason(row.id, errorMessage(err))
+      return null
+    }
     const withParent = this.parentBox(row)
     if (withParent) {
+      this.requireContainment(row, this.physicalRunner(withParent))
       if (row.box_id === withParent) return withParent
       if (!row.box_id) return this.assign(row.id, withParent)
     }
@@ -5773,6 +5878,10 @@ export class TaskManager {
 
   /** Give a task a home on a box, with its own block of preview ports. */
   private assign(taskId: string, boxId: string, opts: { touch?: boolean } = {}): string {
+    const row = this.requireRow(taskId)
+    const actual = this.physicalRunner(boxId)
+    this.requireContainment(row, actual)
+    if (actual !== "local" && actual !== "ssh") this.store.setKv(`runner_ceiling:${taskId}`, "isolated")
     const used = new Set(
       this.store
         .listTaskRows({ boxId })
@@ -5979,6 +6088,9 @@ export class TaskManager {
     /** And codex-auth.json, the Codex login for this turn. */
     let codexWaiting = false
     try {
+      this.requireContainment(row, this.physicalRunner(boxId))
+      this.requireContainment(row, this.store.taskRunner(row))
+      if (this.physicalRunner(boxId) !== "local" && this.physicalRunner(boxId) !== "ssh") this.store.setKv(`runner_ceiling:${row.id}`, "isolated")
       await this.provider.wake(boxId)
       const project = this.store.getProject(row.project_id)
       if (!project) throw new Error("Project was deleted")
@@ -6002,7 +6114,7 @@ export class TaskManager {
       const compact = Boolean(row.compact_pending) && Boolean(row.session_started)
       // A compaction is a turn of its own; queued messages wait for the next one. The rest are claimed for this
       // turn: locked against edits and cancels, delivered (deleted) once it starts, released if it can't.
-      const queued = compact ? [] : this.store.claimInputs(taskId, turnId)
+      const queued = compact ? [] : this.taskInputs(row, this.store.claimInputs(taskId, turnId))
       if (!compact) this.emitTask(taskId)
       // Cody cancelled every message this turn was for: don't run it on "Continue.".
       if (!compact && !queued.length && row.session_started && this.cancelledAll.has(taskId)) throw new StoppedBeforeStart(true)
@@ -6564,7 +6676,7 @@ export class TaskManager {
       // Where the runner keeps the turn's signing key: the box's memory when it has a tmpfs for secrets (Docker).
       secretsDir: provider.secretsDir ?? null,
       publicUrl: this.c.publicUrl || null,
-      redis: this.redis ? { url: this.c.redisUrl, token: this.c.redisToken, key: redisEventsKey(row.id) } : null,
+      redis: null,
       // A sub-task's runner offers message_parent (server/subtasks.ts).
       parentTaskId: row.parent_task_id ?? null,
       // Its connectors: MCP servers naming each secret as ${VAR} (the runner adds them to mcp.json), and the values,
@@ -6609,17 +6721,33 @@ export class TaskManager {
     const root = this.provider.root(boxId)
     const tasks = tasksRootOf(this.provider, boxId)
     const remote = `${root}/.boxyard/restore-${row.id}.tgz`
+    const validated = await validateTaskArchive(row.archive_path!, row.id)
+    let extracted = false
     let from: "git" | "partial" | null = null
     try {
       // In parts when it's over the box's upload limit (Upstash: 100 MB per file). Each failure names its step.
-      await putFile(this.provider, boxId, row.archive_path!, remote).catch((err) => {
-        throw failedStep(`restoring workspace failed: uploading its ${uploadSize(fs.statSync(row.archive_path!).size)} archive to the box`, err)
+      await putFile(this.provider, boxId, validated.file, remote).catch((err) => {
+        throw failedStep(`restoring workspace failed: uploading its ${uploadSize(fs.statSync(validated.file).size)} archive to the box`, err)
       })
       const res = await this.provider.exec(
         boxId,
-        `mkdir -p ${q(tasks)} && tar xzf ${q(remote)} -C ${q(tasks)} && rm -f ${q(remote)} && mkdir -p ${q(dir + "/work")} && rm -f ${q(dir + "/turn.pid")} ${q(dir + "/run.json")}`,
+        `set -e
+mkdir -p ${q(tasks)}
+[ ! -e ${q(dir)} ] && [ ! -L ${q(dir)} ] || exit 1
+stage=$(mktemp -d ${q(tasks + "/.restore-XXXXXX")})
+trap 'rm -rf "$stage"' EXIT
+tar xzf ${q(remote)} -C "$stage"
+mv "$stage/${row.id}" ${q(dir)}
+rm -f ${q(remote)}
+mkdir -p ${q(dir + "/work")}`,
       )
       if (res.exitCode !== 0) throw new Error(`restoring workspace failed: unpacking its archive on the box failed: ${(res.stderr || res.stdout).trim().slice(-500) || `exit code ${res.exitCode}`}`)
+      extracted = true
+      // Only a server-selected origin reaches sanitized Git state, before any reconstruction commands.
+      if (mirror) {
+        const origin = await this.provider.exec(boxId, `[ ! -d ${q(dir + "/work/.git")} ] || git --git-dir=${q(dir + "/work/.git")} config remote.origin.url ${q(mirror.spec.url)}`)
+        if (origin.exitCode !== 0) throw new Error("restoring workspace failed: setting its trusted origin")
+      }
       // A thin archive (git-thin/) gets its repo back from the mirror or GitHub plus its bundle of unpushed commits.
       if (mirror) await this.restoreThinGit(boxId, dir, mirror)
       if (mirror) await this.relinkSharedObjects(boxId, dir, mirror)
@@ -6629,9 +6757,9 @@ export class TaskManager {
       await this.restoreExcludedTrackedFiles(boxId, `${dir}/work`, mirror?.env ?? "")
     } catch (err) {
       // Leave no half-built folder: the next try starts from the archive again (it stays as it was).
-      await this.provider.exec(boxId, `rm -rf ${q(dir)} ${q(remote)} ${q(`${dir}/.boxyard-clone`)}`).catch(() => {})
+      await this.provider.exec(boxId, `rm -f ${q(remote)}${extracted ? `; rm -rf ${q(dir)}` : ""}`).catch(() => {})
       throw err
-    }
+    } finally { validated.cleanup() }
     // The restored events log keeps its own seq numbers; restart the byte offset.
     const cursor = parseCursor(row.event_cursor)
     const size = await this.provider.exec(boxId, `wc -c < ${q(dir + "/events.jsonl")} 2>/dev/null || echo 0`)
@@ -7248,7 +7376,7 @@ export class TaskManager {
         const size = Number(ev.size ?? 0)
         if (size > MAX_ARTIFACT_BYTES) return say("event", `Artifact ${ev.path} is over 25 MB and was skipped.`)
         try {
-          const data = await this.provider.readFile(row.box_id, String(ev.path))
+          const data = await this.provider.readFile(row.box_id, String(ev.path), { maxBytes: MAX_ARTIFACT_BYTES, root: `${this.taskDir(row.box_id, row.id)}/work` })
           if (!this.store.db.open) return
           const artifact = this.artifacts.save({
             id: typeof ev.id === "string" ? ev.id : undefined,
@@ -7828,9 +7956,10 @@ export class TaskManager {
     if (problem) return refuse(problem)
     const env = this.store.taskEnv(parent.id)
     const agentCli = taskAgentCli(parent)
-    const own = parseRunsOn(parent.runs_on)
+    const own = parent.box_id ? boxRunner(parent.box_id) : this.store.taskRunner(parent)
     try {
       for (const runner of new Set(asks.map((a) => a.runsOn).filter((r): r is Runner => r !== "same"))) {
+        this.requireContainment(parent, runner)
         await this.requireRunner(runner, parent.project_id, env, { agentCli, model: parent.model })
       }
     } catch (err) {
@@ -7875,6 +8004,13 @@ export class TaskManager {
   private reportToParent(child: TaskRow, status: TaskStatus, text: string, question: string | null) {
     const parent = child.parent_task_id ? this.store.getTaskRow(child.parent_task_id) : null
     if (!parent || parent.status === "done") return
+    if (!this.mayDeliverAgentInput(child, parent)) {
+      // The child's own transcript remains available to the human. Neither the host parent's history nor its
+      // next-turn queue may receive the report/question; wait_for_subtasks receives only this fixed notice.
+      this.store.setKv(subtaskReportKey(child.id), JSON.stringify({ status, text: "Report withheld across the host authority boundary. A human can review the child's task page.", at: Date.now(), inputId: "" } satisfies SubtaskReport))
+      this.syncSubtasks(parent.id)
+      return
+    }
     const kids = this.store.subtaskRows(parent.id)
     const live = kids.filter((r) => r.id !== child.id && this.liveSubtask(r)).length
     const report = text.trim()
@@ -7956,6 +8092,8 @@ export class TaskManager {
 
   private async writeSubtasksFile(parentId: string) {
     if (this.stopped || !this.store.db.open) return
+    const parent = this.store.getTaskRow(parentId)
+    if (!parent) return
     const queued = new Set(this.store.peekInputs(parentId).map((i) => i.id))
     const children = this.store.subtaskRows(parentId).map((k) => {
       const raw = this.store.getKv(subtaskReportKey(k.id))
@@ -7963,9 +8101,12 @@ export class TaskManager {
       try {
         report = raw ? (JSON.parse(raw) as SubtaskReport) : null
       } catch {}
+      // Re-check old reports too: the parent may have been explicitly elevated after a report was saved.
+      const allowed = this.mayDeliverAgentInput(k, parent)
+      if (!allowed && report) report = { ...report, text: "Report withheld across the host authority boundary. A human can review the child's task page.", inputId: "" }
       // One due to run again shows as queued, so the runner's wait and finish count it as running.
       const status = !isLiveSubtask(k.status) && this.wantsTurn(k) ? "queued" : k.status
-      return { id: k.id, title: k.title, status, url: this.absoluteUrl(`/tasks/${k.id}`), report: report ? { ...report, delivered: !queued.has(report.inputId) } : null }
+      return { id: k.id, title: allowed ? k.title : "Contained task", status, url: this.absoluteUrl(`/tasks/${k.id}`), report: report ? { ...report, delivered: !queued.has(report.inputId) } : null }
     })
     await this.writeTaskFile(parentId, "subtasks.json", { updatedAt: Date.now(), children } satisfies SubtasksFile)
   }
@@ -8007,6 +8148,10 @@ export class TaskManager {
       say(from.id, `Message to ${to} not delivered: no such agent.`, { to, failed: true })
       this.store.queueInput(from.id, "system", `Your message to "${to}" could not be delivered: there is no agent with that id. Use list_agents.`)
       this.schedule()
+      return
+    }
+    if (!this.mayDeliverAgentInput(from, target)) {
+      say(from.id, "Message not delivered: the recipient has a different host authority. Ask a human to review the task directly.", { to: target.id, blocked: true })
       return
     }
     // Coordinator sees: status only. A message across that line would leave one side's words where the Coordinator

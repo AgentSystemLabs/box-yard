@@ -22,6 +22,17 @@ import { tmpDir } from "./helpers.js"
 const KEY = "dtn_secret_test_key_0123456789"
 const TOOLBOX = "https://proxy.test/toolbox"
 
+it("cancels oversized toolbox JSON before decoding or buffering the whole response", async () => {
+  let pulled = 0, cancelled = false
+  const api = new DaytonaApi(() => "fixture-key", (async () => new Response(new ReadableStream({
+    pull(controller) { pulled++; controller.enqueue(new Uint8Array(1024 * 1024)); if (pulled === 20) controller.close() },
+    cancel() { cancelled = true },
+  }))) as typeof fetch)
+  await expect(api.execute({ id: "example", toolboxProxyUrl: TOOLBOX }, "example", 60)).rejects.toThrow(/byte limit/)
+  expect(cancelled).toBe(true)
+  expect(pulled).toBeLessThan(20)
+})
+
 interface Call {
   method: string
   url: string
@@ -97,7 +108,14 @@ function fakeDaytona(o: { sandboxes?: DaytonaSandbox[]; paged?: boolean } = {}):
         f.execs.push(command)
         const stream = /\/tmp\/\.boxyard-stream-[0-9a-f-]+/.exec(command)?.[0]
         // The command that writes the stream ({ …\n} > file), not the one that removes it after.
-        if (stream && command.includes("{ ")) f.files.set(`${id}:${stream}`, Buffer.from("archive bytes\n"))
+        if (stream && command.includes("{ ")) {
+          const encoded = command.match(/-- [^A-Za-z0-9+/=]*([A-Za-z0-9+/=]+)/)?.[1]
+          if (command.includes("boxyard-bounded-read") && encoded) {
+            const [file] = JSON.parse(Buffer.from(encoded, "base64").toString())
+            if (!f.files.has(`${id}:${file}`)) return json({ exitCode: 44, result: `\n${STDERR_MARK}\n` })
+            f.files.set(`${id}:${stream}`, Buffer.from(f.files.get(`${id}:${file}`)!.toString("base64")))
+          } else f.files.set(`${id}:${stream}`, Buffer.from("archive bytes\n"))
+        }
         const a =
           f.answer(command) ??
           (/id -u/.test(command)

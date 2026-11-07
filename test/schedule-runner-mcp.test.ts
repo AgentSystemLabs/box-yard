@@ -33,10 +33,13 @@ async function clientFor(yard: BoxYard, caller: McpCaller) {
 }
 
 describe("per-schedule runner through MCP and REST", () => {
-  it("lets a Captain persist local runs for only its own project, preserving identity restrictions", async () => {
+  it("requires a human-selected host project for Captain host schedules, preserving scope and identity restrictions", async () => {
     const { yard, alpha, beta } = setup()
     const use = await clientFor(yard, { kind: "captain", projectId: alpha.id })
     const input = { name: "Nightly slow tests", cron: "0 2 * * *", timezone: "America/Chicago", prompt: "test:slow", runs_on: "local" }
+    expect((await use("create_schedule", input)).text).toMatch(/containment/)
+    expect(yard.store.listSchedules()).toHaveLength(0)
+    yard.store.updateProject(alpha.id, { runner: "local" })
     const created = await use("create_schedule", input)
     expect(created.error, created.text).toBe(false)
     expect(created.json()).toMatchObject({ project: "alpha", runs_on: "local", timezone: "America/Chicago" })
@@ -47,7 +50,7 @@ describe("per-schedule runner through MCP and REST", () => {
     expect((await use("list_schedules", {})).json()[0].runs_on).toBe("local")
     expect((await use("update_schedule", { schedule: id, prompt: "changed" })).json().runs_on).toBe("local")
     expect((await use("update_schedule", { schedule: id, runs_on: null })).json().runs_on).toBeNull()
-    expect(yard.store.getProject(alpha.id)?.runner).toBe("box")
+    expect(yard.store.projectRunner(alpha.id)).toBe("local")
 
     const other = await yard.scheduler.create({ projectId: beta.id, name: "Other", cron: "@daily", prompt: "keep" })
     expect((await use("create_schedule", { ...input, project: "beta" })).text).toMatch(/^Out of scope/)

@@ -1,3 +1,4 @@
+import { readWorkerFile, type WorkerReadOptions } from "../workerFiles.js"
 import fs from "node:fs"
 import path from "node:path"
 import type { SshPool, SshTarget } from "../runpod/ssh.js"
@@ -42,10 +43,8 @@ export abstract class SshBoxProvider {
     if (r.exitCode !== 0) throw new Error(`Writing ${filePath} on ${boxId} failed: ${r.stderr.slice(-300)}`)
   }
 
-  async readFile(boxId: string, filePath: string): Promise<Buffer> {
-    const r = await this.sshPool.run(await this.target(boxId), `cat ${q(filePath)}`, { timeoutMs: 10 * 60_000 })
-    if (r.exitCode !== 0) throw Object.assign(new Error(`Reading ${filePath} on ${boxId} failed: ${r.stderr.slice(-300)}`), { code: r.exitCode === 1 ? "ENOENT" : undefined })
-    return r.stdout
+  async readFile(boxId: string, filePath: string, opts?: WorkerReadOptions): Promise<Buffer> {
+    return readWorkerFile({ nodeBin: "node", execStream: this.execStream.bind(this) }, boxId, filePath, opts)
   }
 
   async uploadFile(boxId: string, localPath: string, destination: string): Promise<void> {

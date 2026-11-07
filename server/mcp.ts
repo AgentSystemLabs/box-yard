@@ -107,6 +107,8 @@ export interface McpDeps {
    * their agent.
    */
   turnPicks?: (caller: McpCaller) => TurnPicks
+  /** Only the application with configured human authentication may honor picks that widen isolation. */
+  authenticatedHumanPicks?: boolean
 }
 
 /**
@@ -433,6 +435,17 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     const pick = turnPick()
     if (!pick) return { runsOn, machineLabel, note: {} }
     return { runsOn: pick.value, machineLabel: undefined, note: pickNote(pick, differs(pick, runsOn, machineLabel)) }
+  }
+  const humanHostPick = (runner: Runner) => {
+    const pick = turnPick()
+    return Boolean(deps.authenticatedHumanPicks && pick && placementOf(pick.value, undefined).runner === runner)
+  }
+  /** Model arguments alone cannot turn an isolated project's new task/schedule into host execution. */
+  const requireNewRunner = (projectId: string, runner: Runner | null | undefined, allowPick = true) => {
+    const effective = runner ?? store.projectRunner(projectId)
+    if ((effective === "local" || effective === "ssh") && store.projectRunner(projectId) !== effective && !(allowPick && humanHostPick(effective))) {
+      throw new Error("Task containment forbids this host runner override. An authenticated human must select it, or configure the project's host runner.")
+    }
   }
   /** The call asked for somewhere other than the pick. */
   const differs = (pick: RunTargetPick, runsOn: RunsOn | undefined, machineLabel: string | undefined) =>
@@ -1314,6 +1327,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       const pin = picked(a.runs_on, a.machine_label)
       const where = placementOf(pin.runsOn, pin.machineLabel)
       const cli = pickedAgent(a.agent, a.model, a.effort)
+      requireNewRunner(projectId, where.runner)
       await tasks.requireRunner(tasks.newTaskRunner(where.runner, projectId), projectId, a.env, { agentCli: cli.agent, model: cli.model, machineLabel: where.machineLabel, gpu: where.gpu })
       const t = tasks.createTask({
         projectId,
@@ -1438,6 +1452,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         const why = await Promise.all(
           a.tasks.map((item, i) => {
             const r = tasks.newTaskRunner(places[i]?.runner, p.id)
+            try { requireNewRunner(p.id, places[i]?.runner) } catch (err) { return errorMessage(err) }
             if (!r) return null
             const label = places[i]!.machineLabel
             const gpu = places[i]!.gpu
@@ -1541,7 +1556,10 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
             }
           : {}
       await tasks.requireRunner(where.runner, before.projectId, store.taskEnv(before.id), { agentCli: before.agentCli, machineLabel: where.machineLabel, gpu: where.gpu })
-      if (where.runner) tasks.setRunsOn(before.id, where.runner, where.machineLabel, where.gpu, where.boxSize)
+      if (where.runner) {
+        if ((where.runner === "local" || where.runner === "ssh") && humanHostPick(where.runner)) tasks.elevateRunner(before.id, where.runner)
+        tasks.setRunsOn(before.id, where.runner, where.machineLabel, where.gpu, where.boxSize)
+      }
       // Before the message: queuing it runs the scheduler, which must already see the new priority.
       if (a.priority) tasks.setTaskPriority(before.id, a.priority, prioritySetter)
       const how = delivery(before)
@@ -2168,6 +2186,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         if (scopeId && a.target === "orchestrator") throw outOfScope("Coordinator schedules belong to the Coordinator")
         const projectId = projectFilter(a.project)
         unsealed(projectId, "its schedule prompts are its content; ask its Captain to create the schedule")
+        if (projectId) requireNewRunner(projectId, a.runs_on, false)
         return ok(
           scheduleView(
             await scheduler.create({
@@ -2207,6 +2226,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     safe(
       async (a: { schedule: string; runs_on?: Runner | null; name?: string; cron?: string; prompt?: string; timezone?: string; catch_up?: "once" | "skip"; allow_overlap?: boolean; enabled?: boolean }) => {
         const s = schedule(a.schedule)
+        if (s.projectId && a.runs_on !== undefined) requireNewRunner(s.projectId, a.runs_on, false)
         if (a.prompt !== undefined) unsealed(s.projectId, "its schedule prompts are its content; ask its Captain to change the prompt")
         return ok(
           scheduleView(

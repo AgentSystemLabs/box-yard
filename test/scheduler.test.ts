@@ -20,6 +20,7 @@ function setup(opts: { qstash?: QStash | null; publicUrl?: string } = {}) {
   const notices: string[] = []
   const tasks = {
     createTask: (input: Parameters<TaskManager["createTask"]>[0]) => store.createTask(input),
+    mayDeliverTaskOutput: (id: string, runner: string) => !["local", "ssh"].includes(runner) || store.taskRunner(store.getTaskRow(id)!) === runner,
     notice: (content: string) => void notices.push(content),
   } as unknown as TaskManager
   const clock = { now: utc("2026-10-22T08:58") }
@@ -60,7 +61,7 @@ describe("scheduler", () => {
     await scheduler.update(local.id, { runsOn: null })
     expect(store.getSchedule(local.id)?.runsOn).toBeNull()
     const inherited = scheduler.runNow(local.id)
-    expect("runsOn" in inherited && inherited.runsOn).toBeNull()
+    expect("runsOn" in inherited && inherited.runsOn).toBe("box")
     expect(store.getSchedule(other.id)?.runsOn).toBeNull()
     expect(store.getProject(project.id)?.runner).toBe("box")
   })
