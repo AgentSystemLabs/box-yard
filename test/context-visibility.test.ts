@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The context reading and Compact: none at all with auto-compact on; with it off, in a wide header, or behind ⋯ in a
 // narrow one. The Coordinator's side is in app-shell.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -53,8 +54,10 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(() => {
+afterEach(async () => {
   act(() => root.unmount())
+  // Keep deferred chat requests inside the mocked fetch lifetime.
+  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   vi.unstubAllGlobals()

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The keyboard shortcuts sheet and the composer jump, in the whole app: "?" and its other ways in (the palette's
 // command, the sidebar's button), and ⌥⇧C between the chat's composer and the side panel's.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -80,9 +81,11 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(() => {
+afterEach(async () => {
   act(() => closeShortcuts())
   act(() => root.unmount())
+  // Keep deferred chat requests inside the mocked fetch lifetime.
+  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)

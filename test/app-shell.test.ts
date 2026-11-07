@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { afterPaint } from "../web/src/lib/afterPaint.js"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -112,8 +113,10 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(() => {
+afterEach(async () => {
   act(() => root.unmount())
+  // Keep deferred chat requests inside the mocked fetch lifetime.
+  await act(async () => { await afterPaint() })
   ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width: 1024, height: 768 })
   host.remove()
   document.body.innerHTML = ""

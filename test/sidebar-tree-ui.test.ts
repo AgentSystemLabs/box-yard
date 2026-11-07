@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The sidebar as a WAI-ARIA tree view (lib/treeView.ts): its roles and levels, one tab stop, and every key.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
@@ -137,8 +138,10 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(() => {
+afterEach(async () => {
   act(() => root.unmount())
+  // Keep deferred chat requests inside the mocked fetch lifetime.
+  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)
