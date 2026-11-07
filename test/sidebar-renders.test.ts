@@ -126,6 +126,7 @@ describe("a live task update in the Coordinator view", () => {
     const counts = await liveUpdate("task_run003", { updatedAt: now, contextTokens: 42_000 })
     expect(counts.TaskRow).toBe(1)
     expect(counts.ProjectGroup).toBe(1)
+    expect(counts.DeleteFailedTaskButton).toBeUndefined()
     // The Coordinator's chat reads only whether there are tasks, and its PR button only the open PR count.
     expect(counts.ChatPanel).toBeUndefined()
     expect(counts.PullRequestsButton).toBeUndefined()

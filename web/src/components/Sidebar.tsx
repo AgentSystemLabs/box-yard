@@ -57,6 +57,7 @@ import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { SidebarDeleteRow } from "./SidebarDeleteRow"
+import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
 import { DismissButton } from "./Modal"
 import { ChatIcon } from "./ChatIcons"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
@@ -810,7 +811,7 @@ const META_TONE: Partial<Record<Task["status"], string>> = { needs_input: "text-
 /**
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
  * project), so the copy Cody clicked is the one drawn selected. `project`: its project's name, on a second line. One
- * ready for Cody's review ends with Mark done's ✓. It leads with the task's icon (TaskStatusIcon), which pulses while
+ * ready for Cody's review ends with Mark done's ✓; a failed task ends with Delete's trash icon. It leads with the task's icon (TaskStatusIcon), which pulses while
  * the task works and has a still dot when it asks or failed; its meta says the state in words. A PR number links to
  * GitHub beside the task button, so each action has its own keyboard target.
  */
@@ -858,6 +859,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
       </button>
       {prMeta && <PrChip task={task} variant="number" className={cx(TAP_AREA, FOCUS, "mr-2 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden")} />}
       {readyForReview(task.status) && <DoneButton task={task} />}
+      {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
     </SidebarDeleteRow>
   )
 })
@@ -1054,6 +1056,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
         </span>
       </button>
       {readyForReview(task.status) && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
+      {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
     </SidebarDeleteRow>
   )
 })
