@@ -73,6 +73,7 @@ import { DockerService } from "./docker/service.js"
 import { MachineService, type MachineServiceDeps } from "./machines/service.js"
 import { MachineActions } from "./machines/actions.js"
 import { listHarnessTargets, listRunTargets, resolveHarnessPick, resolveInlinePicks, resolveProjectPick, resolveRunTargetPick, type RunTargetDeps } from "./runTargets.js"
+import { GithubReferences } from "./githubReferences.js"
 import { isMachineBox, MACHINE_LIMITS, machineOfBox, normalizeLabel, type MachineKeyRef } from "../shared/machines.js"
 import { ClaudeModels } from "./claudeModels.js"
 import { serverClaudeEnv } from "./turnCredentials.js"
@@ -613,6 +614,11 @@ export function createBoxYard(
   // Read the running commit now, before a `git pull` can move HEAD under this process.
   buildInfo()
   const tasks = new TaskManager({ config: c, store, provider, hub, redis, artifacts, uploads, settings, github: opts.github, gpu, vast, daytona, docker, machines, identities, logins })
+  const githubReferences = new GithubReferences({
+    project: (id) => store.getProject(id),
+    token: opts.github?.token ?? ((id) => c.mock ? null : tasks.githubToken(id) || null),
+    fetch: opts.github?.fetch ?? (c.mock ? null : fetch),
+  })
   tasks.runnerProblem = (runner, key, cli, gpuCloud) => setup.runnerProblem(runner, key, cli, gpuCloud)
   // The chats' "@" list (server/runTargets.ts): the same runner checks and machines the task tools go by.
   const runTargetDeps: RunTargetDeps = {
@@ -1815,6 +1821,11 @@ export function createBoxYard(
     const projectId = typeof req.query.project === "string" && req.query.project ? req.query.project : null
     if (projectId && !store.getProject(projectId)) throw new BadRequestError("No such project")
     res.json(await listRunTargets(runTargetDeps, projectId))
+  })
+  // UI lookup only: repository and identity are always resolved from this project on the server.
+  api.get("/projects/:id/github-references", async (req, res) => {
+    if (req.query.q !== undefined && typeof req.query.q !== "string") throw new BadRequestError("Search must be text")
+    res.json(await githubReferences.get(req.params.id!, req.query.q ?? ""))
   })
   // The "!" list of agent CLIs for a message whose tasks go where ?runsOn= says (its "@" pick; omitted: the project's
   // Runs on, or the default): each that's installed and signed in there.
