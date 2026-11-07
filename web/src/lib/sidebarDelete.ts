@@ -21,8 +21,15 @@ export function sidebarDeleteTasks(target: SidebarDeleteTarget, tasks: readonly 
 
 export function sidebarDeleteBlocked(target: SidebarDeleteTarget, tasks: readonly Task[], captainBusy: boolean): string | null {
   if (target.kind === "project" && captainBusy) return "Stop the Captain before deleting this project."
-  if (sidebarDeleteTasks(target, tasks).some((t) => ["queued", "starting", "working"].includes(t.status) || t.turnStartedAt != null || t.compacting || t.compactPending || t.pendingCount > 0)) {
+  const failed = target.kind === "task" && tasks.some((t) => t.id === target.id && t.status === "failed")
+  if (sidebarDeleteTasks(target, tasks).some((t) => ["queued", "starting", "working"].includes(t.status) || t.turnStartedAt != null || t.compacting || t.compactPending || (t.pendingCount > 0 && !(failed && t.status === "failed")))) {
     return "Stop queued or running tasks before deleting."
   }
   return null
+}
+
+/** Failed launches retain their inputs. Deleting them needs explicit consent, rather than treating them as running. */
+export function sidebarDeleteQueued(target: SidebarDeleteTarget, tasks: readonly Task[]): number {
+  if (target.kind !== "task" || !tasks.some((t) => t.id === target.id && t.status === "failed")) return 0
+  return sidebarDeleteTasks(target, tasks).reduce((n, t) => n + (t.status === "failed" ? t.pendingCount || 0 : 0), 0)
 }

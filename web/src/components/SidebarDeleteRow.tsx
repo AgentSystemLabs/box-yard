@@ -185,13 +185,13 @@ function DeleteAction({ target, close }: { target: SidebarDeleteTarget; close: (
       type="button"
       data-sidebar-delete
       aria-label={`Delete ${target.name}`}
-      disabled={Boolean(blocked) || pending}
+      disabled={pending}
       title={blocked ?? `Delete ${target.name}…`}
       className="min-h-11 w-22 bg-red-950 px-2 text-sm font-medium text-red-200 hover:bg-red-900 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-red-200 disabled:cursor-not-allowed disabled:text-red-300/60"
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
-        if (!blocked) void remove()
+        void remove()
       }}
     >
       {pending ? "Deleting…" : "Delete"}

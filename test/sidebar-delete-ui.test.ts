@@ -288,7 +288,7 @@ describe("sidebar deletion semantics", () => {
     render([parent, { ...child, status }, sibling])
     for (const el of [taskRow(child), taskRow(parent), row(captainKey(project.id))]) {
       swipe(el)
-      expect(action(el).disabled).toBe(true)
+      expect(action(el).disabled).toBe(false)
       expect(action(el).title).toContain("Stop")
     }
   })
@@ -297,7 +297,7 @@ describe("sidebar deletion semantics", () => {
     qc.setQueryData(keys.captain(project.id), { projectId: project.id, busy: true })
     render([parent, { ...child, status: "needs_input", turnStartedAt: 100 }])
     swipe(taskRow(parent))
-    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(action(taskRow(parent)).disabled).toBe(false)
     swipe(row(captainKey(project.id)))
     expect(action(row(captainKey(project.id))).title).toContain("Captain")
   })
@@ -305,7 +305,7 @@ describe("sidebar deletion semantics", () => {
   it("blocks pending messages and compaction without changing completion semantics", () => {
     render([parent, { ...child, pendingCount: 1, compacting: true }])
     key(taskRow(parent), "ContextMenu")
-    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(action(taskRow(parent)).disabled).toBe(false)
     expect(taskRow(parent).querySelector("[data-testid=sidebar-mark-done]")).not.toBeNull()
   })
 
@@ -351,7 +351,7 @@ describe("sidebar deletion semantics", () => {
   it("includes hidden/done descendants when protecting a parent from active work", () => {
     render([parent, { ...child, status: "done", turnStartedAt: 123 }])
     key(taskRow(parent), "ContextMenu")
-    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(action(taskRow(parent)).disabled).toBe(false)
   })
 
   it("rechecks running descendants after confirmation before sending DELETE", async () => {
@@ -480,11 +480,44 @@ describe("visible failed-task deletion", () => {
     expect(new URLSearchParams(location.search).get("session")).toBe(sibling.id)
   })
 
+  it.each(["inline", "swipe"])("confirms retained queued messages through the %s action without losing them on cancel", async (entry) => {
+    const queued = { ...failed, pendingCount: 5 }
+    render([queued, sibling])
+    const button = () => {
+      if (entry === "inline") return direct(taskRow(queued))
+      key(taskRow(queued), "ContextMenu")
+      return action(taskRow(queued))
+    }
+    click(button())
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("permanently deletes 5 queued messages. They won't be sent.")
+    answer(false)
+    await flush()
+    expect(qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === queued.id)?.pendingCount).toBe(5)
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+    fetchMock.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response('{"ok":true}', { status: 200 }) : new Promise(() => {}))
+    click(button())
+    answer(true)
+    await flush()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/tasks/${queued.id}?ifResting=1&discardQueued=5`, expect.objectContaining({ method: "DELETE" }))
+    expect(taskRow(queued)).toBeNull()
+  })
+
+  it("keeps a late queued message and asks for fresh consent", async () => {
+    render([{ ...failed, pendingCount: 5 }])
+    click(direct(taskRow(failed)))
+    act(() => qc.setQueryData(keys.tasks, [{ ...failed, pendingCount: 6 }]))
+    answer(true)
+    await flush()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Queued messages changed. Review them and confirm deletion again.")
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
   it("blocks running descendants and rechecks work started during confirmation", async () => {
     render([failed, { ...child, status: "working" }, sibling])
     click(direct(taskRow(failed)))
-    expect(currentConfirm()).toBeUndefined()
-    expect(currentToasts().some((t) => t.body?.includes("Stop"))).toBe(true)
+    expect(currentConfirm()).toMatchObject({ title: "Can't delete task", body: "Stop queued or running tasks before deleting." })
+    answer(true)
+    await flush()
     render([failed, child, sibling])
     click(direct(taskRow(failed)))
     act(() => qc.setQueryData(keys.tasks, [failed, { ...child, status: "working" }, sibling]))
