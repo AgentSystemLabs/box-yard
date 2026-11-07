@@ -10,7 +10,6 @@ import {
   keepSelection,
   revealScroll,
   rowMeta,
-  shortAge,
   sidebarGroups,
   sidebarSelection,
   withFold,
@@ -100,35 +99,30 @@ describe("sidebarGroups", () => {
 
 describe("rowMeta", () => {
   it("says what Cody would ask about first", () => {
-    expect(rowMeta(task("a", YARD.id, "needs_input"), NOW)).toBe("asks")
-    expect(rowMeta(task("a", YARD.id, "failed"), NOW)).toBe("failed")
-    expect(rowMeta(task("a", YARD.id, "queued"), NOW)).toBe("queued")
-    expect(rowMeta(task("a", YARD.id, "pr_ready", { prUrl: "https://github.com/o/r/pull/19" }), NOW)).toBe("#19")
-    expect(rowMeta(task("a", YARD.id, "done", { prUrl: "https://github.com/o/r/pull/19", prMergedAt: NOW }), NOW)).toBe("merged #19")
-    expect(rowMeta(task("a", YARD.id, "done"), NOW)).toBe("done")
-    expect(rowMeta(task("a", YARD.id, "working", { lastActiveAt: NOW - 12 * 60_000 }), NOW)).toBe("working")
-    expect(rowMeta(task("a", YARD.id, "idle", { lastActiveAt: NOW - 12 * 60_000 }), NOW)).toBe("12m")
-    expect(rowMeta(task("a", YARD.id, "idle", { prUrl: "https://github.com/o/r/pull/7" }), NOW)).toBe("#7")
+    expect(rowMeta(task("a", YARD.id, "needs_input"))).toBe("asks")
+    expect(rowMeta(task("a", YARD.id, "failed"))).toBe("")
+    expect(rowMeta(task("a", YARD.id, "queued"))).toBe("queued")
+    expect(rowMeta(task("a", YARD.id, "pr_ready", { prUrl: "https://github.com/o/r/pull/19" }))).toBe("#19")
+    expect(rowMeta(task("a", YARD.id, "done", { prUrl: "https://github.com/o/r/pull/19", prMergedAt: NOW }))).toBe("merged #19")
+    expect(rowMeta(task("a", YARD.id, "done"))).toBe("done")
+    expect(rowMeta(task("a", YARD.id, "working", { lastActiveAt: NOW - 12 * 60_000 }))).toBe("")
+    expect(rowMeta(task("a", YARD.id, "idle", { lastActiveAt: NOW - 12 * 60_000 }))).toBe("")
+    expect(rowMeta(task("a", YARD.id, "idle", { prUrl: "https://github.com/o/r/pull/7" }))).toBe("#7")
   })
 
-  it("shortAge counts down to now", () => {
-    expect(shortAge(NOW - 10_000, NOW)).toBe("now")
-    expect(shortAge(NOW - 3 * HOUR, NOW)).toBe("3h")
-    expect(shortAge(NOW - 50 * HOUR, NOW)).toBe("2d")
-    expect(shortAge(NOW + 5000, NOW)).toBe("now")
-  })
+
 })
 
 describe("inboxRows", () => {
   it("lists what the inbox holds: asking, then failed, then PRs to review", () => {
     const tasks = [task("pr", YARD.id, "pr_ready"), task("w", YARD.id, "working"), task("f", SITE.id, "failed"), task("a", SITE.id, "needs_input")]
-    const rows = inboxRows(tasks, (t) => ["needs_input", "failed", "pr_ready"].includes(t.status), NOW)
+    const rows = inboxRows(tasks, (t) => ["needs_input", "failed", "pr_ready"].includes(t.status))
     expect(rows.map((r) => r.task.id)).toEqual(["a", "f", "pr"])
   })
 })
 
 describe("cappedRows", () => {
-  const rows = inboxRows(["a", "b", "c", "d", "e", "f", "g"].map((id) => task(id, YARD.id, "needs_input")), () => true, NOW)
+  const rows = inboxRows(["a", "b", "c", "d", "e", "f", "g"].map((id) => task(id, YARD.id, "needs_input")), () => true)
   const shownIds = (r: { shown: { task: Task }[] }) => r.shown.map((x) => x.task.id)
 
   it("shows the first five and counts the rest for \"Show n more\"", () => {
@@ -252,18 +246,16 @@ describe("keeping what didn't change", () => {
     expect(keepGroups(before.others, groups(tasks).others)).toBe(before.others)
     const none = groups([])
     expect(keepGroups(none.others, groups([]).others)).toBe(none.others)
-    const waiting = inboxRows(tasks, (t) => t.status === "needs_input", NOW)
-    expect(keepRows(waiting, inboxRows(tasks, (t) => t.status === "needs_input", NOW))).toBe(waiting)
+    const waiting = inboxRows(tasks, (t) => t.status === "needs_input")
+    expect(keepRows(waiting, inboxRows(tasks, (t) => t.status === "needs_input"))).toBe(waiting)
     expect(keepRows([], [])).toEqual([])
   })
 
-  it("a row whose meta changes is new, though its task isn't: an idle task's age, a minute later", () => {
+  it("keeps the same rows as time passes: idle rows have no last-run age", () => {
     const idle = [task("e", YARD.id, "idle", { updatedAt: NOW - 30 * 60_000 }), task("f", YARD.id, "working")]
-    const before = groups(idle).shown[0]!
-    const after = keepGroups([before], groups(idle, NOW + 5 * 60_000).shown)[0]!
-    expect(after.rows.map((r) => r.meta)).toEqual(["working", "35m"])
-    expect(after.rows[0]).toBe(before.rows[0])
-    expect(after.rows[1]).not.toBe(before.rows[1])
+    const before = groups(idle).shown
+    expect(keepGroups(before, groups(idle, NOW + 5 * 60_000).shown)).toBe(before)
+    expect(before[0]!.rows.map((r) => r.meta)).toEqual(["", ""])
   })
 
   it("follows a task that moves: a new status reorders the rows and changes the group's counts", () => {

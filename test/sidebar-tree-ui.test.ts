@@ -169,15 +169,15 @@ describe("the sidebar's tree: roles and attributes", () => {
     expect(outline()).toEqual([
       "Coordinator (1/5)",
       "Waiting on you2 ▾ (2/5)",
-      "  Check SSH into the benchbox-yardasks (1/2)",
+      "  Check SSH into the benchasks (1/2)",
       // The PR number has its own named link beside the button that names the treeitem.
-      "  Refresh the portfoliomarketing-site (2/2)",
+      "  Refresh the portfolio (2/2)",
       "box-yard, Captain ▾ (3/5)",
       "  Check SSH into the benchasks (1/2)",
-      "  Plan the launchworking ▾ (2/2)",
-      "    Write the launch postLevel 2 · working ▾ (1/2)",
-      "      Draft the pricing sectionLevel 3 · working (1/1)",
-      "    Pick the imagesLevel 2 · working (2/2)",
+      "  Plan the launch ▾ (2/2)",
+      "    Write the launch post ▾ (1/2)",
+      "      Draft the pricing section (1/1)",
+      "    Pick the images (2/2)",
       "marketing-site, Captain ▾ (4/5)",
       "  Refresh the portfolio (1/1)",
       "More projects1 ▸ (5/5)",
@@ -240,7 +240,7 @@ describe("the sidebar's tree: keys", () => {
     expect(item.getAttribute("aria-level")).toBe("14")
     expect(item.getAttribute("aria-posinset")).toBe("1")
     expect(item.getAttribute("aria-setsize")).toBe("1")
-    expect(item.textContent).toContain("Level 13")
+    expect(item.textContent).not.toMatch(/Level|\b\d+[mh]\b/)
     expect(item.querySelector("[data-testid=sidebar-mark-done]")?.getAttribute("tabindex")).toBe("-1")
     focus(item)
     press("ArrowLeft")
@@ -686,8 +686,9 @@ describe("PR numbers below a task title in the project tree", () => {
 
   it("links a merged sub-task's PR while leaving a working task's status intact", () => {
     render(APP_HOME, [{ ...audit, status: "working" }, child])
-    expect(row(audit).querySelector("a")).toBeNull()
-    expect(itemName(row(audit))).toContain("working")
+    expect(row(audit).querySelector("a")!.getAttribute("href")).toBe(audit.prUrl)
+    expect(row(audit).querySelector(".task-title-working")!.textContent).toBe(audit.title)
+    expect(itemName(row(audit))).not.toContain("working")
     const link = row(child).querySelector<HTMLAnchorElement>("a")!
     expect(link).not.toBeNull()
     expect(link.getAttribute("aria-label")).toBe("Merged #17 on GitHub (opens in a new tab)")

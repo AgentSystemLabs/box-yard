@@ -216,10 +216,12 @@ export function CueDot({ cue }: { cue: IconCue }) {
  * shows before the tile store has it. `label`: its state in words, which a screen reader reads as the icon's name;
  * without it the icon is decorative. `muted`: a resting row's neutral tile.
  */
-export const TaskStatusIcon = memo(function TaskStatusIcon({ task, size = "md", muted = false, label, className }: {
+export const TaskStatusIcon = memo(function TaskStatusIcon({ task, size = "md", muted = false, pulse = true, label, className }: {
   task: Pick<Task, "id" | "title" | "icon" | "projectId" | "status">
   size?: keyof typeof TILE_SIZE
   muted?: boolean
+  /** Rows animate their title instead; other surfaces retain the icon pulse. */
+  pulse?: boolean
   label?: string
   className?: string
 }) {
@@ -236,7 +238,7 @@ export const TaskStatusIcon = memo(function TaskStatusIcon({ task, size = "md", 
       data-status={task.status}
       data-icon={icon}
       style={muted || !color ? MUTED : projectColorStyle(color)}
-      className={cx("relative inline-grid shrink-0 place-items-center bg-(--pc)/15 text-(--pc)", TILE_SIZE[size], cue === "working" && WORKING_PULSE, className)}
+      className={cx("relative inline-grid shrink-0 place-items-center bg-(--pc)/15 text-(--pc)", TILE_SIZE[size], cue === "working" && pulse && WORKING_PULSE, className)}
     >
       <Icon aria-hidden />
       <CueDot cue={cue} />

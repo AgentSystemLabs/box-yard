@@ -152,7 +152,8 @@ describe("the sidebar", () => {
     expect(icons.map((i) => [i.dataset.status, i.getAttribute("aria-label")])).toEqual([["needs_input", "Needs you"], ["working", "Working"]])
     expect(icons[0]!.className).not.toContain("animate-pulse")
     expect(icons[0]!.querySelector("[data-cue]")!.getAttribute("data-cue")).toBe("asks")
-    expect(icons[1]!.className).toContain("motion-safe:animate-pulse")
+    expect(icons[1]!.className).not.toContain("animate-pulse")
+    expect(section("box-yard")!.querySelector(".task-title-working")!.textContent).toBe(RUN.title)
     expect(section("marketing-site")!.textContent).toContain("#19")
     expect(section("photo-tools")).toBeNull()
     const more = section("More projects")!
@@ -213,7 +214,7 @@ describe("the sidebar", () => {
     render()
     click(button(section("Waiting on you")!, "Check SSH into the bench"))
     expect(new URLSearchParams(location.search).get("session")).toBe(ASK.id)
-    expect(selected()).toEqual([["page", "Check SSH into the bench Needs you box-yardasks"]])
+    expect(selected()).toEqual([["page", "Check SSH into the bench Needs you asks"]])
     expect(section("Waiting on you")!.querySelector("[aria-current=page]")).not.toBeNull()
     // Fold the section: the task's row under box-yard is the one on screen, so it takes the mark.
     click(button(section("Waiting on you")!, /^Waiting on you/))
@@ -255,11 +256,30 @@ describe("the sidebar", () => {
     expect(new URLSearchParams(location.search).get("session")).toBe(PR.id)
   })
 
-  it("keeps a running task's state as its compact meta even when it has a PR", () => {
+  it("keeps a working title and its PR inline without a visible status word", () => {
     render(APP_HOME, [{ ...PR, status: "working" }])
     const row = button(section("marketing-site")!, PR.title).parentElement!
-    expect(row.textContent).toContain("working")
-    expect(row.querySelector("a[data-pr-state]")).toBeNull()
+    expect(row.textContent).not.toContain("working")
+    expect(row.querySelector(".task-title-working")!.textContent).toBe(PR.title)
+    expect(row.querySelector('[aria-label="Working"]')).not.toBeNull()
+    expect(row.querySelector("a[data-pr-state]")!.getAttribute("href")).toBe(PR.prUrl)
+  })
+
+  it("colors failed titles while retaining named status icons and no last-run or level labels", () => {
+    const failed = { ...RUN, status: "failed" as const, title: "Example failed task" }
+    const idle = { ...PR, status: "idle" as const, prUrl: null }
+    render(APP_HOME, [failed, idle])
+    const open = button(section("box-yard")!, failed.title)
+    expect(open.querySelector(".task-title-failed")!.textContent).toBe(failed.title)
+    expect(open.querySelector('[aria-label="Failed"]')).not.toBeNull()
+    expect(open.title).toContain("Failed")
+    expect(open.textContent).toBe(failed.title)
+    const resting = button(section("marketing-site")!, idle.title)
+    expect(resting.textContent).toBe(idle.title)
+    for (const item of [open, resting]) {
+      expect(item.querySelector(".row-start-2")).toBeNull()
+      expect(item.textContent).not.toMatch(/Level|\b\d+[mh]\b/)
+    }
   })
 
   it("pins keep a quiet project; unpinning moves it to More projects", () => {
