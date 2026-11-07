@@ -399,7 +399,7 @@ export function useChatPicks({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (panel) return false
     if (!open || !mention) return false
-    if (e.isComposing || e.key === "Process") return false
+    if (e.nativeEvent.isComposing || e.key === "Process") return false
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault()
       setActive((i) => step(i, e.key === "ArrowDown" ? 1 : -1))
@@ -639,7 +639,7 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
       className="@container/picker max-h-[85dvh]! w-full max-w-lg! rounded-t-2xl [&_[data-dismiss]]:h-11 [&_[data-dismiss]]:w-11 [&_[data-dismiss]]:transition-none"
       bodyClassName="flex min-h-0 flex-col"
       onKeyDown={(e) => {
-        if (e.isComposing || e.key === "Process") return
+        if (e.nativeEvent.isComposing || e.key === "Process") return
         const target = e.target as HTMLElement | null
         if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable=true]")) return
         // Esc: clear the sheet filter first, then Back/close (ModalStep still handles level Esc after).
