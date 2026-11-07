@@ -32,6 +32,7 @@ export function useSendTo({ enabled, draftKey, value, setValue, input, onPick }:
   const [focused, setFocused] = useState(false)
   const [dismissed, dismiss] = useState<string | null>(null)
   const [active, setActive] = useState(0)
+  const caretRef = useRef(0)
   const id = useId()
   const mention = enabled ? sendToMention(value, caret) : null
   const scope = mention ? `${draftKey}:${mention.start}:${mention.query}` : null
@@ -52,8 +53,13 @@ export function useSendTo({ enabled, draftKey, value, setValue, input, onPick }:
   useEffect(() => setActive(0), [search, sheet])
   useEffect(() => { if (!mention) dismiss(null) }, [Boolean(mention)])
   const onCaret = () => {
+    if (!enabled) return
     const el = input.current
-    setCaret(el && el.selectionStart === el.selectionEnd ? el.selectionStart : -1)
+    const next = el && el.selectionStart === el.selectionEnd ? el.selectionStart : -1
+    if (next !== caretRef.current) {
+      caretRef.current = next
+      setCaret(next)
+    }
   }
   const close = () => { setSheet(false); dismiss(scope) }
   const pick = (destination: SendDestination) => {
@@ -91,8 +97,8 @@ export function useSendTo({ enabled, draftKey, value, setValue, input, onPick }:
   }
   return {
     total: matches.length, enabled, chosen, confirmed, open, sheet, query, setQuery, id, options, active, setActive, loading, error,
-    pick, close, openSheet, onCaret, onFocus: (next: boolean) => { setFocused(next); if (next) onCaret() }, onKeyDown, send,
-    clear: () => { choose(null); input.current?.focus() },
+    pick, close, openSheet, onCaret, onFocus: (next: boolean) => { if (enabled) { setFocused(next); if (next) onCaret() } }, onKeyDown, send,
+    clear: (focus = true) => { choose(null); if (focus) input.current?.focus() },
     retry: () => { void projects.refetch(); void tasks.refetch() },
     inputProps: open && !sheet ? {
       role: "combobox", "aria-autocomplete": "list" as const, "aria-haspopup": "listbox" as const,
@@ -114,7 +120,7 @@ export function SendToNote({ picker }: { picker: Picker }) {
       {picker.chosen && destination.kind === "task" && <span className="block text-zinc-400">{destination.detail}</span>}
       {picker.chosen && <span className="block text-zinc-400">Enter sends there · Clear returns to this chat</span>}
     </span>
-    {picker.chosen && <button type="button" aria-label="Clear destination" title="Clear destination" onClick={picker.clear} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg hover:bg-zinc-800"><X className="h-4 w-4" aria-hidden /></button>}
+    {picker.chosen && <button type="button" aria-label="Clear destination" title="Clear destination" onClick={() => picker.clear()} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg hover:bg-zinc-800"><X className="h-4 w-4" aria-hidden /></button>}
   </div>
 }
 

@@ -387,7 +387,7 @@ export function Composer({
         else el.setSelectionRange(text.length, text.length)
       },
       submit: () => submitRef.current(),
-      clearSendTo: () => clearSendTo.current(),
+      clearSendTo: () => clearSendTo.current(false),
     }),
     [],
   )
