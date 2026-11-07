@@ -73,6 +73,7 @@ export const THREAD_TOOLS: ReadonlySet<string> = new Set([
   "get_task",
   "search_history",
   "list_compactions",
+  "compaction_history",
   "read_compaction",
   "find_compactions_by_task",
   "list_inbox",

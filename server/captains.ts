@@ -1,3 +1,4 @@
+import { CompactionIndex, compactionIndexPrompt } from "./compactionIndex.js"
 import { spawn, type ChildProcess } from "node:child_process"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import fs from "node:fs"
@@ -26,7 +27,6 @@ import {
   captainCompactionsDir,
   cleanSummary,
   compactCommand,
-  compactionsPrompt,
   findCompactionRecord,
   finishCompaction,
   lastCompaction,
@@ -449,6 +449,10 @@ export class CaptainManager {
   /** This project's compactions as records, newest first; `taskId` keeps those linked to that task. */
   compactionRecords(projectId: string, filter: { taskId?: string; limit?: number; before?: number } = {}): CompactionRecord[] {
     return readCompactionRecords(captainCompactionsDir(this.c.dataDir, projectId), filter)
+  }
+
+  compactionIndex(projectId: string): CompactionIndex {
+    return new CompactionIndex(this.store, `captain:${projectId}`, captainCompactionsDir(this.c.dataDir, projectId))
   }
 
   compactionRecord(projectId: string, id: string): CompactionRecord | null {
@@ -1434,7 +1438,7 @@ class Captain {
   private systemPrompt(): string {
     const st = this.settings.get()
     const clone = st.captainCli === "claude" ? this.repo.dir : null
-    const base = `${captainPrompt(this.project, st.ownerName, noteBudgetOf(st, this.store.getProject(this.project.id)), this.statusOnly(), clone)}\n\n${routingInstructions(this.c.dataDir, st)}\n\n${withOwner(compactionsPrompt(this.compactionsDir), st.ownerName)}`
+    const base = `${captainPrompt(this.project, st.ownerName, noteBudgetOf(st, this.store.getProject(this.project.id)), this.statusOnly(), clone)}\n\n${routingInstructions(this.c.dataDir, st)}\n\n${compactionIndexPrompt(new CompactionIndex(this.store, `captain:${this.project.id}`, this.compactionsDir))}`
     return st.captainCli === "codex" ? `${base}\n\n${codexManagerNote(st.ownerName)}` : base
   }
 

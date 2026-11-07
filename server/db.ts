@@ -1241,6 +1241,31 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE tasks ADD COLUMN box_size TEXT;
   ALTER TABLE tasks ADD COLUMN gpu_size TEXT;
   `,
+  `
+  -- Disposable, content-derived compaction excerpts. Originals stay in their existing tables/files.
+  CREATE TABLE compaction_index (
+    collection TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    ordinal INTEGER NOT NULL DEFAULT 0,
+    backend TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    date_source TEXT NOT NULL,
+    title TEXT,
+    description TEXT,
+    summary TEXT,
+    sampled INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (collection, ref)
+  );
+  CREATE INDEX compaction_index_date ON compaction_index(collection, at DESC, ordinal DESC, ref DESC);
+  CREATE TRIGGER compaction_index_coordinator_update AFTER UPDATE OF markdown, at ON orchestrator_compactions BEGIN
+    DELETE FROM compaction_index WHERE collection='coordinator' AND ref=OLD.id;
+  END;
+  CREATE TRIGGER compaction_index_task_update AFTER UPDATE OF summary, at, task_id ON task_compactions BEGIN
+    DELETE FROM compaction_index WHERE collection='task:' || OLD.task_id AND ref=OLD.id;
+  END;
+
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {
