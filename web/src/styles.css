@@ -29,9 +29,94 @@
   --color-yard-400: #fbbf24;
   --color-yard-500: #f59e0b;
   --color-yard-600: #d97706;
+  /* Filled primary actions stay gold with dark ink in either theme. */
+  --color-action: #f59e0b;
+  --color-action-hover: #fbbf24;
+  --color-on-action: #09090b;
   /* GitHub's merged-PR purple, and a lighter shade that reads on dark backgrounds. */
   --color-merged: #8957e5;
   --color-merged-fg: #b392f0;
+}
+
+
+/* The app already shares one zinc surface/ink scale and semantic accent palette. Resolve those
+   tokens here, including opacity utilities, so dialogs, chats and lazy panels agree without
+   changing their layout or rerendering transcripts. Dark keeps Tailwind's original palette. */
+:root { color-scheme: dark; }
+:root:not(.dark) {
+  color-scheme: light;
+  --color-zinc-950: #ffffff;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-700: #c4c4cc;
+  --color-zinc-600: #62626f;
+  --color-zinc-500: #62626f;
+  --color-zinc-400: #52525b;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-200: #27272a;
+  --color-zinc-100: #18181b;
+  --color-zinc-50: #09090b;
+  --color-yard-50: #713f12;
+  --color-yard-100: #713f12;
+  --color-yard-200: #78350f;
+  --color-yard-300: #854d0e;
+  --color-yard-400: #854d0e;
+  --color-yard-500: #a16207;
+  --color-yard-600: #92400e;
+  --color-merged-fg: #6d28d9;
+  --color-sky-50: #075985;
+  --color-sky-100: #075985;
+  --color-sky-200: #075985;
+  --color-sky-300: #075985;
+  --color-sky-400: #075985;
+  --color-amber-50: #78350f;
+  --color-amber-100: #78350f;
+  --color-amber-200: #78350f;
+  --color-amber-300: #78350f;
+  --color-amber-400: #78350f;
+  --color-emerald-50: #065f46;
+  --color-emerald-100: #065f46;
+  --color-emerald-200: #065f46;
+  --color-emerald-300: #065f46;
+  --color-emerald-400: #065f46;
+  --color-red-50: #991b1b;
+  --color-red-100: #991b1b;
+  --color-red-200: #991b1b;
+  --color-red-300: #991b1b;
+  --color-red-400: #991b1b;
+  --color-violet-50: #5b21b6;
+  --color-violet-100: #5b21b6;
+  --color-violet-200: #5b21b6;
+  --color-violet-300: #5b21b6;
+  --color-violet-400: #5b21b6;
+  --color-rose-50: #9f1239;
+  --color-rose-100: #9f1239;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #9f1239;
+  --color-rose-400: #9f1239;
+  --color-teal-50: #115e59;
+  --color-teal-100: #115e59;
+  --color-teal-200: #115e59;
+  --color-teal-300: #115e59;
+  --color-teal-400: #115e59;
+  --color-orange-50: #9a3412;
+  --color-orange-100: #9a3412;
+  --color-orange-200: #9a3412;
+  --color-orange-300: #9a3412;
+  --color-orange-400: #9a3412;
+  --color-sky-500: #0369a1;
+  --color-amber-500: #92400e;
+  --color-emerald-500: #047857;
+  --color-red-500: #b91c1c;
+  --color-violet-500: #6d28d9;
+  --color-teal-500: #0f766e;
+  --color-orange-500: #c2410c;
+  --color-rose-500: #be123c;
+  --color-red-900: #fecaca;
+  --color-red-950: #fef2f2;
+  --color-amber-900: #fde68a;
+  --color-amber-950: #fffbeb;
+  --color-emerald-900: #a7f3d0;
 }
 
 html,
@@ -78,7 +163,7 @@ body {
 
 .scroll-thin {
   scrollbar-width: thin;
-  scrollbar-color: rgb(63 63 70) transparent;
+  scrollbar-color: var(--color-zinc-700) transparent;
 }
 
 /*
@@ -138,7 +223,7 @@ body {
 .prose-chat pre {
   @apply my-2 max-w-full overflow-x-auto rounded-lg bg-zinc-900 p-3 text-xs;
   scrollbar-width: thin;
-  scrollbar-color: rgb(63 63 70) transparent;
+  scrollbar-color: var(--color-zinc-700) transparent;
 }
 .prose-chat .code-block > pre {
   @apply my-0 min-w-0 flex-1 bg-transparent pr-1.5;
@@ -255,4 +340,13 @@ body.resizing iframe {
   background-color: color-mix(in srgb, var(--color-yard-400) 10%, transparent);
   /* Leave room for a focused notice's actions above it. */
   scroll-margin-block: 4rem;
+}
+
+/* Project/harness colors originate in inline styles. Darken the ink on light surfaces while
+   keeping the project's hue and the original chip tint. These selectors touch individual icons/tags. */
+:root:not(.dark) [class~="text-(--pc)"] {
+  color: color-mix(in srgb, var(--pc) 42%, #18181b);
+}
+:root:not(.dark) .composer-tag {
+  color: color-mix(in srgb, var(--tag) 38%, #18181b);
 }

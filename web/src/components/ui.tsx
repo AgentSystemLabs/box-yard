@@ -287,7 +287,7 @@ export function Button({ variant = "subtle", size = "md", loading, className, ch
       className={cx(
         "inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 sm:min-w-0",
         size === "sm" ? "px-3 py-2 text-xs sm:px-2.5 sm:py-1" : "px-3.5 py-2 text-sm",
-        variant === "primary" && "bg-yard-500 text-zinc-950 hover:bg-yard-400",
+        variant === "primary" && "bg-action text-on-action hover:bg-action-hover",
         variant === "subtle" && "bg-zinc-800 text-zinc-200 hover:bg-zinc-700",
         variant === "ghost" && "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
         variant === "danger" && "bg-red-500/10 text-red-300 hover:bg-red-500/20",
