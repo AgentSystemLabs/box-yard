@@ -218,7 +218,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
 
           <div className={showSetup ? "hidden" : "contents"}>
             <SelectionToTask source={selectionSource} onPrompt={submit}>
-              <ChatHistory days={history.days ?? days} messages={all} reveal={reveal} ensure={history.ensure}>
+              <ChatHistory index={history.index} days={history.days ?? days} messages={all} reveal={reveal} ensure={history.ensure}>
                 <StickyScroll
                   handle={scroller}
                   count={(chat.data?.length ?? 0) + (talking ? 1 : 0)}

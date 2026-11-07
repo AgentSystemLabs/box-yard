@@ -4,8 +4,9 @@ import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useTranscriptHistory } from "../web/src/lib/transcriptHistory"
+import { chatDays } from "../web/src/lib/chatDays"
 import { useTail } from "../web/src/lib/tail"
-import { api } from "../web/src/lib/api"
+import { api, ApiError } from "../web/src/lib/api"
 import { ChatHistory, DayBoundary } from "../web/src/components/ChatHistory"
 
 vi.mock("../web/src/lib/api", async (original) => ({ ...await original<typeof import("../web/src/lib/api")>(), api: vi.fn() }))
@@ -18,7 +19,7 @@ let root: Root, host: HTMLElement, qc: QueryClient
 function History({ path = "/api/chat/history", list = live }) {
   state = useTranscriptHistory(path, list)
   tail = useTail(state.items, path, { max: 200 })
-  return h(ChatHistory, { days: state.days ?? [], messages: state.items, ensure: state.ensure, reveal: tail.reveal,
+  return h(ChatHistory, { index: state.index, days: state.days ?? chatDays(list), messages: state.items, ensure: state.ensure, reveal: tail.reveal,
     children: h("div", { "data-scroller": true }, tail.visible.map((m) => h("div", { key: m.id, "data-chat-id": m.id }, h(DayBoundary, { at: m.createdAt, messageId: m.id }), m.content))) })
 }
 const render = (path?: string, list = live) => act(() => root.render(h(QueryClientProvider, { client: qc }, h(History, { path, list }))))
@@ -39,6 +40,49 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); qc.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe("bounded retained history", () => {
+  it.each(["SPA response", "missing route"])("labels a legacy server's partial dates honestly (%s) and recovers on retry", async (response) => {
+    const recent = [item(20), item(21)]
+    vi.mocked(api).mockImplementationOnce(async () => {
+      if (response === "missing route") throw new ApiError("Not found", 404)
+      return "<!doctype html><html>Example older app</html>" as never
+    })
+    render(undefined, recent); await settle()
+    expect(state.index.status).toBe("unsupported")
+    expect(host.textContent).toContain("Older dates need a newer Box Yard server")
+    expect(host.querySelector("nav")?.getAttribute("aria-label")).toContain("older dates may be missing")
+    expect(host.querySelectorAll("nav button")).toHaveLength(2)
+    expect(state.items).toBe(recent)
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Retry dates")!.click())
+    await settle()
+    expect(state.index.status).toBe("ready")
+    expect(host.textContent).not.toContain("Older dates need a newer Box Yard server")
+    expect(host.querySelector("nav")?.getAttribute("aria-label")).toMatch(/^Chat days:/)
+    expect(host.querySelectorAll("nav button")).toHaveLength(3)
+    act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
+    act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
+    await settle(); await settle()
+    expect(document.activeElement?.getAttribute("data-day-start")).toBe("m-0")
+    expect(state.items.length).toBeLessThanOrEqual(200)
+    expect(state.items[0]?.id).toBe("m-0")
+  })
+
+  it("shows an incomplete date index while pending or failed, including an empty conversation", async () => {
+    let reject!: (error: Error) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
+    render(undefined, [])
+    expect(state.index.status).toBe("loading")
+    expect(host.querySelector('[data-loading]')).not.toBeNull()
+    await act(async () => reject(new ApiError("Unavailable", 503)))
+    await settle()
+    expect(state.index.status).toBe("error")
+    expect(host.textContent).toContain("Some older days may be missing")
+    expect(host.textContent).not.toContain("newer Box Yard server")
+    act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Retry dates")!.click())
+    await settle()
+    expect(state.index.status).toBe("ready")
+    expect(state.days?.[0]?.messageId).toBe("m-0")
+  })
+
   it("loads a date older than the initial API cap, focuses it, and keeps the live cache separate", async () => {
     render(); await settle()
     const button = host.querySelector<HTMLButtonElement>('nav button')!

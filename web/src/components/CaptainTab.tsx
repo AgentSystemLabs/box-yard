@@ -214,7 +214,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
           )}
 
           <SelectionToTask source={selectionSource} onPrompt={submit}>
-            <ChatHistory days={history.days ?? days} messages={settled} reveal={reveal} ensure={history.ensure} projectId={project.id}>
+            <ChatHistory index={history.index} days={history.days ?? days} messages={settled} reveal={reveal} ensure={history.ensure} projectId={project.id}>
               <StickyScroll
                 handle={thread}
                 count={count}
