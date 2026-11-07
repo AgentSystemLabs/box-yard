@@ -97,6 +97,35 @@ describe("bounded retained history", () => {
     expect(state.items.find((m) => m.id === "m-1000")?.content).toBe("Edited example reply")
   })
 
+  it("keeps live timestamp moves ordered without pulling a newer turn across a history gap", async () => {
+    render(); await settle()
+    act(() => state.earlier()); await settle()
+    render(undefined, live.map((m) => m.id === "m-1000" ? { ...m, createdAt: item(1400).createdAt }
+      : m.id === "m-1001" ? { ...m, createdAt: item(1004).createdAt } : m))
+    expect(state.items.some((m) => m.id === "m-1000")).toBe(false)
+    expect(state.items.map((m) => m.createdAt)).toEqual(state.items.map((m) => m.createdAt).sort((a, b) => a - b))
+    expect(state.items.findIndex((m) => m.id === "m-1001")).toBeGreaterThan(state.items.findIndex((m) => m.id === "m-1003"))
+    expect(new Set(state.items.map((m) => m.id)).size).toBe(state.items.length)
+    act(() => state.later()); await settle()
+    expect(api).toHaveBeenLastCalledWith("/api/chat/history?after=m-1099")
+  })
+
+  it("uses saved positions and replaces overlapping moved rows with the newly fetched version", async () => {
+    render(); await settle()
+    vi.mocked(api).mockResolvedValueOnce({ messages: Array.from({ length: 100 }, (_, i) => item(i + 900)), before: "old", after: "new",
+      positions: { "m-900": "saved-start", "m-999": "saved-end" } } as never)
+    act(() => state.earlier()); await settle()
+    vi.mocked(api).mockResolvedValueOnce({ messages: Array.from({ length: 100 }, (_, i) => item(i + 800)), before: "old", after: "new" } as never)
+    act(() => state.earlier()); await settle()
+    expect(api).toHaveBeenLastCalledWith("/api/chat/history?before=saved-start")
+    vi.mocked(api).mockResolvedValueOnce({ messages: [{ ...item(950), createdAt: item(1000).createdAt }, item(1001)], before: "older", after: null } as never)
+    act(() => state.later()); await settle()
+    expect(api).toHaveBeenLastCalledWith("/api/chat/history?after=saved-end")
+    expect(state.items.filter((m) => m.id === "m-950")).toHaveLength(1)
+    expect(state.items.find((m) => m.id === "m-950")?.createdAt).toBe(item(1000).createdAt)
+    expect(state.items).toHaveLength(200)
+  })
+
   it("adds a newly streamed date to the complete rail without another transcript request", async () => {
     render(); await settle()
     const count = vi.mocked(api).mock.calls.length

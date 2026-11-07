@@ -57,8 +57,26 @@ describe("retained transcript cursors", () => {
       expect(() => history.page({ kind: "captain", id: a.id }, { [cursor]: captain.id })).toThrow("not found in this conversation")
       expect(() => history.page({ kind: "task", id: ta.id }, { [cursor]: task.id })).toThrow("not found in this conversation")
     }
+    const position = history.page({ kind: "captain", id: b.id }).positions![captain.id]!
+    expect(() => history.page({ kind: "captain", id: a.id }, { before: position })).toThrow("not found in this conversation")
+    expect(() => history.page({ kind: "chat" }, { before: "h:invalid" })).toThrow("Invalid history cursor")
     expect(history.days({ kind: "captain", id: a.id }, "UTC")).toEqual([])
     expect(() => history.page({ kind: "chat" }, { before: "a", after: "b" })).toThrow("one history cursor")
+  })
+
+  it("keeps cursor positions stable when a queued boundary message moves to a new turn", () => {
+    const { history } = setup()
+    seed("chat_messages", undefined, undefined, 250)
+    const scope = { kind: "chat" } as const
+    const latest = history.page(scope)
+    db.prepare("UPDATE chat_messages SET created_at = ? WHERE id = ?").run(Date.UTC(2030, 0, 1), latest.messages[0]!.id)
+    const earlier = history.page(scope, { before: latest.before! })
+    expect(earlier.messages.map((m) => m.id)).toEqual(Array.from({ length: 100 }, (_, i) => `m-${200 - i}`))
+    const around = history.page(scope, { around: "m-150" })
+    const end = around.messages.at(-1)!
+    const next = history.page(scope, { after: around.after! }).messages[0]!
+    db.prepare("UPDATE chat_messages SET created_at = ? WHERE id = ?").run(Date.UTC(2031, 0, 1), end.id)
+    expect(history.page(scope, { after: around.after! }).messages[0]!.id).toBe(next.id)
   })
 
   it("groups lightweight days in the reader's timezone across DST and skips invisible tools", () => {

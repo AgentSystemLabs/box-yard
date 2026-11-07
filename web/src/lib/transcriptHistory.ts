@@ -25,7 +25,18 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
   const items = useMemo(() => {
     if (!page) return live
     const updates = new Map(live.map((m) => [m.id, m]))
-    return page.messages.map((m) => updates.get(m.id) ?? m)
+    const firstAt = page.messages[0]?.createdAt ?? 0
+    const lastAt = page.messages.at(-1)?.createdAt ?? 0
+    let moved = false
+    const merged = page.messages.flatMap((m) => {
+      const update = updates.get(m.id)
+      if (!update || update.createdAt === m.createdAt) return [update ?? m]
+      moved = true
+      // Delivery moves queued messages to the new turn. Do not pull that newer turn into an older window:
+      // its timestamp would also make the next page skip the messages between the window and that turn.
+      return update.createdAt < firstAt || update.createdAt > lastAt ? [] : [update]
+    })
+    return moved ? merged.sort((a, b) => a.createdAt - b.createdAt) : merged
   }, [page, live])
   const latest = useRef({ path, page, items })
   latest.current = { path, page, items }
@@ -45,16 +56,20 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
       const answer = await api<HistoryPage<M>>(`${path}?${new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => entry[1] !== undefined))}`)
       if (token !== serial.current) return false
       let messages = answer.messages
-      if (query.before) messages = [...messages, ...items.slice(0, HISTORY_WINDOW_SIZE - messages.length)]
-      if (query.after) messages = [...items.slice(-(HISTORY_WINDOW_SIZE - messages.length)), ...messages]
+      const previous = page?.messages ?? items
+      const fresh = new Set(messages.map((m) => m.id))
+      const kept = previous.filter((m) => !fresh.has(m.id))
+      if (query.before) messages = [...messages, ...kept.slice(0, HISTORY_WINDOW_SIZE - messages.length)]
+      if (query.after) messages = [...kept.slice(-(HISTORY_WINDOW_SIZE - messages.length)), ...messages]
       const seen = new Set<string>()
       messages = messages.filter((m) => !seen.has(m.id) && !!seen.add(m.id))
       setWindow({ path, page: { messages,
+        positions: Object.fromEntries(messages.map((m) => [m.id, answer.positions?.[m.id] ?? page?.positions?.[m.id] ?? m.id])),
         before: query.after ? messages[0]?.id ?? null : answer.before,
         after: query.before ? messages.at(-1)?.id ?? null : answer.after,
       } })
       // An empty boundary page still closes that direction without dropping the reading window.
-      if (!answer.messages.length) setWindow({ path, page: { messages: items, before: query.before ? null : page?.before ?? null, after: query.after ? null : page?.after ?? null } })
+      if (!answer.messages.length) setWindow({ path, page: { messages: previous, positions: page?.positions, before: query.before ? null : page?.before ?? null, after: query.after ? null : page?.after ?? null } })
       return true
     } catch {
       if (token === serial.current) toast.error("Couldn't load history", "Try the date or history button again.")
@@ -68,12 +83,14 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
     return request({ around: id })
   }, [request])
   const earlier = useCallback(() => {
-    const id = latest.current.items[0]?.id
-    if (id) void request({ before: id })
+    const { page, items } = latest.current
+    const id = (page?.messages ?? items)[0]?.id
+    if (id) void request({ before: page?.positions?.[id] ?? id })
   }, [request])
   const later = useCallback(() => {
-    const id = latest.current.items.at(-1)?.id
-    if (id) void request({ after: id })
+    const { page, items } = latest.current
+    const id = (page?.messages ?? items).at(-1)?.id
+    if (id) void request({ after: page?.positions?.[id] ?? id })
   }, [request])
   const toLatest = useCallback(() => {
     serial.current++

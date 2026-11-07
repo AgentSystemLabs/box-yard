@@ -6,6 +6,8 @@ export interface HistoryPage<M = TranscriptMessage> {
   messages: M[]
   before: string | null
   after: string | null
+  /** Stable positions for retained edges when the client trims a reading window. */
+  positions?: Record<string, string>
 }
 export const HISTORY_PAGE_SIZE = 100
 export const HISTORY_WINDOW_SIZE = 200

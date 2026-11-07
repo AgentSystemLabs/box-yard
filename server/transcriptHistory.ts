@@ -5,6 +5,16 @@ import { HISTORY_PAGE_SIZE, type HistoryDay, type HistoryPage, type TranscriptMe
 
 export type HistoryScope = { kind: "chat" } | { kind: "captain" | "task"; id: string }
 type Row = { id: string; rid: number; created_at: number; role: string; content: string; meta_json: string | null }
+const position = (r: Row) => `h:${Buffer.from(JSON.stringify({ id: r.id, at: r.created_at, rid: r.rid })).toString("base64url")}`
+
+function readPosition(value: string | undefined): { id: string; at: number; rid: number } | undefined {
+  if (!value?.startsWith("h:")) return undefined
+  try {
+    const p = JSON.parse(Buffer.from(value.slice(2), "base64url").toString())
+    if (typeof p.id === "string" && p.id.length <= 128 && Number.isSafeInteger(p.at) && Number.isSafeInteger(p.rid) && p.rid > 0) return p
+  } catch { /* Invalid cursor below. */ }
+  throw new BadRequestError("Invalid history cursor")
+}
 
 /** Read-only browser history. Scope is part of every lookup, including the cursor lookup. Existing (scope,
  * created_at) indexes include rowid as their final key, matching the live logs' order for equal timestamps. */
@@ -22,9 +32,14 @@ export class TranscriptHistory {
     const modes = Object.entries(query).filter(([, value]) => value !== undefined)
     if (modes.length > 1) throw new BadRequestError("Choose one history cursor")
     const mode = modes[0]?.[0]
-    const id = modes[0]?.[1]
-    const anchor = id === undefined ? undefined : this.db.prepare(`SELECT rowid AS rid, created_at FROM ${table} WHERE ${where} AND id = ?`).get(...args, id) as Row | undefined
-    if (id !== undefined && !anchor) throw new BadRequestError("History message not found in this conversation")
+    const value = modes[0]?.[1]
+    const cursor = mode === "around" ? undefined : readPosition(value)
+    const id = cursor?.id ?? value
+    const current = id === undefined ? undefined : this.db.prepare(`SELECT rowid AS rid, created_at FROM ${table} WHERE ${where} AND id = ?`).get(...args, id) as Row | undefined
+    if (id !== undefined && (!current || (cursor && cursor.rid !== current.rid))) throw new BadRequestError("History message not found in this conversation")
+    // A queued message can be delivered between pages. Keep the cursor's original position while still
+    // validating its id and rowid inside this conversation; resolving its new timestamp would skip a gap.
+    const anchor = cursor ? { created_at: cursor.at, rid: cursor.rid } : current
     const select = (op: string, direction: "ASC" | "DESC", limit: number): Row[] => this.db.prepare(
       `SELECT *, rowid AS rid FROM ${table} WHERE ${where} ${anchor ? `AND (created_at, rowid) ${op} (?, ?)` : ""}
        ORDER BY created_at ${direction}, rowid ${direction} LIMIT ?`,
@@ -39,8 +54,9 @@ export class TranscriptHistory {
       messages: rows.map((r) => ({ id: r.id, role: r.role, content: r.content, meta: json(r.meta_json, null),
         createdAt: r.created_at, ...(scope.kind === "task" ? { taskId: scope.id } : scope.kind === "captain" ? { projectId: scope.id } : {}),
       }) as TranscriptMessage),
-      before: exists(rows[0], "<") ? rows[0]!.id : null,
-      after: exists(rows.at(-1), ">") ? rows.at(-1)!.id : null,
+      before: exists(rows[0], "<") ? position(rows[0]!) : null,
+      after: exists(rows.at(-1), ">") ? position(rows.at(-1)!) : null,
+      positions: Object.fromEntries(rows.map((r) => [r.id, position(r)])),
     }
   }
 
@@ -87,7 +103,7 @@ export function transcriptHistoryRoutes(api: Router, store: Store) {
       if (kind === "task" && !store.getTask(id)) throw new BadRequestError("No such task")
       const value = (key: string) => {
         const v = req.query[key]
-        if (v !== undefined && (typeof v !== "string" || !v || v.length > 128)) throw new BadRequestError("Invalid history query")
+        if (v !== undefined && (typeof v !== "string" || !v || v.length > 256)) throw new BadRequestError("Invalid history query")
         return v as string | undefined
       }
       if (value("days") === "1") return void res.json(history.days(scope, value("tz") ?? "UTC"))
