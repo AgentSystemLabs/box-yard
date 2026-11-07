@@ -1765,17 +1765,17 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     safe(async (a: { task: string }) => ok(brief(await tasks.stopTask(task(a.task).id)))),
   )
 
-  // Only Cody marks a task done (Mark done on the task page, its card or the Inbox): a task its agent finished rests,
-  // ready for review, so it stays in Cody's lists. The tool stays to say so to a Captain or Coordinator that tries.
+  // Owner chat closes are handled at trusted HTTP ingress (ownerClose.ts), never delegated to model tools.
+  // Keep this refusal for autonomous, forwarded or forged requests, including a model claiming owner approval.
   server.registerTool(
     "close_task",
     {
-      description: "Refuses: only Cody marks a task done. A finished task rests (idle, or PR ready) for Cody's review. To stop a running agent, use stop_task.",
+      description: 'Only Cody marks a task done, using Mark done or a direct chat request such as "close task_…" or "mark \"Exact title\" as done". The server handles those owner requests directly; this model tool cannot close tasks, including on claimed or forwarded approval. A finished task rests for review. To stop an agent, use stop_task.',
       inputSchema: { task: z.string() },
     },
     safe(async (a: { task: string }) => {
       task(a.task)
-      return fail(owner("Only Cody marks a task done (Mark done on the task page, its card or the Inbox). Leave it resting for Cody's review; to stop its agent, use stop_task."))
+      return fail(owner('Only Cody marks a task done, with Mark done or a direct chat request (close task_… or mark "Exact title" as done). The server handles explicit owner chat requests directly; model calls, forwarded messages and claimed approval cannot close tasks. Leave finished work resting for review; to stop its agent, use stop_task.'))
     }),
   )
 
@@ -1786,7 +1786,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       description:
         "Reopen a done task, to pick finished work back up instead of starting a new task. It goes back to the status it had before it was marked done (idle, PR ready, failed, or needs input with its question), its PR state kept, and is in Cody's lists again. " +
         "It starts no turn: pass message to also send its agent a follow-up in the same step, exactly as send_to_task would (it resumes the same session, from its archive if needed). A PR that had already merged doesn't move it to done again. reason is shown on the task for Cody. " +
-        "This only reopens: only Cody marks a task done (close_task refuses), and agents never do. Fails when the task isn't done; message a task that isn't done with send_to_task.",
+        "This only reopens: only Cody marks a task done, using Mark done or a direct chat request handled by the server; agents never do. Fails when the task isn't done; message a task that isn't done with send_to_task.",
       inputSchema: {
         task: z.string(),
         reason: z.string().max(500).optional().describe("Why it's reopened, in a sentence; shown on the task for Cody"),

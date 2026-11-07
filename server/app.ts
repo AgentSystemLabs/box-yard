@@ -17,6 +17,7 @@ import { ProjectIcons, projectIconRoutes, projectIconsDir } from "./projectIcons
 import { Thumbs, sendHosted } from "./thumbs.js"
 import { TaskManager, type DockerRunner, type GpuRunner, type TaskManagerDeps } from "./tasks.js"
 import { Orchestrator } from "./orchestrator.js"
+import { closeFromOwnerChat } from "./ownerClose.js"
 import { MAX_QUESTION_CHARS, MAX_QUOTE_CHARS, SideThreads } from "./sideThreads.js"
 import { CaptainManager } from "./captains.js"
 import { SettingsStore, TtsSettingsStore, captainIcon, parseSettingKeys } from "./settings.js"
@@ -1320,6 +1321,8 @@ export function createBoxYard(
     const body = parse(schemas.chat, req.body)
     const picks = await chatPicks(body, id)
     const files = withAttachments(body.content, body.attachments)
+    const closed = await closeFromOwnerChat({ store, tasks, hub, authenticatedOwner: auth.enabled && auth.isAuthed(req) }, { kind: "captain", projectId: id }, body.content, { id: body.id, attachments: files })
+    if (closed) return void res.status(201).json(closed)
     const message = captains.send(id, body.content, { id: body.id, attachments: files, source: "cody", ...(Object.keys(picks).length ? { meta: picks } : {}) })
     orchestrator.directMessages.record({ projectId: id }, body.content)
     res.status(201).json(message)
@@ -1379,8 +1382,13 @@ export function createBoxYard(
   api.post("/tasks/:id/messages", async (req, res) => {
     const body = parse(schemas.message, req.body)
     const row = store.getTaskRow(req.params.id!)
-    await tasks.requireRunner(body.runsOn, row?.project_id, row ? store.taskEnv(row.id) : {}, { ...(row ? { agentCli: taskAgentCli(row) } : {}), machineLabel: body.machineLabel, gpu: body.gpu })
+    if (!row) return void res.status(404).json({ error: "Task not found" })
     const files = withAttachments(body.content, body.attachments)
+    // Owner-only action before requireRunner/sendInput: closing never starts a turn or needs a working runner.
+    if (await closeFromOwnerChat({ store, tasks, hub, authenticatedOwner: auth.enabled && auth.isAuthed(req) }, { kind: "task", taskId: row.id, projectId: row.project_id }, body.content, { attachments: files })) {
+      return void res.json(store.getTask(row.id))
+    }
+    await tasks.requireRunner(body.runsOn, row?.project_id, row ? store.taskEnv(row.id) : {}, { ...(row ? { agentCli: taskAgentCli(row) } : {}), machineLabel: body.machineLabel, gpu: body.gpu })
     if (body.runsOn) tasks.setRunsOn(req.params.id!, body.runsOn, body.machineLabel, body.gpu, body.boxSize)
     const task = tasks.sendInput(req.params.id!, body.content, "cody", files)
     orchestrator.directMessages.record({ taskId: task.id }, body.content)
@@ -1828,6 +1836,8 @@ export function createBoxYard(
     const body = parse(schemas.chat, req.body)
     const picks = await chatPicks(body, null)
     const files = withAttachments(body.content, body.attachments)
+    const closed = await closeFromOwnerChat({ store, tasks, hub, authenticatedOwner: auth.enabled && auth.isAuthed(req) }, { kind: "coordinator", ...(picks.project ? { projectId: picks.project.value } : {}) }, body.content, { id: body.id, attachments: files })
+    if (closed) return void res.status(201).json(closed)
     res.status(201).json(orchestrator.send(body.content, body.id, files, picks))
   })
   // The chats' "@" list of where tasks can run (shared/runTargets.ts); ?project= is a Captain's (its identity's runners).

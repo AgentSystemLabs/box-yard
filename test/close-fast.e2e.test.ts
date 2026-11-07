@@ -40,7 +40,7 @@ const running: Running[] = []
 async function start(): Promise<Running> {
   const port = await freePort()
   const boxes = new SlowBoxes(tmpDir("boxes-"), FAKE_CLAUDE)
-  const yard = createBoxYard(testConfig({ port }), { webDir: "/nonexistent", provider: boxes })
+  const yard = createBoxYard(testConfig({ port, password: "example-owner-password" }), { webDir: "/nonexistent", provider: boxes })
   const sent: Running["sent"] = []
   const broadcast = yard.hub.broadcast.bind(yard.hub)
   yard.hub.broadcast = (ev: UiEvent) => {
@@ -67,7 +67,7 @@ afterEach(async () => {
 })
 
 async function call<T>(r: Running, method: string, urlPath: string, body?: unknown): Promise<T> {
-  const res = await fetch(r.base + urlPath, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })
+  const res = await fetch(r.base + urlPath, { method, headers: { Authorization: "Bearer example-owner-password", ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined })
   const data = await res.json()
   if (!res.ok) throw new Error(`${method} ${urlPath} -> ${res.status}: ${JSON.stringify(data)}`)
   return data as T
@@ -88,10 +88,10 @@ async function taskIn(r: Running, prompt: string, want: (t: Task) => boolean, wh
 }
 
 /** POST close with the box held: the answer, how long it took, and whether "done" went out before the box moved. */
-async function closeOnSlowBox(r: Running, id: string) {
+async function closeOnSlowBox(r: Running, id: string, ownerChat = false) {
   r.boxes.slow = true
   const at = Date.now()
-  const task = await call<Task>(r, "POST", `/api/tasks/${id}/close`)
+  const task = await call<Task>(r, "POST", `/api/tasks/${id}/${ownerChat ? "messages" : "close"}`, ownerChat ? { content: "Please close this task" } : undefined)
   const ms = Date.now() - at
   return { task, ms, broadcastDone: r.sent.some((s) => s.id === id && s.status === "done") }
 }
@@ -115,11 +115,11 @@ describe("Mark done on a slow box", () => {
     expect(getTask(r, t.id).status).toBe("done")
   })
 
-  it("closes a running task at once and keeps it done when its stopped turn ends", async () => {
+  it("closes a running task from its own owner chat, archives it and keeps it done when its stopped turn ends", async () => {
     const r = await start()
     const t = await taskIn(r, "keep going [hang]", (t) => t.status === "working", "a working task")
 
-    const { task, ms, broadcastDone } = await closeOnSlowBox(r, t.id)
+    const { task, ms, broadcastDone } = await closeOnSlowBox(r, t.id, true)
     expect(task.status).toBe("done")
     expect(ms).toBeLessThan(1000)
     expect(broadcastDone).toBe(true)
