@@ -1,5 +1,4 @@
-// Shared by sidebar swipe actions and explicit failed-task delete buttons. Reads the cache only when invoked,
-// so adding an action to every failed row does not subscribe those rows to the full task list.
+// Reads deletion guards from the cache when invoked, then rechecks after confirmation.
 import { useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import type { CaptainState, Project, Task } from "../../../shared/types"
