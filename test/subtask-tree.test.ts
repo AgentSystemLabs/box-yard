@@ -246,8 +246,9 @@ describe("the sidebar's sub-task tree", () => {
     expect(plain.className).toContain("pl-[calc(1.5rem+var(--nest,0rem))]")
     expect(plain.className).toContain("pointer-coarse:pl-[calc(2.75rem+var(--nest,0rem))]")
     for (const button of [open(OMELETTE), open(FRENCH)]) {
-      expect(button.className).toContain("pl-[2.75rem]")
-      expect(button.className).toContain("pointer-coarse:pl-[4rem]")
+      // The grid owns the shared indent for the task button and its separate PR link below it.
+      expect(button.parentElement!.className).toContain("pl-[2.75rem]")
+      expect(button.parentElement!.className).toContain("pointer-coarse:pl-[4rem]")
       expect(button.closest<HTMLElement>("[role=treeitem]")!.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
       expect(button.closest<HTMLElement>("[role=treeitem]")!.style.paddingLeft).toBe("")
       expect(button.closest<HTMLElement>("[role=treeitem]")!.style.marginLeft).toBe("")
@@ -262,7 +263,7 @@ describe("the sidebar's sub-task tree", () => {
     expect(chevron(CLASSIC).className).toContain("z-2")
     expect(chevron(OMELETTE).className).toContain("pointer-coarse:w-11")
     expect(chevron(OMELETTE).className).toContain("pointer-coarse:h-11")
-    expect(open(FRENCH).className).toContain("pointer-coarse:min-h-11")
+    expect(open(FRENCH).parentElement!.className).toContain("pointer-coarse:min-h-11")
   })
 
   it("keeps the rail's own steps and bounds their indent to reserve room for content and actions", async () => {

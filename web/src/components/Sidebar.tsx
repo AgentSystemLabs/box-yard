@@ -1018,10 +1018,31 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
 }) {
   const { task, dim, meta, tree } = row
   const label = stateLabel(task)
+  const prMeta = Boolean(task.prUrl && (meta === "PR" || meta.includes("#")))
   const twice = useTreeDoubleClick(task.id, foldTwice && folded !== null)
   const inTree = useContext(InTree)
   const id = useId()
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+  // The actual depth stays readable after the visual indent stops growing. ARIA already announces it.
+  // At the resizable column's 200px minimum, abbreviate Level so its number still fits.
+  const level = depth > 0 && <span aria-hidden={inTree || undefined}>L<span className="@max-[14rem]/side:hidden">evel </span>{depth + 1} · </span>
+  const metadata = (
+    <span className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 @max-[14rem]/side:flex-wrap">
+      {prMeta ? (
+        // A sibling of the task button: native link activation never picks or double-click-folds the task.
+        // Its touch height reserves its own space rather than extending a hit area over the title above it.
+        <>
+          {level && <span className="shrink-0 text-zinc-500">{level}</span>}
+          <PrChip task={task} variant="number" className={cx(FOCUS, "pointer-coarse:min-h-11")} />
+        </>
+      ) : (
+        <span className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>
+          {level}<span aria-hidden={saysState(meta, label)}>{meta}</span>
+        </span>
+      )}
+      {folded && tree && <TreeCountChip tree={tree} />}
+    </span>
+  )
   return (
     <SidebarDeleteRow target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }} doneTask={readyForReview(task.status) && !tree?.running && !tree?.asks ? task : undefined} subtasks={tree?.total}
       // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
@@ -1050,31 +1071,26 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           )}
         </button>
       )}
-      <button
-        type="button"
-        onClick={(e) => {
-          onPick(task.id, "project", e)
-          twice.onClick(e)
-        }}
-        onDoubleClick={twice.onDoubleClick}
-        onMouseDown={keepFocusForPick}
-        data-open-task={task.id}
-        {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
-        title={`${task.title} · ${label}${depth ? ` · Task level ${depth + 1}` : ""}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
-        className={cx("grid min-h-9 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2.5 rounded-lg py-1 pr-2 text-left text-sm pointer-coarse:min-h-11", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD, FOCUS)}
-      >
-        <span className="col-start-2 row-start-1 truncate">{task.title}</span>
-        <RowIcon task={task} label={label} dim={dim} />
-        <span className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 @max-[14rem]/side:flex-wrap">
-          <span className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>
-            {/* The actual depth stays readable after the visual indent stops growing. ARIA already announces it. */}
-            {/* At the resizable column's 200px minimum, abbreviate Level so its number still fits. */}
-            {depth > 0 && <span aria-hidden={inTree || undefined}>L<span className="@max-[14rem]/side:hidden">evel </span>{depth + 1} · </span>}
-            <span aria-hidden={saysState(meta, label)}>{meta}</span>
-          </span>
-          {folded && tree && <TreeCountChip tree={tree} />}
-        </span>
-      </button>
+      <div className={cx("grid min-h-9 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2.5 py-1 pr-2 text-sm pointer-coarse:min-h-11", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
+        <button
+          type="button"
+          onClick={(e) => {
+            onPick(task.id, "project", e)
+            twice.onClick(e)
+          }}
+          onDoubleClick={twice.onDoubleClick}
+          onMouseDown={keepFocusForPick}
+          data-open-task={task.id}
+          {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
+          title={`${task.title} · ${label}${depth ? ` · Task level ${depth + 1}` : ""}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
+          className={cx("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-lg text-left", prMeta && "pointer-coarse:min-h-11", FOCUS)}
+        >
+          <span className="col-start-2 row-start-1 truncate">{task.title}</span>
+          <RowIcon task={task} label={label} dim={dim} />
+          {!prMeta && metadata}
+        </button>
+        {prMeta && metadata}
+      </div>
       {readyForReview(task.status) && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
       {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
     </SidebarDeleteRow>

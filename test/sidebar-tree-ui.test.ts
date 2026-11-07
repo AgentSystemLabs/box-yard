@@ -637,3 +637,65 @@ describe("the sidebar's tree and the app's other keys", () => {
     expect(document.querySelector("[role=dialog][aria-label='Projects and tasks']")).toBeNull()
   })
 })
+
+describe("PR numbers below a task title in the project tree", () => {
+  const audit = task("task_audit01", YARD.id, "Security audit", "pr_ready", undefined, { prUrl: "https://github.com/acme/example-app/pull/18", prState: "open" })
+  const child = task("task_audit02", YARD.id, "Review dependencies", "done", audit, { prUrl: "https://github.com/acme/example-app/pull/17", prState: "merged", prMergedAt: now })
+
+  it.each([1440, 400])("opens the parent PR independently in the %ipx sidebar/drawer, expanded or folded", (width) => {
+    viewport(width)
+    render(APP_HOME, [audit, child])
+    if (width === 400) act(() => openSidebarDrawer())
+    const surface = width === 400 ? document.querySelector<HTMLElement>("[role=dialog][aria-label='Projects and tasks']")! : nav()
+    const auditRow = () => surface.querySelector<HTMLElement>(`[data-tree-key="${taskKey(audit.id, "project")}"]`)!
+    const open = () => auditRow().querySelector<HTMLButtonElement>("[data-open-task]")!
+    const link = () => auditRow().querySelector<HTMLAnchorElement>("a")!
+    const toggle = () => auditRow().querySelector<HTMLButtonElement>("[data-tree-toggle]")!
+    expect(link()).not.toBeNull()
+    expect(link().closest("button")).toBeNull()
+    expect(link().href).toBe(audit.prUrl)
+    expect(link().target).toBe("_blank")
+    expect(link().rel).toBe("noopener noreferrer")
+    expect(link().getAttribute("aria-label")).toBe("PR #18 on GitHub (opens in a new tab)")
+    expect(link().className).toContain("text-emerald-400")
+    expect(link().tabIndex).toBe(0)
+
+    for (const folded of [false, true]) {
+      if (folded) click(toggle())
+      focus(link())
+      expect(press("Enter").defaultPrevented).toBe(false)
+      for (const init of [{}, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+        const e = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, detail: 1, ...init })
+        act(() => {
+          link().dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerId: 1 }))
+          link().dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0, pointerId: 1 }))
+          link().dispatchEvent(e)
+        })
+        expect(e.defaultPrevented).toBe(false)
+        expect(session()).toBeNull()
+        expect(auditRow().getAttribute("aria-expanded")).toBe(String(!folded))
+        expect(auditRow().hasAttribute("aria-current")).toBe(false)
+        expect(surface.querySelector("[data-sidebar-delete]")).toBeNull()
+        if (width === 400) expect(surface.isConnected).toBe(true)
+      }
+    }
+    click(open())
+    expect(session()).toBe(audit.id)
+    if (width === 400) expect(surface.isConnected).toBe(false)
+  })
+
+  it("links a merged sub-task's PR while leaving a working task's status intact", () => {
+    render(APP_HOME, [{ ...audit, status: "working" }, child])
+    expect(row(audit).querySelector("a")).toBeNull()
+    expect(itemName(row(audit))).toContain("working")
+    const link = row(child).querySelector<HTMLAnchorElement>("a")!
+    expect(link).not.toBeNull()
+    expect(link.getAttribute("aria-label")).toBe("Merged #17 on GitHub (opens in a new tab)")
+    expect(link.className).toContain("text-merged-fg")
+    click(link)
+    expect(session()).toBeNull()
+    expect(row(audit).getAttribute("aria-expanded")).toBe("true")
+    click(row(child).querySelector("[data-open-task]")!)
+    expect(session()).toBe(child.id)
+  })
+})
