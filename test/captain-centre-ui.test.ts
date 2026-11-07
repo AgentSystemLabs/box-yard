@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The centre chat as tasks open. On a desktop it never follows a task: a task opening from any entry point (the
 // sidebar, the palette, a link or notice in the chat, Back/Forward, a deep link) shows on its own and an unpinned chat
 // hides, as it was, until the task closes or a chat is picked (test/pins.test.ts has the pins). On a phone a task
@@ -140,10 +139,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Let deferred chat queries start while fetch is still mocked, before restoring the environment.
-  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)

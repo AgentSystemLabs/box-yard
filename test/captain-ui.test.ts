@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -29,10 +28,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Let deferred chat queries start while fetch is still mocked, before restoring the environment.
-  await act(async () => { await afterPaint() })
   host.remove()
   vi.unstubAllGlobals()
 })

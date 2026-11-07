@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -134,10 +133,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Keep deferred chat requests inside the mocked fetch lifetime.
-  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)

@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 // Every composer says who it messages with an icon at its text's leading edge (ChatIcons.tsx): the Coordinator's
 // helm, a Captain's icon (the cap by default), a task's checklist, a sub-task's nested checklist, or a side question's bubble.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -41,10 +40,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Keep deferred chat requests inside the mocked fetch lifetime.
-  await act(async () => { await afterPaint() })
   host.remove()
   closeThread(COORDINATOR_CHAT)
   vi.unstubAllGlobals()

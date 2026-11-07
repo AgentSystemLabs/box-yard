@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The side thread / card panel's draggable width (SideThread.tsx): the column beside a chat, in the app too
 // (#194's ⤢ card).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -43,10 +42,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Keep deferred chat requests inside the mocked fetch lifetime.
-  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   closeThread(COORDINATOR_CHAT)

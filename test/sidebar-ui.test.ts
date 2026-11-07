@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The sidebar: the Coordinator and each project's row as top-level chats (the row is its Captain; only the
 // chevron folds), tasks opening in the side panel, one selected row, "Waiting on you", pins, the top row's 🔍 (the
 // palette), the rail beside an open panel, and the drawer on a phone.
@@ -91,10 +90,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Keep deferred chat requests inside the mocked fetch lifetime.
-  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)

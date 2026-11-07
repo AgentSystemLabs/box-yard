@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 // A chat message's one action (MessageActions.tsx): Reply, in a small toolbar on a short message and in a pill at the
 // tap's height on one taller than about the chat, which quotes text selected beside it. It opens the message's reply
 // thread, where the chat's agent routes each message (side-threads-web.test.ts, thread-routing.test.ts). No Ask,
@@ -90,10 +89,8 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(async () => {
+afterEach(() => {
   act(() => root.unmount())
-  // Keep deferred chat requests inside the mocked fetch lifetime.
-  await act(async () => { await afterPaint() })
   host.remove()
   document.body.innerHTML = ""
   closeThread(COORDINATOR_CHAT)
