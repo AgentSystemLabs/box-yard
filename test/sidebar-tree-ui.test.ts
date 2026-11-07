@@ -536,6 +536,31 @@ describe("the sidebar's tree and the app's other keys", () => {
     expect(document.activeElement).toBe(at(COORDINATOR))
   })
 
+  it.each([
+    [APP_HOME, "coordinator", COORDINATOR],
+    [`${APP_HOME}?captain=${YARD.id}`, `captain:${YARD.id}`, captainKey(YARD.id)],
+    [`${APP_HOME}?session=${PLAN.id}`, `task:${PLAN.id}`, taskKey(PLAN.id, "project")],
+  ])("Escape from %s on a phone opens the sidebar and focuses its current row without losing the draft", async (path, draft, selected) => {
+    viewport(400)
+    setDraftText(draft, "Keep this phone draft")
+    render(path)
+    expect(nav()).toBeNull()
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-composer]")].find((e) => e.value === "Keep this phone draft")!
+    focus(box)
+    expect(press("Escape", { isComposing: true }).defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(box)
+    expect(nav()).toBeNull()
+    press("Escape")
+    await act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())))
+    expect(document.activeElement).toBe(at(selected))
+    press("ArrowDown")
+    expect(focusedKey()).not.toBe(selected)
+    expect(document.activeElement?.getAttribute("role")).toBe("treeitem")
+    expect(location.pathname + location.search).toBe(path)
+    expect(box.isConnected).toBe(true)
+    expect(readDraft(draft).text).toBe("Keep this phone draft")
+  })
+
   it("a covering dialog takes Escape before sidebar focus, without closing the task panel", async () => {
     setDraftText(`task:${PLAN.id}`, "Keep this task draft")
     render(`${APP_HOME}?session=${PLAN.id}`)
