@@ -270,5 +270,14 @@ export function useTreeView<T extends HTMLElement = HTMLDivElement>(current: str
     if (open !== target) open?.click()
   }, [])
 
-  return { ref, onFocus, onBlur, onKeyDown, onClick }
+  const focusCurrent = useCallback(() => {
+    if (!root.current) return false
+    const items = treeItems(root.current)
+    const item = items.find((i) => keyOf(i) === state.current.current) ?? items.find((i) => i.tabIndex === 0) ?? items[0]
+    if (!item) return false
+    focusItem(item)
+    return document.activeElement === item
+  }, [])
+
+  return { ref, onFocus, onBlur, onKeyDown, onClick, focusCurrent }
 }

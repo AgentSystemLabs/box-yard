@@ -15,6 +15,8 @@ import { currentToasts, dismiss } from "../web/src/lib/toast.js"
 import type { Project, Task, TaskStatus } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
 import { itemName, treeItems } from "./sidebarTree.js"
+import { readDraft, resetDrafts, setDraftText } from "../web/src/lib/composerDraft.js"
+import { confirmDialog } from "../web/src/lib/confirm.js"
 
 beforeAll(() => warmLazyParts())
 
@@ -127,6 +129,7 @@ const MORE = "group:more"
 const ALL = [COORDINATOR, WAITING, taskKey(ASK.id, "waiting"), taskKey(PR.id, "waiting"), captainKey(YARD.id), taskKey(ASK.id, "project"), taskKey(PLAN.id, "project"), taskKey(POST.id, "project"), taskKey(DRAFT.id, "project"), taskKey(IMAGES.id, "project"), captainKey(SITE.id), taskKey(PR.id, "project"), MORE]
 
 beforeEach(() => {
+  resetDrafts()
   localStorage.clear()
   sessionStorage.clear()
   viewport(1440)
@@ -497,6 +500,83 @@ describe("the sidebar's tree: lists that change", () => {
 })
 
 describe("the sidebar's tree and the app's other keys", () => {
+  it.each([
+    [APP_HOME, "coordinator", COORDINATOR],
+    [`${APP_HOME}?captain=${YARD.id}`, `captain:${YARD.id}`, captainKey(YARD.id)],
+    [`${APP_HOME}?session=${PLAN.id}`, `task:${PLAN.id}`, taskKey(PLAN.id, "project")],
+  ])("Escape from %s returns actual focus to its current row, preserving the draft and route", (path, draft, selected) => {
+    setDraftText(draft, "Keep this unfinished message")
+    render(path)
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-composer]")].find((e) => e.value === "Keep this unfinished message")!
+    expect(box).toBeDefined()
+    focus(row(IMAGES)) // A stale tree tab stop must not win over the current conversation.
+    focus(box)
+    expect(press("Escape").defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(at(selected))
+    expect(location.pathname + location.search).toBe(path)
+    expect(box.isConnected).toBe(true)
+    expect(box.value).toBe("Keep this unfinished message")
+    expect(readDraft(draft).text).toBe(box.value)
+    press("ArrowDown")
+    expect(focusedKey()).not.toBe(selected)
+    expect(document.activeElement?.getAttribute("role")).toBe("treeitem")
+    expect(readDraft(draft).text).toBe("Keep this unfinished message")
+  })
+
+  it("Escape first closes the composer's popover, and the next Escape returns focus", () => {
+    render()
+    const box = document.querySelector<HTMLTextAreaElement>("textarea[data-chat-composer]")!
+    focus(box)
+    click(document.querySelector("[data-testid=composer-more]")!)
+    expect(document.querySelector("[data-testid=composer-more-menu]")).not.toBeNull()
+    press("Escape")
+    expect(document.querySelector("[data-testid=composer-more-menu]")).toBeNull()
+    expect(document.activeElement).toBe(box)
+    press("Escape")
+    expect(document.activeElement).toBe(at(COORDINATOR))
+  })
+
+  it("a covering dialog takes Escape before sidebar focus, without closing the task panel", async () => {
+    setDraftText(`task:${PLAN.id}`, "Keep this task draft")
+    render(`${APP_HOME}?session=${PLAN.id}`)
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-composer]")].find((e) => e.value === "Keep this task draft")!
+    focus(box)
+    let answer!: Promise<boolean>
+    act(() => { answer = confirmDialog({ title: "Example confirmation" }) })
+    const dialog = document.querySelector<HTMLElement>("[aria-modal=true]")!
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    press("Escape")
+    await expect(answer).resolves.toBe(false)
+    expect(document.activeElement).toBe(box)
+    expect(session()).toBe(PLAN.id)
+    press("Escape")
+    expect(document.activeElement).toBe(row(PLAN))
+  })
+
+  it.each([{ isComposing: true }, { keyCode: 229 }])("IME Escape leaves the task composer and draft alone (%j)", (init) => {
+    setDraftText(`task:${PLAN.id}`, "Keep composition")
+    render(`${APP_HOME}?session=${PLAN.id}`)
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-composer]")].find((e) => e.value === "Keep composition")!
+    focus(box)
+    expect(press("Escape", init).defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(box)
+    expect(session()).toBe(PLAN.id)
+    expect(box.value).toBe("Keep composition")
+  })
+
+  it("Escape expands a folded sidebar and focuses the task row for immediate arrow navigation", async () => {
+    setDraftText(`task:${PLAN.id}`, "Keep the folded task draft")
+    render(`${APP_HOME}?session=${PLAN.id}`)
+    act(() => setSidebarCollapsed(true))
+    const box = [...document.querySelectorAll<HTMLTextAreaElement>("textarea[data-chat-composer]")].find((e) => e.value === "Keep the folded task draft")!
+    focus(box)
+    press("Escape")
+    await act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())))
+    expect(document.activeElement).toBe(row(PLAN))
+    press("ArrowDown")
+    expect(document.activeElement).toBe(row(POST))
+  })
+
   it("keeps its keys from the app's shortcuts, but / still opens the palette", () => {
     render()
     focus(row(PLAN))
