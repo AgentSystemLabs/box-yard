@@ -1,0 +1,336 @@
+import { q } from "./providers/types.js"
+import { KEEP_PACK, cloneTaskScript, setHelperScript, syncMirrorScript, withMirrorLock, type MirrorSpec } from "./gitShare.js"
+import { GIT_MANIFEST, GIT_PACK, readableIndexScript, stageBaseScript } from "./gitFirst.js"
+
+/**
+ * Workspace archives stream off the box: tar writes to stdout, base64 makes it text the exec stream can carry, and
+ * Box Yard decodes it into the archive file on its own disk. Nothing is written to the box's work disk, so a box
+ * with 0 bytes free on /workspace can still be archived. (Before, the tarball went to a temp file first and the
+ * too-big fallback committed into the repo, both of which need free space.)
+ *
+ * The script ends with one trailer line: the exit codes of the pipeline, the WIP snapshot's outcome and the tail of
+ * stderr, so a failure says what went wrong ("tar: write error: No space left on device").
+ */
+
+/** First word of the trailer line. */
+export const ARCHIVE_END = "@@boxyard-archive-end"
+/** Commit message of the WIP snapshot on refs/boxyard/wip. */
+const WIP_MESSAGE = "box-yard: wip snapshot"
+/** Commit message of the staged part of a thin archive's snapshot (the snapshot's parent). */
+const INDEX_MESSAGE = "box-yard: staged changes"
+
+export interface ArchiveScript {
+  /** The box's tasks folder. */
+  root: string
+  /** The box's root folder (for its stage fallback), when it isn't `root`'s parent (the local runner's). */
+  boxRoot?: string
+  taskId: string
+  /** tar --exclude patterns. */
+  excludes: string[]
+  /** Archives larger than this aren't kept (the box stops sending after one byte more). */
+  maxBytes: number
+  /**
+   * Too big whole: only the Claude session, the event log and git history, with uncommitted work saved as a commit
+   * on refs/boxyard/wip. The commit's objects and the ref go to a temp dir in /tmp (the other disk on Upstash) and
+   * into the archive from there; the repo itself isn't touched.
+   */
+  partial: boolean
+  /**
+   * Where archive() staged the task's git-keep.pack (server/gitShare.ts keepPackScript), on /tmp or the work disk. When
+   * `<keepStage>/<taskId>/git-keep.pack` exists, it goes into the archive as `<taskId>/git-keep.pack`.
+   */
+  keepStage?: string
+  /**
+   * Git-first archive: git carries the repo, so only the task folder's other entries go in (the Claude
+   * session, the log, runner state), with `<stage>/<taskId>/git.manifest` and `git.pack` from gitPrepScript
+   * (server/gitFirst.ts) and, with `ignored`, the files git ignores in work/ outside the excluded build dirs.
+   */
+  git?: { stage: string; ignored: boolean }
+  /**
+   * Too big even without the files (a repo cloned before tasks shared the box mirror carries its whole history):
+   * instead of work/.git, `<taskId>/git-thin/` holds HEAD, the refs, a bundle of only the commits GitHub doesn't
+   * have (not reachable from the mirror's refs or the clone's remote-tracking refs) and the WIP
+   * snapshot. Restore clones from the mirror or GitHub and puts them back (thinRestoreScript). Implies `partial`.
+   */
+  thin?: boolean
+  /** The box's mirror of the task's repo (`.boxyard/repos/<name>.git`), whose refs say what GitHub has. */
+  mirror?: string
+}
+
+/**
+ * Scratch folders whose ignored files a git-first archive leaves out, on top of the excluded build dirs: perf and
+ * test captures (shots/perf/*.jsonl, traces) and temp space, the names the runner's workspace cleanup treats as
+ * regenerable. Only ignored files: a tracked or not-ignored `perf/` is work and stays (git carries it).
+ */
+export const ARCHIVE_SCRATCH_DIRS = ["tmp", ".tmp", "shots", "perf", "traces"]
+/** tar --exclude patterns for a task's scratch dirs in work/, at any depth (tar's `*` matches `/` in exclusions). */
+const scratchExcludes = (taskId: string) => ARCHIVE_SCRATCH_DIRS.flatMap((d) => [`--exclude=${q(`${taskId}/work/${d}`)}`, `--exclude=${q(`${taskId}/work/*/${d}`)}`]).join(" ")
+
+/** In a thin archive, next to work/'s place: what restore needs to rebuild the repo (see ArchiveScript.thin). */
+export const THIN_DIR = "git-thin"
+/** Echoed by thinRestoreScript: `ok`, or `fail <why>`. */
+export const THIN_MARK = "boxyard-thin="
+
+/** The bash script that streams a task's archive to stdout. */
+export function archiveScript(o: ArchiveScript): string {
+  const id = q(o.taskId)
+  const excludes = o.excludes.map((e) => `--exclude=${q(e)}`).join(" ")
+  const lines = [
+    "set -o pipefail",
+    // Errors go to a temp file on /tmp; if even that can't be made they're dropped rather than mixed into the data.
+    `err=$(mktemp /tmp/boxyard-archive-err.XXXXXX 2>/dev/null) || err=/dev/null`,
+    `stage=; wip=-; st="2 0 0 0"`,
+    `if cd ${q(o.root)} 2>>"$err"; then`,
+    o.keepStage ? `  [ -f ${q(`${o.keepStage}/${o.taskId}/${KEEP_PACK}`)} ] && k=(-C ${q(o.keepStage)} ${q(`${o.taskId}/${KEEP_PACK}`)}) || k=()` : `  k=()`,
+  ]
+  if (o.git) {
+    const stage = q(o.git.stage)
+    lines.push(
+      `  m=(); while IFS= read -r -d '' f; do m+=("$f"); done < <(find ${id} -mindepth 1 -maxdepth 1 ! -name work -print0 2>>"$err")`,
+      `  g=(-C ${stage} ${q(`${o.taskId}/${GIT_MANIFEST}`)}); [ -f ${q(`${o.git.stage}/${o.taskId}/${GIT_PACK}`)} ] && g+=(${q(`${o.taskId}/${GIT_PACK}`)})`,
+      `  i=(); il=${q(`${o.git.stage}/ignored.list`)}`,
+      // An index git can't read (root's, on Upstash) would list nothing, and .env would be left out without a word.
+      o.git.ignored
+        ? `  if (cd ${id}/work 2>/dev/null && ${readableIndexScript(`${o.git.stage}/ignored.index`)} && git ls-files -z -o -i --exclude-standard --directory 2>/dev/null) | while IFS= read -r -d '' f; do printf '%s\\0' ${id}/work/"$f"; done > "$il" 2>>"$err" && [ -s "$il" ]; then i=(--null -T "$il"); fi`
+        : `  :`,
+      // The excludes come first: they apply to the listed ignored folders too (node_modules/, dist/…). Everything
+      // from work/ here is ignored by git, so its scratch dirs can go too.
+      // BSD tar stops option parsing at the first file operand: --null/-T must precede m, or the
+      // list itself is archived and the ignored files (including .env) silently disappear.
+      `  LC_ALL=C tar czf - ${excludes} ${o.git.ignored ? scratchExcludes(o.taskId) : ""} "\${i[@]}" "\${m[@]}" "\${g[@]}" 2>>"$err" | head -c ${o.maxBytes + 1} | base64 | fold -w 76`,
+    )
+  } else if (o.thin) {
+    lines.push(
+      `  m=(); for f in claude events.jsonl events.seq; do [ -e ${id}/"$f" ] && m+=(${id}/"$f"); done`,
+      `  if [ -e ${id}/work/.git ]; then`,
+      // Staged like the partial archive's snapshot, on whichever of /tmp and the work disk has more room.
+      `    ${stageBaseScript(o.boxRoot ?? o.root.replace(/\/[^/]+\/?$/, "")).split("\n").join("; ")}`,
+      `    stage=$(mktemp -d "$bybase"/boxyard-wip.XXXXXX 2>>"$err") && wip=$(cd ${id}/work && ${thinSnapshot(o.taskId, o.mirror)}) || wip=failed`,
+      `  else echo "no git repo in work/ to archive thin" >>"$err"; wip=failed; fi`,
+      `  [ -n "$stage" ] && [ -d "$stage"/${id} ] && x=(-C "$stage" ${id}) || x=()`,
+      `  LC_ALL=C tar czf - ${excludes} "\${m[@]}" "\${x[@]}" "\${k[@]}" 2>>"$err" | head -c ${o.maxBytes + 1} | base64 | fold -w 76`,
+    )
+  } else if (o.partial) {
+    lines.push(
+      // Everything but the working files: the session, the log, runner state and work/.git.
+      `  m=(); while IFS= read -r -d '' f; do m+=("$f"); done < <(find ${id} -mindepth 1 -maxdepth 1 ! -name work -print0 2>>"$err"); [ -e ${id}/work/.git ] && m+=(${id}/work/.git)`,
+      `  if [ -e ${id}/work/.git ]; then`,
+      // The index copy and the snapshot's objects go to whichever of /tmp and the work disk has more room.
+      `    ${stageBaseScript(o.boxRoot ?? o.root.replace(/\/[^/]+\/?$/, "")).split("\n").join("; ")}`,
+      `    stage=$(mktemp -d "$bybase"/boxyard-wip.XXXXXX 2>>"$err") && wip=$(cd ${id}/work && ${wipSnapshot(o.taskId)}) || wip=failed`,
+      // No repo: without its files there would be nothing of the work left.
+      `  else wip=nogit; fi`,
+      `  [ -n "$stage" ] && [ -d "$stage"/${id} ] && x=(-C "$stage" ${id}) || x=()`,
+      `  LC_ALL=C tar czf - ${excludes} "\${m[@]}" "\${x[@]}" "\${k[@]}" 2>>"$err" | head -c ${o.maxBytes + 1} | base64 | fold -w 76`,
+    )
+  } else {
+    lines.push(`  LC_ALL=C tar czf - ${excludes} ${id} "\${k[@]}" 2>>"$err" | head -c ${o.maxBytes + 1} | base64 | fold -w 76`)
+  }
+  lines.push(
+    `  st="\${PIPESTATUS[*]}"`,
+    "fi",
+    "echo",
+    `echo "${ARCHIVE_END} $st $wip $(tail -c 600 "$err" 2>/dev/null | base64 | tr -d '\\n')"`,
+    `[ "$err" = /dev/null ] || rm -f "$err"`,
+    `[ -z "$stage" ] || rm -rf "$stage"`,
+    "exit 0",
+  )
+  return lines.join("\n")
+}
+
+/**
+ * Save uncommitted work as a commit without writing to the repo: a copy of the index and a new object dir live in
+ * $stage (with the repo's objects as an alternate), and the ref is a file there that the archive carries into
+ * work/.git. Prints the commit, or "clean" when there is nothing uncommitted; exits non-zero if it couldn't.
+ */
+function wipSnapshot(taskId: string): string {
+  const g = `"$stage"/${q(taskId)}/work/.git`
+  return [
+    `s=$(git --no-optional-locks status --porcelain 2>>"$err") || exit 1`,
+    `if [ -z "$s" ]; then echo clean; exit 0; fi`,
+    `mkdir -p ${g}/objects ${g}/refs/boxyard 2>>"$err" || exit 1`,
+    // Paths from git, not ./.git: a worktree's .git is a file, and objects may sit in a shared or alternate store.
+    `i=$(git rev-parse --git-path index 2>>"$err") && o=$(cd "$(git rev-parse --git-path objects 2>>"$err")" && pwd) || exit 1`,
+    `export GIT_INDEX_FILE="$stage/index" GIT_OBJECT_DIRECTORY=${g}/objects GIT_ALTERNATE_OBJECT_DIRECTORIES="$o"`,
+    `{ cp "$i" "$GIT_INDEX_FILE" 2>/dev/null || git read-tree HEAD 2>/dev/null || true; }`,
+    `git add -A 2>>"$err" || exit 1`,
+    `t=$(git write-tree 2>>"$err") || exit 1`,
+    `p=$(git rev-parse -q --verify HEAD) && p="-p $p" || p=`,
+    `c=$(git -c user.name=box-yard -c user.email=box-yard@local commit-tree "$t" $p -m ${q(WIP_MESSAGE)} 2>>"$err") || exit 1`,
+    `echo "$c" > ${g}/refs/boxyard/wip 2>>"$err" || exit 1`,
+    `echo "$c"`,
+  ].join("; ")
+}
+
+/**
+ * The git part of a thin archive, built in $stage without writing to the repo: a throwaway bare repo in $stage
+ * sees the task's objects (and the mirror's) through alternates, gets the WIP commit written straight into it,
+ * holds the refs to keep under refs/keep/ and what GitHub has under refs/excl/, and bundles the difference.
+ * Leaves `<taskId>/git-thin/{HEAD,refs,unpushed.bundle}` in $stage; prints the WIP commit or "clean".
+ */
+function thinSnapshot(taskId: string, mirror?: string): string {
+  const g = `"$stage"/${q(taskId)}/${THIN_DIR}`
+  const m = mirror ? q(mirror) : '""'
+  return [
+    `mkdir -p ${g} 2>>"$err" || exit 1`,
+    `o=$(cd "$(git rev-parse --git-path objects 2>>"$err")" && pwd) || exit 1`,
+    `T="$stage/t.git"; git init -q --bare "$T" 2>>"$err" || exit 1`,
+    `echo "$o" > "$T/objects/info/alternates"`,
+    `bm=${m}; [ -n "$bm" ] && [ -d "$bm/objects" ] && echo "$bm/objects" >> "$T/objects/info/alternates" || bm=`,
+    // Uncommitted work: a commit made with a copy of the index, its objects written into T only.
+    `s=$(git --no-optional-locks status --porcelain 2>>"$err") || exit 1`,
+    `w=clean`,
+    `if [ -n "$s" ]; then`,
+    `  i=$(git rev-parse --git-path index 2>>"$err") || exit 1`,
+    `  { cp "$i" "$stage/index" 2>/dev/null || GIT_INDEX_FILE="$stage/index" git read-tree HEAD 2>/dev/null || true; }`,
+    `  export GIT_OBJECT_DIRECTORY="$T/objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$o"`,
+    `  p=$(git rev-parse -q --verify HEAD) && p="-p $p" || p=`,
+    // What was staged, as its own commit under the snapshot (like git stash), so restore can stage it again.
+    // An index git can't write as a tree (a merge in progress) just isn't kept apart.
+    `  x=$(GIT_INDEX_FILE="$stage/index" git write-tree 2>/dev/null) && ix=$(git -c user.name=box-yard -c user.email=box-yard@local commit-tree "$x" $p -m ${q(INDEX_MESSAGE)} 2>>"$err") && echo "$ix" > ${g}/index && p="-p $ix"`,
+    `  t=$(GIT_INDEX_FILE="$stage/index" sh -c 'git add -A && git write-tree' 2>>"$err") || exit 1`,
+    `  w=$(git -c user.name=box-yard -c user.email=box-yard@local commit-tree "$t" $p -m ${q(WIP_MESSAGE)} 2>>"$err") || exit 1`,
+    `  unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+    `fi`,
+    // HEAD: the branch it's on, or the commit when detached (empty for a repo with no commits).
+    `git symbolic-ref -q HEAD > ${g}/HEAD || git rev-parse -q --verify HEAD > ${g}/HEAD || : > ${g}/HEAD`,
+    `git for-each-ref --format='%(objectname) %(refname)' refs/heads refs/boxyard refs/stash 2>>"$err" | grep -v ' refs/boxyard/wip$' > ${g}/refs`,
+    `[ "$w" = clean ] || echo "$w refs/boxyard/wip" >> ${g}/refs`,
+    `h=$(git rev-parse -q --verify HEAD) && echo "$h refs/boxyard/head" > "$stage/head" || : > "$stage/head"`,
+    `cat ${g}/refs "$stage/head" | awk 'NF == 2 { print "update refs/keep/" $2 " " $1 }' | git -C "$T" update-ref --stdin 2>>"$err" || exit 1`,
+    // What GitHub has: the mirror's refs (GitHub's heads, tags and PR refs at its last fetch) and the clone's own
+    // remote-tracking refs (branches it fetched or pushed since). Restore checks every commit is really there.
+    `{ [ -z "$bm" ] || git -C "$bm" for-each-ref --format='%(objectname)' refs/heads refs/tags refs/pull; git for-each-ref --format='%(objectname)' refs/remotes; } 2>/dev/null | sort -u | awk '{ print "update refs/excl/" NR " " $1 }' | git -C "$T" update-ref --stdin 2>>"$err" || exit 1`,
+    `n=$(git -C "$T" rev-list --count --glob='refs/keep/*' --not --glob='refs/excl/*' 2>>"$err") || exit 1`,
+    `if [ "$n" != 0 ]; then git -C "$T" bundle create -q ${g}/unpushed.bundle --glob='refs/keep/*' --not --glob='refs/excl/*' 2>>"$err" || exit 1; fi`,
+    `echo "$w"`,
+  ].join("\n")
+}
+
+/**
+ * Restore the git part of a thin archive in `<taskDir>`: clone work/ from the box mirror (or GitHub), add the
+ * keep pack and the bundle of unpushed commits, put every ref and HEAD back, check out, and lay the WIP snapshot
+ * over the working tree (uncommitted again). Echoes THIN_MARK ok, or `fail <why>` and exits non-zero, leaving no
+ * work/ behind: a ref whose commit can't be found fails the restore instead of losing it.
+ */
+export function thinRestoreScript(taskDir: string, s: MirrorSpec, git: { helper: string; only?: boolean }): string {
+  const t = q(`${taskDir}/${THIN_DIR}`)
+  const fail = (why: string) => `{ echo "${THIN_MARK}fail ${why}"; cd ${q(taskDir)}; rm -rf work; exit 1; }`
+  return [
+    `cd ${q(taskDir)} && rm -rf work`,
+    `ue=$(mktemp 2>/dev/null || echo /dev/null)`,
+    withMirrorLock(s.mirror, [syncMirrorScript(s), `cd ${q(taskDir)}`, cloneTaskScript(s)].join("\n")) + ` || ${fail(`couldn't clone ${s.url}`)}`,
+    `cd work || ${fail(`couldn't clone ${s.url}`)}`,
+    setHelperScript(git.helper, git.only ?? false),
+    `[ ! -f ../${KEEP_PACK} ] || { git index-pack -q --stdin < ../${KEEP_PACK} >/dev/null && rm -f ../${KEEP_PACK}; } || ${fail("the keep pack didn't apply")}`,
+    `[ ! -f ${t}/unpushed.bundle ] || git bundle unbundle ${t}/unpushed.bundle >/dev/null 2>"$ue" || ${fail(`the unpushed commits need history the mirror and GitHub don't have: $(tail -n 2 "$ue" | tr '\\n' ' ')`)}`,
+    `while read -r sha ref; do [ -n "$ref" ] || continue; git cat-file -e "$sha" 2>/dev/null || ${fail("commit $sha of $ref is missing")}; git update-ref "$ref" "$sha" || ${fail("couldn't set $ref")}; done < ${t}/refs`,
+    `h=$(cat ${t}/HEAD)`,
+    `case "$h" in refs/*) git symbolic-ref HEAD "$h";; "") ;; *) git update-ref --no-deref HEAD "$h";; esac || ${fail("couldn't set HEAD")}`,
+    `if git rev-parse -q --verify HEAD >/dev/null; then git cat-file -e "HEAD^{tree}" 2>/dev/null && git read-tree -u --reset HEAD || ${fail("HEAD's files couldn't be checked out")}; fi`,
+    // The snapshot's files go back into the working tree, then the index is what was staged (or HEAD).
+    `if grep -q ' refs/boxyard/wip$' ${t}/refs; then git read-tree -u --reset refs/boxyard/wip && if [ -s ${t}/index ]; then git read-tree "$(cat ${t}/index)"; else git reset -q; fi || ${fail("the uncommitted work couldn't be put back")}; fi`,
+    `rm -rf ${t}`,
+    `echo "${THIN_MARK}ok"`,
+  ].join("\n")
+}
+
+export interface ArchiveTrailer {
+  tar: number
+  head: number
+  base64: number
+  fold: number
+  /** "-" (not tried), "clean", "failed", "nogit" (no repo to keep) or the WIP commit. */
+  wip: string
+  /** The end of stderr. */
+  stderr: string
+}
+
+/** Turns the script's output back into archive bytes, line by line, as it arrives. */
+export class ArchiveDecoder {
+  bytes = 0
+  trailer: ArchiveTrailer | null = null
+  /** Output lines that were neither data nor the trailer (shell errors), for the error message. */
+  noise: string[] = []
+  private rest = ""
+
+  constructor(private readonly sink: (data: Buffer) => void) {}
+
+  push(chunk: string) {
+    this.rest += chunk
+    let i: number
+    while ((i = this.rest.indexOf("\n")) >= 0) {
+      const line = this.rest.slice(0, i)
+      this.rest = this.rest.slice(i + 1)
+      this.line(line.replace(/\r$/, ""))
+    }
+  }
+
+  end() {
+    if (this.rest) this.line(this.rest)
+    this.rest = ""
+  }
+
+  private line(line: string) {
+    if (!line) return
+    if (line.startsWith(ARCHIVE_END)) {
+      this.trailer = parseTrailer(line)
+      return
+    }
+    if (!this.trailer && /^[A-Za-z0-9+/]+={0,2}$/.test(line)) {
+      const data = Buffer.from(line, "base64")
+      this.bytes += data.length
+      this.sink(data)
+      return
+    }
+    if (this.noise.length < 20) this.noise.push(line.slice(0, 300))
+  }
+}
+
+function parseTrailer(line: string): ArchiveTrailer {
+  const [, tar, head, base64, fold, wip, err] = line.split(" ")
+  const code = (s: string | undefined) => (s && /^\d+$/.test(s) ? Number(s) : 2)
+  let stderr = ""
+  try {
+    stderr = err ? Buffer.from(err, "base64").toString("utf8") : ""
+  } catch {}
+  return { tar: code(tar), head: code(head), base64: code(base64), fold: code(fold), wip: wip ?? "-", stderr }
+}
+
+/** The last couple of meaningful lines of an error output, on one line. */
+export function errorTail(text: string, max = 300): string {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+  const tail = lines.slice(-2).join("; ")
+  return tail.length > max ? `…${tail.slice(-max)}` : tail
+}
+
+export type ArchiveOutcome = { ok: true; bytes: number; wip: string } | { ok: false; tooBig: boolean; error: string }
+
+/**
+ * What a task's archive holds (tasks.archive_kind): git-first (the session and ignored files; its code is on origin),
+ * the whole folder, or (too big for that) a partial or thin one.
+ */
+export type ArchiveKind = "git" | "whole" | "partial" | "thin"
+
+/** Did the streamed archive come through whole? */
+export function archiveOutcome(d: ArchiveDecoder, o: { maxBytes: number; partial: boolean; exitCode: number }): ArchiveOutcome {
+  const t = d.trailer
+  const detail = errorTail(t?.stderr || d.noise.join("\n"))
+  if (!t) return { ok: false, tooBig: false, error: `the archive stream ended early (exit ${o.exitCode})${detail ? `: ${detail}` : ""}` }
+  if (d.bytes > o.maxBytes) return { ok: false, tooBig: true, error: `workspace is too large to archive (over ${Math.round(o.maxBytes / 1e6)} MB compressed)` }
+  // GNU tar uses 1 for this benign warning, but BSD tar also uses 1 for missing/unreadable files.
+  // Accept only the known warning, never a partial archive that could authorize workspace removal.
+  const warnings = t.stderr.split("\n").map((line) => line.trim()).filter(Boolean)
+  // The protocol carries only the last 600 bytes of stderr. A full tail cannot prove earlier
+  // diagnostics were benign, so fail closed instead of hiding an earlier BSD tar error.
+  const changed = t.tar === 1 && Buffer.byteLength(t.stderr) < 600 && warnings.length > 0 && warnings.every((line) => /file changed as we read it$/i.test(line))
+  if (t.tar !== 0 && !changed) return { ok: false, tooBig: false, error: detail || `tar exited with ${t.tar}` }
+  if (t.head || t.base64 || t.fold) return { ok: false, tooBig: false, error: detail || `streaming the archive failed (exit ${t.head || t.base64 || t.fold})` }
+  if (o.partial && t.wip === "nogit") return { ok: false, tooBig: false, error: "work/ has no git repo, so it can't be archived without its files" }
+  if (o.partial && t.wip === "failed") return { ok: false, tooBig: false, error: `couldn't save uncommitted work on refs/boxyard/wip${detail ? `: ${detail}` : ""}` }
+  if (!d.bytes) return { ok: false, tooBig: false, error: detail || "tar wrote nothing" }
+  return { ok: true, bytes: d.bytes, wip: t.wip }
+}

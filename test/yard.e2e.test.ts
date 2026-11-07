@@ -1,0 +1,403 @@
+import { afterEach, describe, expect, it } from "vitest"
+import fs from "node:fs"
+import type { Server } from "node:http"
+import { createBoxYard, type BoxYard } from "../server/app.js"
+import type { Config } from "../server/config.js"
+import type { AppNotification, BoxInfo, ChatMessage, CloudStatus, Project, Task, TaskMessage, UsageReport } from "../shared/types.js"
+import { NEXT_STEPS_META_KEY } from "../shared/nextSteps.js"
+import { fakeRedis, freePort, testConfig, waitFor } from "./helpers.js"
+
+// End-to-end: the real server, task manager, worker runner and MCP servers,
+// with local folder "boxes" and the fake claude standing in for the model.
+
+interface Running {
+  yard: BoxYard
+  server: Server
+  base: string
+  config: Config
+}
+const running: Running[] = []
+
+async function start(overrides: Partial<Config> = {}): Promise<Running> {
+  const port = await freePort()
+  const config = testConfig({ port, ...overrides })
+  const yard = createBoxYard(config, { webDir: "/nonexistent" })
+  const server = await new Promise<Server>((resolve) => {
+    const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
+  })
+  await yard.start()
+  const r = { yard, server, base: `http://127.0.0.1:${port}`, config }
+  running.push(r)
+  return r
+}
+
+afterEach(async () => {
+  for (const r of running.splice(0)) {
+    r.yard.stop()
+    await new Promise((res) => r.server.close(() => res(null)))
+  }
+})
+
+async function call<T>(r: Running, method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(r.base + path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}: ${JSON.stringify(data)}`)
+  return data as T
+}
+
+const getTask = (r: Running, id: string) => call<Task>(r, "GET", `/api/tasks/${id}`)
+const settled = (t: Task) => !["queued", "starting", "working"].includes(t.status) && t.pendingCount === 0
+
+async function project(r: Running, name = "demo") {
+  return call<Project>(r, "POST", "/api/projects", { name })
+}
+async function task(r: Running, projectId: string, title: string, prompt: string) {
+  return call<Task>(r, "POST", "/api/tasks", { projectId, title, prompt })
+}
+async function untilStatus(r: Running, id: string, status: Task["status"]) {
+  return waitFor(async () => {
+    const t = await getTask(r, id)
+    return t.status === status && settled(t) ? t : null
+  }, `task ${id} to be ${status}`)
+}
+
+describe("box yard end to end", () => {
+  it("runs a task until it rests for review, publishes an artifact and suggests a project note", async () => {
+    const r = await start()
+    const p = await project(r)
+    const t = await task(r, p.id, "Haiku", "write a haiku [artifact] [note]")
+    expect(t.status).toBe("queued")
+
+    const rested = await untilStatus(r, t.id, "idle")
+    expect(rested.summary).toContain("mock agent")
+    expect(rested.turnCount).toBe(1)
+
+    const artifacts = await call<{ url: string; taskId: string }[]>(r, "GET", "/api/artifacts")
+    expect(artifacts).toHaveLength(1)
+    const file = await fetch(r.base + artifacts[0]!.url)
+    expect(await file.text()).toContain("write a haiku")
+
+    // The agent's note is a suggestion for the Captain's notes retro, not a note yet.
+    const projects = await call<Project[]>(r, "GET", "/api/projects")
+    expect(projects[0]!.notes).toEqual([])
+    const suggestions = await call<{ content: string; why: string }[]>(r, "GET", `/api/projects/${p.id}/suggestions`)
+    expect(suggestions).toMatchObject([{ content: expect.stringContaining("npm test"), why: expect.stringContaining("test command") }])
+
+    // The workspace gets archived so the task can move boxes later.
+    await waitFor(async () => (await getTask(r, t.id)).lastArchivedAt, "archive")
+    const messages = await call<TaskMessage[]>(r, "GET", `/api/tasks/${t.id}/messages`)
+    const reply = [...messages].reverse().find((m) => m.role === "assistant")
+    expect(reply?.content).not.toContain("boxyard-next-steps")
+    expect(reply?.meta?.[NEXT_STEPS_META_KEY]).toEqual(["Review the mock result", "Run a broader check", "Ask for a PR-ready summary"])
+  })
+
+  it("records Claude usage per task and project", async () => {
+    const r = await start()
+    const p = await project(r, "usage")
+    const t = await task(r, p.id, "Measure", "write things")
+    await untilStatus(r, t.id, "idle")
+
+    const taskAfter = await getTask(r, t.id)
+    expect(taskAfter.claudeTokens).toBeGreaterThan(0)
+
+    const usage = await call<UsageReport>(r, "GET", "/api/usage")
+    expect(usage.windows.find((w) => w.key === "today")!.claude.totalTokens).toBeGreaterThan(0)
+    expect(usage.projects.find((x) => x.projectId === p.id)?.claude.totalTokens).toBeGreaterThan(0)
+    expect(usage.tasks.find((x) => x.taskId === t.id)?.claude.totalTokens).toBeGreaterThan(0)
+  })
+
+  it("counts a turn's auto-compaction in its tokens, as its cost does, and each turn only its own step", async () => {
+    // Every token costs $2 per million, so a row's tokens and cost agree when it's charged for the same calls.
+    process.env.FAKE_CLAUDE_USD_PER_MTOK = "2"
+    try {
+      const r = await start()
+      const p = await project(r, "compacting")
+      const t = await task(r, p.id, "Long one", "write things [autocompact]")
+      await untilStatus(r, t.id, "idle")
+      await call(r, "POST", `/api/tasks/${t.id}/messages`, { content: "write more" })
+      await untilStatus(r, t.id, "idle")
+
+      type Row = { run_kind: string; input_tokens: number; cache_creation_input_tokens: number; cache_read_input_tokens: number; output_tokens: number; total_tokens: number; cost_usd: number; reported_cost_usd: number }
+      const rows = r.yard.store.db.prepare("SELECT * FROM claude_usage WHERE task_id = ? ORDER BY ended_at, rowid").all(t.id) as Row[]
+      expect(rows.map((x) => x.run_kind)).toEqual(["turn", "turn"])
+      const [first, second] = rows as [Row, Row]
+      // The fake's main loop reads no cache: only the compaction's summary call does, so it's in the first turn's tokens.
+      expect(first.cache_read_input_tokens).toBeGreaterThan(0)
+      expect(first.cache_creation_input_tokens).toBeGreaterThan(0)
+      expect(second.cache_read_input_tokens).toBe(0)
+      for (const x of rows) {
+        expect(x.total_tokens).toBe(x.input_tokens + x.cache_creation_input_tokens + x.cache_read_input_tokens + x.output_tokens)
+        expect(x.cost_usd).toBeCloseTo((x.total_tokens * 2) / 1e6, 9)
+      }
+      // The second turn resumed the session: its tokens are its own, and the two turns add up to the session's total.
+      expect(second.reported_cost_usd).toBeCloseTo(((first.total_tokens + second.total_tokens) * 2) / 1e6, 9)
+
+      // The task view and the Usage page show those same totals.
+      const tokens = first.total_tokens + second.total_tokens
+      const after = await getTask(r, t.id)
+      expect(after.claudeTokens).toBe(tokens)
+      expect(after.claudeCostUsd).toBeCloseTo((tokens * 2) / 1e6, 9)
+      const usage = await call<UsageReport>(r, "GET", `/api/usage?from=${Date.now() - 3_600_000}`)
+      const row = usage.tasks.find((x) => x.taskId === t.id)!.claude
+      expect(row.totalTokens).toBe(tokens)
+      expect(row.cacheReadInputTokens).toBe(first.cache_read_input_tokens)
+      // Every row in the period, the Captain's too, is priced at the same rate, and its categories add up.
+      const period = usage.period!.claude
+      expect(period.inputTokens + period.cacheCreationInputTokens + period.cacheReadInputTokens + period.outputTokens).toBe(period.totalTokens)
+      expect(period.costUsd).toBeCloseTo((period.totalTokens * 2) / 1e6, 9)
+      expect(usage.period!.byTask.find((x) => x.key === t.id)?.tokens).toBe(tokens)
+    } finally {
+      delete process.env.FAKE_CLAUDE_USD_PER_MTOK
+    }
+  })
+
+  it("at today's cloud limit new boxes wait with the reason and a fix; a raise makes the box", async () => {
+    const r = await start()
+    // $2 of box spend today (a box that's gone now); the daily cloud limit is $1.
+    const now = Date.now()
+    r.yard.store.recordBoxUsageInterval({ boxId: "gone-box", provider: "local", size: "small", keepAlive: false, startedAt: now - 60_000, endedAt: now, activeMs: 60_000, uptimeMs: 60_000, source: "actual", computeUsd: 2 })
+    await call(r, "PUT", "/api/agent-settings", { budget: { dailyUsd: 1, monthlyUsd: 0 } })
+    const p = await project(r, "budget")
+    const t = await task(r, p.id, "Waits", "write things")
+    const waiting = await waitFor(async () => {
+      const got = await getTask(r, t.id)
+      return got.waitReason ? got : null
+    }, "a wait reason")
+    expect(waiting.status).toBe("queued")
+    expect(waiting.waitReason).toContain("today's cloud spend is $2 of its $1 limit")
+    expect(waiting.waitFix).toBe("raise-cloud-limit")
+    expect(await call<BoxInfo[]>(r, "GET", "/api/boxes")).toHaveLength(0)
+    expect((await call<UsageReport>(r, "GET", "/api/usage")).budget.blocked).toBe(true)
+    const cloud = await call<CloudStatus>(r, "GET", "/api/cloud")
+    expect(cloud.spend).toMatchObject({ todayUsd: 2, dailyLimitUsd: 1, state: "reached" })
+    const chat = await call<ChatMessage[]>(r, "GET", "/api/chat")
+    expect(chat.filter((m) => m.role === "notice" && m.content.startsWith("⚠️ **Cloud spend** hit the limit"))).toHaveLength(1)
+
+    // One click: today's limit goes past today's spend by a day's worth, and the task gets its box.
+    const raised = await call<CloudStatus>(r, "POST", "/api/cloud/raise")
+    expect(raised.spend).toMatchObject({ dailyLimitUsd: 3, raisedUsd: 2, state: "ok" })
+    await untilStatus(r, t.id, "idle")
+    expect((await getTask(r, t.id)).waitFix ?? null).toBeNull()
+  })
+
+  it("doesn't count Claude spend against the cloud limit, and a raise needs a limit", async () => {
+    const r = await start()
+    r.yard.store.recordClaudeUsage({ source: "orchestrator", runKind: "turn", startedAt: Date.now(), endedAt: Date.now(), usage: { input_tokens: 1 }, costUsd: 2 })
+    await call(r, "PUT", "/api/agent-settings", { budget: { dailyUsd: 1, monthlyUsd: 0 } })
+    const p = await project(r, "claude spend")
+    const t = await task(r, p.id, "Runs", "write things")
+    await untilStatus(r, t.id, "idle")
+    await call(r, "PUT", "/api/agent-settings", { budget: { dailyUsd: 0, monthlyUsd: 0 } })
+    await expect(call(r, "POST", "/api/cloud/raise")).rejects.toThrow(/no daily cloud limit/)
+  })
+
+  it("asks Cody a question, then resumes the same session with the answer", async () => {
+    const r = await start()
+    const p = await project(r)
+    const t = await task(r, p.id, "Button", "build a button [ask]")
+    const asking = await untilStatus(r, t.id, "needs_input")
+    expect(asking.question).toMatch(/blue or green/)
+
+    const chat = await call<ChatMessage[]>(r, "GET", "/api/chat")
+    expect(chat.some((m) => m.role === "notice" && m.content.includes("needs you"))).toBe(true)
+
+    await call(r, "POST", `/api/tasks/${t.id}/messages`, { content: "blue" })
+    const rested = await untilStatus(r, t.id, "idle")
+    expect(rested.turnCount).toBe(2)
+    expect(rested.sessionId).toBe(asking.sessionId)
+    expect(rested.question).toBeNull()
+
+    const messages = await call<TaskMessage[]>(r, "GET", `/api/tasks/${t.id}/messages`)
+    expect(messages.some((m) => m.role === "user" && m.content === "blue")).toBe(true)
+  })
+
+  it("records a notification each time a task lands on needs-you or finishes its turn, with read state", async () => {
+    const r = await start()
+    const p = await project(r, "site")
+    const t = await task(r, p.id, "Button", "build a button [ask]")
+    await untilStatus(r, t.id, "needs_input")
+    let list = await call<AppNotification[]>(r, "GET", "/api/notifications")
+    expect(list).toMatchObject([{ taskId: t.id, status: "needs_input", title: "Button", projectName: "site", readAt: null }])
+    expect(list[0]!.summary).toMatch(/blue or green/)
+
+    const read = await call<{ ids: string[] }>(r, "POST", "/api/notifications/read", { taskId: t.id })
+    expect(read.ids).toEqual([list[0]!.id])
+    await call(r, "POST", `/api/tasks/${t.id}/messages`, { content: "blue" })
+    await untilStatus(r, t.id, "idle")
+    list = await call<AppNotification[]>(r, "GET", "/api/notifications")
+    expect(list.map((n) => [n.status, n.readAt === null])).toEqual([["idle", true], ["needs_input", false]])
+
+    // Cody closing it himself is not news.
+    await call(r, "POST", `/api/tasks/${t.id}/close`)
+    await waitFor(async () => (await getTask(r, t.id)).boxId === null, "workspace evicted") // let the close finish before teardown
+    expect(await call<AppNotification[]>(r, "GET", "/api/notifications")).toHaveLength(2)
+  })
+
+  it("marks failures, keeps the error, and retries on request", async () => {
+    const r = await start()
+    const p = await project(r)
+    const t = await task(r, p.id, "Breaker", "[fail] please")
+    const failed = await untilStatus(r, t.id, "failed")
+    expect(failed.error).toContain("fake failure")
+    await call(r, "POST", `/api/tasks/${t.id}/retry`)
+    // The fake fails again because the task prompt still says [fail]; the point is the retry ran.
+    await waitFor(async () => (await getTask(r, t.id)).turnCount === 2 && settled(await getTask(r, t.id)), "retry turn")
+  })
+
+  it("never runs more agents than the pool allows, and queues the rest", async () => {
+    const r = await start({ maxBoxes: 1, slotsPerBox: 2 })
+    const p = await project(r)
+    const tasks = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => task(r, p.id, `Slow ${i}`, `slow job ${i} [slow]`)),
+    )
+    let maxRunning = 0
+    let maxBoxes = 0
+    await waitFor(async () => {
+      const boxes = await call<BoxInfo[]>(r, "GET", "/api/boxes")
+      maxBoxes = Math.max(maxBoxes, boxes.length)
+      maxRunning = Math.max(maxRunning, ...boxes.map((b) => b.runningTurns), 0)
+      const all = await Promise.all(tasks.map((t) => getTask(r, t.id)))
+      return all.every((t) => t.status === "idle")
+    }, "all slow tasks to rest", 45_000)
+    expect(maxBoxes).toBe(1)
+    expect(maxRunning).toBeLessThanOrEqual(2)
+    expect(maxRunning).toBeGreaterThan(0)
+  })
+
+  it("lets agents message each other through the orchestrator", async () => {
+    const r = await start()
+    const p = await project(r)
+    const a = await task(r, p.id, "Receiver", "write things")
+    await untilStatus(r, a.id, "idle")
+    const b = await task(r, p.id, "Sender", `say hi [agent:${a.id}]`)
+    await untilStatus(r, b.id, "idle")
+    // The receiver gets a new turn with the message, in its same session.
+    const received = await waitFor(async () => {
+      const t = await getTask(r, a.id)
+      return t.turnCount === 2 && settled(t) ? t : null
+    }, "receiver second turn")
+    expect(received.sessionId).toBe(a.sessionId)
+    const msgs = await call<TaskMessage[]>(r, "GET", `/api/tasks/${a.id}/messages`)
+    const agentMsg = msgs.find((m) => m.role === "agent")
+    expect(agentMsg?.content).toContain("Hi from another agent")
+    expect(agentMsg?.meta?.from).toBe(b.id)
+  })
+
+  it("restores a task's workspace on another box after its box is lost", async () => {
+    const r = await start({ maxBoxes: 2 })
+    const p = await project(r)
+    const t = await task(r, p.id, "Mover", "write things")
+    const first = await untilStatus(r, t.id, "idle")
+    await waitFor(async () => (await getTask(r, t.id)).lastArchivedAt, "archive")
+    const oldBox = first.boxId!
+    // Pretend the box vanished (deleted in the console, crashed, expired).
+    fs.rmSync(`${r.config.dataDir}/local-boxes/${oldBox}`, { recursive: true, force: true })
+    await call(r, "DELETE", `/api/boxes/${oldBox}`)
+
+    await call(r, "POST", `/api/tasks/${t.id}/messages`, { content: "keep going" })
+    const moved = await waitFor(async () => {
+      const x = await getTask(r, t.id)
+      return x.turnCount === 2 && settled(x) ? x : null
+    }, "turn on new box")
+    expect(moved.boxId).not.toBe(oldBox)
+    const msgs = await call<TaskMessage[]>(r, "GET", `/api/tasks/${t.id}/messages`)
+    expect(msgs.some((m) => m.content.startsWith("Workspace restored"))).toBe(true)
+    // The restored folder still has the file the agent wrote in turn one.
+    expect(fs.existsSync(`${r.config.dataDir}/local-boxes/${moved.boxId}/tasks/${t.id}/work/box-yard-demo.md`)).toBe(true)
+  })
+
+  it("stops a running turn", async () => {
+    const r = await start()
+    const p = await project(r)
+    const t = await task(r, p.id, "Long", "think hard [slow]")
+    await waitFor(async () => (await getTask(r, t.id)).status === "working", "working")
+    await call(r, "POST", `/api/tasks/${t.id}/stop`)
+    const stopped = await waitFor(async () => {
+      const x = await getTask(r, t.id)
+      return x.status === "idle" ? x : null
+    }, "stopped")
+    expect(stopped.error).toBeNull()
+    // Cody stopped it himself, so no notification.
+    expect(await call<AppNotification[]>(r, "GET", "/api/notifications")).toEqual([])
+  })
+
+  it("the orchestrator chat creates projects and tasks through MCP tools", async () => {
+    const r = await start()
+    await call(r, "POST", "/api/chat", { content: "create project site" })
+    await waitFor(async () => (await call<Project[]>(r, "GET", "/api/projects")).some((p) => p.name === "site"), "project from chat")
+    await call(r, "POST", "/api/chat", { content: "task site: Landing page -- make a landing page [preview]" })
+    const created = await waitFor(async () => (await call<Task[]>(r, "GET", "/api/tasks")).find((t) => t.title === "Landing page"), "task from chat")
+    const idle = await untilStatus(r, created.id, "idle")
+    expect(idle.previews[0]?.port).toBeGreaterThanOrEqual(4000)
+    const chat = await call<ChatMessage[]>(r, "GET", "/api/chat")
+    expect(chat.filter((m) => m.role === "tool").map((m) => m.content)).toEqual(expect.arrayContaining(["create_project", "create_task"]))
+    expect(chat.some((m) => m.role === "assistant" && m.content.includes("Started task"))).toBe(true)
+    // Each turn's tool calls and replies carry when it started, so the chat can tell turns apart (lib/chatUpdates.ts).
+    const turnOf = (name: string) => chat.find((m) => m.role === "tool" && m.content === name)?.meta?.turn
+    expect(chat.filter((m) => m.role === "tool" || m.role === "assistant").every((m) => typeof m.meta?.turn === "number")).toBe(true)
+    expect(turnOf("create_project")).not.toBe(turnOf("create_task"))
+    const reply = [...chat].reverse().find((m) => m.role === "assistant")
+    expect(reply?.content).not.toContain("boxyard-next-steps")
+    expect(reply?.meta?.[NEXT_STEPS_META_KEY]).toEqual(["Check the latest yard status", "Start a related task", "Summarize open decisions"])
+    // Second message resumed the same orchestrator session.
+    expect(r.yard.store.getKv("orchestrator_session_started")).toBe("1")
+  })
+
+  it("uses Upstash Redis as the event bus when configured", async () => {
+    const redis = await fakeRedis()
+    try {
+      const r = await start({ redisUrl: redis.url, redisToken: redis.token })
+      const p = await project(r)
+      const t = await task(r, p.id, "Bus", "write things [artifact]")
+      await untilStatus(r, t.id, "idle")
+      const stream = redis.streams.get(`boxyard:events:${t.id}`) ?? []
+      expect(stream.length).toBeGreaterThan(3)
+      const health = await call<{ bus: string }>(r, "GET", "/api/health")
+      expect(health.bus).toBe("redis")
+    } finally {
+      redis.close()
+    }
+  })
+
+  it("requires the password when one is set", async () => {
+    const r = await start({ password: "hunter2" })
+    const res = await fetch(`${r.base}/api/projects`)
+    expect(res.status).toBe(401)
+    const login = await fetch(`${r.base}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "hunter2" }),
+    })
+    expect(login.status).toBe(200)
+    const cookie = login.headers.get("set-cookie")!.split(";")[0]!
+    const ok = await fetch(`${r.base}/api/projects`, { headers: { cookie } })
+    expect(ok.status).toBe(200)
+    const bad = await fetch(`${r.base}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "nope" }),
+    })
+    expect(bad.status).toBe(401)
+  })
+
+  it("returns readable validation errors", async () => {
+    const r = await start()
+    const res = await fetch(`${r.base}/api/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: "nope", title: "", prompt: "x" }),
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/title/)
+    const missing = await fetch(`${r.base}/api/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: "prj_doesnotexist", title: "a", prompt: "b" }),
+    })
+    expect(missing.status).toBe(404)
+  })
+})

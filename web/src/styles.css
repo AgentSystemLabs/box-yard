@@ -1,0 +1,258 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every half rem from 8 to 36. */
+@source inline("@{min,max}-[{8..36}rem]/composer:hidden");
+@source inline("@{min,max}-[{8..35}.5rem]/composer:hidden");
+@source inline("@max-[{8..36}rem]/composer:sr-only");
+@source inline("@max-[{8..35}.5rem]/composer:sr-only");
+
+/*
+ * Type: Inter sets the whole UI (@fontsource-variable/inter, imported in main.tsx; index.html preloads its latin file,
+ * vite.config.ts), and Sora SemiBold, a geometric face to match the Y-brace crate, sets the "BOX YARD" wordmark
+ * (BrandLogo.tsx, whose Y is the crate). The wordmark's file holds only those capitals at that one weight
+ * (scripts/wordmark-font.py), so Vite inlines it here.
+ */
+@font-face {
+  font-family: "Box Yard Wordmark";
+  src: url("./fonts/box-yard-wordmark.woff2") format("woff2");
+  font-weight: 600;
+  font-display: block;
+}
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-wordmark: "Box Yard Wordmark", var(--font-sans);
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-yard-50: #fffbeb;
+  --color-yard-400: #fbbf24;
+  --color-yard-500: #f59e0b;
+  --color-yard-600: #d97706;
+  /* GitHub's merged-PR purple, and a lighter shade that reads on dark backgrounds. */
+  --color-merged: #8957e5;
+  --color-merged-fg: #b392f0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 100%;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-200 antialiased;
+  /* Zoomed phones can expose less than 320 CSS px; let their chat containers shrink with them. */
+  min-width: min(320px, 100%);
+  overflow-x: hidden;
+  /* Only the y axis: no page bounce or pull-to-refresh. The x axis must stay auto, or the browser's
+     swipe-back (trackpad two-finger swipe, edge swipe) never starts: body is a scroll container here
+     (html's overflow-x stops the viewport propagation), so every gesture chains through it. */
+  overscroll-behavior-y: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+::selection {
+  @apply bg-yard-500/30;
+}
+
+/* Custom chevron for <Select> (ui.tsx): the native arrow sits flush against the border */
+@layer components {
+  .select-chevron {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+  }
+  .select-chevron.select-sm {
+    background-position: right 0.625rem center;
+    background-size: 0.75rem;
+  }
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(63 63 70) transparent;
+}
+
+/*
+ * The chat column (ChatPanel with `centre`): the header, the transcript and the composer each span the window
+ * and pad themselves in to the same centered 48rem column, so the scroll area and the borders run edge to edge.
+ * Every row reserves the transcript's (thin) scrollbar gutter on both sides, so the column lines up to the pixel
+ * whether or not the scrollbar takes room. The gutter only applies to scroll containers: give rows that don't
+ * scroll overflow-hidden.
+ */
+.chat-column {
+  scrollbar-width: thin;
+  scrollbar-gutter: stable both-edges;
+  padding-left: max(1rem, env(safe-area-inset-left), calc((100% - 48rem) / 2));
+  padding-right: max(1rem, env(safe-area-inset-right), calc((100% - 48rem) / 2));
+}
+
+.prose-chat p {
+  @apply my-1.5 leading-relaxed;
+}
+.prose-chat ul {
+  @apply my-1.5 list-disc pl-5;
+}
+.prose-chat ol {
+  @apply my-1.5 list-decimal pl-5;
+}
+.prose-chat a {
+  @apply text-yard-400 underline decoration-yard-400/40 underline-offset-2 hover:decoration-yard-400;
+}
+/* A link to another site (NewTabLink sets data-external) is sky with a trailing ↗, like the app's other outside links,
+   so it never reads as one of the yellow in-app links. PR links wear their state's colors instead (GithubTextLink in ui.tsx). */
+.prose-chat a[data-external] {
+  @apply text-sky-400 decoration-sky-400/40 hover:decoration-sky-400;
+}
+.prose-chat code {
+  @apply rounded bg-zinc-800 px-1 py-0.5 font-mono text-[0.85em];
+}
+/* A fenced code block (CodeBlock in ui.tsx): the code scrolls sideways on its own, and the copy button has a
+   gutter at the right, outside the scroller, so it never covers a line however far it's scrolled. */
+.prose-chat .code-block {
+  @apply my-2 flex max-w-full flex-wrap rounded-lg bg-zinc-900;
+}
+/* A long block folds to its first 12 lines (CodeBlock's CODE_FOLD_LINES), fading out into its "Show all N lines" row.
+   It still scrolls sideways. */
+.prose-chat .code-block[data-folded] > pre {
+  max-height: calc(12lh + 0.75rem);
+  overflow-y: hidden;
+  mask-image: linear-gradient(to bottom, black calc(100% - 3lh), transparent);
+}
+/* A document in the file preview shows its code whole: folding is for chat. */
+.prose-doc .code-block[data-folded] > pre {
+  max-height: none;
+  mask-image: none;
+}
+.prose-doc .code-fold {
+  display: none;
+}
+.prose-chat pre {
+  @apply my-2 max-w-full overflow-x-auto rounded-lg bg-zinc-900 p-3 text-xs;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(63 63 70) transparent;
+}
+.prose-chat .code-block > pre {
+  @apply my-0 min-w-0 flex-1 bg-transparent pr-1.5;
+}
+.prose-chat pre code {
+  @apply bg-transparent p-0;
+  white-space: pre;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  @apply mt-3 mb-1 font-semibold text-zinc-100;
+}
+/* Markdown files in the preview modal: documents, so headings get real sizes */
+.prose-doc h1 {
+  @apply mt-1 mb-3 border-b border-zinc-800 pb-2 text-2xl;
+}
+.prose-doc h2 {
+  @apply mt-5 mb-2 text-xl;
+}
+.prose-doc h3 {
+  @apply mt-4 mb-1.5 text-base;
+}
+.prose-doc blockquote {
+  @apply my-2 border-l-2 border-zinc-700 pl-3 text-zinc-400;
+}
+.prose-chat table {
+  @apply my-2 block max-w-full overflow-x-auto text-sm;
+}
+.prose-chat th,
+.prose-chat td {
+  @apply border border-zinc-800 px-2 py-1;
+  /* Keep words whole in cells: a wide table scrolls inside itself (above), not the chat. */
+  overflow-wrap: break-word;
+}
+
+.prose-chat img,
+.prose-doc img,
+.prose-chat video,
+.prose-doc video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* While dragging a panel border: no text selection, and keep the resize cursor everywhere */
+body.resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+body.resizing iframe {
+  pointer-events: none;
+}
+
+/*
+ * A "#project", "@runner" or "!harness" tag in a chat's draft (ComposerTags.tsx), in its colour (--tag) on its tint
+ * (--tag-tint) like a chip. Its 2px of padding each side is drawn as shadow, which takes no room: the text under the
+ * textarea must sit exactly where the textarea's own (transparent) text is.
+ */
+.composer-tag {
+  color: var(--tag);
+  background-color: var(--tag-tint);
+  box-shadow: -2px 0 0 var(--tag-tint), 2px 0 0 var(--tag-tint);
+  border-radius: 4px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* A tag that's only its part of the message's (one item of a list): dashed under, which moves no glyph. */
+.composer-tag[data-part] {
+  text-decoration: underline dashed var(--tag);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* Passages that have a side thread (lib/threadHighlight.ts), tinted in place; the open thread's is stronger. */
+::highlight(side-thread) {
+  background-color: color-mix(in oklab, var(--color-yard-400) 14%, transparent);
+  text-decoration: underline dotted color-mix(in oklab, var(--color-yard-400) 70%, transparent);
+  text-underline-offset: 3px;
+}
+::highlight(side-thread-open) {
+  background-color: color-mix(in oklab, var(--color-yard-400) 32%, transparent);
+  color: var(--color-zinc-50);
+}
+
+/* Settings can be narrower than the window. Every editable result keeps a touch-sized target. */
+.settings-body [hidden] { display: none !important; }
+.settings-body input:not([type=checkbox]):not([type=radio]),
+.settings-body select,
+.settings-body button,
+.settings-body label:has(input[type=checkbox]),
+.settings-body label:has(input[type=radio]) { min-height: 44px; min-width: 44px; }
+.settings-body button { min-width: 44px; }
+.settings-body input, .settings-body select, .settings-body textarea { max-width: 100%; }
+.settings-body [data-settings-category], .settings-body [data-settings-field] { min-width: 0; }
+.settings-searching [data-settings-category] { margin-bottom: 2rem; }
+.settings-searching [data-settings-context] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .settings-body *, .settings-body *::before, .settings-body *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+.settings-dialog > footer { flex-flow: row wrap; align-items: center; }
+.settings-dialog > footer > button { width: auto; min-height: 44px; }
+.settings-dialog > footer > div { display: flex; width: auto; flex: 1 1 auto; flex-flow: row wrap; justify-content: flex-end; align-items: center; }
+.settings-dialog > footer > div > button { min-height: 44px; }
+.settings-dialog > footer [role=status], .settings-dialog > footer [role=alert] { flex: 1 0 100%; text-align: right; }
+
+.settings-dialog > header button { min-height: 44px; min-width: 44px; }
+
+/* A summary jump marks its source until the next interaction. No timed fade or motion. */
+[data-chat-highlight] {
+  outline: 2px solid var(--color-yard-400);
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+  background-color: color-mix(in srgb, var(--color-yard-400) 10%, transparent);
+  /* Leave room for a focused notice's actions above it. */
+  scroll-margin-block: 4rem;
+}

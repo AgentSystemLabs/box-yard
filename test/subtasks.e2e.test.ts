@@ -1,0 +1,172 @@
+import { afterEach, describe, expect, it } from "vitest"
+import type { Server } from "node:http"
+import { createBoxYard, type BoxYard } from "../server/app.js"
+import type { Project, Task, TaskMessage } from "../shared/types.js"
+import { freePort, testConfig, waitFor } from "./helpers.js"
+
+// Sub-tasks end to end (server/subtasks.ts): real worker turns (fake-claude) start sub-tasks with spawn_subtasks, the
+// sub-tasks run as tasks of their own and report back, and the parent answers from the reports.
+
+interface Running {
+  yard: BoxYard
+  server: Server
+  base: string
+}
+const running: Running[] = []
+
+async function start(): Promise<Running> {
+  const port = await freePort()
+  const yard = createBoxYard(testConfig({ port }), { webDir: "/nonexistent" })
+  // Captains would wake on task notices and start turns of their own.
+  yard.captains.tuning.wakeDebounceMs = 10 * 60_000
+  const server = await new Promise<Server>((resolve) => {
+    const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
+  })
+  await yard.start()
+  const r = { yard, server, base: `http://127.0.0.1:${port}` }
+  running.push(r)
+  return r
+}
+
+afterEach(async () => {
+  for (const r of running.splice(0)) {
+    r.yard.stop()
+    await new Promise((res) => r.server.close(() => res(null)))
+  }
+})
+
+async function call<T>(r: Running, method: string, url: string, body?: unknown): Promise<T> {
+  const res = await fetch(r.base + url, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(`${method} ${url} -> ${res.status}: ${JSON.stringify(data)}`)
+  return data as T
+}
+
+const kids = (r: Running, id: string) => r.yard.store.listTasks().filter((t) => t.parentTaskId === id)
+const transcript = (r: Running, id: string): TaskMessage[] => r.yard.store.listTaskMessages(id, 500)
+const reports = (r: Running, id: string) => transcript(r, id).filter((m) => m.role === "agent" && m.meta?.subtaskReport)
+const resting = (r: Running, id: string, statuses: string[], what: string, timeoutMs = 60_000) =>
+  waitFor(() => {
+    const row = r.yard.store.getTaskRow(id)
+    return row && !row.current_turn_id && statuses.includes(row.status) ? r.yard.store.getTask(id) : null
+  }, what, timeoutMs)
+
+describe("sub-tasks", () => {
+  it("runs one parent and its sub-tasks (one of them nested), and the parent answers from their reports", async () => {
+    const r = await start()
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const parent = await call<Task>(r, "POST", "/api/tasks", {
+      projectId: project.id,
+      title: "Research the best way to cook an omelette",
+      prompt: "research the best way to cook an omlette use 4 sub agents to do it",
+    })
+
+    // Every agent in the tree calls finish: each rests idle, ready for Cody's review (only Cody marks a task done).
+    const done = await resting(r, parent.id, ["idle"], "the parent to finish from its sub-tasks' reports", 90_000)
+    const children = kids(r, parent.id)
+    expect(children.map((k) => k.title)).toEqual(["Classic technique", "Ingredients and ratios", "Pans and heat", "Chef and expert methods"])
+    expect(children.every((k) => k.status === "idle" && k.subtaskDepth === 1 && k.rootTaskId === parent.id && k.withParent)).toBe(true)
+    // The first one split its part in two, one level further down.
+    const nested = kids(r, children[0]!.id)
+    expect(nested.map((k) => [k.title, k.subtaskDepth, k.rootTaskId, k.status])).toEqual([
+      ["French rolled method", 2, parent.id, "idle"],
+      ["American folded method", 2, parent.id, "idle"],
+    ])
+    // A sub-task with runs_on "same" runs where its parent runs.
+    const box = r.yard.store.getTaskRow(parent.id)!.box_id
+    expect([...children, ...nested].every((k) => r.yard.store.getTaskRow(k.id)!.box_id === box)).toBe(true)
+
+    // The parent's transcript links the sub-tasks it started and shows each report as a line from it.
+    const started = transcript(r, parent.id).find((m) => m.meta?.kind === "subtasks" && Array.isArray(m.meta.subtasks))
+    expect((started?.meta?.subtasks as { id: string }[]).map((s) => s.id)).toEqual(children.map((k) => k.id))
+    expect(reports(r, parent.id).map((m) => m.meta?.from).sort()).toEqual(children.map((k) => k.id).sort())
+    expect(reports(r, children[0]!.id).map((m) => m.meta?.from).sort()).toEqual(nested.map((k) => k.id).sort())
+
+    // It rested waiting while they ran, and their reports woke it once, together: one turn of Cody's, one of theirs.
+    expect(r.yard.store.listTaskTurns(parent.id).map((t) => t.trigger)).toEqual(["cody", "agent"])
+    expect(transcript(r, parent.id).some((m) => m.role === "event" && /^Waiting for 4 sub-tasks to report/.test(m.content))).toBe(true)
+    expect(done.status).toBe("idle")
+    expect(r.yard.store.hasInputs(parent.id)).toBe(false)
+    // Its answer is what Cody asked for, so it notifies like any finished task.
+    const notices = r.yard.store.db
+      .prepare("SELECT content FROM chat_messages WHERE role = 'notice' AND json_extract(meta_json, '$.taskId') = ?")
+      .all(parent.id) as { content: string }[]
+    expect(notices.some((n) => n.content.startsWith("💬 **Research the best way to cook an omelette** finished its turn: Combined answer from 4 sub-tasks"))).toBe(true)
+    // Its sub-tasks' updates went to it as reports, not to Cody's chats as well.
+    const kidNotices = r.yard.store.db
+      .prepare(`SELECT content FROM chat_messages WHERE role = 'notice' AND json_extract(meta_json, '$.taskId') IN (${[...children, ...nested].map(() => "?").join(",")})`)
+      .all(...[...children, ...nested].map((k) => k.id)) as { content: string }[]
+    expect(kidNotices.filter((n) => /is done|finished its turn/.test(n.content))).toEqual([])
+  }, 120_000)
+
+  it("waits for the reports mid-turn with wait_for_subtasks, so they don't start another turn", async () => {
+    const r = await start()
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const parent = await call<Task>(r, "POST", "/api/tasks", { projectId: project.id, title: "Compare pans", prompt: "spawn subtasks: Cast iron | Nonstick [wait]" })
+    const done = await resting(r, parent.id, ["idle"], "the parent to finish in its first turn")
+    expect(done.turnCount).toBe(1)
+    expect(kids(r, parent.id).map((k) => k.status)).toEqual(["idle", "idle"])
+    // wait_for_subtasks took the reports off the queue, so nothing is left to start a second turn.
+    await new Promise((res) => setTimeout(res, 1500))
+    expect(r.yard.store.getTaskRow(parent.id)!.turn_count).toBe(1)
+    expect(r.yard.store.hasInputs(parent.id)).toBe(false)
+    expect(r.yard.store.getTask(parent.id)!.summary ?? "").toMatch(/Combined answer from 2 sub-tasks/)
+  }, 90_000)
+
+  it("refuses sub-tasks over Settings' depth and fan-out caps", async () => {
+    const r = await start()
+    r.yard.settings.update({ subtaskMaxDepth: 1, subtaskMaxChildren: 2 })
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+
+    const wide = await call<Task>(r, "POST", "/api/tasks", { projectId: project.id, title: "Too many", prompt: "spawn subtasks: A | B | C" })
+    await resting(r, wide.id, ["idle"], "the refused spawn's turn to end")
+    expect(kids(r, wide.id)).toHaveLength(0)
+    expect(transcript(r, wide.id).some((m) => m.meta?.refused && /starts at most 2 sub-tasks/.test(m.content))).toBe(true)
+
+    const deep = await call<Task>(r, "POST", "/api/tasks", { projectId: project.id, title: "Too deep", prompt: "spawn subtasks: Outer > Inner | Other" })
+    await resting(r, deep.id, ["idle"], "the parent to finish from its two reports", 90_000)
+    const [outer, other] = kids(r, deep.id)
+    expect([outer!.title, other!.title]).toEqual(["Outer", "Other"])
+    // Outer is at depth 1, the cap: its own spawn is refused, and it reports that instead.
+    expect(kids(r, outer!.id)).toHaveLength(0)
+    expect(transcript(r, outer!.id).some((m) => m.meta?.refused && /nest at most 1 deep/.test(m.content))).toBe(true)
+    expect(reports(r, deep.id).find((m) => m.meta?.from === outer!.id)?.content).toMatch(/^Not started: Sub-tasks nest at most 1 deep/)
+  }, 120_000)
+
+  it("stops and closes a parent's whole tree with it", async () => {
+    const r = await start()
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const parent = await call<Task>(r, "POST", "/api/tasks", {
+      projectId: project.id,
+      title: "Long research",
+      prompt: "spawn subtasks: Middle > Deep {hang} | Side {hang}",
+    })
+    // The parent and Middle rest waiting on theirs; Deep and Side hang mid-turn.
+    const tree = await waitFor(() => {
+      const [middle, side] = kids(r, parent.id)
+      const deep = middle && kids(r, middle.id)[0]
+      const row = (t: Task | undefined) => (t ? r.yard.store.getTaskRow(t.id) : null)
+      return row(deep)?.status === "working" && row(side)?.status === "working" && row(middle)?.status === "waiting" && r.yard.store.getTaskRow(parent.id)?.status === "waiting"
+        ? { middle: middle!, side: side!, deep: deep! }
+        : null
+    }, "the tree to be under way", 60_000)
+
+    await call(r, "POST", `/api/tasks/${parent.id}/stop`)
+    for (const k of [tree.deep, tree.side, tree.middle]) await resting(r, k.id, ["idle", "failed"], `${k.title} to stop with the parent`)
+    expect(r.yard.store.getTaskRow(parent.id)!.status).toBe("idle")
+    expect(transcript(r, tree.middle.id).some((m) => m.content === "Stopped with its parent task, Long research.")).toBe(true)
+    expect(transcript(r, tree.deep.id).some((m) => m.content === "Stopped with its parent task, Middle.")).toBe(true)
+    // Stopped turns don't report, so nothing wakes the parent.
+    await new Promise((res) => setTimeout(res, 1000))
+    expect(reports(r, parent.id)).toHaveLength(0)
+    expect(r.yard.store.getTaskRow(parent.id)!.turn_count).toBe(1)
+
+    await call(r, "POST", `/api/tasks/${parent.id}/close`)
+    await waitFor(() => [parent, tree.middle, tree.side, tree.deep].every((t) => r.yard.store.getTaskRow(t.id)?.status === "done"), "the whole tree to close")
+    expect(transcript(r, tree.deep.id).some((m) => m.content === "Closed with its parent task, Middle.")).toBe(true)
+  }, 120_000)
+})

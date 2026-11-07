@@ -1,0 +1,871 @@
+// The picks in the Coordinator and Captain composers (shared/runTargets.ts): where the message's tasks run ("@"), which
+// harness (agent CLI) runs them ("!") and, in the Coordinator's chat only, which project the message is for ("#").
+// The pick always lives in the text, as "@token" / "!token" / "#token", so the text and what's sent never disagree:
+// - typing: "@" opens the list of places, "!" the list of harnesses, "#" the list of projects, filtered as Cody types;
+//   ↑/↓ move, Enter or Tab picks, Esc backs out a level or closes, a tap picks.
+// - the Where, Harness and Project buttons in the composer's row of icons (the main way on a phone) put that trigger at
+//   the caret and open the same list, so using them teaches the typed shortcut. When the draft already names a pick of
+//   that kind, the button selects its word instead: the list offers the others, and picking one replaces it.
+//   Where and Harness open a sheet with focusable choices; the phone keyboard stays out of the way while drilling.
+// The Composer sends the picks as the message's meta.runsOn / meta.agent / meta.project; sent messages show them as
+// chips. Default says what it means (in the buttons' names and the list's header): in a Captain's chat its project's
+// own Runs on and agent, in the Coordinator's each project's.
+// A pick typed inside one item of a list of tasks ("9. … !claude") is only that item's (shared/runTargets.ts
+// scopePicks): it goes as meta.inlinePicks, a hint the turn's prompt lists, and Box Yard doesn't apply it to the
+// other tasks. The buttons are the whole message's, so in a list their trigger goes at the message's start; the line
+// over them (PickScope) and the sent message's dashed chips say which picks are only their part's.
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react"
+import { createPortal, flushSync } from "react-dom"
+import { AlertTriangle, Asterisk, Box, BrainCircuit, ChevronRight, Container, Cpu, FolderGit2, MapPin, Monitor, MousePointer2, Network, Server, SquareTerminal, Tag, type LucideIcon } from "lucide-react"
+import { cx } from "./ui"
+import { ComposerMenuItem } from "./ComposerMenu"
+import { Loading } from "./Loading"
+import { DismissButton, Modal, ModalStep } from "./Modal"
+import { useAbove } from "../lib/useAbove"
+import { useAgentSettings, useCursorModels, useHarnessTargets, useModelCatalog, useProjectRunDefaults, useProjectTargets, useRefreshPicker, useRunTargets } from "../lib/queries"
+import { CURSOR_FALLBACK_MODELS } from "../../../shared/agentCli"
+import { harnessDefaults } from "../../../shared/harnessDefaults"
+import { harnessModelTargets } from "../../../shared/harnessPicks"
+import {
+  drillsInto,
+  filterRunTargets,
+  inlinePicksFrom,
+  inlinePicksOf,
+  insertRunTarget,
+  listItems,
+  mentionAt,
+  pickConflict,
+  pickOf,
+  projectHarnessTarget,
+  projectRunTarget,
+  runTargetPickOf,
+  runTargetParent,
+  scopePicks,
+  TAG_TRIGGER,
+  tokensIn,
+  type InlinePick,
+  type InlineReason,
+  type PickKind,
+  type PickTrigger,
+  type PlacedPick,
+  type RunTarget,
+  type RunTargetPick,
+  type ScopedPick,
+  type TagKind,
+} from "../../../shared/runTargets"
+
+const ICON: Record<string, LucideIcon> = {
+  local: Monitor,
+  "this-computer": Monitor,
+  box: Box,
+  docker: Container,
+  gpu: Cpu,
+  ssh: Network,
+  claude: Asterisk,
+  codex: SquareTerminal,
+  cursor: MousePointer2,
+}
+const iconOf = (t: Pick<RunTarget, "kind" | "token">): LucideIcon =>
+  t.kind === "machine" ? Server : t.kind === "label" ? Tag : t.kind === "project" ? FolderGit2 : t.kind === "gpu" || t.token.startsWith("gpu:") ? Cpu : (ICON[t.token.split(":")[0]!] ?? MapPin)
+
+/** A list (and its button): where the tasks run, their harness, or (the Coordinator's) the project. */
+export type ListKind = TagKind
+const TRIGGER = TAG_TRIGGER
+/** A button's icon while nothing of its kind is picked. */
+const DEFAULT_ICON: Record<ListKind, LucideIcon> = { runsOn: MapPin, agent: BrainCircuit, project: FolderGit2 }
+const LIST_TITLE: Record<ListKind, string> = {
+  runsOn: "Where this message's tasks run",
+  agent: "Which harness runs this message's tasks",
+  project: "Which project this message is for",
+}
+/** The title while the "@word" is typed in one item of a list of tasks. */
+const ITEM_TITLE: Record<ListKind, (item: string) => string> = {
+  runsOn: (item) => `Where ${item}'s task runs`,
+  agent: (item) => `Which harness runs ${item}'s task`,
+  project: (item) => `Which project ${item} is for`,
+}
+const BUTTON_NAME: Record<ListKind, string> = { runsOn: "Where tasks run", agent: "Harness", project: "Project" }
+/** The project setting Default follows. */
+const SETTING: Record<PickKind, string> = { runsOn: "Runs on", agent: "agent" }
+
+/** A message's picks, as onSubmit gets them: the whole message's, and the ones for only part of it. */
+export interface ChatPicks {
+  runsOn?: RunTargetPick
+  agent?: RunTargetPick
+  /** The Coordinator's "#": the project's Captain should get it. */
+  project?: RunTargetPick
+  /** Picks typed for one item of a list of tasks (or that disagree): hints the turn's prompt lists, never applied. */
+  inline?: InlinePick[]
+}
+
+type ByKind<T> = Record<PickKind, T>
+
+/** What the Composer needs: key handling, the textarea's combobox attributes, the typed list, the buttons' state. */
+export interface ChatPicksState {
+  /** Call first in the textarea's onKeyDown: true when the menu took the key (Enter picks instead of sending). */
+  onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean
+  /** The textarea's caret moved, it got or lost focus. */
+  onCaret: () => void
+  onFocus: (focused: boolean) => void
+  /** combobox attributes for the textarea, while the list is on. */
+  inputProps: Record<string, string | boolean | undefined>
+  open: boolean
+  /** Button picks use a focusable sheet; typed mentions keep their combobox list. */
+  panel: boolean
+  close: () => void
+  /**
+   * The shared list: its kind, options, the highlighted one and the pick action, for <RunTargetList>. `opens` says
+   * which options open what's under them (a GPU cloud's GPUs) rather than pick.
+   */
+  list: {
+    id: string
+    kind: ListKind
+    options: RunTarget[]
+    loading: boolean
+    error: boolean
+    active: number
+    pick: (t: RunTarget) => void
+    setActive: (i: number) => void
+    note: string | null
+    opens: (t: RunTarget) => boolean
+    /** The drill-down open now (a harness's models, a box's sizes): its header shows Back. */
+    parent?: RunTarget
+    back: () => void
+    /** The list item the "@word" is typed in ("item 9"), when the draft is a list of tasks: the pick is only that item's. */
+    item: string | null
+  }
+  /** The whole message's picks now: the "@token" / "!token" / "#token" in the draft that's for all of it (scopePicks). */
+  picked: Record<ListKind, RunTarget | null>
+  /** Every pick typed in the draft, with what it's for: the whole message, or only its part (scopePicks). */
+  scoped: ScopedPick[]
+  /** The lists a tag in the draft can name (shared/runTargets.ts tagsIn): only the kinds this chat has, once loaded. */
+  lists: Partial<Record<ListKind, RunTarget[] | undefined>>
+  /** What Default is in a Captain's chat (its project's Runs on and agent, greyed out when it can't run there); null in the Coordinator's or while loading. */
+  defaults: ByKind<RunTarget | null>
+  /** The Captain's project, once loaded. */
+  projectName: string | null
+  /** Why they can't be sent together (Codex on an SSH machine), or null. Sending waits until it's fixed. */
+  conflict: string | null
+  /** What a send carries. */
+  extra: () => ChatPicks
+  /** The kinds with a button: Where and Harness, and Project in the Coordinator's chat. */
+  kinds: ListKind[]
+  /** A button's press: its trigger in the draft (or its existing pick selected), and its panel/list open. */
+  insert: (kind: ListKind) => void
+  /** Whose lists: a project's Captain, or null for the Coordinator. */
+  projectId: string | null
+}
+
+const NO_DEFAULTS: ByKind<RunTarget | null> = { runsOn: null, agent: null }
+const NO_LISTS: ChatPicksState["lists"] = {}
+const NONE: PlacedPick[] = []
+const NO_SCOPED: ScopedPick[] = []
+
+/** A draft's typed picks of one kind (a greyed-out one too, but not for "#"), for scopePicks. */
+const placedIn = (text: string, targets: RunTarget[], trigger: PickTrigger, kind: ListKind, disabledToo = true): PlacedPick[] =>
+  tokensIn(text, targets, trigger, disabledToo).map((p) => ({ ...p, kind }))
+
+/** The item of a list of tasks (two or more items) that `at` is in, as "item 9"; null outside one, or with no list. */
+function itemOf(text: string, at: number): string | null {
+  const items = listItems(text)
+  if (items.length < 2) return null
+  return items.find((i) => at >= i.start && at <= i.end)?.label ?? null
+}
+const CAPTAIN_KINDS: ListKind[] = ["runsOn", "agent"]
+const COORDINATOR_KINDS: ListKind[] = ["project", "runsOn", "agent"]
+
+/**
+ * The picks' state for a composer's draft. `enabled` false: nothing (task chats, side threads). "#" is on only in the
+ * Coordinator's chat (`projectId` null). A list is fetched on mount into the shared query cache. Focusing refreshes
+ * stale lists in the background; the harness list is for where the tasks run. No network/availability check holds a
+ * menu closed, except "#": it opens only once the projects are there and one matches, so "#123" and "# Heading" stay text.
+ */
+export function useChatPicks({
+  enabled,
+  projectId,
+  value,
+  setValue,
+  input,
+}: {
+  enabled: boolean
+  projectId: string | null
+  value: string
+  setValue: (v: string) => void
+  input: RefObject<HTMLTextAreaElement | null>
+}): ChatPicksState {
+  const [focused, setFocused] = useState(false)
+  const [panel, setPanel] = useState(false)
+  const hashOn = enabled && projectId === null
+  const hasAt = enabled && value.includes("@")
+  const hasBang = enabled && value.includes("!")
+  const hasHash = hashOn && value.includes("#")
+  const placesQuery = useRunTargets(projectId, enabled, focused ? "focus" : hasAt ? "mention" : null)
+  const places = placesQuery.data
+  // Each kind's typed picks; the whole message's "@" one says where the "!" list checks the harnesses.
+  const atPlaced = useMemo(() => (hasAt && places ? placedIn(value, places, "@", "runsOn") : NONE), [hasAt, places, value])
+  const typedRunsOn = useMemo(() => (atPlaced.length ? scopePicks(value, atPlaced).wide.runsOn : null), [atPlaced, value])
+  const runsOn = enabled ? typedRunsOn : null
+  const harnessQuery = useHarnessTargets(projectId, runsOn?.value ?? null, enabled, focused ? "focus" : hasBang ? "mention" : null)
+  const lastHarnesses = useRef<RunTarget[] | undefined>(undefined)
+  useEffect(() => {
+    if (harnessQuery.data && !harnessQuery.isPlaceholderData) lastHarnesses.current = harnessQuery.data
+  }, [harnessQuery.data, harnessQuery.isPlaceholderData])
+  // A different location's availability isn't evidence for this one. Keep its rows visible, but wait to pick them.
+  const availableHarnesses = useMemo(() => harnessQuery.isPlaceholderData || !harnessQuery.data
+    ? (harnessQuery.data ?? lastHarnesses.current)?.map((t) => ({ ...t, disabled: harnessQuery.error ? "Couldn't check availability for this location" : "Checking availability for this location…" }))
+    : harnessQuery.data, [harnessQuery.data, harnessQuery.isPlaceholderData, harnessQuery.error])
+  // Catalogs load only when a harness tag is in the draft. The built-in lists keep typing and picking immediate.
+  const settings = useAgentSettings({ enabled: hasBang }).data?.settings
+  const claudeModels = useModelCatalog(hasBang)
+  const cursorModels = useCursorModels(hasBang)
+  const harnesses = useMemo(() => availableHarnesses && harnessModelTargets(availableHarnesses, {
+    defaults: harnessDefaults(settings),
+    claude: claudeModels.data?.models,
+    cursor: cursorModels.data?.models ?? CURSOR_FALLBACK_MODELS,
+  }), [availableHarnesses, settings?.agentModel, settings?.agentEffort, settings?.agentCodexModel, settings?.agentCodexEffort, settings?.agentCursorModel, claudeModels.data?.models, cursorModels.data?.models])
+  const projects = useProjectTargets(hashOn)
+  const refreshPicker = useRefreshPicker(projectId)
+  const bangPlaced = useMemo(() => (hasBang && harnesses ? placedIn(value, harnesses, "!", "agent") : NONE), [hasBang, harnesses, value])
+  const hashPlaced = useMemo(() => (hasHash && projects ? placedIn(value, projects, "#", "project", false) : NONE), [hasHash, projects, value])
+  // Which are the whole message's and which only one item's: one parse for the buttons, the send and the scope line.
+  const scoped = useMemo(
+    () => (atPlaced.length || bangPlaced.length || hashPlaced.length ? scopePicks(value, [...atPlaced, ...bangPlaced, ...hashPlaced]) : null),
+    [atPlaced, bangPlaced, hashPlaced, value],
+  )
+  const agent = enabled ? (scoped?.wide.agent ?? null) : null
+  const project = scoped?.wide.project ?? null
+  // A Captain's Default is its project's own Runs on and agent, checked against the lists for where its tasks go now.
+  const own = useProjectRunDefaults(enabled ? projectId : null)
+  const checkedHarnesses = harnessQuery.isPlaceholderData ? undefined : harnessQuery.data
+  const defaults = useMemo<ByKind<RunTarget | null>>(
+    () => (own ? { runsOn: projectRunTarget(places, own.runner, own.machineLabel), agent: projectHarnessTarget(checkedHarnesses, own.agentCli) } : NO_DEFAULTS),
+    [own, places, checkedHarnesses],
+  )
+  const conflict = runsOn?.disabled ? `${runsOn.disabled} (you picked @${runsOn.token}): pick another place.` : pickConflict(runsOn, agent)
+
+  const [caret, setCaret] = useState(0)
+  const [active, setActive] = useState(0)
+  // Esc closes the list for the "@word" it was on; a new "@" (or "!", "#") opens it again.
+  const [dismissed, setDismissed] = useState<number | null>(null)
+  const id = useId()
+
+  const at = Math.min(caret, value.length)
+  const atMention = hasAt ? mentionAt(value, at, "@") : null
+  const bangMention = !atMention && hasBang ? mentionAt(value, at, "!") : null
+  const hashMention = !atMention && !bangMention && hasHash ? mentionAt(value, at, "#") : null
+  const mention = atMention ?? bangMention ?? hashMention
+  const kind: ListKind = bangMention ? "agent" : hashMention ? "project" : "runsOn"
+  const lists: Record<ListKind, RunTarget[] | undefined> = { runsOn: places, agent: harnesses, project: projects }
+  // A Captain's chat has no "#", though the projects may be in the cache.
+  const tagLists = useMemo(() => (enabled ? { runsOn: places, agent: harnesses, project: hashOn ? projects : undefined } : NO_LISTS), [enabled, hashOn, places, harnesses, projects])
+  const source = lists[kind]
+  const parent = mention && source ? runTargetParent(source, mention.query) : undefined
+  const options = useMemo(() => (mention && source ? filterRunTargets(source, mention.query, kind === "project") : []), [mention?.query, source, kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  // "#" waits for a match: a heading ("# Plan") or an issue ("#123") never opens an empty or loading list.
+  const showable = kind === "project" ? options.length > 0 : !source || options.length > 0
+  const open = Boolean(enabled && (panel || (focused && showable)) && mention && dismissed !== mention.start)
+  const close = () => {
+    setPanel(false)
+    if (mention) setDismissed(mention.start)
+  }
+  const errors: Record<ListKind, boolean> = { runsOn: Boolean(placesQuery.error), agent: Boolean(harnessQuery.error), project: false }
+  // Typed inside one item of a list of tasks: the pick is that item's only, and the list says so.
+  const mentionItem = useMemo(() => (mention ? itemOf(value, mention.start) : null), [mention?.start, value]) // eslint-disable-line react-hooks/exhaustive-deps
+  const firstEnabled = Math.max(0, options.findIndex((t) => !t.disabled))
+  // A new filter highlights its first pickable option.
+  useEffect(() => setActive(firstEnabled), [mention?.query, mention?.start, kind, firstEnabled])
+  useEffect(() => {
+    if (dismissed !== null && mention?.start !== dismissed) setDismissed(null)
+  }, [mention?.start, dismissed])
+
+  // Only on a move: the select event after each keystroke reports the caret its input already did, and a same-value
+  // setState right after a render still costs the Composer a commit.
+  const caretAt = useRef(0)
+  const moveCaret = useCallback((at: number) => {
+    if (at === caretAt.current) return
+    caretAt.current = at
+    setCaret(at)
+  }, [])
+  const onCaret = useCallback(() => moveCaret(input.current?.selectionStart ?? 0), [input, moveCaret])
+
+  const pick = useCallback(
+    (t: RunTarget) => {
+      const el = input.current
+      if (!el || t.disabled) return
+      const trigger = t.kind === "harness" ? "!" : t.kind === "project" ? "#" : "@"
+      const m = mentionAt(el.value, el.selectionStart ?? el.value.length, trigger)
+      if (!m) return
+      // A GPU cloud with GPUs under it opens them first: picking it again (or "any GPU" on it) then picks it.
+      const targets = trigger === "!" ? harnesses : places
+      const drill = trigger !== "#" && Boolean(targets) && drillsInto(t, targets!, m.query)
+      const next = insertRunTarget(el.value, m, t.token, trigger, drill)
+      flushSync(() => setValue(next.value))
+      if (!panel || !drill) el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+      moveCaret(next.caret)
+      if (!drill) setPanel(false)
+    },
+    [input, setValue, moveCaret, places, harnesses, panel],
+  )
+  const opens = useCallback((t: RunTarget) => kind !== "project" && Boolean(source && mention) && drillsInto(t, source!, mention!.query), [kind, source, mention?.query]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const back = () => {
+    const el = input.current
+    if (!el || !mention || !parent) return
+    const next = insertRunTarget(el.value, mention, parent.under ?? "", TRIGGER[kind], true)
+    flushSync(() => setValue(next.value))
+    if (!panel) el.focus()
+    el.setSelectionRange(next.caret, next.caret)
+    moveCaret(next.caret)
+  }
+
+  // A button: the trigger the caret is already in (its list opens again); else the draft's own pick of that kind, its
+  // word selected so the list offers the others (typing filters, picking replaces it); else the trigger at the caret,
+  // spaced from the words around it. The list opens either way.
+  const insert = useCallback(
+    (k: ListKind) => {
+      const el = input.current
+      if (!el) return
+      const text = el.value
+      const trigger = TRIGGER[k]
+      // The button is the whole message's pick: its token is the one scopePicks gives the message, not an item's.
+      const all = lists[k] ? placedIn(text, lists[k]!, trigger, k) : []
+      const named = all.length ? scopePicks(text, all).picks.filter((p) => p.scope === "message").at(-1) : undefined
+      let from: number
+      let to: number
+      let start = el.selectionStart ?? text.length
+      let end = el.selectionEnd ?? start
+      // Already typing one ("@bo", a second press): open its list again rather than add another.
+      const typing = start === end ? mentionAt(text, start, trigger) : null
+      if (typing) {
+        from = to = start
+      } else if (named) {
+        from = named.start + 1
+        to = named.end
+      } else {
+        // In a list of tasks, a pick typed in an item is only that item's: the whole message's goes at its start.
+        if (itemOf(text, start)) start = end = 0
+        const before = text.slice(0, start)
+        const after = text.slice(end)
+        const lead = before && !/[\s(["']$/.test(before) ? " " : ""
+        const trail = after && !/^\s/.test(after) ? " " : ""
+        flushSync(() => setValue(before + lead + trigger + trail + after))
+        from = to = before.length + lead.length + 1
+      }
+      if (k === "project") el.focus()
+      el.setSelectionRange(from, to)
+      setDismissed(null)
+      setPanel(k !== "project")
+      moveCaret(from)
+      if (k !== "project") refreshPicker(k, runsOn?.value ?? null)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [input, setValue, moveCaret, places, harnesses, projects, refreshPicker, runsOn?.value],
+  )
+
+  const step = (from: number, dir: 1 | -1) => {
+    for (let i = 1; i <= options.length; i++) {
+      const to = (from + dir * i + options.length) % options.length
+      if (!options[to]!.disabled) return to
+    }
+    return from
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (panel) return false
+    if (!open || !mention) return false
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault()
+      setActive((i) => step(i, e.key === "ArrowDown" ? 1 : -1))
+      return true
+    }
+    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+      if (!source) {
+        e.preventDefault()
+        return true
+      }
+      const t = options[active]
+      e.preventDefault()
+      if (t && !t.disabled) pick(t)
+      return true
+    }
+    if (e.key === "Escape") {
+      e.preventDefault()
+      e.stopPropagation()
+      if (parent) back()
+      else setDismissed(mention.start)
+      return true
+    }
+    return false
+  }
+
+  const extra = (): ChatPicks => {
+    const inline = enabled && scoped ? inlinePicksFrom(value, scoped) : []
+    return {
+      ...(project ? { project: pickOf(project) } : {}),
+      ...(runsOn && !runsOn.disabled ? { runsOn: pickOf(runsOn) } : {}),
+      ...(agent && !agent.disabled ? { agent: pickOf(agent) } : {}),
+      ...(inline.length ? { inline } : {}),
+    }
+  }
+
+  const projectName = own?.name ?? null
+  const note = mentionItem
+    ? `only ${mentionItem}'s, not the whole message's`
+    : kind === "project"
+      ? "its Captain gets it"
+      : `Default: ${defaultWords(kind, { defaults, projectId, projectName })}${defaults[kind]?.disabled ? ` (${defaults[kind]!.disabled})` : ""}`
+  const listId = `${id}-picks`
+  const optionId = (i: number) => `${listId}-${i}`
+  return {
+    onKeyDown,
+    onCaret,
+    onFocus: (on) => {
+      setFocused(on)
+      if (on) setPanel(false)
+    },
+    inputProps: enabled
+      ? {
+          role: "combobox",
+          "aria-autocomplete": "list",
+          "aria-haspopup": "listbox",
+          "aria-expanded": open && !panel,
+          "aria-controls": open && !panel ? listId : undefined,
+          "aria-activedescendant": open && !panel && options[active] ? optionId(active) : undefined,
+        }
+      : {},
+    open,
+    panel,
+    close,
+    list: { id: listId, kind, options, loading: !source, error: errors[kind], active, pick, setActive, note, opens, item: mentionItem, parent, back },
+    picked: { runsOn, agent, project },
+    scoped: enabled ? (scoped?.picks ?? NO_SCOPED) : NO_SCOPED,
+    lists: tagLists,
+    defaults,
+    projectName,
+    conflict,
+    extra,
+    kinds: !enabled ? [] : hashOn ? COORDINATOR_KINDS : CAPTAIN_KINDS,
+    insert,
+    projectId,
+  }
+}
+
+/** The panel both lists sit in: over the composer's box, portalled with a fixed position so a clipping footer can't cut it. */
+const PANEL = "@container/menu fixed z-50 flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-xl shadow-black/40"
+const ROW = "mx-1 flex min-h-11 w-[calc(100%-0.5rem)] cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm"
+
+/** One target's icon, "@token", what it is and its second line (or why it can't be picked); a › when it opens more. */
+function TargetRow({ t, on, trigger, opens, panel = false }: { t: RunTarget; on: boolean; trigger: PickTrigger; opens: boolean; panel?: boolean }) {
+  const Icon = iconOf(t)
+  return (
+    <>
+      <Icon className={cx("h-4 w-4 shrink-0", on && !t.disabled ? "text-yard-400" : "text-zinc-500")} aria-hidden />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className={panel ? "flex min-w-0 flex-col gap-x-2 @min-[28rem]/picker:flex-row @min-[28rem]/picker:flex-wrap @min-[28rem]/picker:items-baseline" : "flex min-w-0 items-baseline gap-2"}>
+          {panel ? <>
+            <span className="min-w-0 wrap-anywhere text-zinc-100">{t.menuLabel ?? t.label}</span>
+            <span className="min-w-0 font-mono text-xs wrap-anywhere text-zinc-500">{trigger}{t.token}</span>
+          </> : t.menuLabel ? <span className="min-w-0 truncate text-zinc-100">{t.menuLabel}</span> : <>
+            <span className="min-w-0 truncate font-mono text-[13px] text-zinc-100">{trigger}{t.token}</span>
+            {t.label.toLowerCase() !== t.token && <span className="min-w-0 truncate text-zinc-400">{t.label}</span>}
+          </>}
+        </span>
+        <span className={cx("min-w-0 text-xs", panel ? "wrap-anywhere" : "truncate", t.disabled ? "text-amber-300/80" : "text-zinc-500")}>{t.disabled ?? t.detail}</span>
+      </span>
+      {opens && <ChevronRight data-testid="run-target-opens" className="h-4 w-4 shrink-0 text-zinc-500" aria-label="More options" />}
+    </>
+  )
+}
+
+/** The typed list ("@", "!" or "#"), just over the composer's box. Its header says what Default is, since the buttons are only icons. */
+export function RunTargetList({ list, anchor }: { list: ChatPicksState["list"]; anchor: RefObject<HTMLElement | null> }) {
+  const { id, kind, options, loading, error, active, pick, setActive, note, opens, parent, back } = list
+  const at = useAbove(anchor)
+  // The highlighted row stays in view as ↑/↓ move through a long list.
+  useEffect(() => {
+    document.getElementById(`${id}-${active}`)?.scrollIntoView?.({ block: "nearest" })
+  }, [id, active])
+  if (!at) return null
+  return createPortal(
+    <div
+      data-testid="run-target-menu"
+      data-kind={kind}
+      style={{ left: at.left, width: at.width, bottom: at.bottom }}
+      className={PANEL}
+      // A press keeps the caret in the text (no blur), on a phone too.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <div data-testid="run-target-menu-title" className="flex min-h-11 min-w-0 items-center gap-1.5 border-b border-zinc-800/80 px-2 py-1 text-[11px] text-zinc-500">
+        {parent && <DismissButton kind="back" onClick={back} label="Back to choices" className="h-11! w-11! transition-none" />}
+        <span className="min-w-0 flex-1">
+          <span className="block text-zinc-300">{parent ? `${parent.label} · ${parent.model ? "Effort" : kind === "agent" ? "Model" : "Options"}` : list.item ? ITEM_TITLE[kind](list.item) : LIST_TITLE[kind]}</span>
+          {!parent && note && <span className="block truncate text-zinc-500">{note}</span>}
+        </span>
+      </div>
+      {(loading || error) && <PickerStatus error={error} />}
+      <ul id={id} role="listbox" aria-busy={loading || undefined} aria-label={LIST_TITLE[kind]} style={{ maxHeight: at.maxHeight - 56 }} className="scroll-thin overflow-y-auto overscroll-contain py-1">
+        {options.map((t, i) => {
+          const on = i === active
+          return (
+            <li
+              key={t.token}
+              id={`${id}-${i}`}
+              role="option"
+              aria-selected={on}
+              aria-disabled={t.disabled ? true : undefined}
+              data-token={t.token}
+              title={t.disabled ? `Can't pick it now: ${t.disabled}` : kind === "project" ? `${t.label}: its Captain gets this message` : `${t.label} (${kind === "agent" ? "agent" : "runs_on"} ${t.value})`}
+              onClick={() => pick(t)}
+              onMouseMove={() => !t.disabled && !on && setActive(i)}
+              className={cx(ROW, on && !t.disabled && "bg-zinc-800", t.disabled && "cursor-not-allowed opacity-50")}
+            >
+              <TargetRow t={t} on={on} trigger={TRIGGER[kind]} opens={opens(t)} />
+            </li>
+          )
+        })}
+      </ul>
+    </div>,
+    document.body,
+  )
+}
+
+/** Button picks share the typed list's navigation and tokens, with focus inside the panel and no phone keyboard. */
+export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; returnFocus: () => HTMLElement | null }) {
+  const { list } = picks
+  const { id, kind, parent, back, options, active, loading, error, note, opens, pick, setActive } = list
+  const rows = useRef<HTMLDivElement>(null)
+  const level = parent?.token ?? ""
+  const firstEnabled = options.find((t) => !t.disabled)?.token
+  // On a drill or Back the first pickable choice takes focus. Availability may arrive after the panel opens.
+  useEffect(() => {
+    const first = rows.current?.querySelector<HTMLElement>('[role="option"]:not([disabled])')
+    first?.focus({ preventScroll: true })
+  }, [level, firstEnabled])
+  useEffect(() => {
+    const row = document.getElementById(`${id}-${active}`)
+    row?.scrollIntoView?.({ block: "nearest" })
+  }, [id, active])
+  const title = parent ? `${parent.label} · ${parent.model ? "Effort" : kind === "agent" ? "Model" : "Options"}` : LIST_TITLE[kind]
+  return (
+    <Modal
+      label={title}
+      placement="sheet"
+      size="md"
+      onClose={picks.close}
+      returnFocus={returnFocus}
+      className="@container/picker max-h-[85dvh]! w-full max-w-lg! rounded-t-2xl [&_[data-dismiss]]:h-11 [&_[data-dismiss]]:w-11 [&_[data-dismiss]]:transition-none"
+      bodyClassName="flex min-h-0 flex-col"
+      onKeyDown={(e) => {
+        const current = (e.target as HTMLElement).closest<HTMLElement>('[role="option"]')
+        if (!current) return
+        const buttons = [...rows.current!.querySelectorAll<HTMLButtonElement>('[role="option"]:not([disabled])')]
+        const at = buttons.indexOf(current as HTMLButtonElement)
+        let next: HTMLButtonElement | undefined
+        if (e.key === "ArrowDown") next = buttons[(at + 1) % buttons.length]
+        else if (e.key === "ArrowUp") next = buttons[(at - 1 + buttons.length) % buttons.length]
+        else if (e.key === "Home") next = buttons[0]
+        else if (e.key === "End") next = buttons.at(-1)
+        else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          current.click()
+        }
+        if (next) {
+          e.preventDefault()
+          next.focus()
+        }
+      }}
+    >
+      <ModalStep active={Boolean(parent)} back={back} label="Back to choices" />
+      <div data-testid="run-target-menu" data-kind={kind} className="flex min-h-0 flex-col">
+        <div data-testid="run-target-menu-title" className="flex shrink-0 items-start gap-2 border-b border-zinc-800 px-3 py-2">
+          {parent && <DismissButton kind="back" onClick={back} label="Back to choices" />}
+          <div className="min-w-0 flex-1 py-2.5">
+            <h2 className="text-sm font-medium wrap-anywhere text-zinc-100">{title}</h2>
+            {!parent && note && <p className="mt-1 text-xs wrap-anywhere text-zinc-500">{note}</p>}
+          </div>
+          {!parent && <DismissButton kind="close" onClick={picks.close} />}
+        </div>
+        {error ? <PickerStatus error /> : loading && <Loading kind="rows" label="Checking availability" className="px-3 py-3" />}
+        <div ref={rows} id={id} role="listbox" aria-label={title} aria-busy={loading || undefined} className="scroll-thin min-h-0 overflow-y-auto overscroll-contain py-1.5">
+          {options.map((t, i) => (
+            <button
+              type="button"
+              key={t.token}
+              id={`${id}-${i}`}
+              role="option"
+              data-token={t.token}
+              title={t.disabled ? `Can't pick it now: ${t.disabled}` : undefined}
+              disabled={Boolean(t.disabled)}
+              aria-disabled={t.disabled ? true : undefined}
+              aria-selected={i === active}
+              tabIndex={i === active ? 0 : -1}
+              onFocus={() => setActive(i)}
+              onClick={() => pick(t)}
+              className={cx(ROW, "py-2.5 focus-visible:bg-zinc-800 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-yard-500 focus-visible:outline-none", t.disabled && "cursor-not-allowed opacity-50")}
+            >
+              <TargetRow t={t} on={i === active} trigger={TRIGGER[kind]} opens={opens(t)} panel />
+            </button>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * The Where, Harness and (the Coordinator's) Project buttons for the composer's row of icons. Each shows its pick as an
+ * icon (amber once the draft names one) and says it in its name; a press puts its trigger in the text and opens the
+ * shared picker (useChatPicks `insert`). Where and Harness take focus into a sheet; Project keeps the text's list.
+ * `className` sizes them like the row's other buttons.
+ */
+export function PickButtons({ picks, className }: { picks: ChatPicksState; className?: string }) {
+  return (
+    <>
+      {picks.kinds.map((kind) => (
+        <PickButton key={kind} kind={kind} picks={picks} className={className} />
+      ))}
+    </>
+  )
+}
+
+/**
+ * The same buttons as lines of the composer's More menu, for a box too narrow to show them on the row: each names its
+ * pick and shows the character it types, so the menu teaches the shortcut too. `onDone` closes the menu after one.
+ */
+export function PickMenuItems({ picks, className, onDone }: { picks: ChatPicksState; className?: string; onDone: () => void }) {
+  return (
+    <>
+      {picks.kinds.map((kind) => {
+        const current = picks.picked[kind]
+        return (
+          <ComposerMenuItem
+            key={kind}
+            data-testid={`more-pick-${kind}`}
+            icon={pickProblem(kind, picks) ? AlertTriangle : current ? iconOf(current) : DEFAULT_ICON[kind]}
+            label={BUTTON_NAME[kind]}
+            detail={pickWords(kind, picks)}
+            keyHint={TRIGGER[kind]}
+            className={className}
+            onClick={() => {
+              onDone()
+              picks.insert(kind)
+            }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+/** What a button's pick is, in words: "@gpu (RunPod GPU)", "Default (Upstash box, box-yard's Runs on)", "none picked". */
+export function pickWords(kind: ListKind, picks: Pick<ChatPicksState, "picked" | "defaults" | "projectId" | "projectName">) {
+  const current = picks.picked[kind]
+  if (current) return `${TRIGGER[kind]}${current.token} (${current.label}${current.disabled ? `, ${current.disabled}` : ""})`
+  if (kind === "project") return "none picked, the Coordinator decides"
+  const fallback = picks.defaults[kind]
+  return `Default (${defaultWords(kind, picks)}${fallback?.disabled ? `: ${fallback.disabled}` : ""})`
+}
+
+/** Why the button's pick (or, with none, its Default) can't run where the tasks go; null when it can. */
+function pickProblem(kind: ListKind, picks: Pick<ChatPicksState, "picked" | "defaults">): string | null {
+  const current = picks.picked[kind]
+  if (current) return current.disabled
+  return kind === "project" ? null : (picks.defaults[kind]?.disabled ?? null)
+}
+
+export function PickButton({ kind, picks, className }: { kind: ListKind; picks: ChatPicksState; className?: string }) {
+  const current = picks.picked[kind]
+  const Icon = current ? iconOf(current) : DEFAULT_ICON[kind]
+  const warn = Boolean(pickProblem(kind, picks))
+  const trigger = TRIGGER[kind]
+  const name = `${BUTTON_NAME[kind]}: ${pickWords(kind, picks)}`
+  return (
+    <button
+      type="button"
+      data-testid={`pick-${kind}`}
+      aria-label={name}
+      aria-haspopup={kind === "project" ? "listbox" : "dialog"}
+      aria-expanded={picks.open && picks.list.kind === kind}
+      title={`${name}. Adds ${trigger} to the message: pick from its list, or type ${trigger} yourself`}
+      // Preserve the caret until insert has placed or selected the token.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => picks.insert(kind)}
+      className={cx(
+        "flex shrink-0 items-center justify-center rounded-lg focus-visible:ring-2 focus-visible:ring-yard-500/60 focus-visible:outline-none",
+        className,
+        warn ? "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20" : current ? "bg-yard-500/10 text-yard-200 hover:bg-yard-500/20" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200",
+      )}
+    >
+      {warn ? <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden /> : <Icon className="h-4 w-4 shrink-0" aria-hidden />}
+    </button>
+  )
+}
+
+function PickerStatus({ error }: { error: boolean }) {
+  return <div role="status" className="px-3 py-2 text-xs text-zinc-500">{error ? "Couldn't refresh availability. Try opening again." : "Checking availability…"}</div>
+}
+
+/**
+ * What Default is, in words: "This computer, Mobile's Runs on" in a Captain's chat, "each project's agent" in the
+ * Coordinator's (it picks each task's project), "the project's Runs on" until the project loads.
+ */
+function defaultWords(kind: PickKind, picks: Pick<ChatPicksState, "defaults" | "projectId" | "projectName">, sep = ", ") {
+  const t = picks.defaults[kind]
+  if (!picks.projectId) return `each project's ${SETTING[kind]}`
+  if (!t || !picks.projectName) return `the project's ${SETTING[kind]}`
+  return `${t.label}${sep}${picks.projectName}'s ${SETTING[kind]}`
+}
+
+/** Over the buttons when the picks can't go together (Codex on an SSH machine): say so before it's sent. */
+export function PickConflict({ text }: { text: string }) {
+  return (
+    <div role="status" data-testid="pick-conflict" className="flex items-start gap-1.5 px-1.5 pt-1 text-xs text-amber-300">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="min-w-0">{text}</span>
+    </div>
+  )
+}
+
+/** What an inline pick's chip says it's for: its item, or why it isn't the whole message's. */
+const INLINE_SHORT: Record<InlineReason, string> = { item: "", mixed: "disagrees", words: "words differ" }
+const INLINE_WHY: Record<InlineReason, string> = {
+  item: "",
+  mixed: "another pick of its kind in the message disagrees",
+  words: "the message's words ask for another harness",
+}
+/** What a whole-message pick does, for its chip's title. */
+const WIDE_EFFECT: Record<ListKind, string> = {
+  runsOn: "Box Yard applies it to every task it leads to",
+  agent: "Box Yard applies it to every task it leads to",
+  project: "the Coordinator sends all of it to that project's Captain",
+}
+const inlineTitle = (p: { kind: ListKind; token: string; reason: InlineReason }, where: string | null, sent: boolean) =>
+  `${TRIGGER[p.kind]}${p.token} is only for ${where ? where : `part of the message (${INLINE_WHY[p.reason]})`}: Box Yard doesn't apply it to the whole message. ` +
+  `The ${sent ? "Coordinator or Captain was" : "Coordinator or Captain is"} told where it is, to pass it on that task.`
+
+/**
+ * Over the composer's buttons when the draft has picks for only part of it (an "@" or "!" inside one item of a list
+ * of tasks, or ones that disagree): which are for the whole message and which are only hints for their part, as
+ * scopePicks sees them. A draft with only whole-message picks shows nothing here: the buttons say those.
+ */
+export function PickScope({ scoped }: { scoped: ScopedPick[] }) {
+  const inline = scoped.filter((p) => p.scope === "inline")
+  if (!inline.length) return null
+  // The whole message's, once each (an item may name it again).
+  const wide = scoped.filter((p, i) => p.scope === "message" && scoped.findIndex((q) => q.scope === "message" && q.kind === p.kind) === i)
+  return (
+    <div data-testid="pick-scope" className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1.5 pt-1 text-[11px] text-zinc-500">
+      {wide.length > 0 && (
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
+          <span className="shrink-0">Whole message</span>
+          {wide.map((p) => (
+            <ScopeChip key={`${p.kind}-${p.start}`} testId="pick-scope-wide" t={p.target} kind={p.kind} title={`${TRIGGER[p.kind]}${p.target.token} is for the whole message: ${WIDE_EFFECT[p.kind]}.`} />
+          ))}
+        </span>
+      )}
+      <span className="flex min-w-0 flex-wrap items-center gap-1">
+        <span className="shrink-0">Only their part</span>
+        {inline.map((p) => (
+          <ScopeChip
+            key={`${p.kind}-${p.start}`}
+            testId="pick-scope-inline"
+            t={p.target}
+            kind={p.kind}
+            inline
+            where={p.item?.label ?? INLINE_SHORT[p.reason!]}
+            title={inlineTitle({ kind: p.kind, token: p.target.token, reason: p.reason! }, p.item?.label ?? null, false)}
+          />
+        ))}
+      </span>
+    </div>
+  )
+}
+
+/** One pick on the scope line: solid for the whole message's, dashed for one that's only its part's ("item 9"). */
+function ScopeChip({ t, kind, inline = false, where, title, testId }: { t: Pick<RunTarget, "kind" | "token">; kind: ListKind; inline?: boolean; where?: string; title: string; testId: string }) {
+  const Icon = iconOf(t)
+  return (
+    <span
+      data-testid={testId}
+      title={title}
+      className={cx(
+        "inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-2 py-0.5",
+        inline ? "border-dashed border-zinc-600 text-zinc-300" : "border-yard-500/30 bg-yard-500/10 text-yard-200",
+      )}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">
+        <span className="font-mono">
+          {TRIGGER[kind]}
+          {t.token}
+        </span>
+        {where ? ` · ${where}` : ""}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Under a sent message with picks (meta.runsOn, meta.agent, meta.project): its project, where its tasks run and on
+ * which harness; then, dashed, the picks that were only for part of it (meta.inlinePicks) with where each was.
+ */
+export const PickChips = memo(function PickChips({ meta }: { meta: Record<string, unknown> | null | undefined }) {
+  const where = runTargetPickOf(meta, "runsOn")
+  const agent = runTargetPickOf(meta, "agent")
+  const project = runTargetPickOf(meta, "project")
+  const inline = inlinePicksOf(meta)
+  if (!where && !agent && !project && !inline.length) return null
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1">
+      {project && (
+        <Chip testId="project-pick-chip" icon={FolderGit2} title={`Picked with #: this message is for ${project.label}, so its Captain gets it`}>
+          <span className="font-mono">#{project.token}</span>
+          {project.label.toLowerCase() !== project.token ? ` · ${project.label}` : ""}
+        </Chip>
+      )}
+      {where && (
+        <Chip
+          testId="runs-on-chip"
+          icon={iconOf({ kind: where.value.startsWith("label:") ? (where.token.startsWith("label:") ? "label" : "machine") : "runner", token: where.token })}
+          title={`Picked with @: this message's tasks run on ${where.label} (runs_on ${where.value})`}
+        >
+          Runs on <span className="font-mono">@{where.token}</span>
+          {where.label.toLowerCase() !== where.token ? ` · ${where.label}` : ""}
+        </Chip>
+      )}
+      {agent && (
+        <Chip testId="agent-pick-chip" icon={iconOf({ kind: "harness", token: agent.token })} title={`Picked with !: this message's tasks run on ${agent.label} (agent ${agent.value})`}>
+          <span className="font-mono">!{agent.token}</span> · {agent.label}
+        </Chip>
+      )}
+      {inline.map((p, i) => (
+        <ScopeChip
+          key={`${p.kind}-${i}`}
+          testId="inline-pick-chip"
+          t={{ kind: p.kind === "agent" ? "harness" : p.kind === "project" ? "project" : p.value.startsWith("label:") ? "label" : "runner", token: p.token }}
+          kind={p.kind}
+          inline
+          where={p.where ? itemLabel(p.where) : INLINE_SHORT[p.reason]}
+          title={inlineTitle(p, p.where, true)}
+        />
+      ))}
+    </div>
+  )
+})
+
+/** "item 9" from a sent pick's where (`item 9 ("Port the pickaxe…")`), for its chip; the title has the rest. */
+const itemLabel = (where: string) => /^(?:item|bullet) \d+/.exec(where)?.[0] ?? where
+
+function Chip({ testId, icon: Icon, title, children }: { testId: string; icon: LucideIcon; title: string; children: ReactNode }) {
+  return (
+    <span
+      data-testid={testId}
+      title={title}
+      className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-yard-500/30 bg-yard-500/10 px-2 py-0.5 text-[11px] text-yard-200"
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">{children}</span>
+    </span>
+  )
+}

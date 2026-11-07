@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Box Yard" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Box Yard</title>
+    <script>
+      // The app's first requests go out with the page, beside its script instead of after it (web/src/lib/boot.ts).
+      (function () {
+        var get = function (path) {
+          return fetch(path, { credentials: "same-origin" })
+            .then(function (r) { return r.ok ? r.json() : null })
+            .catch(function () { return null })
+        }
+        var early = { stream: null, heard: [], failed: false }
+        early.listen = function (e) { early.heard.push(e) }
+        // The stream first, so it's open before the snapshot is read: its "hello" says which events that includes.
+        try {
+          var es = new EventSource("/api/stream?patches=1")
+          es.addEventListener("hello", early.listen)
+          es.addEventListener("boot", early.listen)
+          es.addEventListener("message", early.listen)
+          es.onerror = function () { early.failed = true }
+          early.stream = es
+        } catch (e) {}
+        early.me = get("/api/me")
+        early.boot = get("/api/boot")
+        // Every Captain's newest messages (lib/captainPrefetch.ts) once the boot data is in (so signed in), when the
+        // network is idle while the app's script starts: asked for beside the boot data, they slowed the first paint.
+        early.recent = early.boot.then(function (b) { return b ? get("/api/captains/recent") : null })
+        window.__boxYardEarly = early
+      })()
+    </script>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

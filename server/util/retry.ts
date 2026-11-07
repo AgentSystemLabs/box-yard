@@ -1,0 +1,56 @@
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** True for errors worth retrying: network hiccups, 408, 429 and 5xx. */
+export function isTransient(err: unknown): boolean {
+  const e = err as { statusCode?: number; status?: number; code?: string; message?: string; name?: string }
+  const status = e?.statusCode ?? e?.status
+  if (typeof status === "number") return status === 408 || status === 429 || status >= 500
+  if (e?.name === "AbortError" || e?.name === "TimeoutError") return true
+  const msg = String(e?.message ?? "")
+  return /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network/i.test(
+    `${e?.code ?? ""} ${msg}`,
+  )
+}
+
+/** Retry `fn` with exponential backoff on transient errors. */
+export async function retry<T>(
+  fn: () => Promise<T>,
+  opts: { attempts?: number; baseMs?: number; label?: string } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 4
+  const base = opts.baseMs ?? 500
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (!isTransient(err) || i === attempts - 1) break
+      await sleep(base * 2 ** i + Math.floor(Math.random() * 200))
+    }
+  }
+  throw lastErr
+}
+
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  return String(err)
+}
+
+/**
+ * "<step> failed: <err's message>", so an error names the step it came from. Keeps err's status and code (isTransient,
+ * isUploadTooBig and the like still read them) and err as its cause.
+ */
+export function failedStep(step: string, err: unknown): Error {
+  const out = new Error(`${step} failed: ${errorMessage(err)}`, { cause: err })
+  const e = err as { statusCode?: unknown; status?: unknown; code?: unknown } | null
+  for (const key of ["statusCode", "status", "code"] as const) if (e?.[key] !== undefined) Object.assign(out, { [key]: e[key] })
+  return out
+}
+
+/** True when a provider refused for sending too much too fast: HTTP 429, or a "rate limit" / "too many requests" message. */
+export function isRateLimited(err: unknown): boolean {
+  const e = err as { statusCode?: number; status?: number; message?: string }
+  if ((e?.statusCode ?? e?.status) === 429) return true
+  return /rate.?limit|too many requests/i.test(String(e?.message ?? ""))
+}

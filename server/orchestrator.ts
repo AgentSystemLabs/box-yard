@@ -1,0 +1,1149 @@
+import { spawn, type ChildProcess } from "node:child_process"
+import { randomUUID } from "node:crypto"
+import fs from "node:fs"
+import path from "node:path"
+import type { Config } from "./config.js"
+import type { Hub } from "./hub.js"
+import type { Store } from "./store.js"
+import { ORCHESTRATOR_PROMPT } from "./prompts.js"
+import { COORDINATOR_NAMED_HEADING, namedState, TASK_THREAD_HEADING, tasksState, type PrLookup } from "./handoff.js"
+import { updatesBlock } from "./noticeBatch.js"
+import { DirectMessageDigests } from "./directMessageDigests.js"
+import { withOwner } from "../shared/owner.js"
+import type { Attachment, CaptainToolResult, ChatMessage, CompactionTaskSnapshot, ContextUsage, Effort, OrchestratorState, ScheduleRun, Task } from "../shared/types.js"
+import { uploadsDir } from "./uploads.js"
+import { BadRequestError, queuedChatError, type QueuedChatChange } from "./store.js"
+import { compactThreshold, type SettingsStore } from "./settings.js"
+import { contextTokens, contextWindowOf, formatTokens, parseContextReport, resultUsageObject, sessionUsageOf } from "./usage.js"
+import {
+  SUMMARY_PROMPT,
+  afterCompactBlock,
+  cleanSummary,
+  compactCommand,
+  compactionsDir,
+  compactionsPrompt,
+  finishCompaction,
+  lastCompaction,
+  recapBlock,
+  summaryBody,
+  summaryLooksValid,
+  summaryPrompt,
+  writeCompaction,
+} from "./compactions.js"
+import { routingInstructions } from "./routing.js"
+import { compactionTaskSnapshots, liveTaskLines, mentionedTaskIds, type StatusOnly } from "./compactionTasks.js"
+import { NEXT_STEPS_META_KEY, parseNextSteps } from "../shared/nextSteps.js"
+import { serverClaudeEnv } from "./turnCredentials.js"
+import { sessionLineMeta, type ThreadHost } from "./sideThreads.js"
+import { MISSING_SESSION, codexErrorText } from "./codex.js"
+import { CHAT_ALLOWED_TOOLS, CHAT_TOOLS, attachedImages, chatClaudeLogin, codexAttachmentNote, codexChatLaunch, codexManagerNote, type ChatLaunch } from "./chatAgent.js"
+import { limitsOf, recordLimits } from "./loginLimits.js"
+import { codexModel, type ManagerCli } from "../shared/agentCli.js"
+import { TurnClock, turnTiming, type McpHandshakes } from "./turnTimings.js"
+import { retryOnNextLogin, rotationLoginRef, type AgentLogins, type PickedLogin } from "./agentLogins.js"
+import { isCredentialsLogin } from "../shared/agentLogins.js"
+import { NO_PICKS, turnPicks, type InlinePick, type RunTargetPick, type TurnPicks } from "../shared/runTargets.js"
+import { pickNotes } from "./runTargets.js"
+import { STOPPED_LINE, STOPPED_META, STOPPED_NOTE } from "./stoppedTurn.js"
+import { NO_SESSION_CONNECTORS, mcpConfigJson, type SessionConnectors } from "./connectors/sessions.js"
+import type { SessionRef } from "./connectors/connectors.js"
+
+const TURN_TIMEOUT_MS = 15 * 60_000
+/** Wait this long after a task update before waking the orchestrator, to batch updates. */
+const WAKE_DEBOUNCE_MS = 4000
+/** Automatic turns in a row (no message from Cody in between) before it stops waking itself. */
+export const MAX_AUTO_TURNS = 8
+/** What the orchestrator says on an automatic turn when there's nothing to tell Cody; not shown. */
+const NO_UPDATE = "(no update)"
+const SESSION_KEY = "orchestrator_session"
+const STARTED_KEY = "orchestrator_session_started"
+/** The CLI the session belongs to (null: Claude Code, from before Codex). Another CLI can't resume it. */
+const SESSION_CLI_KEY = "orchestrator_session_cli"
+const USAGE_KEY = "orchestrator_usage"
+/** The summary file the next turn starts with: set by a compaction, cleared once a turn has seen it. */
+const RECAP_KEY = "orchestrator_recap"
+/** Set when Cody stopped a turn: the next turn starts with STOPPED_NOTE, and clears it once it has finished. */
+const STOPPED_KEY = "orchestrator_stopped"
+/** Never wait for more than this share of the window: the CLI's own last-resort compaction (no log) kicks in near 96%. */
+const MAX_THRESHOLD_SHARE = 0.95
+
+/** Tools that create something, and the id prefix of what they create. */
+const CREATES: Record<string, string> = { create_task: "task", create_project: "prj", create_schedule: "sch" }
+
+/** The id a create_* tool result names (the first id with the tool's prefix), or null. */
+export function createdId(tool: string, content: unknown): string | null {
+  const prefix = CREATES[tool]
+  if (!prefix) return null
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((c) => (typeof c?.text === "string" ? c.text : "")).join("") : ""
+  return new RegExp(`\\b${prefix}_[A-Za-z0-9-]{6,40}\\b`).exec(text)?.[0] ?? null
+}
+
+/** Coordinator tools that talk to a project Captain; their tool lines keep the result as meta.captain. */
+export const CAPTAIN_TOOLS = new Set(["send_to_captain", "ask_captain", "wait_for_captain"])
+
+/** The Captain's project and reply from a send/ask/wait_for_captain result, or null if it isn't one. */
+export function captainToolResult(tool: string, content: unknown): CaptainToolResult | null {
+  if (!CAPTAIN_TOOLS.has(tool)) return null
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((c) => (typeof c?.text === "string" ? c.text : "")).join("") : ""
+  let r: any
+  try {
+    r = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!r || typeof r !== "object") return null
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null)
+  // ask_captain names only what was said after the question; wait_for_captain the latest reply.
+  const reply = tool === "send_to_captain" ? null : tool === "ask_captain" && "reply" in r ? str(r.reply) : str(r.lastReply)
+  return {
+    projectId: str(r.projectId) ?? str(r.state?.projectId),
+    reply: reply ? reply.slice(0, 20_000) : null,
+    finished: typeof r.allFinished === "boolean" ? r.allFinished : null,
+  }
+}
+
+/** What one run of the claude CLI produced. */
+interface RunResult {
+  ok: boolean
+  error: string
+  /** Assistant text (used for the compaction summary). */
+  text: string
+  /** Raw stdout, for non-stream commands like /context. */
+  raw: string
+  sessionId: string | null
+  /** The login it ran on (docs/logins.md), when it was handed one. */
+  login?: PickedLogin | null
+  /** Cody stopped it (stopTurn): not an error. */
+  stopped?: boolean
+}
+type RunKind = "turn" | "summary" | "compact" | "context"
+
+/** What asked for a run, for its timing row (shared/turnTimings.ts). */
+interface RunAsk {
+  /** Images attached to the messages it answers: a Codex run gets them with the prompt (Claude Code opens them with Read). */
+  images?: string[]
+  trigger?: string | null
+  /** The oldest message or update it answers. */
+  requestedAt?: number | null
+  /** Only task updates and Captain replies to relay, no message from Cody: Settings' relay model may run it. */
+  relay?: boolean
+}
+
+/** Tell the orchestrator where Cody's attached files are, and how to pass them on. */
+export function attachmentNote(files: unknown, ownerName?: string): string {
+  if (!Array.isArray(files) || !files.length) return ""
+  const lines = (files as Attachment[]).map((f) => `- ${f.name} (${f.mime}, ${f.size} bytes) id=${f.id} path=${f.path}`)
+  return `\n\n[${withOwner("Cody", ownerName)} attached ${files.length === 1 ? "a file" : "files"}. Open them with the Read tool (images included). To give them to an agent, pass the ids in the \`attachments\` param of create_task, create_tasks or send_to_task.]\n${lines.join("\n")}`
+}
+
+/**
+ * The orchestrator is Claude Code in headless mode with the Box Yard MCP
+ * tools. Every chat message runs `claude -p --resume <session>` so the
+ * conversation keeps its context across messages and restarts.
+ */
+export class Orchestrator {
+  private running = false
+  private pending = false
+  private wakeWanted = false
+  private wakeTimer: NodeJS.Timeout | null = null
+  private autoTurns = 0
+  /** Read on every nudge; tests shorten it. */
+  readonly tuning = { wakeDebounceMs: WAKE_DEBOUNCE_MS }
+  /** The turn running now, stamped on what it sends to Captains so their replies know a fan-out (captainWake.ts). */
+  turnKey: string | null = null
+  /**
+   * Cody's "@" and "!" picks for the messages this turn answers (shared/runTargets.ts turnPicks), while it runs: the
+   * task tools take them as runs_on and agent, and messages to Captains carry them (server/mcp.ts,
+   * CaptainManager.coordinatorMeta).
+   */
+  turnPicks: TurnPicks = NO_PICKS
+  /** Set by stop(): the database closes right after, so a turn still winding down must not touch it. */
+  private stopped = false
+  /** Model-only notes for queued scheduled runs, by run id. The queue itself lives in the schedule_runs table. */
+  private readonly runNotes = new Map<string, string>()
+  private child: ChildProcess | null = null
+  /** What `child` is running: only a turn can be stopped. */
+  private childKind: RunKind | null = null
+  /** Set by stopTurn() until the turn it stopped has ended, which is then recorded as stopped. */
+  private stopping = false
+  /** From a Stop until the next turn in this drain: the chats show the Coordinator idle while the stopped turn ends. */
+  private stopShown = false
+  private compactWanted: "button" | "auto" | null = null
+  private compacting = false
+  /**
+   * The system prompt of the turn before a compaction, kept for its summary and /compact passes: writing the
+   * summary file changes the file list in it, which would cost /compact the prompt cache.
+   */
+  private compactionSystemPrompt: string | null = null
+  private lastError: string | null = null
+  private readonly workdir: string
+  readonly compactionsDir: string
+  private readonly mcpConfigPath: string
+  readonly directMessages: DirectMessageDigests
+
+  constructor(
+    private readonly c: Config,
+    private readonly store: Store,
+    private readonly hub: Hub,
+    mcp: { url: string; token: string; handshakes?: McpHandshakes },
+    private readonly settings: SettingsStore,
+  ) {
+    this.directMessages = new DirectMessageDigests(store, (id) => this.statusOnly(id), () => this.owner())
+    this.mcp = mcp
+    this.handshakes = mcp.handshakes ?? null
+    this.workdir = path.join(c.dataDir, "orchestrator")
+    this.compactionsDir = compactionsDir(c.dataDir)
+    fs.mkdirSync(this.compactionsDir, { recursive: true })
+    this.mcpConfigPath = path.join(c.dataDir, "orchestrator-mcp.json")
+  }
+
+  private readonly mcp: { url: string; token: string }
+
+  /** The CLI the Coordinator runs on now (Settings › Coordinator). */
+  private cli(): ManagerCli {
+    return this.settings.get().orchestratorCli
+  }
+
+  /** Its model: Settings › Coordinator › Model, or its Codex model when it runs on Codex (null: Codex's default). */
+  private model(): string | null {
+    const st = this.settings.get()
+    return st.orchestratorCli === "codex" ? codexModel(null, st.orchestratorCodexModel) : st.orchestratorModel
+  }
+  /** The MCP handshakes /mcp saw, to split a run's start-up into process start and MCP connect. */
+  private readonly handshakes: McpHandshakes | null
+
+  /**
+   * Projects whose identity lets the Coordinator see their status only (app.ts wires Identities in). Its summaries,
+   * recaps and compaction snapshots then keep their tasks' status and leave out their questions and replies.
+   */
+  statusOnly: StatusOnly = () => false
+  /** GitHub's PR states for the named-state block in front of Cody's messages (app.ts: TaskManager.prs). */
+  prs: PrLookup | null = null
+  /** The Claude and Codex logins its runs rotate over (docs/logins.md); app.ts wires them in. */
+  logins: AgentLogins | null = null
+  /** The external MCP connectors a session gets (docs/connectors.md › Sessions); app.ts wires them in. */
+  connectors: ((ref: SessionRef) => Promise<SessionConnectors>) | null = null
+
+  /**
+   * Written before every run rather than once at startup: the token is per
+   * process, and another server process starting on the same data dir (say,
+   * one that then fails to bind the port) must not leave us a stale token.
+   * Its connectors name their secrets as ${VAR}: the values are in the run's env only.
+   */
+  private writeMcpConfig(connectors: SessionConnectors) {
+    fs.writeFileSync(this.mcpConfigPath, mcpConfigJson({ type: "http", url: this.mcp.url, headers: { Authorization: `Bearer ${this.mcp.token}` } }, connectors), { mode: 0o600 })
+  }
+
+  /**
+   * The connectors this run gets: the Coordinator's, with OAuth tokens refreshed when they have under 45 minutes left.
+   * Every kind of run gets the same, so a summary or /compact keeps the turn's tools (and its prompt cache); only a
+   * turn may call them (claudeArgs). Codex runs get none yet.
+   */
+  private async sessionConnectors(): Promise<SessionConnectors> {
+    if (this.cli() !== "claude" || !this.connectors) return NO_SESSION_CONNECTORS
+    try {
+      return await this.connectors({ kind: "coordinator" })
+    } catch (err) {
+      console.error("[orchestrator] couldn't put its connectors together:", (err as Error).message)
+      return NO_SESSION_CONNECTORS
+    }
+  }
+
+  get busy() {
+    return this.running
+  }
+
+  /** Save Cody's message and make sure a turn will pick it up. */
+  send(content: string, id?: string, attachments: Attachment[] = [], picks: Partial<TurnPicks> & { project?: RunTargetPick; inlinePicks?: InlinePick[] } = {}): ChatMessage {
+    // Mid-turn it waits for the next turn: queued (see Store.deliverQueued).
+    const meta = {
+      ...(attachments.length ? { attachments } : {}),
+      // The "#" pick: the turn's prompt says which project's Captain it's for (pickNotes).
+      ...(picks.project ? { project: picks.project } : {}),
+      ...(picks.runsOn ? { runsOn: picks.runsOn } : {}),
+      ...(picks.agent ? { agent: picks.agent } : {}),
+      // Picks for only part of it: the prompt lists them, and the turn applies none (shared/runTargets.ts scopePicks).
+      ...(picks.inlinePicks?.length ? { inlinePicks: picks.inlinePicks } : {}),
+      ...(this.running ? { queued: true } : {}),
+    }
+    const msg = this.store.addChat("user", content.trim(), Object.keys(meta).length ? meta : null, id)
+    this.hub.broadcast({ type: "chat.message", message: msg })
+    this.pending = true
+    this.autoTurns = 0
+    void this.drain()
+    return msg
+  }
+
+  /** Edit a message still queued for the next turn. Refused once that turn has taken it. */
+  editQueued(id: string, content: string): ChatMessage {
+    return this.queuedChanged(this.store.editQueuedChat("chat_messages", id, null, content.trim()))
+  }
+
+  /** Delete a queued message before a turn reads it. Undo with restoreQueued. */
+  cancelQueued(id: string): ChatMessage {
+    return this.queuedChanged(this.store.cancelQueuedChat("chat_messages", id, null))
+  }
+
+  restoreQueued(id: string): ChatMessage {
+    const since = Number(this.store.getKv("orchestrator_last_turn_at") ?? 0)
+    const msg = this.queuedChanged(this.store.restoreQueuedChat("chat_messages", id, null, { queued: this.running, at: Math.max(Date.now(), since) }))
+    this.pending = true
+    void this.drain()
+    return msg
+  }
+
+  private queuedChanged(change: QueuedChatChange): ChatMessage {
+    if (!change.ok) throw queuedChatError(change.reason, "the Coordinator")
+    const msg: ChatMessage = { role: "user", ...change.row }
+    this.hub.broadcast({ type: "chat.message", message: msg })
+    return msg
+  }
+
+  /**
+   * A hook's message (server/hooks.ts message_coordinator): a chat line labelled with the hook, answered
+   * on the next turn. Unlike Cody's messages it doesn't reset the automatic-turn count: it's an automation.
+   */
+  hookMessage(content: string, meta: Record<string, unknown>): ChatMessage {
+    const msg = this.store.addChat("user", content.trim(), this.running ? { ...meta, queued: true } : meta)
+    this.hub.broadcast({ type: "chat.message", message: msg })
+    this.pending = true
+    void this.drain()
+    return msg
+  }
+
+  /**
+   * Queue a scheduled prompt (a `queued` schedule_runs row). It is injected into
+   * the chat once no turn is running, so two orchestrator turns never overlap.
+   */
+  enqueueScheduled(runId: string, notes?: string) {
+    if (notes) this.runNotes.set(runId, notes)
+    void this.drain()
+  }
+
+  /** On startup: runs that were mid-turn when the server stopped are failed; queued ones are delivered, and so are queued messages. */
+  resumeScheduled() {
+    for (const r of this.store.listScheduleRuns({ status: ["running"] })) this.finishScheduledRun(r.id, "Box Yard restarted before this run finished.")
+    if (this.store.queuedChatIds().length) this.pending = true
+    if (this.pending || this.store.listScheduleRuns({ status: ["queued"], limit: 1 }).length) void this.drain()
+  }
+
+  /**
+   * A task finished, failed, asked something or opened a PR. Wake the
+   * orchestrator (after a short pause to batch updates) so it can tell Cody
+   * and carry on with work he already asked for, without waiting for his
+   * next message.
+   */
+  nudge() {
+    if (!this.c.orchestratorAutoWake || this.wakeTimer) return
+    this.wakeTimer = setTimeout(() => {
+      this.wakeTimer = null
+      // Updates from an agent that's still mid-turn (say, it published a file)
+      // wait for its end-of-turn notice, which nudges again; then they go together.
+      const busy = new Set(["queued", "starting", "working"])
+      const ready = this.store.unseenNoticeTasks().some((id) => !id || !busy.has(this.store.getTask(id)?.status ?? "idle"))
+      if (!ready) return
+      this.wakeWanted = true
+      void this.drain()
+    }, this.tuning.wakeDebounceMs)
+    this.wakeTimer.unref?.()
+  }
+
+  stop() {
+    this.stopped = true
+    if (this.wakeTimer) clearTimeout(this.wakeTimer)
+    this.wakeTimer = null
+    this.child?.kill("SIGTERM")
+  }
+
+  /**
+   * Cody's Stop: end the turn running now. Its process is ended and the session kept; the chat says it was stopped
+   * (not an error) and the next turn starts with a note saying so (server/stoppedTurn.ts). A turn still setting up
+   * stops before its process starts. Messages queued meanwhile still get their turn; a pending automatic wake-up
+   * doesn't. A compaction isn't a turn and finishes. False when no turn is running.
+   */
+  stopTurn(): boolean {
+    if (!this.running || this.compacting || this.stopped) return false
+    this.stopping = true
+    this.wakeWanted = false
+    if (this.childKind === "turn") this.child?.kill("SIGTERM")
+    // Every open chat shows it stopped at once, not when the process has ended.
+    this.stopShown = true
+    this.hub.broadcast({ type: "chat.busy", busy: false })
+    this.publishState()
+    return true
+  }
+
+  // ------------------------------------------------------------------ context usage and compaction
+
+  usage(): ContextUsage {
+    try {
+      const u = JSON.parse(this.store.getKv(USAGE_KEY) ?? "null")
+      if (u) return { tokens: u.tokens ?? null, window: u.window ?? null, updatedAt: u.updatedAt ?? null }
+    } catch {}
+    return { tokens: null, window: null, updatedAt: null }
+  }
+
+  private setUsage(tokens: number | null, window?: number | null) {
+    const prev = this.usage()
+    this.store.setKv(USAGE_KEY, JSON.stringify({ tokens, window: window ?? prev.window, updatedAt: Date.now() }))
+    this.publishState()
+  }
+
+  state(): OrchestratorState {
+    return {
+      busy: this.running && !this.stopShown,
+      usage: this.usage(),
+      compacting: this.compacting,
+      compactQueued: this.compactWanted !== null && !this.compacting,
+      lastCompaction: lastCompaction(this.compactionsDir),
+      compactionsDir: this.compactionsDir,
+      error: this.lastError,
+    }
+  }
+
+  private publishState() {
+    try {
+      this.hub.broadcast({ type: "orchestrator.state", state: this.state() })
+    } catch {
+      // The database is closed (shutdown while a turn was finishing).
+    }
+  }
+
+  /** Compact the orchestrator's session: right now if it is idle, otherwise right after the current turn. */
+  requestCompact(trigger: "button" | "auto" = "button") {
+    if (!this.session().started) throw new BadRequestError("The orchestrator hasn't started a conversation yet, so there is nothing to compact.")
+    if (this.compacting || this.compactWanted) return this.state()
+    this.compactWanted = trigger
+    this.lastError = null
+    this.publishState()
+    void this.drain()
+    return this.state()
+  }
+
+  /** After a turn: queue a compaction when usage passed the configured threshold. */
+  private checkAutoCompact() {
+    try {
+      this.checkAutoCompactNow()
+    } catch {
+      // Shutting down; nothing to compact.
+    }
+  }
+
+  private checkAutoCompactNow() {
+    if (this.compactWanted || this.compacting) return
+    const { orchestratorAutoCompact: ac } = this.settings.get()
+    const u = this.usage()
+    const threshold = compactThreshold(ac, u.window)
+    if (threshold === null || u.tokens === null) return
+    const cap = u.window ? Math.floor(u.window * MAX_THRESHOLD_SHARE) : Infinity
+    if (u.tokens >= Math.min(threshold, cap)) {
+      this.compactWanted = "auto"
+      this.publishState()
+    }
+  }
+
+  /** Tasks updated or mentioned since the previous recorded compaction. */
+  private compactionTaskSnapshots(): CompactionTaskSnapshot[] {
+    const previous = this.previousCompactionAt()
+    const mentioned = mentionedTaskIds(this.store.listChatSince(previous).flatMap((m) => [m.content, m.meta]))
+    return compactionTaskSnapshots(this.store, this.store.listTasks(), previous, mentioned, this.statusOnly)
+  }
+
+  private previousCompactionAt(): number {
+    return this.store.listOrchestratorCompactions({ limit: 1 })[0]?.at ?? lastCompaction(this.compactionsDir)?.at ?? 0
+  }
+
+  /** The newest summary file, read back, or null when there is none (or it can't be read). */
+  private latestSummary(): { at: number; file: string; markdown: string } | null {
+    const last = lastCompaction(this.compactionsDir)
+    if (!last) return null
+    try {
+      return { at: last.at, file: last.file, markdown: fs.readFileSync(last.file, "utf8") }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * The summary prompt, with the previous summary to carry forward and the tasks in play as they are now: busy
+   * ones, and those updated or mentioned since the previous compaction (the rest are as that summary says).
+   */
+  private summaryPrompt(): string {
+    const previous = this.latestSummary()
+    const since = this.previousCompactionAt()
+    const ids = new Set([
+      ...this.store.listTasks().filter((t) => t.updatedAt >= since).map((t) => t.id),
+      ...mentionedTaskIds(this.store.listChatSince(since).flatMap((m) => [m.content, m.meta])),
+    ])
+    return summaryPrompt(withOwner(SUMMARY_PROMPT, this.owner()), { previous, liveTasks: liveTaskLines(this.store, ids, { busy: true, statusOnly: this.statusOnly }) })
+  }
+
+  /**
+   * A saved summary as a prompt block, with the current state of every task it names. Right after a /compact
+   * (`compacted`) only that state: the CLI's own summary carries the rest.
+   */
+  private recap(file: string, opts: { lead?: string; compacted?: boolean } = {}): string | null {
+    let markdown: string
+    try {
+      markdown = fs.readFileSync(file, "utf8")
+    } catch {
+      return null
+    }
+    const live = liveTaskLines(this.store, mentionedTaskIds([summaryBody(markdown)]), { statusOnly: this.statusOnly })
+    return opts.compacted ? afterCompactBlock(file, markdown, live) : recapBlock(file, markdown, live, opts.lead)
+  }
+
+  /**
+   * Write the durable summary first, then /compact. If the summary can't be
+   * produced the session is left alone (and the error shown), so every
+   * compaction has a log file.
+   */
+  private async doCompact() {
+    const trigger = this.compactWanted ?? "button"
+    this.compactWanted = null
+    this.compacting = true
+    this.lastError = null
+    this.publishState()
+    try {
+      const s = this.session()
+      const before = this.usage().tokens
+      const cli = this.cli()
+      const model = this.model() ?? "codex"
+      this.compactionSystemPrompt = this.systemPrompt()
+      const summary = await this.run(this.summaryPrompt(), s.id, true, "summary")
+      const text = cleanSummary(summary.text)
+      if (!summary.ok || !summaryLooksValid(text)) {
+        throw new Error(`couldn't write the summary first (${summary.error || "empty or malformed reply"}), so the context was not compacted`)
+      }
+      const meta = { at: Date.now(), sessionId: s.id, model, trigger, tokensBefore: before }
+      const taskSnapshots = this.compactionTaskSnapshots()
+      const files = writeCompaction(this.compactionsDir, meta, text, taskSnapshots)
+      this.store.addOrchestratorCompaction({
+        id: files.id,
+        at: meta.at,
+        sessionId: meta.sessionId,
+        model: meta.model,
+        trigger: meta.trigger,
+        tokensBefore: meta.tokensBefore,
+        markdownPath: files.markdownFile,
+        jsonPath: files.jsonFile,
+        markdown: files.markdown,
+        tasks: taskSnapshots,
+      })
+      let after: { tokens: number; window: number } | null = null
+      if (cli === "codex") {
+        // Codex has no /compact to run headless: the next turn starts a new session from this summary (RECAP_KEY).
+        this.resetSession()
+        this.compactionSystemPrompt = null
+        this.setUsage(null)
+      } else {
+        const compact = await this.run(compactCommand(this.owner()), s.id, true, "compact")
+        if (!compact.ok) throw new Error(`/compact failed: ${compact.error}`)
+        // /compact keeps the session id; if a CLI version ever changed it, follow it.
+        let id = s.id
+        if (compact.sessionId && compact.sessionId !== s.id) {
+          id = compact.sessionId
+          this.store.setKv(SESSION_KEY, id)
+        }
+        this.compactionSystemPrompt = null
+        const report = await this.run("/context", id, true, "context")
+        after = report.ok ? parseContextReport(report.raw) : null
+        this.setUsage(after?.tokens ?? null, after?.window)
+      }
+      finishCompaction(files.markdownFile, after?.tokens ?? null)
+      this.store.finishOrchestratorCompaction(files.id, after?.tokens ?? null, fs.readFileSync(files.markdownFile, "utf8"))
+      // The /compact summary leaves out what this one says: the next turn starts with it.
+      this.store.setKv(RECAP_KEY, files.markdownFile)
+      const note = this.store.addChat(
+        "notice",
+        `Context compacted${before ? ` from ${formatTokens(before)}` : ""}${after ? ` to ${formatTokens(after.tokens)} tokens` : ""} (${trigger === "auto" ? "automatic" : "button"}). Summary saved to ${files.markdownFile}.`,
+        { kind: "compaction" },
+      )
+      // Informational only: the orchestrator doesn't need to see this one.
+      this.store.db.prepare("UPDATE chat_messages SET seen_by_orchestrator = 1 WHERE id = ?").run(note.id)
+      this.hub.broadcast({ type: "chat.message", message: note })
+    } catch (err) {
+      this.lastError = `Compaction skipped: ${(err as Error).message}`
+      const m = this.store.addChat("error", this.lastError)
+      this.hub.broadcast({ type: "chat.message", message: m })
+    } finally {
+      this.compacting = false
+      this.compactionSystemPrompt = null
+      this.publishState()
+    }
+  }
+
+  /** What a side thread on this chat forks (server/sideThreads.ts). Reading it never changes the session. */
+  threadHost(): ThreadHost {
+    return {
+      cwd: this.workdir,
+      session: () => ({ id: this.store.getKv(SESSION_KEY) ?? "", started: this.store.getKv(STARTED_KEY) === "1" }),
+      systemPrompt: () => this.systemPrompt(),
+      readRules: () => this.readRules(),
+      cli: () => this.cli(),
+      model: () => this.model(),
+      effort: () => this.settings.get().orchestratorEffort,
+      compactionsDir: this.compactionsDir,
+      caller: { kind: "coordinator" },
+      claudeLogin: () => null,
+      login: () => this.logins?.heldBy("coordinator", this.cli()) ?? null,
+      usage: { source: "orchestrator", projectId: null },
+      taskState: (task) => tasksState([task], this.stateOptions(), TASK_THREAD_HEADING),
+      statusOnly: (projectId) => this.statusOnly(projectId),
+    }
+  }
+
+  /** Forget the session: the next turn starts a new one. */
+  private resetSession() {
+    this.store.setKv(SESSION_KEY, randomUUID())
+    this.store.setKv(STARTED_KEY, null)
+  }
+
+  private session() {
+    let id = this.store.getKv(SESSION_KEY)
+    if (!id) {
+      id = randomUUID()
+      this.store.setKv(SESSION_KEY, id)
+      this.store.setKv(STARTED_KEY, null)
+    }
+    return { id, started: this.store.getKv(STARTED_KEY) === "1" }
+  }
+
+  private async drain() {
+    if (this.running || this.stopped) return
+    this.running = true
+    this.hub.broadcast({ type: "chat.busy", busy: true })
+    try {
+      while (!this.stopped && (this.pending || this.wakeWanted || this.compactWanted || this.nextScheduledRun())) {
+        // A turn after a stopped one (for a message queued meanwhile): the chats showed idle from the Stop.
+        if (this.stopShown) {
+          this.stopShown = false
+          this.hub.broadcast({ type: "chat.busy", busy: true })
+          this.publishState()
+        }
+        if (this.compactWanted) {
+          await this.doCompact()
+        } else if (this.pending) {
+          this.pending = false
+          this.wakeWanted = false
+          await this.turn()
+        } else if (this.nextScheduledRun()) {
+          await this.scheduledTurn(this.nextScheduledRun()!)
+        } else {
+          this.wakeWanted = false
+          await this.autoTurn()
+        }
+      }
+    } catch (err) {
+      // stop() killed the turn and closed the database under it: nothing left to record.
+      if (!this.stopped) throw err
+    } finally {
+      this.running = false
+      this.stopping = false
+      this.stopShown = false
+      this.hub.broadcast({ type: "chat.busy", busy: false })
+      this.publishState()
+    }
+  }
+
+  /** The oldest queued scheduled run, if any. */
+  private nextScheduledRun() {
+    const queued = this.store.listScheduleRuns({ status: ["queued"] })
+    return queued.length ? queued[queued.length - 1]! : null
+  }
+
+  private finishScheduledRun(id: string, error?: string) {
+    const run = this.store.updateScheduleRun(id, { status: error ? "failed" : "done", error: error ?? null, finishedAt: Date.now() })
+    this.runNotes.delete(id)
+    this.hub.broadcast({ type: "schedule.run", run })
+  }
+
+  /** Inject a scheduled prompt into the chat as a labeled message and handle it like a message from Cody. */
+  private async scheduledTurn(queued: ScheduleRun) {
+    const msg = this.store.addChat("user", queued.prompt, { scheduleId: queued.scheduleId, scheduleRunId: queued.id })
+    this.hub.broadcast({ type: "chat.message", message: msg })
+    const run = this.store.updateScheduleRun(queued.id, { status: "running", startedAt: Date.now(), chatMessageId: msg.id })
+    this.hub.broadcast({ type: "schedule.run", run })
+    // This message is answered by this turn, not by Cody's next one.
+    this.store.setKv("orchestrator_last_turn_at", String(Date.now() + 1))
+    const notices = this.takeNotices()
+    const notes = this.runNotes.get(queued.id)
+    const prompt = [
+      updatesBlock("Box Yard updates since your last turn", notices),
+      queued.prompt,
+      `(${withOwner("This is a scheduled message from Box Yard, not a new message from Cody.", this.owner())} ${notes ?? ""} ${withOwner("Handle it as if Cody had sent it: do the work, and reply with what Cody should see.", this.owner())})`,
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+    const result = await this.runPrompt(prompt, { trigger: "schedule", requestedAt: queued.dueAt })
+    this.finishScheduledRun(queued.id, result.ok ? undefined : result.error.slice(0, 500))
+  }
+
+  private owner(): string {
+    return this.settings.get().ownerName
+  }
+
+  /** Passive FYIs join the existing updates block, without participating in any wake or pending-turn path. */
+  private takeNotices(): string[] {
+    return [
+      ...this.store.takeUnseenNotices(withOwner("(FYI: already on Cody's screen, no action needed.)", this.owner())),
+      ...this.directMessages.take(),
+    ]
+  }
+
+  /** Messages Cody sent since the orchestrator last replied. */
+  private unansweredUserMessages(): ChatMessage[] {
+    const since = Number(this.store.getKv("orchestrator_last_turn_at") ?? 0)
+    return this.store.listChat(200).filter((m) => m.role === "user" && m.createdAt >= since && m.meta?.cancelled !== true)
+  }
+
+  private promptText(messages: ChatMessage[]): string[] {
+    return messages
+      .map((m) =>
+        m.meta?.source === "hook" && typeof m.meta.hookName === "string"
+          ? `[From the Box Yard hook "${m.meta.hookName}": ${withOwner("an automation, not a new message from Cody", this.owner())}]\n${m.content}`
+          : m.content + (this.cli() === "codex" ? codexAttachmentNote : attachmentNote)(m.meta?.attachments, this.owner()) + pickNotes(m.meta, this.owner(), true),
+      )
+      .filter((text) => text.trim())
+  }
+
+  /** A turn with only task updates in it: report them and keep Cody's work moving. */
+  private async autoTurn() {
+    if (this.autoTurns >= MAX_AUTO_TURNS) return
+    const requestedAt = this.store.oldestUnseenNoticeAt()
+    const notices = this.takeNotices()
+    if (!notices.length) return
+    this.autoTurns++
+    await this.runPrompt(
+      [
+        updatesBlock("Box Yard updates since your last turn", notices),
+        withOwner(
+          `(Automatic wake-up: there is no new message from Cody. Tell Cody in a line or two what finished, failed or needs Cody, with links. ` +
+          `If an update completes a step of work Cody already asked for and the next step is clear, start it. ` +
+          `Don't start unrelated work, and don't repeat things you already told Cody. If there's nothing new for Cody, reply with exactly ${NO_UPDATE} and nothing else.)`,
+          this.owner(),
+        ),
+      ].join("\n\n"),
+      { trigger: "updates", requestedAt, relay: true },
+    )
+  }
+
+  private async turn() {
+    const answering = this.unansweredUserMessages()
+    const messages = this.promptText(answering)
+    if (!messages.length) return
+    // Codex sees attached images with the message itself; Claude Code opens them with Read.
+    const images = this.cli() === "codex" ? answering.flatMap((m) => attachedImages(m.meta?.attachments)) : []
+    // Messages sent during the last turn move to now, right before this turn's reply.
+    const moved = this.store.deliverQueued("chat_messages", answering.map((m) => m.id))
+    for (const d of moved) {
+      const m = answering.find((x) => x.id === d.id)!
+      this.hub.broadcast({ type: "chat.message", message: { ...m, createdAt: d.createdAt, meta: d.meta } })
+    }
+    this.store.setKv("orchestrator_last_turn_at", String(Math.max(Date.now(), ...moved.map((d) => d.createdAt)) + 1))
+    const named = await this.namedState(answering.filter((m) => m.meta?.source !== "hook").map((m) => m.content).join("\n\n"))
+    const notices = this.takeNotices()
+    const prompt = [
+      updatesBlock("Box Yard updates since your last turn", notices),
+      named,
+      messages.join("\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+    const ask = {
+      trigger: answering.every((m) => m.meta?.source === "hook") ? "hook" : "cody",
+      requestedAt: Math.min(...answering.map((m) => m.createdAt)),
+    }
+    this.turnPicks = turnPicks(answering.map((m) => m.meta))
+    try {
+      await this.runPrompt(prompt, { ...ask, images })
+    } finally {
+      this.turnPicks = NO_PICKS
+    }
+  }
+
+  /** The tasks and projects Cody's message names, as they stand now (server/handoff.ts), so a quick question needs no lookup step. */
+  private namedState(text: string): Promise<string | null> {
+    const projects = this.store.listProjects()
+    return namedState(text, { tasks: this.store.listTasks(), projects }, this.stateOptions(projects), COORDINATOR_NAMED_HEADING)
+  }
+
+  /** How the Coordinator is shown tasks' state: each with its project's name, a status-only project's sealed. */
+  private stateOptions(projects = this.store.listProjects()) {
+    return { store: this.store, prs: this.prs, sealed: (t: Task) => this.statusOnly(t.projectId), projectNames: new Map(projects.map((p) => [p.id, p.name])) }
+  }
+
+  /** The model and effort a run uses: Settings' relay pair for a relay-only turn when it's on, else the Coordinator's. */
+  private modelFor(kind: RunKind, ask: RunAsk): { model: string; effort: Effort } {
+    const st = this.settings.get()
+    // On Codex every turn runs on its Codex model: the relay pair is a Claude model. "" is Codex's own default.
+    if (st.orchestratorCli === "codex") return { model: this.model() ?? "", effort: st.orchestratorEffort }
+    const relay = st.orchestratorRelay
+    if (kind === "turn" && ask.relay && relay.enabled) return { model: relay.model, effort: relay.effort }
+    return { model: st.orchestratorModel, effort: st.orchestratorEffort }
+  }
+
+  /** A one-glance view of the yard, so the orchestrator never works from stale memory. */
+  private yardNow(): string {
+    const projects = new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+    const lines = this.store
+      .listTasks({ status: ["queued", "starting", "working", "needs_input", "waiting"] })
+      .map((t) => `- ${t.id} "${t.title}" [${projects.get(t.projectId) ?? "?"}] ${t.status}${t.pendingCount ? ` (+${t.pendingCount} queued messages)` : ""}`)
+    return `[Yard now] ${lines.length ? `busy or waiting agents:\n${lines.join("\n")}` : "no agents are busy; every task is idle, done or failed."}`
+  }
+
+  private async runPrompt(body: string, ask: RunAsk = {}): Promise<{ ok: boolean; error: string }> {
+    const recapFile = this.store.getKv(RECAP_KEY)
+    const s = this.session()
+    // A /compact keeps the session; Codex's compaction starts a new one, which gets the whole summary.
+    const compacted = recapFile ? this.recap(recapFile, { compacted: s.started }) : null
+    const stoppedNote = this.store.getKv(STOPPED_KEY) ? withOwner(STOPPED_NOTE, this.owner()) : null
+    const now = [this.yardNow(), stoppedNote, body].filter(Boolean).join("\n\n")
+    const prompt = [compacted, now].filter(Boolean).join("\n\n")
+    this.turnKey = `turn_${randomUUID().slice(0, 12)}`
+    // A session the other CLI started can't be resumed: start over the same way as when it's gone.
+    const switched = s.started && (this.store.getKv(SESSION_CLI_KEY) ?? "claude") !== this.cli()
+    let result: RunResult = switched ? { ok: false, error: "session not found: it belongs to the other CLI", text: "", raw: "", sessionId: null } : await this.run(prompt, s.id, s.started, "turn", ask)
+    // Its login hit its usage limit or was refused: once more on the next one (a Codex thread another login's home
+    // doesn't have starts over below, like any missing session). A turn Cody stopped stays stopped.
+    if (!result.stopped)
+      result = await retryOnNextLogin(this.logins, result, () => {
+        const again = this.session()
+        return this.run(prompt, again.id, again.started, "turn", ask)
+      })
+    if (!result.ok && !result.stopped && s.started && MISSING_SESSION.test(result.error)) {
+      // Session file is gone (new machine, wiped data). Start over with the last summary and a recap.
+      const fresh = randomUUID()
+      this.store.setKv(SESSION_KEY, fresh)
+      const recap = this.store
+        .listChat(30)
+        .filter((m) => (m.role === "user" || m.role === "assistant") && m.meta?.cancelled !== true)
+        .map((m) => `[${m.role}] ${m.content.slice(0, 800)}`)
+        .join("\n")
+      const last = recapFile ? { file: recapFile } : this.latestSummary()
+      const saved = last ? this.recap(last.file, { lead: "Your session was reset. This is the last summary you wrote" }) : null
+      result = await this.run(`${saved ? `${saved}\n\n` : ""}Earlier conversation (your session was reset):\n${recap}\n\n---\n\n${now}`, fresh, false, "turn", ask)
+    }
+    this.turnKey = null
+    this.stopping = false
+    if (result.ok && recapFile) this.store.setKv(RECAP_KEY, null)
+    if (result.ok && stoppedNote) this.store.setKv(STOPPED_KEY, null)
+    if (result.stopped) {
+      this.store.setKv(STOPPED_KEY, "1")
+      const msg = this.store.addChat("error", withOwner(STOPPED_LINE, this.owner()), { ...STOPPED_META })
+      this.hub.broadcast({ type: "chat.message", message: msg })
+    } else if (!result.ok) {
+      const msg = this.store.addChat("error", `The orchestrator hit an error: ${result.error.slice(0, 1500)}`)
+      this.hub.broadcast({ type: "chat.message", message: msg })
+    }
+    this.checkAutoCompact()
+    return result
+  }
+
+  /**
+   * The run's timings into turn_timings (shared/turnTimings.ts), and their id on the turn's reply, where the chat's
+   * timing chip opens them. Instrumentation only: it never fails the run.
+   */
+  private recordTiming(
+    clock: TurnClock,
+    r: { kind: RunKind; sessionId: string; model: string | null; effort: string; resume: boolean; ask: RunAsk; ok: boolean; reply: ChatMessage | null; loginId: string | null },
+  ) {
+    try {
+      const reading = clock.finish(r.ok)
+      const id = `tim_${randomUUID().slice(0, 12)}`
+      const timing = turnTiming(reading, {
+        id,
+        role: "coordinator",
+        kind: r.kind,
+        sessionId: r.sessionId,
+        model: r.model ?? this.settings.get().orchestratorModel,
+        effort: r.effort,
+        trigger: r.kind === "turn" ? (r.ask.trigger ?? null) : "compaction",
+        resumed: r.resume,
+        requestedAt: r.ask.requestedAt ?? null,
+        handshake: this.handshakes?.since("coordinator", reading.startedAt, clock.ready ?? reading.endedAt) ?? null,
+        loginId: r.loginId,
+      })
+      this.store.recordTurnTiming(timing)
+      if (r.kind === "turn" && r.reply) {
+        const updated = this.store.setChatTiming(r.reply.id, id, timing.totalMs)
+        if (updated) this.hub.broadcast({ type: "chat.message", message: updated })
+      }
+    } catch (err) {
+      console.error("[orchestrator] couldn't record the turn's timings:", err)
+    }
+  }
+
+  /** Arguments for the claude CLI, by kind of run. Settings are read here, so changes apply from the next run. */
+  private claudeArgs(kind: RunKind, sessionId: string, resume: boolean, ask: RunAsk = {}, connectors: SessionConnectors = NO_SESSION_CONNECTORS): string[] {
+    const { model: modelName, effort } = this.modelFor(kind, ask)
+    const session = resume ? ["--resume", sessionId] : ["--session-id", sessionId]
+    const model = ["--model", modelName]
+    // Every kind of run sends the turn's tools, system prompt and effort, so the summary and /compact passes
+    // reuse the prompt cache of the turn before them instead of writing the whole context to it again.
+    return [
+      "-p",
+      // /context prints plain text.
+      ...(kind === "context" ? [] : ["--output-format", "stream-json", "--verbose"]),
+      ...(kind === "turn" ? ["--include-partial-messages"] : []),
+      "--strict-mcp-config",
+      "--mcp-config",
+      this.mcpConfigPath,
+      "--tools",
+      CHAT_TOOLS,
+      // Only a turn may use them; Read is for the compaction log and uploads (and only those folders). With no
+      // allow rules, dontAsk denies every call, so the summary pass can only write text.
+      ...(kind === "turn" ? ["--allowedTools", ["mcp__boxyard", ...connectors.allowed, ...CHAT_ALLOWED_TOOLS, ...this.readRules()].join(",")] : []),
+      "--permission-mode",
+      "dontAsk",
+      "--append-system-prompt",
+      (kind === "summary" || kind === "compact" ? this.compactionSystemPrompt : null) ?? this.systemPrompt(),
+      ...session,
+      ...model,
+      "--effort",
+      effort,
+    ]
+  }
+
+  /** Box Yard's part of the system prompt. Settings are read here, so changes apply from the next run. */
+  private systemPrompt(): string {
+    const st = this.settings.get()
+    const base = `${withOwner(ORCHESTRATOR_PROMPT, st.ownerName)}\n\n${routingInstructions(this.c.dataDir, st)}\n\n${withOwner(compactionsPrompt(this.compactionsDir), st.ownerName)}`
+    return st.orchestratorCli === "codex" ? `${base}\n\n${codexManagerNote(st.ownerName)}` : base
+  }
+
+  /** Read access is limited to these folders (absolute paths use a `//` prefix in permission rules). */
+  private readRules(): string[] {
+    // The uploads folder holds files Cody attached in the chat.
+    return [`Read(/${this.compactionsDir}/**)`, `Read(/${uploadsDir(this.c.dataDir)}/**)`]
+  }
+
+  /** How this run starts: Claude Code with its flags, or Codex (which has no /compact or /context: see doCompact). */
+  private launch(kind: RunKind, sessionId: string, resume: boolean, ask: RunAsk, login: PickedLogin | null, connectors: SessionConnectors = NO_SESSION_CONNECTORS): ChatLaunch {
+    const st = this.settings.get()
+    if (st.orchestratorCli === "codex") {
+      const { model, effort } = this.modelFor(kind, ask)
+      return codexChatLaunch({
+        c: this.c,
+        credentials: login && this.logins ? this.logins.codexCredentials(login) : this.settings.credentials,
+        loginId: login?.id ?? null,
+        loginRef: rotationLoginRef(login),
+        mcp: this.mcp,
+        resume: resume ? sessionId : null,
+        model: model || null,
+        effort,
+        instructions: (kind === "summary" ? this.compactionSystemPrompt : null) ?? this.systemPrompt(),
+        images: ask.images,
+      })
+    }
+    this.writeMcpConfig(connectors)
+    const [bin, ...pre] = this.c.claudeBin.split(" ")
+    // The rotation's login (docs/logins.md), else env vars or Settings › Credentials, read on every run so a saved token
+    // works without a restart.
+    const added = login && !isCredentialsLogin(login.id) ? login : null
+    const env = serverClaudeEnv(added?.env ?? null, this.settings.credentials.claudeEnv())
+    const loginRef = rotationLoginRef(added) ?? chatClaudeLogin(env, null)
+    // The connectors' values: only this process's env holds them (its MCP config names them as ${VAR}).
+    Object.assign(env, connectors.env)
+    return { cli: "claude", bin: bin!, args: [...pre, ...this.claudeArgs(kind, sessionId, resume, ask, connectors)], env, translate: null, after() {}, login: loginRef }
+  }
+
+  /** One run of the CLI, with the connectors it gets put together (and refreshed) first. */
+  private async run(prompt: string, sessionId: string, resume: boolean, kind: RunKind = "turn", ask: RunAsk = {}): Promise<RunResult> {
+    const connectors = await this.sessionConnectors()
+    return this.spawnRun(prompt, sessionId, resume, kind, ask, connectors)
+  }
+
+  private spawnRun(prompt: string, sessionId: string, resume: boolean, kind: RunKind, ask: RunAsk, connectors: SessionConnectors): Promise<RunResult> {
+    return new Promise((resolve) => {
+      // Codex compacts on its own and has no /context: doCompact starts a fresh session from the summary instead.
+      if (this.cli() === "codex" && (kind === "compact" || kind === "context")) return resolve({ ok: true, error: "", text: "", raw: "", sessionId: null })
+      // Stopped while it was still setting up: nothing to start.
+      if (kind === "turn" && this.stopping) return resolve({ ok: false, stopped: true, error: withOwner(STOPPED_LINE, this.owner()), text: "", raw: "", sessionId: null })
+      // A summary, compaction or /context continues the turn's session, so it keeps the turn's login.
+      const login = this.logins?.pick({ harness: this.cli(), holder: "coordinator", resume: resume || kind !== "turn" }) ?? null
+      const launch = this.launch(kind, sessionId, resume, ask, login, connectors)
+      const cliName = launch.cli === "codex" ? `codex (${this.c.codexBin})` : `claude (${this.c.claudeBin})`
+      const { model: runModel, effort } = this.modelFor(kind, ask)
+      const clock = new TurnClock()
+
+      let child: ChildProcess
+      try {
+        child = spawn(launch.bin, launch.args, { cwd: this.workdir, env: launch.env, stdio: ["pipe", "pipe", "pipe"] })
+      } catch (err) {
+        resolve({ ok: false, error: `Couldn't start ${launch.cli}: ${(err as Error).message}`, text: "", raw: "", sessionId: null, login })
+        return
+      }
+      this.child = child
+      this.childKind = kind
+      let stderr = ""
+      let buf = ""
+      let sawResult = false
+      let resultError: string | null = null
+      let settled = false
+      let raw = ""
+      let said = ""
+      let resultUsage: Record<string, number> | null = null
+      let resultSessionUsage: ReturnType<typeof sessionUsageOf> = null
+      let resultCostUsd: number | null = null
+      let resultDurationMs: number | null = null
+      let resultModel: string | null = null
+      // The turn's final reply: the last text, unless a tool call came after it.
+      let reply: ChatMessage | null = null
+      const startedAt = Date.now()
+      let seenSession: string | null = null
+      const created = new Map<string, ChatMessage>()
+      const quiet = kind !== "turn"
+      const timer = setTimeout(() => child.kill("SIGTERM"), TURN_TIMEOUT_MS)
+
+      const onLine = (line: string) => {
+        if (launch.translate) {
+          for (const m of launch.translate(line)) onMsg(m)
+          return
+        }
+        let msg: any
+        try {
+          msg = JSON.parse(line)
+        } catch {
+          return
+        }
+        onMsg(msg)
+      }
+      const onMsg = (msg: any) => {
+        // stop() closed the database; the run's last lines have nowhere to go.
+        if (this.stopped) return
+        if (typeof msg.session_id === "string") seenSession = msg.session_id
+        clock.line(msg)
+        if (msg.type === "rate_limit_event") return void recordLimits(this.store, this.hub, launch.login, limitsOf(msg), typeof msg.at === "number" ? msg.at : Date.now())
+        if (msg.type === "stream_event") {
+          if (quiet) return
+          const ev = msg.event
+          if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+            this.hub.broadcast({ type: "chat.delta", text: ev.delta.text })
+          }
+          return
+        }
+        if (msg.type === "system" && msg.subtype === "init") {
+          if (kind === "turn") {
+            // Codex names its own thread: that's the session the next turn resumes.
+            if (launch.cli === "codex" && seenSession) this.store.setKv(SESSION_KEY, seenSession)
+            this.store.setKv(STARTED_KEY, "1")
+            this.store.setKv(SESSION_CLI_KEY, launch.cli)
+          }
+          return
+        }
+        if (msg.type === "assistant" && Array.isArray(msg.message?.content)) {
+          const tokens = msg.message.model === "<synthetic>" || kind !== "turn" ? null : contextTokens(msg.message.usage)
+          if (tokens) this.setUsage(tokens)
+          const text = msg.message.content
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text)
+            .join("")
+            .trim()
+          if (text) said = said ? `${said}\n\n${text}` : text
+          if (quiet) return
+          if (text && text !== NO_UPDATE) {
+            const parsed = parseNextSteps(text)
+            // The session line it came from: a side thread on this message forks the session there.
+            const meta = { ...(parsed.nextSteps.length ? { [NEXT_STEPS_META_KEY]: parsed.nextSteps } : {}), ...sessionLineMeta(msg, sessionId), turn: startedAt }
+            const m = this.store.addChat("assistant", parsed.content, meta)
+            this.hub.broadcast({ type: "chat.message", message: m })
+            reply = m
+          } else if (text === NO_UPDATE) reply = null
+          for (const b of msg.message.content) {
+            if (b.type !== "tool_use") continue
+            reply = null
+            const name = String(b.name).replace(/^mcp__boxyard__/, "")
+            const m = this.store.addChat("tool", name, { input: b.input, turn: startedAt })
+            if ((CREATES[name] || CAPTAIN_TOOLS.has(name)) && typeof b.id === "string") created.set(b.id, m)
+            this.hub.broadcast({ type: "chat.message", message: m })
+          }
+          return
+        }
+        if (msg.type === "user" && Array.isArray(msg.message?.content)) {
+          // A create_* result names the new task/project/schedule; the chat's tool line links to it.
+          // A Captain tool's result keeps the project and the Captain's reply, shown when the line is expanded.
+          for (const b of msg.message.content) {
+            const m = b?.type === "tool_result" && !b.is_error ? created.get(b.tool_use_id) : undefined
+            if (!m) continue
+            created.delete(b.tool_use_id)
+            const resultId = createdId(m.content, b.content)
+            const captain = captainToolResult(m.content, b.content)
+            const updated = resultId
+              ? this.store.setChatMeta(m.id, { ...m.meta, resultId })
+              : captain
+                ? this.store.setChatMeta(m.id, { ...m.meta, captain })
+                : null
+            if (updated) this.hub.broadcast({ type: "chat.message", message: updated })
+          }
+          return
+        }
+        if (msg.type === "result") {
+          sawResult = true
+          if (kind === "turn") {
+            this.store.setKv(STARTED_KEY, "1")
+            const window = contextWindowOf(msg.modelUsage)
+            if (window) this.setUsage(this.usage().tokens, window)
+          }
+          resultUsage = resultUsageObject(msg.usage)
+          resultSessionUsage = sessionUsageOf(msg.modelUsage)
+          resultCostUsd = typeof msg.total_cost_usd === "number" ? msg.total_cost_usd : null
+          resultDurationMs = typeof msg.duration_ms === "number" ? msg.duration_ms : null
+          resultModel = typeof msg.model === "string" ? msg.model : null
+          if (msg.is_error) resultError = String(msg.result ?? msg.subtype ?? "error")
+        }
+      }
+
+      child.stdout!.on("data", (chunk: Buffer) => {
+        buf += chunk.toString("utf8")
+        const lines = buf.split("\n")
+        buf = lines.pop() ?? ""
+        if (kind === "context") raw += chunk.toString("utf8")
+        for (const line of lines) if (line.trim()) onLine(line)
+      })
+      child.stderr!.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString("utf8")).slice(-6000)
+      })
+      const finish = (code: number | null, err?: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (buf.trim()) onLine(buf)
+        this.child = null
+        this.childKind = null
+        launch.after()
+        if (this.stopped) return resolve({ text: said, raw, sessionId: seenSession, ok: false, error: "Box Yard stopped." })
+        if (resultUsage || resultSessionUsage || typeof resultCostUsd === "number" || typeof resultDurationMs === "number") {
+          this.store.recordClaudeUsage({
+            source: "orchestrator",
+            runKind: kind,
+            sessionId: seenSession ?? sessionId,
+            model: resultModel ?? (runModel || "codex"),
+            startedAt,
+            endedAt: Date.now(),
+            durationMs: resultDurationMs,
+            usage: resultUsage,
+            sessionUsage: resultSessionUsage,
+            costUsd: resultCostUsd,
+            resumed: resume,
+            loginId: login?.id ?? null,
+          })
+        }
+        if (kind !== "context") this.recordTiming(clock, { kind, sessionId: seenSession ?? sessionId, model: resultModel ?? (runModel || null), effort, resume, ask, ok: !err && code === 0 && !resultError, reply, loginId: login?.id ?? null })
+        if (login) this.logins?.ran(login, "coordinator", !err && code === 0 && !resultError)
+        // Lets the client speak a one-line summary of the reply (lib/speech.ts).
+        if (!quiet) this.hub.broadcast({ type: "chat.turn", startedAt, replyId: reply?.id ?? null })
+        const base = { text: said, raw, sessionId: seenSession, login }
+        // A Stop that came after the reply's result line ended a turn that had already finished.
+        if (kind === "turn" && this.stopping) return resolve(sawResult && !resultError ? { ...base, ok: true, error: "" } : { ...base, ok: false, stopped: true, error: withOwner(STOPPED_LINE, this.owner()) })
+        if (err) return resolve({ ...base, ok: false, error: `Couldn't run ${cliName}: ${err.message}` })
+        if (code === 0 && !resultError && (sawResult || launch.cli === "claude")) return resolve({ ...base, ok: true, error: "" })
+        resolve({ ...base, ok: false, error: resultError ?? ((launch.cli === "codex" ? codexErrorText(stderr) : stderr.trim()) || `${launch.cli} exited with code ${code}${sawResult ? "" : " before answering"}`) })
+      }
+      child.on("error", (err) => finish(null, err))
+      child.on("close", (code) => finish(code))
+      child.stdin!.on("error", () => {})
+      child.stdin!.end(prompt)
+    })
+  }
+}

@@ -1,0 +1,197 @@
+// RunPod GPU pods as a runner ("Runs on: RunPod GPU", shared/runner.ts). A GPU project gets up to its Max boxes
+// pods at a time, within the $/hr caps; pod #1 mounts the project's network volume. Pods come and go, the volume
+// stays (docs/runpod.md).
+import { GPU_BOX_PREFIXES, GPU_PROVIDER_LABEL, anyGpuBoxIndex, anyGpuBoxProject, gpuBoxIdOn, gpuBoxProvider, isAnyGpuBox } from "./gpu.js"
+
+/**
+ * A GPU project's virtual boxes, one per pod: `runpod-<projectId>` is pod #1 (the only one before projects could
+ * have several), `runpod-<projectId>-<n>` pod #n. They're never `boxes` rows (like the local runner's box).
+ * Vast.ai's are `vastai-<projectId>[-<n>]` (shared/gpu.ts): the helpers below read both, `gpuBoxId` makes RunPod's.
+ */
+export const GPU_BOX_PREFIX = GPU_BOX_PREFIXES.runpod
+export const gpuBoxId = (projectId: string, n = 1) => gpuBoxIdOn("runpod", projectId, n)
+/** Any GPU cloud's box: RunPod's `runpod-…`, Vast.ai's `vastai-…` or Daytona's `daytona-…`. */
+export const isGpuBox = isAnyGpuBox
+export const gpuBoxProject = anyGpuBoxProject
+/** Which of its project's pods a GPU box is: 1 for `runpod-<projectId>`. */
+export const gpuBoxIndex = anyGpuBoxIndex
+/** "GPU pod #2 · keep-the-castle" on RunPod, "Vast.ai GPU #2 · keep-the-castle" on Vast.ai, "Daytona sandbox #2 · …" on Daytona. */
+export const gpuPodLabel = (id: string, projectName: string | null) => {
+  const cloud = gpuBoxProvider(id)
+  const name = cloud === "vast" ? `${GPU_PROVIDER_LABEL.vast} GPU` : cloud === "daytona" ? `${GPU_PROVIDER_LABEL.daytona} sandbox` : "GPU pod"
+  return `${name} #${gpuBoxIndex(id)} · ${projectName ?? gpuBoxProject(id)}`
+}
+/** The most pods one project may have: its Max boxes when lower, and the bound when it sets none (the $/hr caps apply too). */
+export const MAX_GPU_PODS = 20
+
+/** Pods start from this public image when no custom image is built: slower (tools install at boot), no Docker needed. */
+export const RUNPOD_STOCK_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
+
+/**
+ * Where pods run. Secure: RunPod's own datacenters, the only ones with network volumes. Community: hosts other people
+ * run, cheaper and with GPUs Secure lacks (an RTX 3070), but no network volume, so caches start cold on every pod.
+ */
+export type RunPodCloud = "SECURE" | "COMMUNITY"
+export const RUNPOD_CLOUDS: RunPodCloud[] = ["SECURE", "COMMUNITY"]
+export const cloudLabel = (c: RunPodCloud) => (c === "COMMUNITY" ? "Community Cloud" : "Secure Cloud")
+
+/**
+ * What each GPU type is good for, shown next to it in the pickers. Ids are RunPod's gpuTypeIds exactly (checked
+ * against GET /v2/catalog/gpus); prices are rough, the pickers show RunPod's live ones.
+ */
+export const RUNPOD_GPU_GUIDE: Record<string, { vramGb: number; usd: string; use: string }> = {
+  "NVIDIA GeForce RTX 3070": { vramGb: 8, usd: "~$0.13/hr, Community only", use: "the cheapest: browser and WebGL game testing" },
+  "NVIDIA RTX A4000": { vramGb: 16, usd: "~$0.17–0.25/hr", use: "browser and WebGL game testing" },
+  "NVIDIA RTX 4000 Ada Generation": { vramGb: 20, usd: "~$0.20–0.28/hr", use: "browser and WebGL games, light CUDA" },
+  "NVIDIA RTX A5000": { vramGb: 24, usd: "~$0.16–0.27/hr", use: "games and mid-size models" },
+  "NVIDIA A40": { vramGb: 48, usd: "~$0.35–0.59/hr", use: "big models and datasets" },
+  "NVIDIA RTX A6000": { vramGb: 48, usd: "~$0.33–0.59/hr", use: "big models and datasets" },
+}
+
+/** "NVIDIA RTX A5000" → "RTX A5000". */
+export const shortGpu = (id: string) => id.replace(/^NVIDIA (GeForce )?/, "")
+
+/** "16 GB, ~$0.17–0.25/hr, browser and WebGL game testing", or null for a type with no guide entry. */
+export const gpuHint = (id: string) => {
+  const g = RUNPOD_GPU_GUIDE[id]
+  return g ? `${g.vramGb} GB, ${g.usd}, ${g.use}` : null
+}
+
+/** Bounds on the minimum host RAM and vCPUs a pod asks for (global and per project). */
+export const RUNPOD_MACHINE_LIMITS = { minRamGb: { min: 1, max: 512 }, minVcpus: { min: 1, max: 128 } } as const
+
+/** A GPU project's own machine settings; null fields use Settings › RunPod GPU's. */
+export interface ProjectGpuMachine {
+  gpuTypes: string[] | null
+  cloud: RunPodCloud | null
+  minRamGb: number | null
+  minVcpus: number | null
+}
+
+/** Settings › RunPod GPU (kv "runpod"). */
+export interface RunPodSettings {
+  /** The image pods start from: one built with Build image, any compatible one, or null for the stock image. */
+  image: string | null
+  /** Where Build image pushes, e.g. docker.io/alice/boxyard-gpu (no tag). */
+  imageRepo: string | null
+  /** GPU types to try, in order (RunPod ids, e.g. "NVIDIA RTX A5000"). */
+  gpuTypes: string[]
+  /** Where new pods run, unless the project picks (Project.gpuCloud). Network volumes are Secure Cloud only. */
+  cloud: RunPodCloud
+  /** RunPod only places a pod on a host with at least this much RAM (GB), unless the project sets its own. */
+  minRamGb: number
+  /** …and at least this many vCPUs. Cheap Community hosts can come with little of either; a game's browser needs ~12 GB. */
+  minVcpus: number
+  /** The datacenter for new volumes; null picks the one with the best stock of `gpuTypes`. */
+  dataCenter: string | null
+  /** Stop a pod after this many minutes with no agent turn running. */
+  idleMinutes: number
+  /** Tasks that may run on one pod at once, unless the project sets its own Tasks running at once. */
+  agentsPerPod: number
+  containerDiskGb: number
+  /** Size of a project's network volume (caches, data), which only its pod #1 mounts. 0: no volume. */
+  volumeGb: number
+  /**
+   * The most one project's pods may cost together, $/hr, unless the project sets its own (Project.gpuMaxHourlyUsd).
+   * A pod that would go over waits; one that comes back pricier than its GPU's list price allows is terminated.
+   */
+  maxHourlyUsd: number
+  /** The most all of this install's GPU pods together may cost, $/hr. */
+  totalMaxHourlyUsd: number
+  /** The pod's own watchdog terminates it this long after Box Yard stops being in touch (the computer slept). */
+  watchdogMinutes: number
+}
+
+export const DEFAULT_RUNPOD_SETTINGS: RunPodSettings = {
+  image: null,
+  imageRepo: null,
+  gpuTypes: ["NVIDIA RTX A5000", "NVIDIA A40"],
+  cloud: "SECURE",
+  minRamGb: 24,
+  minVcpus: 8,
+  dataCenter: null,
+  idleMinutes: 10,
+  agentsPerPod: 3,
+  containerDiskGb: 40,
+  volumeGb: 30,
+  maxHourlyUsd: 1,
+  totalMaxHourlyUsd: 3,
+  watchdogMinutes: 30,
+}
+
+export interface RunPodPodInfo {
+  boxId: string
+  /** Which of its project's pods (gpuBoxIndex). */
+  index: number
+  projectId: string
+  projectName: string | null
+  podId: string
+  status: string
+  gpu: string | null
+  dataCenter: string | null
+  costPerHr: number | null
+  /** ms since epoch. */
+  startedAt: number | null
+  /** The pod stays up until then even when idle (ms since epoch), or null. */
+  keepWarmUntil: number | null
+  /** Agent turns running on it now. */
+  running: number
+}
+
+export interface RunPodVolumeInfo {
+  id: string
+  name: string
+  sizeGb: number
+  dataCenter: string
+  type: string
+  projectId: string | null
+  projectName: string | null
+  monthlyUsd: number
+}
+
+export interface RunPodImageBuild {
+  state: "idle" | "running" | "succeeded" | "failed"
+  image: string | null
+  startedAt: number | null
+  finishedAt: number | null
+  error: string | null
+  /** It built and pushed, but something needs a look (the registry won't let RunPod pull it anonymously). */
+  warning: string | null
+  /** The tail of the docker output. */
+  log: string
+}
+
+/** GET /api/runpod. */
+export interface RunPodStatus {
+  settings: RunPodSettings
+  apiKey: boolean
+  /** Docker on the computer running Box Yard: installed and its daemon answering. */
+  docker: { installed: boolean; running: boolean; error: string | null }
+  /** The tag Build image would make now; `image` is out of date when it differs (Box Yard's runpod/ changed). */
+  currentTag: string
+  build: RunPodImageBuild
+  pods: RunPodPodInfo[]
+  volumes: RunPodVolumeInfo[]
+  /** Why GPU projects can't run right now, or null. */
+  problem: string | null
+  error: string | null
+}
+
+export interface RunPodGpuOption {
+  id: string
+  name: string
+  memoryGb: number
+  /** $/hr on Secure Cloud, or null when it isn't offered there. */
+  securePrice: number | null
+  /** $/hr on Community Cloud, or null when it isn't offered there. */
+  communityPrice: number | null
+  availability: string
+  /** What it's good for (RUNPOD_GPU_GUIDE), or null. */
+  use: string | null
+}
+
+/** A GPU type's list price on a cloud, or null when it isn't offered there. */
+export const gpuPrice = (g: Pick<RunPodGpuOption, "securePrice" | "communityPrice">, cloud: RunPodCloud) => (cloud === "COMMUNITY" ? g.communityPrice : g.securePrice)
+
+/** Network volume price by tier, $/GB/month (runpod.io/pricing). */
+export const VOLUME_GB_MONTH_USD: Record<string, number> = { STANDARD: 0.07, HIGH_PERFORMANCE: 0.14 }

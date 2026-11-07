@@ -1,0 +1,71 @@
+{
+  "name": "box-yard",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "One chat to run a yard of Claude Code agents inside Upstash Boxes.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,magenta \"NODE_ENV=development tsx watch --clear-screen=false server/index.ts\" \"vite\"",
+    "build": "vite build && tsc -p tsconfig.server.json",
+    "start": "npm run build && npm run serve",
+    "serve": "node dist/server/server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "tsx scripts/test-full.ts",
+    "test:full": "tsx scripts/test-full.ts",
+    "test:fast": "tsx scripts/test-full.ts --tier fast",
+    "test:slow": "tsx scripts/test-full.ts --tier slow",
+    "test:tiers": "tsx scripts/check-test-tiers.ts",
+    "test:related": "tsx scripts/test-related.ts",
+    "deploy:box": "tsx scripts/deploy-box.ts",
+    "deploy:vps": "bash scripts/deploy-vps.sh",
+    "worker-snapshot": "tsx scripts/make-worker-snapshot.ts",
+    "smoke:runpod": "tsx scripts/smoke-runpod.ts",
+    "smoke:vast": "tsx scripts/smoke-vast.ts",
+    "smoke:daytona": "tsx scripts/smoke-daytona.ts",
+    "smoke:models": "tsx scripts/smoke-models.ts",
+    "test:docker": "BOXYARD_DOCKER_E2E=1 vitest run test/docker-real.e2e.test.ts",
+    "test:detect": "BOXYARD_DETECT_E2E=1 vitest run test/identity-detect-here.e2e.test.ts --silent=false",
+    "demo": "./yard demo"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@upstash/box": "^0.7.10",
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.3.0",
+    "ws": "^8.22.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.104.5",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "happy-dom": "^21.0.4",
+    "lucide-react": "^1.61.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "wouter": "^3.13.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.35.5"
+  }
+}

@@ -1,0 +1,1339 @@
+// Types shared by the API server and the React app.
+import type { TaskOutcome } from "./quiet.js"
+import type { BoxCleanup } from "./disk.js"
+import type { Hook, HookRun } from "./hooks.js"
+import type { BoxResize } from "./boxSizes.js"
+import type { BoxEvent } from "./boxHistory.js"
+import type { TtsInfo } from "./tts.js"
+import type { SetupStatus } from "./setup.js"
+import type { Runner } from "./runner.js"
+import type { GpuPick, GpuProvider } from "./gpu.js"
+import type { AgentCli, ManagerCli } from "./agentCli.js"
+import type { CaptainIconId } from "./captainIcons.js"
+import type { Connector } from "./connectors.js"
+import type { TaskPlacement } from "./placement.js"
+import type { MachinesStatus } from "./machines.js"
+import type { ProjectSnapshot, SnapshotJob } from "./snapshots.js"
+import type { Identity } from "./identities.js"
+import type { AgentLogin } from "./agentLogins.js"
+import type { ProjectColor } from "./projectColors.js"
+import type { TaskIconName } from "./taskIcons.js"
+import type { TaskPriority } from "./priority.js"
+import type { ProjectGpuMachine, RunPodImageBuild } from "./runpod.js"
+import type { DockerImageBuild, ProjectDocker } from "./docker.js"
+export type { TaskOutcome } from "./quiet.js"
+export type { BoxCleanup } from "./disk.js"
+export type { BoxResize, ResizePlan, ResizeInitiator, ResizeMode, ResizeStep, DiskFit } from "./boxSizes.js"
+export type { BoxEvent, BoxEventFilter, BoxEventType, BoxActor, BoxActorKind } from "./boxHistory.js"
+
+export const TASK_STATUSES = [
+  "queued", // waiting for a free box slot
+  "starting", // box is being prepared (clone, restore, install)
+  "working", // a Claude turn is running
+  "needs_input", // the agent asked Cody something
+  "waiting", // the agent is waiting on a reply from another agent
+  "idle", // turn finished, nothing pending
+  "pr_ready", // a pull request is open
+  "done", // the agent (or Cody) marked it finished
+  "failed", // something broke; see `error`
+] as const
+export type TaskStatus = (typeof TASK_STATUSES)[number]
+
+/** Statuses where a task needs nothing from anyone right now. */
+export const RESTING_STATUSES: TaskStatus[] = ["idle", "pr_ready", "done", "failed", "needs_input", "waiting"]
+
+/** A task's pull request as GitHub sees it. Merged and closed are final: polling stops there. */
+export const PR_STATES = ["open", "draft", "merged", "closed"] as const
+export type PrState = (typeof PR_STATES)[number]
+export const isFinalPrState = (s: PrState | null | undefined) => s === "merged" || s === "closed"
+
+export interface Project {
+  id: string
+  name: string
+  description: string
+  /** `owner/name` or a full git URL. Empty for non-coding projects. */
+  repo: string | null
+  baseBranch: string
+  /** Env var names only; values never leave the server. */
+  envKeys: string[]
+  /** The curated notes every agent in the project starts with (the Captain keeps them within the notes budget). */
+  notes: ProjectNote[]
+  /** This project's own notes budget (most notes in a prompt); null uses Settings › Max notes. */
+  notesMaxCount: number | null
+  /** This project's own notes token budget; null uses Settings › Notes token budget. */
+  notesMaxTokens: number | null
+  /** Size for new boxes made for this project; null uses Settings → Worker size. */
+  boxSize: BoxSize | null
+  /** Box mirrors of its repo are partial clones (blob:none); null uses Settings → Partial clone mirrors. */
+  partialClone: boolean | null
+  /** Push each task's branch and uncommitted work at the end of every turn; null uses Settings → Push at turn end. */
+  pushAtTurnEnd: boolean | null
+  /** Restore and save node_modules through the box's dependency cache; null uses Settings → Dependency cache. */
+  depCache: boolean | null
+  /** Close the issues a merged PR names (when it merged into another branch than the default); null uses Settings. */
+  closeIssuesOnMerge: boolean | null
+  /** A task whose PR merges moves to done (and its workspace is archived); null uses Settings. */
+  autoDoneOnMerge: boolean | null
+  /** Where its agents run: "box" in Upstash boxes, "local" on the computer running Box Yard (shared/runner.ts). */
+  runner: Runner
+  /** Runs on: SSH machine: the machines it runs on, by label or machine name (shared/machines.ts); null: any machine. */
+  machineLabel: string | null
+  /** The CLI its new tasks run on (Claude Code, Codex or Cursor); null uses Settings › Box agents › Agent. */
+  agentCli: AgentCli | null
+  /**
+   * Tasks running at once: how many of its own tasks may run at the same time on one box, GPU pod or this computer.
+   * Other projects' tasks never wait for it; the box's own limit (Settings › Tasks running at once per box, or › on this
+   * computer) bounds them. null: only the box's limit (server/agentLimits.ts).
+   */
+  agentsPerBox: number | null
+  /**
+   * Needs the whole machine (off by default): while one of its agents runs on a box or this computer, no other
+   * project's agent starts there, and its agents wait for the others' to finish (server/agentLimits.ts).
+   */
+  wholeMachine: boolean
+  /** Most task folders on a box that holds one of its folders, the same way; null uses Settings › Task folders kept per box. */
+  tasksPerBox: number | null
+  /** Most boxes its tasks use at once (boxes made for it or holding its task folders); null: only Settings › Max boxes. */
+  maxBoxes: number | null
+  /**
+   * When it runs on RunPod GPU: the most its pods may cost together, $/hr (0: no cap of its own, the total cap still
+   * applies). null uses Settings › RunPod GPU › Per-project cap.
+   */
+  gpuMaxHourlyUsd: number | null
+  /** When it runs on RunPod GPU: the GPU types, cloud and least host RAM/vCPUs for its new pods; null fields use Settings › RunPod GPU's. */
+  gpuMachine: ProjectGpuMachine
+  /** When it runs on a GPU: the cloud its boxes come from (shared/gpu.ts); null follows Settings › Box providers › Default GPU cloud. */
+  gpuProvider: GpuProvider | null
+  /** When it runs in a Docker container: its own image or Dockerfile; both null use Settings › Docker's (shared/docker.ts). */
+  docker: ProjectDocker
+  /** Who acts for it (shared/identities.ts): its GitHub account, git author, signing key and Claude login. */
+  identityId: string
+  /** The box snapshot its new boxes start from (shared/snapshots.ts), or null: they start cold. */
+  snapshot: ProjectSnapshot | null
+  /** Its colour in the Coordinator chat and the sidebar (shared/projectColors.ts); null: one from its name. */
+  color: ProjectColor | null
+  /** Its own icon (shared/projectIcons.ts), shown instead of its coloured letter; null: none. */
+  iconUrl: string | null
+  /**
+   * Its Captain's icon (shared/captainIcons.ts), over its image and Settings' Captain icon; null: its image if it has
+   * one, else Settings'.
+   */
+  captainIcon: CaptainIconId | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ProjectNote {
+  id: string
+  projectId: string
+  /** Who created it: the owner's name, "captain", "orchestrator", or "agent: <task title>" for older agent notes. */
+  author: string
+  content: string
+  createdAt: number
+  /** The last edit; createdAt until someone edits it. */
+  updatedAt: number
+  /** Who made the last edit, or null when it was never edited. */
+  updatedBy: string | null
+}
+
+export const NOTE_SUGGESTION_STATUSES = ["pending", "accepted", "merged", "rejected"] as const
+export type NoteSuggestionStatus = (typeof NOTE_SUGGESTION_STATUSES)[number]
+
+/**
+ * A note an agent proposed with suggest_note. It never reaches a prompt by itself: the project's Captain
+ * accepts it as a note, merges it into one, or rejects it in the notes retro after the task. Nobody else
+ * approves it; the Notes tab only shows the history.
+ */
+export interface NoteSuggestion {
+  id: string
+  projectId: string
+  /** The task whose agent suggested it; null once that task is deleted. */
+  taskId: string | null
+  taskTitle: string
+  content: string
+  /** What a future agent would get wrong without this note. */
+  why: string
+  status: NoteSuggestionStatus
+  /** The note it became (accepted) or was merged into. */
+  noteId: string | null
+  resolvedBy: string | null
+  /** The Captain's one-line reason for its decision. */
+  reason: string | null
+  createdAt: number
+  resolvedAt: number | null
+  /** When a notes retro handed it to the Captain; each suggestion goes out in one retro at most. */
+  retroAt: number | null
+}
+
+export interface PreviewLink {
+  port: number
+  url: string
+  label: string
+}
+
+/** A task a queued task's wait reason names as what holds it back (Task.waitFor). */
+export interface WaitFor {
+  taskId: string
+  /** As the reason text has it. */
+  title: string
+}
+
+/**
+ * A one-click way out of a wait (Task.waitFix). "raise-cloud-limit": today's cloud limit blocks a new box (raise it
+ * until midnight); "cloud-settings": the monthly cloud limit does (Settings › Usage); "allow-boxes": the queue wants
+ * more new boxes than Box Yard makes in an hour without asking (allow them for an hour); "box-settings": the box
+ * ceiling does (Settings › Boxes & limits).
+ */
+export type WaitFix = "raise-cloud-limit" | "cloud-settings" | "allow-boxes" | "box-settings"
+export const WAIT_FIXES: readonly WaitFix[] = ["raise-cloud-limit", "cloud-settings", "allow-boxes", "box-settings"]
+
+export interface Task {
+  id: string
+  projectId: string
+  title: string
+  prompt: string
+  status: TaskStatus
+  boxId: string | null
+  sessionId: string
+  branch: string | null
+  prUrl: string | null
+  /** Null until the server has asked GitHub (or the task has no PR). */
+  prState: PrState | null
+  prMergedAt: number | null
+  /** GitHub login of whoever merged the PR. */
+  prMergedBy: string | null
+  previews: PreviewLink[]
+  question: string | null
+  summary: string | null
+  /** Until there is a summary: the latest assistant text or tool call as one line (shared/activity.ts), for cards. */
+  activity?: string | null
+  error: string | null
+  /** Why a queued task is held back beyond a free slot, e.g. "Waiting for disk cleanup on box-1". */
+  waitReason: string | null
+  /** Set when that wait is for a box of at least this size (the project's box size): no such box has room yet. */
+  waitBoxSize: BoxSize | null
+  /** The tasks holding it back that the wait reason names, in the order it names them (each `title` is in the text), so the UI links them. */
+  waitFor: WaitFor[]
+  /** The one-click fix the UI offers next to the wait reason, when there is one (e.g. raise today's cloud limit). */
+  waitFix?: WaitFix | null
+  turnCount: number
+  /** When the turn running now started (ms since epoch); null between turns. */
+  turnStartedAt?: number | null
+  /** Messages waiting to be sent in the next turn. */
+  pendingCount: number
+  /** Changes whenever the queued messages do (added, edited, cancelled, being delivered); "" when none. */
+  queueRev?: string
+  lastArchivedAt: number | null
+  /** Set when a schedule started this task. */
+  scheduleId: string | null
+  /** Who started it (TaskRow.source): cody, orchestrator, captain:<project>, hook:<id>, agent:<task>, system. */
+  startedBy?: string | null
+  /** "noop" when the agent reported a run that found nothing to do and the server accepted it (shared/quiet.ts). */
+  outcome: TaskOutcome | null
+  /** Tokens in the Claude session's context after its last turn; null until the first turn ends. */
+  contextTokens: number | null
+  contextWindow: number | null
+  /** A compaction is queued for after the current turn. */
+  compactPending: boolean
+  /** A compaction turn is running right now. */
+  compacting: boolean
+  /** The CLI its agent runs on (Claude Code, Codex or Cursor), fixed when it was created. */
+  agentCli: AgentCli
+  /** Model currently selected for subsequent turns, when routing overrode the global agent model. */
+  model: string | null
+  /** Effort currently selected for subsequent turns, when routing or the orchestrator overrode the global effort. */
+  effort: Effort | null
+  /** Claude Code cost recorded for this task's turns. */
+  claudeCostUsd: number
+  /** Claude Code tokens recorded for this task's turns. */
+  claudeTokens: number
+  /** Routing rule name or id that picked the current model/effort, if any. */
+  routingRule: string | null
+  /** Short explanation of why that route was picked. */
+  routingReason: string | null
+  /**
+   * The task's own "Runs on" (shared/runner.ts): "local" (this computer) or "box", set when it was created or by a
+   * later message. It wins over the project's setting for every turn; null follows the project.
+   */
+  runsOn: Runner | null
+  /** Minimum Upstash size for this task; omitted follows the project. */
+  boxSize?: BoxSize | null
+  /** With its own runs_on "ssh": the SSH machines it runs on, by label or name (shared/machines.ts); null: any. */
+  machineLabel: string | null
+  /** With its own runs_on "gpu": its own cloud and GPU ("@gpu:daytona:h100"), over its project's; null follows the project. */
+  gpu?: GpuPick | null
+  /**
+   * Where it actually runs (shared/placement.ts): the box its workspace is on now, where it last ran once that box
+   * let it go, and where its next turn goes and which setting chose that. Always set by the server.
+   */
+  placement?: TaskPlacement | null
+  /** Cody pressed "Merge PR" and the agent hasn't finished that turn yet (null otherwise). */
+  mergeRequest?: MergeRequest | null
+  /** The last turn-end push of the task's git work (repo projects with push at turn end on); null before the first. */
+  pushState?: PushState | null
+  /** The icon it was given (shared/taskIcons.ts: create_task's `icon`); null: one from its title (taskIcon()). */
+  icon?: TaskIconName | null
+  /** Shared by the tasks one create_tasks call started (the Coordinator's cards view keeps their cards together); null when started on its own. */
+  batchId?: string | null
+  /** "high": its next turn goes before every normal task waiting for a slot (shared/priority.ts). Sticky until changed. */
+  priority?: TaskPriority
+  /** Never moved to done when its PR merges (a long-running task), whatever Settings and its project say. */
+  stayOpenOnMerge?: boolean
+  /**
+   * A sub-task: the task whose agent started it with spawn_subtasks, which gets its report when it finishes
+   * (server/subtasks.ts). Null for a top-level task. The sidebar nests it under its parent.
+   */
+  parentTaskId?: string | null
+  /** The top of its sub-task tree; null for a top-level task. */
+  rootTaskId?: string | null
+  /** How deep in its tree: 0 at the top, 1 a child, 2 a grandchild. */
+  subtaskDepth?: number
+  /** Runs where its parent runs and shares its parent's slot (spawn_subtasks' runs_on "same"). */
+  withParent?: boolean
+  /** When it last joined the queue (a new task, a message): FIFO within a priority (queueOrder). */
+  lastActiveAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * What the last turn-end push did. "pushed": origin has the branch's commits and, when there is uncommitted work,
+ * the hidden ref refs/boxyard/wip/<task>, so the archive only needs the session and log. "skipped" (push off, no
+ * write access, a repo git can't snapshot) and "failed" keep the full archive.
+ */
+export interface PushState {
+  status: "pushed" | "skipped" | "failed"
+  at: number
+  branch: string | null
+  /** The commit the workspace was on. */
+  head: string | null
+  /** Commit on origin at refs/boxyard/wip/<task> holding uncommitted work; null when the work was clean. */
+  wip: string | null
+  /** Why it was skipped or failed. */
+  reason: string | null
+}
+
+/**
+ * A pending "Merge PR" request: the standard merge message went to the task's session (or waits in its queue).
+ * It stays until the turn that handled it ends or the PR is merged or closed; a second one for the same PR is refused meanwhile.
+ */
+export interface MergeRequest {
+  prNumber: number
+  prUrl: string
+  requestedAt: number
+  /** When the message went out in a turn; null while it waits for the agent's current turn to end. */
+  deliveredAt: number | null
+  /** Who asked, when it wasn't the owner's Merge button: a hook, as `hook "On PR ready → merge"`. */
+  requestedBy?: string | null
+}
+
+/** What to do when runs were missed (the server was down or its box was paused). */
+export type CatchUp = "once" | "skip"
+
+/** Where a schedule's runs go: a fresh task in a project, or a message to the orchestrator chat. */
+export type ScheduleTarget = "project" | "orchestrator"
+
+export type ScheduleRunStatus = "queued" | "running" | "done" | "failed"
+
+/** One run of an orchestrator schedule. (Project schedule runs are ordinary tasks.) */
+export interface ScheduleRun {
+  id: string
+  scheduleId: string
+  status: ScheduleRunStatus
+  reason: "scheduled" | "manual" | "catch-up"
+  /** The text injected into the chat, e.g. "[Scheduled: Morning digest] ...". */
+  prompt: string
+  dueAt: number
+  /** The chat message this run injected, once delivered. */
+  chatMessageId: string | null
+  error: string | null
+  createdAt: number
+  startedAt: number | null
+  finishedAt: number | null
+}
+
+export interface Schedule {
+  id: string
+  target: ScheduleTarget
+  /** Null for orchestrator schedules. */
+  projectId: string | null
+  /** Project runs use this runner; null follows the project. "local" is this computer. */
+  runsOn: Runner | null
+  name: string
+  /** 5-field cron expression or a macro like @daily. */
+  cron: string
+  /** IANA time zone the cron is read in, e.g. America/New_York. */
+  timezone: string
+  /** What the agent is asked to do on every run. */
+  prompt: string
+  enabled: boolean
+  catchUp: CatchUp
+  /** Start a run even when the previous run is still going. */
+  allowOverlap: boolean
+  nextRunAt: number | null
+  lastRunAt: number | null
+  lastTaskId: string | null
+  /** Why the last due run did not start a task, if it didn't. */
+  lastSkipReason: string | null
+  runCount: number
+  /** QStash schedule id when QStash triggers this schedule. */
+  qstashId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** A file Cody attached to a message. `path` is the file on the server's disk (chat messages only). */
+export interface Attachment {
+  id: string
+  name: string
+  size: number
+  mime: string
+  /** An image's size as shown (EXIF orientation applied), when the server could read it: the chat reserves its box. */
+  width?: number
+  height?: number
+  path?: string
+}
+
+/** Who sent a queued message: shapes its row on the task page. */
+export type QueuedSender = "owner" | "coordinator" | "captain" | "hook" | "agent" | "system"
+
+/**
+ * A message waiting for a task's next turn (GET /api/tasks/:id/queue). "queued" ones can be edited and deleted;
+ * "delivering" ones are being handed to a turn that is starting, and "steering" ones to the running turn (Steer):
+ * both are locked.
+ */
+export interface QueuedMessage {
+  id: string
+  taskId: string
+  /** The raw input source: cody, cody:merge, orchestrator, captain:<project>, hook:<id>, agent:<task>, system. */
+  source: string
+  kind: QueuedSender
+  /** Who sent it, as the row says it: "Cody", "Coordinator", "box-yard Captain", "Hook: On PR ready". */
+  sender: string
+  text: string
+  attachments: Attachment[]
+  status: "queued" | "delivering" | "steering"
+  /** Bumped on every edit; pass it back to an edit to refuse it when someone else changed the message first. */
+  version: number
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * What Steer did (POST /api/tasks/:id/queue/steer, deliver_queued_now, send_to_task steer): "steering": the queue
+ * is on its way into the running turn, which reads it at its next step without stopping; "after_turn": the
+ * running turn can't take it (a Codex agent, or the box couldn't be reached), so it goes in when that turn ends;
+ * "next_turn": no turn is running (or one is starting and takes them all); "after_compaction": a /compact turn
+ * runs first; "already_delivered": a turn already took them (nothing was queued any more).
+ */
+export type SteerDelivery = "steering" | "after_turn" | "next_turn" | "after_compaction" | "already_delivered"
+
+export type TaskMessageRole = "user" | "assistant" | "tool" | "event" | "agent"
+
+export interface TaskMessage {
+  id: string
+  taskId: string
+  role: TaskMessageRole
+  content: string
+  meta: Record<string, unknown> | null
+  createdAt: number
+}
+
+export type ChatRole = "user" | "assistant" | "tool" | "notice" | "error"
+
+export interface ChatMessage {
+  id: string
+  role: ChatRole
+  content: string
+  meta: Record<string, unknown> | null
+  createdAt: number
+}
+
+/**
+ * A side thread: a question about a passage highlighted in the Coordinator chat (projectId null) or a project
+ * Captain's chat, answered in its own Claude session forked from that chat at the highlighted message. Closing it in
+ * the UI only hides it; it stays reopenable from its marker until deleted.
+ */
+export interface SideThread {
+  id: string
+  /** null: the Coordinator chat; else that project's Captain chat. */
+  projectId: string | null
+  /** The chat message the highlight is in (an ask), the message replied to (a reply thread), or a task card's key (a task thread: the task's id, or `batch:<batch id>`). */
+  anchorId: string
+  /**
+   * "ask": a question about a highlighted passage. "reply": replies to the whole message, one thread per message, shown
+   * as "N replies" under it; each of Cody's messages there is routed (shared/threadRoutes.ts). "task": questions to the
+   * Coordinator from a task's card, one thread per card, shown in it.
+   */
+  kind: SideThreadKind
+  /** The highlighted text, as selected; for a reply thread, the whole message replied to; for a task thread, the card's title. */
+  quote: string
+  /** How the thread got the chat's context: a fork of its session at the message, or (after a compaction) its summary. null until the first answer. */
+  context: "fork" | "summary" | null
+  /** A turn is running. */
+  busy: boolean
+  /** Cody's messages and the answers (not tool lines or errors). */
+  replies: number
+  /** An answer (or error) came after Cody last had the thread open. */
+  unread: boolean
+  /** When Cody resolved it, or null. A new message reopens it. */
+  resolvedAt: number | null
+  createdAt: number
+  updatedAt: number
+  /**
+   * A reply thread on a message about one task (a task's update, or what Cody sent it): that task. Cody's messages
+   * there can go to its agent (shared/threadRoutes.ts). null on any other thread.
+   */
+  taskId?: string | null
+}
+
+export type SideThreadKind = "ask" | "reply" | "task"
+
+export type SideThreadRole = "user" | "assistant" | "tool" | "error"
+
+export interface SideThreadMessage {
+  id: string
+  threadId: string
+  role: SideThreadRole
+  content: string
+  meta: Record<string, unknown> | null
+  createdAt: number
+}
+
+/**
+ * Who sent a Captain a message: Cody from the Captain tab, the Coordinator (send_to_captain/ask_captain), a schedule,
+ * a hook, or an agent in the project (message_captain; meta has taskId, taskTitle and waitSeconds).
+ */
+export type CaptainSource = "cody" | "coordinator" | "schedule" | "hook" | "agent"
+
+/** The Captain-tool fields the Coordinator chat keeps on a send_to_captain/ask_captain/wait_for_captain tool line (meta.captain). */
+export interface CaptainToolResult {
+  projectId: string | null
+  /** The Captain's reply (ask/wait), when it gave one. */
+  reply: string | null
+  /** False when the Coordinator stopped waiting while the Captain was still working. */
+  finished: boolean | null
+}
+
+export interface CaptainMessage {
+  id: string
+  projectId: string
+  role: ChatRole
+  content: string
+  meta: Record<string, unknown> | null
+  createdAt: number
+}
+
+export interface Artifact {
+  id: string
+  projectId: string | null
+  taskId: string | null
+  title: string
+  filename: string
+  mime: string
+  size: number
+  url: string
+  createdAt: number
+}
+
+export interface BoxInfo {
+  id: string
+  provider: string
+  status: "creating" | "ready" | "lost" | "deleting"
+  size: BoxSize
+  keepAlive: boolean
+  slots: number
+  runningTurns: number
+  /**
+   * Fewer than `slots` while a project with an agent running here sets Tasks running at once: the strictest of those
+   * limits (no agent joins until running drops below it), with the project. Absent otherwise.
+   */
+  projectLimit?: { slots: number; project: string } | null
+  /**
+   * Over its slots because the limit was lowered while these agents ran: the limit they started under
+   * (null when that's not why, or not known since a restart).
+   */
+  limitLoweredFrom?: number | null
+  residentTasks: string[]
+  /** Names of the projects whose tasks live on this box. */
+  projects: string[]
+  /** Ids of the projects with work on this box, or that it was made for (the ones it can be snapshotted for). */
+  projectIds?: string[]
+  activeMs: number
+  uptimeMs: number
+  diskBytes: number | null
+  /** Free and total space on the box's work disk (df), null until first checked. */
+  diskFreeBytes: number | null
+  diskTotalBytes: number | null
+  diskCheckedAt: number | null
+  /** Since when Box Yard's probes can't reach the box (its disk and memory numbers are stale), or null. */
+  unreachableSince?: number | null
+  /** Free and total space on the box's root disk (/tmp, HOME) when that isn't the work disk; null otherwise or until checked. */
+  rootFreeBytes?: number | null
+  rootTotalBytes?: number | null
+  /** Memory in use (without reclaimable page cache) and the box's memory, from the same probe; null until checked. */
+  memUsedBytes?: number | null
+  memTotalBytes?: number | null
+  /** 1-minute load average and the CPUs it's over (nproc). */
+  loadAvg?: number | null
+  cpuCount?: number | null
+  /** Why placement skips the box for new agents (Settings → Boxes & limits → Memory), or null. */
+  memoryPressure?: string | null
+  /** Too little free space for a new workspace (Settings → Boxes & limits → Disk). */
+  diskLow: boolean
+  /** The running cleanup, or the last one. */
+  cleanup: BoxCleanup | null
+  /** What is being done to the box right now; its Clean up, Clear, Resize and Delete buttons wait for it. */
+  operation: BoxOperation | null
+  /** The running resize, or the last one (on a migrated-to box: the one that made it). */
+  resize: BoxResize | null
+  estimatedCostUsd: number
+  usageSource: UsageSource
+  createdAt: number
+  lastUsedAt: number
+  /** Why an idle box outlives Settings › Idle box deletion: a workspace on it isn't archived yet (retried), or null. */
+  idleHeld?: string | null
+}
+
+export type BoxOperation = "cleanup" | "clear" | "delete" | "resize" | "snapshot"
+
+/**
+ * A task's part in the delete safety check (server/boxDelete.ts): "ok" lets the box go, the rest hold it. The
+ * Coordinator and Captains (delete_box) are refused by any of them; Cody can stop agents, or delete anyway.
+ */
+export type BoxDeleteVerdict = "ok" | "running" | "queued" | "unpushed" | "dirty" | "unchecked"
+
+/** Tasks Cody can delete past with "Delete anyway": all but "ok", and running agents (those are stopped instead). */
+export const deleteAtRisk = <T extends { verdict: BoxDeleteVerdict }>(tasks: T[]): T[] => tasks.filter((t) => t.verdict !== "ok" && t.verdict !== "running")
+
+/** What Clear box and Delete box would touch, for their confirmations, and the safety check delete_box runs. */
+export interface BoxContents {
+  boxId: string
+  /** A worker box (deleted at its provider), a RunPod GPU pod (terminated; its network volume stays), or a Docker
+   * project's container (deleted with its workspace volume). */
+  kind: "box" | "pod" | "container"
+  /** The box id, or "GPU pod #1 · project" for a pod. */
+  label: string
+  tasks: {
+    id: string
+    title: string
+    projectId: string
+    status: TaskStatus
+    /** A turn is running (or setting up) on the box right now. */
+    running: boolean
+    /** Changed or untracked files in the workspace (git status), null when it couldn't tell. Archived before anything is removed. */
+    uncommitted: number | null
+    /** The workspace already has an archive newer than its last activity. */
+    archived: boolean
+    prState: PrState | null
+    verdict: BoxDeleteVerdict
+    /** Why it holds the delete, or what happens to it ("archived first", "needs no archive: PR merged…"). */
+    detail: string
+  }[]
+  /** Agents running on the box: Clear and Delete refuse unless asked to stop them. */
+  running: number
+  /** Disk in use on the box (df), and how much of it is Box Yard's folders (du). */
+  diskUsedBytes: number | null
+  diskBytes: number | null
+  /** Why nobody can delete it right now (another operation on it, still being created, a pod that isn't up), or null. */
+  busy: string | null
+  /** Every reason delete_box refuses it (busy, then each task that isn't "ok"); empty when it may go. */
+  refusals: string[]
+}
+
+export interface Health {
+  ok: boolean
+  provider: string
+  mock: boolean
+  bus: "redis" | "file"
+  claude: { available: boolean; version: string | null }
+  problems: string[]
+  pool: { maxBoxes: number; slotsPerBox: number; maxAgents: number; maxResidentPerBox: number; boxIdleDeleteMinutes: number }
+  orchestratorBusy: boolean
+  /** How schedules are triggered: the server's own timer, or QStash plus the timer. */
+  scheduler: "local" | "qstash"
+  /** The build this server runs: its git commit (null when it isn't a checkout) and when the process started. */
+  build: { commit: string | null; commitDate: string | null; startedAt: number }
+}
+
+/** Server-sent events pushed to the UI. */
+export type UiEvent =
+  | { type: "task"; task: Task }
+  | { type: "task.deleted"; taskId: string }
+  | { type: "task.message"; message: TaskMessage }
+  | { type: "project"; project: Project }
+  /** A project's note suggestions changed (one was added or resolved). */
+  | { type: "note_suggestions"; projectId: string }
+  | { type: "project.deleted"; projectId: string }
+  /** The owner reordered the projects: every project id, first to last. */
+  | { type: "projects.order"; ids: string[] }
+  | { type: "chat.message"; message: ChatMessage }
+  | { type: "chat.delta"; text: string }
+  | { type: "chat.busy"; busy: boolean }
+  /** An orchestrator turn ended. `replyId` is its final reply (text after its last tool call), if it said anything. */
+  | { type: "chat.turn"; startedAt: number; replyId: string | null }
+  | { type: "orchestrator.state"; state: OrchestratorState }
+  | { type: "captain.message"; message: CaptainMessage }
+  | { type: "captain.state"; state: CaptainState }
+  | { type: "thread"; thread: SideThread }
+  | { type: "thread.message"; message: SideThreadMessage }
+  | { type: "thread.delta"; threadId: string; text: string }
+  | { type: "thread.deleted"; threadId: string; projectId: string | null }
+  | { type: "settings"; info: SettingsInfo }
+  /** Settings › Voice text-to-speech choices changed (keys only as set/unset). */
+  | { type: "tts"; info: TtsInfo }
+  /** A credential was saved or removed in the app (status only, never a value). */
+  | { type: "setup"; status: SetupStatus }
+  /** Settings › RunPod GPU's image build moved on (state and the log's tail; never a secret). */
+  | { type: "runpod.build"; build: RunPodImageBuild }
+  /** Settings › Docker's image build moved on (state and the log's tail; never a secret). */
+  | { type: "docker.build"; build: DockerImageBuild }
+  /** Settings › Machines changed: a machine, its last test, its state or tasks (never a key). */
+  | { type: "machines"; status: MachinesStatus }
+  /** Settings › Identities changed: an identity, its secrets' fingerprints, or which projects use it. */
+  | { type: "identities"; identities: Identity[] }
+  /** A run reported a login's subscription limits (GET /api/limits): new figures, a reset time or a state. */
+  | { type: "limits" }
+  /** Settings › Connectors changed: a connector, its status, or its secrets' fingerprints (never a value). */
+  | { type: "connectors"; connectors: Connector[] }
+  /** Settings › Credentials › More logins changed: a login, its state or last test (label and last 4 only, never a value). */
+  | { type: "logins"; logins: AgentLogin[] }
+  | { type: "artifact"; artifact: Artifact }
+  | { type: "boxes"; boxes: BoxInfo[] }
+  | { type: "box.cleanup"; cleanup: BoxCleanup }
+  | { type: "box.resize"; resize: BoxResize }
+  /** A project snapshot job started, moved on a step or finished (shared/snapshots.ts). */
+  | { type: "project.snapshot"; job: SnapshotJob }
+  /** A new box history row (server/boxHistory.ts). */
+  | { type: "box.event"; event: BoxEvent }
+  | { type: "schedule"; schedule: Schedule }
+  | { type: "schedule.run"; run: ScheduleRun }
+  | { type: "schedule.deleted"; scheduleId: string }
+  | { type: "notification"; notification: AppNotification }
+  | { type: "notifications.read"; ids: string[]; readAt: number }
+  | { type: "hook"; hook: Hook }
+  | { type: "hook.deleted"; hookId: string }
+  | { type: "hook.run"; run: HookRun }
+
+/** Task statuses that are worth telling Cody about when a task lands in them. */
+export const NOTIFY_STATUSES = ["done", "pr_ready", "needs_input", "failed", "idle"] as const
+export type NotifyStatus = (typeof NOTIFY_STATUSES)[number]
+
+/**
+ * Should a status change notify Cody? Only when work settles: a running (or queued) task lands on a
+ * finished or attention status. Idle counts only after a turn actually ran (working -> idle).
+ */
+export function shouldNotify(prev: TaskStatus, next: TaskStatus): next is NotifyStatus {
+  if (prev === next) return false
+  if (!(NOTIFY_STATUSES as readonly TaskStatus[]).includes(next)) return false
+  if (next === "idle") return prev === "working"
+  return prev === "queued" || prev === "starting" || prev === "working"
+}
+
+/** A task that finished or needs attention, as shown in toasts and the sidebar's Recent list. */
+export interface AppNotification {
+  id: string
+  /** The task it's about; null for a box notification (e.g. a resize the Coordinator made). */
+  taskId: string | null
+  /** The box it's about, for box notifications. */
+  boxId?: string | null
+  /** Where a click goes when it isn't the task page. */
+  href?: string | null
+  projectId: string
+  /** Task title and project name as they were when it fired. */
+  title: string
+  projectName: string
+  status: NotifyStatus
+  /** One line: the question, the error or the agent's summary. */
+  summary: string | null
+  createdAt: number
+  readAt: number | null
+}
+
+// ---------------------------------------------------------------- effort, usage, settings
+
+export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
+/** Ultra is Codex-only; EFFORTS remains the Claude picker/catalog's levels. */
+export type Effort = (typeof EFFORTS)[number] | "ultra"
+/** Box agent effort setting: a fixed level, or the orchestrator picks per task/message. */
+export type AgentEffort = Effort | "orchestrator"
+
+export const DEFAULT_MODEL = "claude-opus-5-5"
+export const DEFAULT_EFFORT: Effort = "high"
+/** Captains have their own model/effort settings; like every default they start at Opus 5.5, high effort. */
+export const DEFAULT_CAPTAIN_MODEL = DEFAULT_MODEL
+export const DEFAULT_CAPTAIN_EFFORT: Effort = DEFAULT_EFFORT
+/** The CLI accepts an auto-compact window between these many tokens. */
+export const AUTOCOMPACT_MIN_TOKENS = 100_000
+export const AUTOCOMPACT_MAX_TOKENS = 1_000_000
+/** The Coordinator's and Captains' default auto-compact threshold (Settings › Coordinator › Auto-compact). */
+export const DEFAULT_AUTOCOMPACT_TOKENS = 250_000
+
+export const WORKER_SIZES = ["small", "medium", "large"] as const
+export type WorkerSize = (typeof WORKER_SIZES)[number]
+
+export const SIZE_DEFAULTS: Record<WorkerSize, { slotsPerBox: number; maxResidentPerBox: number }> = {
+  small: { slotsPerBox: 1, maxResidentPerBox: 3 },
+  medium: { slotsPerBox: 2, maxResidentPerBox: 8 },
+  large: { slotsPerBox: 4, maxResidentPerBox: 18 },
+}
+
+/**
+ * Relay-only Coordinator turns (woken by task updates and Captain replies, with no message from Cody) on another
+ * model or effort. Off by default: a different model or effort can't read the turn before's prompt cache, so each
+ * relay turn writes the whole context again (cheap and quick on a small model, slow on a big one).
+ */
+export interface RelayModel {
+  enabled: boolean
+  model: string
+  effort: Effort
+}
+export const DEFAULT_RELAY_MODEL: RelayModel = { enabled: false, model: "claude-haiku-5-5", effort: "low" }
+
+/** Settings › Coordinator › Quick questions effort: a level, or "" for the effort of the chat the question is in. */
+export type QuickQuestionEffort = (typeof EFFORTS)[number] | ""
+
+export interface AutoCompact {
+  enabled: boolean
+  unit: "percent" | "tokens"
+  /** Percent of the context window (10-95) or a token count. */
+  value: number
+}
+
+export const BOX_SIZES = WORKER_SIZES
+export type BoxSize = WorkerSize
+
+export interface CostRates {
+  boxActiveCpuHourlyUsd: Record<BoxSize, number>
+  boxKeepAliveMonthlyUsd: Record<BoxSize, number>
+  boxStorageGbMonthUsd: number
+}
+
+export interface BudgetSettings {
+  /** 0 disables this budget. */
+  dailyUsd: number
+  /** 0 disables this budget. */
+  monthlyUsd: number
+}
+
+export interface Settings {
+  /** What Box Yard calls its human in prompts and labels (default "Cody"). */
+  ownerName: string
+  /**
+   * Settings › Credentials › Git author: the author of turns whose identity names none, before this computer's git
+   * config and the GitHub account behind the token (server/gitAuthor.ts). "" = unset; GIT_USER_NAME / GIT_USER_EMAIL.
+   */
+  gitUserName: string
+  gitUserEmail: string
+  /** The Coordinator's header shows the cloud meter (boxes, $/h, today's box spend). Off by default: not everyone uses boxes. */
+  showCloudMeter: boolean
+  /** Hours before the Coordinator chat's task cards folded a quiet one into "Idle" (0 = never). The cards are gone; the API still takes it. */
+  cardsIdleHours: number
+  /** Sub-tasks: how deep spawn_subtasks may nest (1: a task's children can't start their own). */
+  subtaskMaxDepth: number
+  /** Sub-tasks: how many sub-tasks one task may start, over its whole life. */
+  subtaskMaxChildren: number
+  /**
+   * When a task's PR merges and its turn is over (pr_ready or idle, nothing running or queued), it moves to done. Off, a
+   * merged PR leaves the task idle until it's marked done.
+   */
+  autoDoneOnMerge: boolean
+  /**
+   * When a task's PR merges into a branch other than the repo's default (GitHub only closes "Fixes #N" issues on the
+   * default branch), Box Yard closes the same-repo issues its title and body name with a closing keyword.
+   */
+  closeIssuesOnMerge: boolean
+  /** The CLI the Coordinator runs on (shared/agentCli.ts): Claude Code unless set to Codex. */
+  orchestratorCli: ManagerCli
+  orchestratorModel: string
+  /** The Coordinator's model when it runs on Codex; "" is Codex's own default. */
+  orchestratorCodexModel: string
+  orchestratorEffort: Effort
+  /** Compacts between turns once usage passes the threshold; writes a log file first. */
+  orchestratorAutoCompact: AutoCompact
+  /** A lighter model or effort for the Coordinator's relay-only turns (task updates, no message from Cody); off by default. */
+  orchestratorRelay: RelayModel
+  /** The CLI every project's Captain runs on. */
+  captainCli: ManagerCli
+  /** Model for the per-project Captains, separate from the Coordinator's. */
+  captainModel: string
+  /** The Captains' model when they run on Codex; "" is Codex's own default. */
+  captainCodexModel: string
+  captainEffort: Effort
+  /** The icon every Captain shows (shared/captainIcons.ts) unless its project has an icon or image of its own. */
+  captainIcon: CaptainIconId
+  /**
+   * Quick questions (side threads: a task's side questions, Reply and Ask in the Coordinator's and Captains' chats)
+   * run on this Claude model; "" runs each on its chat's model, as before this setting. A chat on Codex keeps its own.
+   */
+  quickQuestionModel: string
+  /** ...and at this effort; "" is its chat's effort. */
+  quickQuestionEffort: QuickQuestionEffort
+  /** The CLI new tasks run on unless their project (or the task) picks one; a task keeps the one it started on. */
+  agentCli: AgentCli
+  agentModel: string
+  /** Box agents' model on Codex, unless the task or routing picks a Codex model; "" is Codex's own default. */
+  agentCodexModel: string
+  /** Codex's independent effort. Legacy explicit agentEffort is inherited until this is saved. */
+  agentCodexEffort: AgentEffort
+  /**
+   * Box agents' model on Cursor (a `cursor-agent models` id, which carries its effort), unless the task or routing
+   * picks one Cursor runs; "" is the CLI's own default (docs/cursor.md).
+   */
+  agentCursorModel: string
+  agentEffort: AgentEffort
+  /** YAML routing rules the orchestrator uses to choose per-task/per-turn model and effort. */
+  agentRoutingConfig: string
+  /** When enabled, passed to the CLI as --autocompact; otherwise the CLI's own default applies. */
+  agentAutoCompact: AutoCompact
+  /** Upstash Box size used for new worker boxes (a project's preferred size wins). */
+  workerSize: WorkerSize
+  /**
+   * Default GPU cloud: where GPU projects without a cloud of their own, and tasks picked with "@gpu", get their pods
+   * (Settings › Box providers). A project's own cloud, or a task's "@gpu:<cloud>", wins.
+   */
+  gpuProvider: GpuProvider
+  /** The Coordinator and Captains may resize boxes with resize_box. */
+  autoResizeEnabled: boolean
+  /** The largest size resize_box may pick. */
+  autoResizeMaxSize: BoxSize
+  /** When the pool is full and no box of a project's size is free, placement may resize an idle box up to it. Off: the task waits. */
+  placementResizeEnabled: boolean
+  /** Most worker boxes alive at once. */
+  maxBoxes: number
+  /** Most worker boxes being created at the same time, when many tasks wait for one (still within maxBoxes). */
+  boxCreateConcurrency: number
+  /** Claude turns that may run at once inside one box. Unset, each box uses its own size's default. */
+  slotsPerBox: number
+  /** Max tasks running at once across all boxes. 0 = no extra cap beyond boxes x tasks running at once per box. */
+  maxAgents: number
+  /**
+   * Local runner: most tasks of "This computer" projects running at once on the machine running Box Yard. They
+   * queue on their own, apart from box slots and Max tasks running at once.
+   */
+  localAgents: number
+  /**
+   * Task folders kept on this computer (the local runner), and on each SSH machine, before the oldest finished ones
+   * leave: only a resting folder whose work is all pushed, archived first (or done with a merged PR). 0 = no limit.
+   */
+  localFoldersKept: number
+  /**
+   * On this computer and SSH machines: remove a done task's git-ignored dependency and build output (node_modules,
+   * dist, build…) once its work is pushed. A task that isn't done keeps it; only a low disk frees it (server/ownCleanup.ts).
+   */
+  localBuildCleanup: boolean
+  /**
+   * Unused: a task that isn't done no longer loses its build output after idle hours (it may be running a dev server).
+   * Kept so saved settings and BOXYARD_LOCAL_BUILD_CLEANUP_IDLE_HOURS still parse.
+   */
+  localBuildCleanupIdleHours: number
+  /**
+   * Low-disk cleanup on this computer and SSH machines: below this much free disk (GB) where the task folders live, free
+   * build output and then the oldest finished folders until it's back above. 0 = off.
+   */
+  localDiskMinFreeGb: number
+  /** Rates used to estimate Upstash Box infrastructure costs. */
+  costRates: CostRates
+  /** Optional cost guardrail. When exceeded, Box Yard holds queued agent turns. */
+  budget: BudgetSettings
+  /** Task folders kept in one box before old archived ones are parked. */
+  maxResidentPerBox: number
+  /** Delete a worker box after this many idle minutes. 0 = keep boxes until removed manually. */
+  boxIdleDeleteMinutes: number
+  /** Park archived resting task folders from boxes after this many idle days. 0 = keep folders. */
+  workspaceRetentionDays: number
+  /** Prune orphan and long-done archives after this many days. 0 = keep archives. */
+  archiveRetentionDays: number
+  /** Never prune the archive of a task touched within this many days (on top of archiveRetentionDays). 0 = no extra protection. */
+  archiveKeepTouchedDays: number
+  /** Free space a box needs before a new workspace lands on it, at least. */
+  diskMinFreeMb: number
+  /** ...and at least this many times the repo's last clone size. */
+  diskCloneFactor: number
+  /** Placement skips a box with more than this % of its memory in use while agents run on it. 0 = off. */
+  memoryMaxUsedPercent: number
+  /** ...or with less than this much memory free (MB). 0 = off. */
+  memoryMinFreeMb: number
+  /** ...or with a 1-minute load average above this many times its CPUs. 0 = off. */
+  loadMaxPerCpu: number
+  /** Box repo mirrors are partial clones (blob:none): old blobs are fetched when something reads them. A project can override it. */
+  gitPartialClone: boolean
+  /**
+   * After every turn, push the task's branch and its uncommitted work (to the hidden ref refs/boxyard/wip/<task>),
+   * so archives only carry what git can't. A project can override it.
+   */
+  gitPushAtTurnEnd: boolean
+  /** Remove a resting task's git-ignored build output (node_modules, dist, caches…) after this many idle minutes. 0 = off. */
+  buildCleanupIdleMinutes: number
+  /**
+   * Dependency cache: each box keeps installed node_modules per lockfile and hard-links them into tasks that lack one
+   * (box-runner.mjs depsRestore/depsSave), so a fresh or cleaned task needs no npm ci. A project can override it.
+   */
+  depCacheEnabled: boolean
+  /** Most space (MB) one box's dependency cache may take on its work disk; least recently used entries go first. */
+  depCacheMaxMb: number
+  /** Notes retro: when a task's PR merges, or a task without a PR ends done, its Captain curates the agent's note suggestions. */
+  notesRetroEnabled: boolean
+  /** Max notes: at most this many notes go into each agent's prompt (a project can set its own)... */
+  notesMaxCount: number
+  /** ...and at most about this many tokens of them. Over either, the Captain is told to prune. */
+  notesMaxTokens: number
+}
+
+/** Settings › Coordinator › Idle after: its default and range, in hours. */
+export const CARDS_IDLE_HOURS = { default: 3, min: 0, max: 24 * 30 } as const
+
+/** Settings › Box agents › Sub-tasks: how deep they nest, and how many one task may start. */
+export const SUBTASK_MAX_DEPTH = { default: 3, min: 1, max: 6 } as const
+export const SUBTASK_MAX_CHILDREN = { default: 10, min: 1, max: 50 } as const
+
+/** Agents that can run at once under a set of limits. */
+export function agentCapacity(p: { maxBoxes: number; slotsPerBox: number; maxAgents: number }) {
+  const perBoxes = p.maxBoxes * p.slotsPerBox
+  return p.maxAgents > 0 ? Math.min(p.maxAgents, perBoxes) : perBoxes
+}
+
+/** A project's own box settings (Project › Settings) take the same ranges as the global ones they override. */
+export const PROJECT_BOX_LIMITS = {
+  agentsPerBox: { min: 1, max: 20 },
+  tasksPerBox: { min: 1, max: 200 },
+  maxBoxes: { min: 1, max: 100 },
+  /** $/hr, the range of Settings › RunPod GPU › Max per project. */
+  gpuMaxHourlyUsd: { min: 0, max: 100 },
+} as const
+
+/** Settings › Boxes created at once: its default and range. */
+export const BOX_CREATE_CONCURRENCY = { default: 10, min: 1, max: 50 } as const
+
+/** Free-plan box limit, from https://upstash.com/pricing/box (checked 2026-10-22). */
+export const UPSTASH_FREE_CONCURRENT_BOXES = 10
+
+export type SettingSource = "ui" | "env" | "default"
+
+export interface SettingsInfo {
+  /** The values in effect from the next turn on. */
+  settings: Settings
+  /** Where each value comes from: saved in the UI, an env var, or the built-in default. */
+  sources: Record<keyof Settings, SettingSource>
+  defaults: Settings
+}
+
+export interface ClaudeUsageTotals {
+  costUsd: number
+  inputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  outputTokens: number
+  totalTokens: number
+  turns: number
+  durationMs: number
+}
+
+/**
+ * Where a box's cost comes from: "actual" is the provider's own figure (Upstash's Box.list total_compute_cost_usd),
+ * "measured" is CPU time Box Yard measured (the box's cgroup cpu.stat, or the provider's CPU total) priced with the
+ * Settings › Usage rates, and "estimated" is one CPU core for as long as a turn ran there.
+ */
+export type UsageSource = "actual" | "measured" | "estimated"
+const SOURCE_RANK: Record<UsageSource, number> = { actual: 0, measured: 1, estimated: 2 }
+/** The less exact of two sources: a total is only as exact as its weakest part. */
+export const weakerSource = (a: UsageSource, b: UsageSource): UsageSource => (SOURCE_RANK[a] >= SOURCE_RANK[b] ? a : b)
+
+export interface BoxUsageTotals {
+  activeMs: number
+  uptimeMs: number
+  diskBytes: number
+  costUsd: number
+  source: UsageSource
+}
+
+export interface UsageWindow {
+  key: "today" | "7d" | "30d"
+  label: string
+  since: number
+  claude: ClaudeUsageTotals
+  boxes: BoxUsageTotals
+  totalCostUsd: number
+}
+
+export interface UsageProjectTotal {
+  projectId: string
+  projectName: string
+  claude: ClaudeUsageTotals
+}
+
+export interface UsageTaskTotal {
+  taskId: string
+  taskTitle: string
+  projectId: string
+  projectName: string
+  claude: ClaudeUsageTotals
+}
+
+export interface UsageBoxTotal {
+  boxId: string
+  provider: string
+  size: BoxSize
+  keepAlive: boolean
+  activeMs: number
+  uptimeMs: number
+  diskBytes: number | null
+  estimatedCostUsd: number
+  usageSource: UsageSource
+}
+
+export interface BudgetStatus {
+  daily: { limitUsd: number; usedUsd: number; exceeded: boolean; warning: boolean }
+  monthly: { limitUsd: number; usedUsd: number; exceeded: boolean; warning: boolean }
+  blocked: boolean
+}
+
+/**
+ * Cloud spend against Settings › Daily cloud limit (budget.dailyUsd) and Monthly cloud limit (budget.monthlyUsd):
+ * what the boxes cost (Upstash, by the CPU they used). RunPod pods have their own $/hour caps instead.
+ */
+export interface CloudSpend {
+  /** Box spend since local midnight. */
+  todayUsd: number
+  /** Today's limit: Settings' daily limit plus today's raises; 0 when there's no daily limit. */
+  dailyLimitUsd: number
+  /** What "Raise today's limit" added today. */
+  raisedUsd: number
+  /** Today's limit after one more raise (a day's worth on top of the limit, or of today's spend if past it); null without a daily limit. */
+  raiseToUsd: number | null
+  /** Box spend over the last 30 days, and the limit on it (0: none). */
+  monthUsd: number
+  monthlyLimitUsd: number
+  /** "warning" from 80% of a limit; "reached" at 100%, when new boxes wait (running work goes on). */
+  state: "ok" | "warning" | "reached"
+  /** Why new boxes wait, when a limit is reached: "today's cloud spend is $10.02 of its $10 limit". */
+  blockedReason: string | null
+  /** How the spend was worked out: the weakest source among the boxes' intervals. */
+  source: UsageSource
+}
+
+/** One box in the cloud meter's list. */
+export interface CloudBox {
+  id: string
+  status: BoxInfo["status"]
+  size: BoxSize
+  /** Names of the projects with a workspace on it. */
+  projects: string[]
+  runningTurns: number
+  /** What it cost today, and since it was made. */
+  todayUsd: number
+  totalUsd: number
+  /** When it went idle (no turn running), and when the idle sweep deletes it; null while it's busy or never. */
+  idleSince: number | null
+  deletesAt: number | null
+  /** Kept past its idle time, and why (BoxInfo.idleHeld). */
+  idleHeld: string | null
+}
+
+/** The cloud meter on the Coordinator (GET /api/cloud). */
+export interface CloudStatus {
+  spend: CloudSpend
+  /** What the boxes cost per hour now: their spend over the last 15 minutes, as an hourly rate. */
+  hourlyUsd: number
+  boxes: { running: number; idle: number; creating: number; total: number }
+  /** Settings › Advanced › Box ceiling (maxBoxes): a safety stop, not a budget. */
+  ceiling: number
+  /** Settings › Idle box deletion, in minutes; 0: idle boxes stay. */
+  idleDeleteMinutes: number
+  list: CloudBox[]
+  /** RunPod GPU pods: their $/hour now against the cap for all pods; null when RunPod isn't set up. */
+  gpu: { pods: number; hourlyUsd: number; capUsd: number } | null
+  /** Vast.ai GPU instances, the same way; null (or absent) when Vast.ai isn't set up. */
+  vast?: { pods: number; hourlyUsd: number; capUsd: number } | null
+  /** Daytona sandboxes, the same way; null (or absent) when Daytona isn't set up. */
+  daytona?: { pods: number; hourlyUsd: number; capUsd: number } | null
+  /** New boxes past the ones Box Yard makes in an hour without asking. */
+  fanout: BoxFanout
+}
+
+/**
+ * Box Yard makes up to `freePerHour` new boxes an hour on its own. When the queue wants more, the rest wait on one OK
+ * (allow them for an hour): `wanted` is how many wait for it, `upToHourlyUsd` what they'd cost an hour with every core
+ * busy, `allowedUntil` the end of an OK given (ms since epoch), or null.
+ */
+export interface BoxFanout {
+  freePerHour: number
+  wanted: number
+  upToHourlyUsd: number
+  allowedUntil: number | null
+}
+
+export interface UsageReport {
+  generatedAt: number
+  rates: CostRates
+  budget: BudgetStatus
+  windows: UsageWindow[]
+  projects: UsageProjectTotal[]
+  tasks: UsageTaskTotal[]
+  boxes: UsageBoxTotal[]
+  /** The Coordinator's own runs (all-time). */
+  orchestrator: ClaudeUsageTotals
+  /** Per-project Captain runs (all-time), including older rows logged as orchestrator usage with a project id. */
+  captains: ClaudeUsageTotals
+  /** Everything for one period. Only present when the request passed `from` (GET /api/usage?from=&to=). */
+  period?: UsagePeriodReport
+}
+
+/** Where spend goes. Agents are task turns that no schedule started; schedule runs are the rest. */
+export type UsageCategory = "coordinator" | "captains" | "agents" | "schedules" | "boxes"
+export const USAGE_CATEGORIES: UsageCategory[] = ["coordinator", "captains", "agents", "schedules", "boxes"]
+
+/** One line of a breakdown table. Every breakdown's rows sum to the period total. */
+export interface UsageBreakdownRow {
+  key: string
+  label: string
+  /** Second line, e.g. a task's project or a schedule's run count. */
+  detail?: string | null
+  href?: string | null
+  /** Set on rows that aren't the breakdown's own kind (Boxes in "By model", the Coordinator in "By project"). */
+  other?: boolean
+  category?: UsageCategory | null
+  /** Claude runs that did work (a run with no tokens and no cost, like a /context probe, isn't a turn). */
+  turns: number
+  tokens: number
+  costUsd: number
+  /** Schedule runs: tasks the schedule started in the period. */
+  runs?: number
+  children?: UsageBreakdownRow[]
+}
+
+export interface UsageBucket {
+  start: number
+  /** Cost per category in this bucket. */
+  costs: Record<UsageCategory, number>
+}
+
+export interface UsagePeriodBox {
+  boxId: string
+  size: BoxSize
+  keepAlive: boolean
+  /** False once the box is gone; its metered time still counts. */
+  live: boolean
+  activeMs: number
+  uptimeMs: number
+  diskBytes: number | null
+  costUsd: number
+  source: UsageSource
+}
+
+export interface UsagePeriodReport {
+  from: number
+  to: number
+  bucketMs: number
+  totalCostUsd: number
+  claude: ClaudeUsageTotals
+  boxes: BoxUsageTotals
+  categories: Record<UsageCategory, { costUsd: number; turns: number; tokens: number }>
+  buckets: UsageBucket[]
+  byProject: UsageBreakdownRow[]
+  byTask: UsageBreakdownRow[]
+  byModel: UsageBreakdownRow[]
+  /** By the Claude or Codex login runs used (docs/logins.md); runs on the usual login are one "other" row. */
+  byLogin: UsageBreakdownRow[]
+  bySource: UsageBreakdownRow[]
+  boxList: UsagePeriodBox[]
+}
+
+export interface ContextUsage {
+  tokens: number | null
+  window: number | null
+  updatedAt: number | null
+}
+
+export interface CompactionInfo {
+  at: number
+  trigger: "button" | "auto"
+  tokensBefore: number | null
+  tokensAfter: number | null
+  file: string
+}
+
+export interface CompactionTaskSnapshot {
+  taskId: string
+  title: string
+  status: TaskStatus
+  projectId: string
+  projectName: string
+  branch: string | null
+  prUrl: string | null
+  sessionId: string
+  summary: string
+  lastActiveAt: number
+}
+
+export interface OrchestratorCompactionRecord extends CompactionInfo {
+  id: string
+  sessionId: string
+  model: string
+  jsonFile: string
+  taskCount: number
+  tasks: CompactionTaskSnapshot[]
+  markdown?: string
+}
+
+/** A compaction read back from its log files (Captain compactions have no database rows). */
+export interface CompactionRecord extends OrchestratorCompactionRecord {
+  /** Tasks the compaction links: snapshotted, listed in its frontmatter, or named in its summary. */
+  taskIds: string[]
+}
+
+export interface TaskCompactionRecord {
+  id: string
+  taskId: string
+  sessionId: string
+  at: number
+  statusBefore: TaskStatus | null
+  statusAfter: TaskStatus | null
+  tokensBefore: number | null
+  tokensAfter: number | null
+  summary: string
+  archivePath: string | null
+  archiveAvailable: boolean
+  archiveNote: string | null
+}
+
+export interface OrchestratorState {
+  busy: boolean
+  usage: ContextUsage
+  compacting: boolean
+  compactQueued: boolean
+  lastCompaction: CompactionInfo | null
+  compactionsDir: string
+  error: string | null
+}
+
+export interface CaptainState {
+  projectId: string
+  busy: boolean
+  usage: ContextUsage
+  compacting: boolean
+  compactQueued: boolean
+  lastCompaction: CompactionInfo | null
+  compactionsDir: string
+  error: string | null
+  /** Unattended wake-ups since Cody or the Coordinator last wrote. */
+  autoTurns?: number
+  /** Set while the loop guard holds back automatic wake-ups; queued updates go out when it ends. */
+  throttledUntil?: number | null
+}
+
+export interface CaptainCompaction extends CompactionInfo {
+  content: string
+}
+
+/** One project's Captain as the web app prefetches it (GET /api/captains/recent): what its chat shows first. */
+export interface RecentCaptain {
+  projectId: string
+  state: CaptainState
+  /** The newest messages, oldest first, as GET /api/projects/:id/captain/messages lists them. */
+  messages: CaptainMessage[]
+  /** Older messages exist: the chat loads its whole history when it opens. */
+  more: boolean
+  /** Its side threads, for the markers under its messages. */
+  threads: SideThread[]
+}

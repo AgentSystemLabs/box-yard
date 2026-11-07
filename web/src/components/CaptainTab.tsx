@@ -1,0 +1,747 @@
+// The project page's Captain tab: the Captain's transcript as a chat, like the Coordinator panel.
+// A slim header (status, model, context + Compact, last active, ⋯ menu), the thread with task
+// notices folded into one-line rows, and the shared Composer to message the Captain directly.
+// A picked Captain is also a top-level chat: `centre` lays it out as the whole centre, like the Coordinator's.
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import {
+  AlarmClock,
+  AlertTriangle,
+  Archive,
+  ChevronRight,
+  MoreHorizontal,
+  Settings,
+  UserRound,
+  Users,
+  Webhook,
+  type LucideIcon,
+} from "lucide-react"
+import {
+  newClientId,
+  useAgentSettings,
+  useCaptainCompactions,
+  useCaptainMessages,
+  useCaptainState,
+  useChatTurnStop,
+  useSendCaptainMessage,
+} from "../lib/queries"
+import { firstPaintRows, useCountFromFirst, useTail } from "../lib/tail"
+import { chatDays } from "../lib/chatDays"
+import { ChatHistory, DayBoundary } from "./ChatHistory"
+import { splitQueued } from "../lib/queued"
+import { useEntityIndex } from "../lib/entities"
+import { HEAD_CONTAINER, spotClass, useAutoCompact } from "../lib/contextVisibility"
+import { captainRows, groupLabel, parseNotice, plainText, stripFrontMatter, type CaptainNoticeItem, type CaptainRow } from "../lib/captainTranscript"
+import { NOTICE_ICON } from "./noticeIcons"
+import { AgentIcon, AppLink, Button, InRepo, LineIcon, Markdown, TimeAgo, cx, useRepoScope, warmMarkdown } from "./ui"
+import { ChatLine, CollapsibleMarkdown, FullReplyLink } from "./ChatLine"
+import { stripTruncation } from "../lib/truncated"
+import { QueuedChatMessage } from "./QueuedMessages"
+import { AttachmentList } from "./Attachments"
+import { PickChips } from "./RunTargetMenu"
+import { captainSourceOf, forwardedFromTask } from "../../../shared/captain"
+import { Composer, type ComposerExtra, type ComposerHandle } from "./Composer"
+import { DockComposer } from "./DockComposer"
+import { SidebarMenuButton } from "./Sidebar"
+import { CoordinatorCrumb } from "./TreeNav"
+import { ProjectAvatar } from "./TaskIcon"
+import { Helm } from "./ShipIcons"
+import { useCaptainMark } from "./CaptainIcon"
+import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
+import { pickProject, setChatProjectFilter } from "../lib/projectBar"
+import { COORDINATOR_CHAT } from "../lib/threads"
+import { useTiles } from "../lib/taskTiles"
+import { ContextMeter, ContextMiniBar, formatTokens } from "./ContextMeter"
+import { StickyScroll, createJumpStore, type StickyScrollHandle } from "./StickyScroll"
+import { SelectionToTask } from "./SelectionToTask"
+import { SideThreadPane, ThreadChatProvider, ThreadMarkers } from "./SideThread"
+import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
+import type { SelectionTaskSource } from "../lib/selectionTask"
+import { Modal } from "./Modal"
+import { PREVIEW_GROUP } from "./FileLink"
+import { PublishedRow, SLIM_TITLE_LINK } from "./PublishedNotices"
+import { menuItem } from "./TaskHeader"
+import { useOpenProjectSettings } from "../lib/projectSettings"
+import { ChatName, ChatSwitcher } from "./ChatSwitcher"
+import { SearchButton } from "./CommandPalette"
+import { ChatControls } from "./ColumnControls"
+import { EmptyCaptain } from "./EmptyCaptain"
+import { focusComposer, useComposerFocus } from "../lib/chatSwitch"
+import { Loading } from "./Loading"
+import type { Attachment, CaptainCompaction, CaptainMessage, CaptainSource, CaptainState, Project } from "../../../shared/types"
+
+const NO_MESSAGES: CaptainMessage[] = []
+
+/**
+ * Rows a Captain's first paint starts from, and adds while they don't fill the view (StickyScroll's `onFill`). Building
+ * and laying out the newest 60 at once took half a second on a phone, so switching to a Captain whose chat was already
+ * in memory still stalled before it showed. Once a chat has filled the view, first paints start from as many rows as
+ * that took (lib/tail.ts firstPaintRows).
+ */
+export const CAPTAIN_FIRST_PAINT_ROWS = 4
+
+/**
+ * Rows added a frame at a time after that first paint, up to the newest 60. All at once, they held the main thread for
+ * a quarter of a second on a phone right after a switch, so a click or a scroll then waited.
+ */
+export const CAPTAIN_GROW_ROWS = 8
+
+/**
+ * A project's Captain chat. Everything in it is about the project, so "#12" and "PR #12" link to its repo. `centre`: it's
+ * the centre (App.tsx), with `panel` (a task or Captain opened from it) beside it as the Coordinator's has.
+ */
+export function CaptainTab({ project, scrollKey, centre = false, panel }: { project: Project; scrollKey?: string; centre?: boolean; panel?: ReactNode }) {
+  return (
+    <InRepo projectId={project.id}>
+      <CaptainChat project={project} scrollKey={scrollKey} centre={centre} panel={panel} />
+    </InRepo>
+  )
+}
+
+function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Project; scrollKey?: string; centre: boolean; panel?: ReactNode }) {
+  const state = useCaptainState(project.id)
+  const messages = useCaptainMessages(project.id)
+  const send = useSendCaptainMessage(project.id)
+  const panel = useRef<HTMLElement>(null)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const handle = useRef<ComposerHandle>(null)
+  const thread = useRef<StickyScrollHandle>(null)
+  // With `centre`, "Jump to latest" goes in the line over the box (DockComposer.tsx), as in the Coordinator's chat.
+  const jumpStore = useMemo(createJumpStore, [])
+  const color = useTiles().colors.get(project.id)
+  const target = useMemo(() => ({ label: `the ${project.name} Captain`, color }), [project.name, color])
+  // Picked in a chat switcher: the composer takes focus.
+  useComposerFocus(project.id, box)
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => setOpenGroups(new Set()), [project.id])
+
+  // A suggested next step sends without touching the composer (no keyboard pops up on a phone).
+  const followUp = useCallback(
+    (text: string, attachments: Attachment[] = [], extra?: ComposerExtra) => {
+      const content = text.trim()
+      if (!content && !attachments.length) return
+      const sending = send.mutateAsync({ id: newClientId("chat"), content, attachments, ...extra })
+      sending.catch(() => {}) // onError already says so; the Composer puts the text back.
+      thread.current?.scrollToEnd()
+      return sending
+    },
+    [send.mutateAsync],
+  )
+  const submit = useCallback(
+    (text: string, attachments: Attachment[] = [], extra?: ComposerExtra) => {
+      const sending = followUp(text, attachments, extra)
+      box.current?.focus()
+      return sending
+    },
+    [followUp],
+  )
+  // A starter in the empty chat goes in the box to edit, never straight to the Captain.
+  const fill = useCallback((text: string) => handle.current?.fill(text), [])
+  const toggleGroup = useCallback(
+    (id: string) =>
+      setOpenGroups((prev) => {
+        const next = new Set(prev)
+        if (!next.delete(id)) next.add(id)
+        return next
+      }),
+    [],
+  )
+
+  const list = messages.data ?? NO_MESSAGES
+  // Messages sent mid-turn wait at the bottom until the turn that reads them starts.
+  const { settled, queued } = useMemo(() => splitQueued(list), [list])
+  // `centre` keeps the Captain's chat plain: its replies and the updates, without the tool calls between them.
+  const rows = useMemo(() => captainRows(centre ? settled.filter((m) => m.role !== "tool") : settled), [settled, centre])
+  const days = useMemo(() => chatDays(rows.map(firstMessage)), [rows])
+  // Switching Captains (or opening one) paints just the newest rows that fill the view, then the rest of the newest 60.
+  const tail = useTail(rows, project.id, { first: firstPaintRows(project.id, CAPTAIN_FIRST_PAINT_ROWS), grow: CAPTAIN_GROW_ROWS })
+  const rowsRef = useRef(rows)
+  rowsRef.current = rows
+  const tailReveal = tail.reveal
+  const reveal = useCallback((id: string) => {
+    const row = rowsRef.current.find((r) => r.id === id || (r.type === "notices" && r.messages.some((m) => m.id === id)) || (r.type === "files" && r.group.messages.some((m) => m.id === id)))
+    if (!row || !tailReveal(row.id)) return false
+    if (row.type === "notices") setOpenGroups((prev) => prev.has(row.id) ? prev : new Set([...prev, row.id]))
+    return true
+  }, [tailReveal])
+  const count = useCountFromFirst(list, project.id)
+  // `centre` offers next steps only under the newest reply, like the Coordinator's chat.
+  const newest = useMemo(() => {
+    if (!centre) return
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i]!
+      if (r.type === "message" && r.message.role === "assistant") return r.id
+    }
+  }, [rows, centre])
+
+  // Older replies aren't rendered yet: parse their markdown in idle time so loading them is quick.
+  const hidden = tail.hidden
+  const index = useEntityIndex()
+  const repo = useRepoScope()
+  useEffect(() => {
+    if (hidden) warmMarkdown(rows.slice(0, hidden).flatMap((r) => (r.type === "message" && r.message.role === "assistant" ? [r.message.content] : [])), index, repo)
+  }, [rows, hidden, index, repo])
+
+  const busy = Boolean(state.data?.busy)
+  const stop = useChatTurnStop(project.id, busy)
+  // Selected Captain output becomes a task request to this Captain.
+  const selectionSource = useMemo<SelectionTaskSource>(() => ({ kind: "captain", project: { id: project.id, name: project.name } }), [project.id, project.name])
+  const lastActive = Math.max(list.at(-1)?.createdAt ?? 0, state.data?.usage.updatedAt ?? 0) || null
+
+  return (
+    <ThreadChatProvider value={project.id}>
+      <section
+        ref={panel}
+        data-testid="captain-chat"
+        data-centre={centre || undefined}
+        // Open at the bottom: the shared Composer's own border-t and bottom padding end the card, as in ChatPanel.
+        // A `coord` container: an open side thread sits beside the chat when it's wide, over it when not.
+        className={
+          centre
+            ? "@container/coord relative flex h-full min-w-0 bg-zinc-950"
+            : "@container/coord relative flex min-h-[32rem] flex-1 overflow-hidden rounded-t-xl border border-b-0 border-zinc-900 bg-zinc-950"
+        }
+      >
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {centre ? <CentreCaptainHeader project={project} state={state.data} lastActive={lastActive} /> : <CaptainHeader projectId={project.id} state={state.data} lastActive={lastActive} />}
+          {state.data?.error && (
+            <div className="flex gap-2 border-b border-red-900/50 bg-red-950/30 px-4 py-2 text-xs text-red-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 wrap-anywhere">{state.data.error}</span>
+            </div>
+          )}
+
+          <SelectionToTask source={selectionSource} onPrompt={submit}>
+            <ChatHistory days={days} messages={settled} reveal={reveal} projectId={project.id}>
+              <StickyScroll
+                handle={thread}
+                count={count}
+                resetKey={project.id}
+                restoreKey={scrollKey ?? `captain:${project.id}`}
+                hidden={tail.hidden}
+                onLoadEarlier={tail.loadEarlier}
+                onTrim={tail.trim}
+                onFill={tail.fill}
+                onFilled={tail.filled}
+                growing={tail.growing}
+                jumpStore={centre ? jumpStore : undefined}
+                className={centre ? "chat-column py-6" : "px-3 py-4 sm:px-4"}
+                contentClassName={centre ? "space-y-3" : "mx-auto max-w-3xl space-y-3"}
+              >
+                {messages.isLoading && <Loading kind="chat" label="Loading the Captain's conversation" />}
+                {list.length === 0 && !messages.isLoading && <EmptyCaptain project={project} onPick={fill} />}
+                <CaptainTranscript rows={tail.visible} openGroups={openGroups} onToggle={toggleGroup} onFollowUp={followUp} centre={centre} newest={newest} />
+                {busy && (
+                  // Just the dots, like the Coordinator's: the header's icon says it's working.
+                  <div data-testid="captain-working" className="flex gap-1 px-1 py-2">
+                    {[0, 1, 2].map((i) => (
+                      <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-sky-400/70" style={{ animationDelay: `${i * 120}ms` }} />
+                    ))}
+                  </div>
+                )}
+                {queued.map((m) => (
+                  <InboundMessage key={m.id} m={m} />
+                ))}
+              </StickyScroll>
+            </ChatHistory>
+          </SelectionToTask>
+
+          {centre ? (
+            <DockComposer
+              jumpStore={jumpStore}
+              chat={target}
+              onSubmit={submit}
+              placeholder={busy ? "Queue another message for the Captain…" : `Message the ${project.name} Captain…`}
+              textareaRef={box}
+              handleRef={handle}
+              panelRef={panel}
+              historyKey={`captain:${project.id}`}
+              stop={stop}
+              runTargetsProject={project.id}
+              pullRequests
+              className="chat-column overflow-hidden"
+            />
+          ) : (
+            <Composer
+              onSubmit={submit}
+              placeholder={busy ? "Queue another message…" : "Message the Captain…"}
+              textareaRef={box}
+              handleRef={handle}
+              panelRef={panel}
+              historyKey={`captain:${project.id}`}
+              stop={stop}
+              runTargets
+              runTargetsProject={project.id}
+            />
+          )}
+        </div>
+        <SideThreadPane chat={project.id} panel={side} headerClassName={centre ? "min-h-14" : undefined} />
+      </section>
+    </ThreadChatProvider>
+  )
+}
+
+const firstMessage = (row: CaptainRow): CaptainMessage => row.type === "files" ? row.group.messages[0]! : row.type === "notices" ? row.messages[0]! : row.message
+
+/** Header/context updates leave the transcript and its day boundaries alone. */
+const CaptainTranscript = memo(function CaptainTranscript({ rows, openGroups, onToggle, onFollowUp, centre, newest }: {
+  rows: CaptainRow[]
+  openGroups: ReadonlySet<string>
+  onToggle: (id: string) => void
+  onFollowUp: (message: string) => void
+  centre: boolean
+  newest?: string
+}) {
+  return rows.map((row, i) => (
+    <Fragment key={row.id}>
+      <DayBoundary at={firstMessage(row).createdAt} previousAt={i ? firstMessage(rows[i - 1]!).createdAt : undefined} messageId={row.id} />
+      <Row row={row} open={openGroups.has(row.id)} onToggle={onToggle} onFollowUp={onFollowUp} next={!centre || row.id === newest} />
+    </Fragment>
+  ))
+})
+
+const Row = memo(function Row({
+  row,
+  open,
+  onToggle,
+  onFollowUp,
+  next,
+}: {
+  row: CaptainRow
+  open: boolean
+  onToggle: (id: string) => void
+  onFollowUp: (message: string) => void
+  /** Whether a reply shows its suggested next steps. */
+  next: boolean
+}) {
+  if (row.type === "message")
+    return row.message.role === "user" ? (
+      // Like a ChatLine: named for a side thread on it, with its threads under it.
+      <div data-chat-id={row.message.id}>
+        <InboundMessage m={row.message} />
+        <ThreadMarkers m={row.message} />
+      </div>
+    ) : (
+      <ChatLine m={row.message} onFollowUp={onFollowUp} next={next} />
+    )
+  if (row.type === "notice") return <NoticeRow m={row.message} />
+  if (row.type === "files") return <PublishedRow group={row.group} />
+  return <NoticeGroup id={row.id} items={row.items} messages={row.messages} open={open} onToggle={onToggle} />
+})
+
+const INBOUND: Record<CaptainSource, { label: string; icon: LucideIcon; box: string; head: string }> = {
+  cody: { label: "You", icon: UserRound, box: "rounded-br-md bg-yard-500/15", head: "text-yard-300" },
+  coordinator: { label: "From Coordinator", icon: Helm, box: "rounded-bl-md border border-sky-500/25 bg-sky-500/5", head: "text-sky-300" },
+  schedule: { label: "Scheduled", icon: AlarmClock, box: "rounded-bl-md border border-violet-500/25 bg-violet-500/5", head: "text-violet-300" },
+  hook: { label: "Hook", icon: Webhook, box: "rounded-bl-md border border-teal-500/25 bg-teal-500/5", head: "text-teal-300" },
+  agent: { label: "From task", icon: Users, box: "rounded-bl-md border border-amber-500/25 bg-amber-500/5", head: "text-amber-300" },
+}
+
+/** "From task <title>" for an agent's message_captain: the title links to the task, and a waiting agent says so. */
+function AgentSource({ meta }: { meta: CaptainMessage["meta"] }) {
+  const taskId = typeof meta?.taskId === "string" ? meta.taskId : null
+  const title = typeof meta?.taskTitle === "string" && meta.taskTitle.trim() ? meta.taskTitle : (taskId ?? "unknown task")
+  const wait = typeof meta?.waitSeconds === "number" ? meta.waitSeconds : 0
+  const held = typeof meta?.heldUntil === "number"
+  return (
+    <>
+      <span className="shrink-0">From task</span>
+      {taskId ? (
+        <AppLink href={`/tasks/${taskId}`} className="min-w-0 truncate font-semibold tracking-normal normal-case hover:underline" title={`${title} (${taskId})`}>
+          {title}
+        </AppLink>
+      ) : (
+        <span className="min-w-0 truncate tracking-normal normal-case">{title}</span>
+      )}
+      {(held || wait > 0) && (
+        <span
+          className="shrink-0 rounded bg-amber-500/15 px-1 font-normal tracking-normal normal-case"
+          title={held ? "The Captain's loop guard held this repeated message back for a while" : `The agent waited up to ${wait} s mid-turn for a reply`}
+        >
+          {held ? "held by loop guard" : `waits ${wait}s`}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** A message to the Captain, labelled by who sent it: Cody (right), the Coordinator or a schedule (left). Long ones fold. */
+export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMessage }) {
+  const source = captainSourceOf(m)
+  const s = INBOUND[source]
+  const Icon = s.icon
+  // An agent's message is always message_captain, and "From task" says so: the room goes to the task title.
+  const tool = source !== "agent" && typeof m.meta?.tool === "string" ? m.meta.tool : null
+  // Cody's message from a task's chat (TaskManager.forwardToCaptain): the task it's about.
+  const via = source === "cody" ? forwardedFromTask(m.meta) : null
+  const bubble = (
+    <div className={cx(MESSAGE_BLOCK, "max-w-[85%] min-w-0 rounded-2xl px-3 py-2 text-sm text-zinc-100", s.box, m.meta?.pending ? "opacity-70" : "")}>
+      <div className={cx("mb-1 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase", s.head)}>
+        <Icon className="h-3 w-3 shrink-0" />{" "}
+        {source === "agent" ? <AgentSource meta={m.meta} /> : source === "hook" && typeof m.meta?.hookName === "string" ? `Hook: ${m.meta.hookName}` : s.label}
+        {tool && <span className="min-w-0 truncate font-mono font-normal tracking-normal normal-case opacity-70">· {tool}</span>}
+        {via && (
+          <AppLink href={`/tasks/${via.taskId}`} data-testid="captain-via-task" title={`Sent from the chat of ${via.taskTitle} (${via.taskId})`} className="min-w-0 truncate font-normal tracking-normal normal-case hover:underline">
+            · from {via.taskTitle}
+          </AppLink>
+        )}
+        <span className="ml-auto shrink-0 pl-2 font-normal tracking-normal whitespace-nowrap normal-case text-zinc-500">
+          <TimeAgo ts={m.createdAt} />
+        </span>
+      </div>
+      {m.content && <CollapsibleMarkdown>{m.content}</CollapsibleMarkdown>}
+      <AttachmentList files={m.meta?.attachments} />
+      <PickChips meta={m.meta} />
+      {!m.meta?.pending && m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
+    </div>
+  )
+  // Queued (sent mid-turn): the bubble, then the Queued label with Edit and Delete under it.
+  const queued = m.meta?.queued === true
+  return (
+    <div
+      id={`captain-${m.id}`}
+      data-testid="captain-inbound"
+      data-source={source}
+      className={cx("flex", queued && "flex-col gap-1", source === "cody" && (queued ? "items-end" : "justify-end"))}
+    >
+      {queued ? (
+        <QueuedChatMessage m={m} projectId={m.projectId} who="the Captain">
+          {bubble}
+        </QueuedChatMessage>
+      ) : (
+        bubble
+      )}
+    </div>
+  )
+})
+
+/**
+ * One task notice: status icon, linked task title, a plain summary and the time. Click to see all of it. A wide row is
+ * one line, title first; in a narrow one (its own `@container`, not the window) or once opened, the whole title gets
+ * its own row and the summary and time go under it.
+ */
+const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
+  const [full, setFull] = useState(false)
+  const n = useMemo(() => parseNotice(m.content, m.meta), [m.content, m.meta])
+  const taskId = typeof m.meta?.taskId === "string" ? m.meta.taskId : null
+  const { icon: Icon, className, label } = NOTICE_ICON[n.kind]
+  const toggle = (e: MouseEvent | KeyboardEvent) => {
+    if ((e.target as HTMLElement).closest("a")) return
+    if ("key" in e && e.key !== "Enter" && e.key !== " ") return
+    e.preventDefault()
+    setFull((v) => !v)
+  }
+  // One line (title · summary · time) only for a collapsed row with a title in a wide row.
+  const inline = Boolean(n.title) && !full
+  const text = full ? "whitespace-normal wrap-anywhere" : "truncate"
+  return (
+    <div
+      id={`captain-${m.id}`}
+      role="button"
+      tabIndex={0}
+      aria-expanded={full}
+      title={full ? undefined : plainText(stripTruncation(m.content).text)}
+      onClick={toggle}
+      onKeyDown={toggle}
+      className={cx(
+        MESSAGE_BLOCK,
+        "flex min-w-0 cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-900/60 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none",
+      )}
+      {...PREVIEW_GROUP}
+    >
+      <LineIcon icon={Icon} className={cx("h-3.5 w-3.5", className)} label={label} />
+      <div className="@container min-w-0 flex-1">
+        <div className={cx("grid grid-cols-[minmax(0,1fr)_auto] gap-x-2", inline && "@md:grid-cols-[minmax(0,max-content)_minmax(0,1fr)_auto]")}>
+          {n.title && (
+            <div data-testid="notice-title" className={cx("col-span-2 wrap-anywhere", inline && "@md:col-span-1 @md:truncate")}>
+              {taskId ? (
+                <AppLink href={`/tasks/${taskId}`} className={SLIM_TITLE_LINK}>
+                  {n.title}
+                </AppLink>
+              ) : (
+                <span className="font-medium text-zinc-200">{n.title}</span>
+              )}
+            </div>
+          )}
+          <div data-testid="notice-meta" className={text}>
+            {inline && n.summary.length > 0 && <span className="text-zinc-600 @max-md:hidden">· </span>}
+            {n.summary.map((s, i) =>
+              "href" in s ? (
+                <AppLink key={i} href={s.href} className="text-yard-400 hover:underline">
+                  {s.label}
+                </AppLink>
+              ) : (
+                <span key={i}>{s.text}</span>
+              ),
+            )}
+            {n.truncated && taskId && <FullReplyLink taskId={taskId} />}
+          </div>
+          <span className="text-right text-[11px] text-zinc-600">
+            <TimeAgo ts={m.createdAt} />
+          </span>
+        </div>
+      </div>
+      <MessageActions text={m.content} anchorId={m.id} />
+    </div>
+  )
+})
+
+/** Consecutive notices folded into "4 task updates", with their icons and titles as a preview. */
+const NoticeGroup = memo(function NoticeGroup({
+  id,
+  items,
+  messages,
+  open,
+  onToggle,
+}: {
+  id: string
+  items: CaptainNoticeItem[]
+  messages: CaptainMessage[]
+  open: boolean
+  onToggle: (id: string) => void
+}) {
+  const parsed = useMemo(() => messages.map((m) => parseNotice(m.content, m.meta)), [messages])
+  const kinds = [...new Set(parsed.map((p) => p.kind))].slice(0, 4)
+  const titles = [...new Set(parsed.flatMap((p) => (p.title ? [p.title] : [])))]
+  const last = messages.at(-1)!
+  return (
+    <div data-testid="notice-group" className="rounded-lg border border-zinc-900 bg-zinc-900/20">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => onToggle(id)}
+        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-900/60 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+      >
+        <ChevronRight className={cx("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+        <span className="flex shrink-0 gap-0.5">
+          {kinds.map((k) => {
+            const { icon: Icon, className } = NOTICE_ICON[k]
+            return <Icon key={k} className={cx("h-3.5 w-3.5", className)} />
+          })}
+        </span>
+        <span className="shrink-0 font-medium text-zinc-300">{groupLabel(messages, items.length)}</span>
+        {titles.length > 0 && (
+          <span className="min-w-0 flex-1 truncate text-zinc-600">
+            · {titles.slice(0, 2).join(", ")}
+            {titles.length > 2 ? ` +${titles.length - 2}` : ""}
+          </span>
+        )}
+        <span className="ml-auto shrink-0 pl-1 text-[11px] text-zinc-600">
+          <TimeAgo ts={last.createdAt} />
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-0.5 border-t border-zinc-900 px-1 py-1">
+          {items.map((item) => (item.type === "files" ? <PublishedRow key={item.id} group={item.group} /> : <NoticeRow key={item.id} m={item.message} />))}
+        </div>
+      )}
+    </div>
+  )
+})
+
+/** The Captain's model, and its context reading unless auto-compact makes it moot. */
+function useCaptainMeter(state: CaptainState | undefined) {
+  const settings = useAgentSettings().data?.settings
+  const model = settings ? `${settings.captainModel} · ${settings.captainEffort} effort` : null
+  // Captains compact on the Coordinator's auto-compact setting; the meter is only a reading.
+  const autoCompact = useAutoCompact("coordinator")
+  const headerMeter = spotClass(autoCompact, "header")
+  const meter: MeterProps | null = autoCompact ? null : {
+    tokens: state?.usage.tokens ?? null,
+    window: state?.usage.window ?? null,
+    compacting: state?.compacting ?? false,
+    queued: Boolean(state?.compactQueued),
+  }
+  return { model, meter, headerMeter }
+}
+
+/**
+ * The centre's header for a Captain, laid out like the Coordinator's (ChatPanel): on a phone the sidebar's menu
+ * button and the Coordinator's crumb, then its icon in its project's colour (it pulses while the Captain works: no
+ * status word) and its name (where the sidebar is a column, the name opens the chat switcher; on a phone ☰ switches),
+ * and on a phone 🔍; its ⋯ menu as in the tab.
+ */
+function CentreCaptainHeader({ project, state, lastActive }: { project: Project; state: CaptainState | undefined; lastActive: number | null }) {
+  const { model, meter } = useCaptainMeter(state)
+  const sidebarInline = useMinWidth(SIDEBAR_INLINE)
+  const color = useTiles().colors.get(project.id)
+  // Its icon is the project's image when it has one and picks no icon: the name doesn't show it a second time.
+  const imageMark = useCaptainMark(project.id).kind === "image"
+  // The switcher's pick stays in the centre: another Captain, or back to the Coordinator, with its box focused.
+  const pick = useCallback((chat: string) => {
+    if (chat === COORDINATOR_CHAT) setChatProjectFilter(null)
+    else pickProject(chat)
+    focusComposer(chat)
+    return true
+  }, [])
+  return (
+    <div className={HEAD_CONTAINER}>
+      <header className="@container chat-column flex min-h-14 flex-col justify-center border-b border-zinc-900 pt-[env(safe-area-inset-top)] sm:overflow-hidden sm:pt-[max(0.5rem,env(safe-area-inset-top))] [&_button]:min-h-11 [&_button]:min-w-11">
+        <div className="flex min-w-0 items-center gap-2">
+          {!sidebarInline && <SidebarMenuButton />}
+          {/* On a phone, the Coordinator is one tap up from here (TreeNav.tsx). Under 280px (a 320px phone at 125% zoom)
+              the crumb gives its room to the project's name; ☰ still reaches the Coordinator. */}
+          {!sidebarInline && <CoordinatorCrumb className="@max-[17.5rem]:hidden" />}
+          <AgentIcon busy={Boolean(state?.busy)} compacting={Boolean(state?.compacting)} error={Boolean(state?.error)} color={color} projectId={project.id} />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ChatName current={project.id} onPick={pick}>
+              {/* Which Captain matters more than the word, so a narrow header keeps the project's name (sooner on a phone,
+                  where the Coordinator's crumb and 🔍 take room too). */}
+              <span data-testid="chat-title" className="flex min-w-0 items-center gap-1.5">
+                <ProjectAvatar src={imageMark ? null : project.iconUrl} className="h-4 w-4 rounded-[4px]" />
+                <span className="min-w-0 truncate">
+                  {project.name}
+                  <span className={sidebarInline ? "@max-[17.5rem]:sr-only" : "@max-[23rem]:sr-only"}> Captain</span>
+                </span>
+              </span>
+            </ChatName>
+          </div>
+          {/* Context readings stay out of the chat, as in the Coordinator's: the full meter is in ⋯. */}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {!sidebarInline && <SearchButton />}
+            <CaptainMenu projectId={project.id} meter={meter} model={model} lastActive={lastActive} />
+            <ChatControls name={`the ${project.name} Captain`} />
+          </div>
+        </div>
+      </header>
+    </div>
+  )
+}
+
+function CaptainHeader({ projectId, state, lastActive }: { projectId: string; state: CaptainState | undefined; lastActive: number | null }) {
+  const { model, meter, headerMeter } = useCaptainMeter(state)
+  const color = useTiles().colors.get(projectId)
+  return (
+    // Like the task header: its icon (which says its state), name and a small context reading (when wide); model, last
+    // active and the full meter are in ⋯.
+    <header className={cx(HEAD_CONTAINER, "flex items-center gap-2 border-b border-zinc-900 px-3 py-2 sm:px-4")}>
+      <AgentIcon busy={Boolean(state?.busy)} compacting={Boolean(state?.compacting)} error={Boolean(state?.error)} color={color} projectId={projectId} />
+      {/* Opens the chat switcher: the Coordinator, then every project's Captain. */}
+      <ChatSwitcher current={projectId}>Captain</ChatSwitcher>
+      <div className="ml-auto flex items-center gap-1">
+        {meter && headerMeter !== null && (
+          <ContextMiniBar tokens={meter.tokens} window={meter.window} hint="How much of the Captain's context window is used." className={cx("mr-1", headerMeter)} />
+        )}
+        <CaptainMenu projectId={projectId} meter={meter} model={model} lastActive={lastActive} />
+      </div>
+    </header>
+  )
+}
+
+type MeterProps = Omit<ComponentProps<typeof ContextMeter>, "className">
+
+/**
+ * ⋯: the Captain's model, last activity and context, then Project settings and compaction history. A sheet like the
+ * task header's ⓘ (a Modal portalled to the body), so the header's overflow can't clip it.
+ */
+function CaptainMenu({ projectId, meter, model, lastActive }: { projectId: string; meter: MeterProps | null; model: string | null; lastActive: number | null }) {
+  const [open, setOpen] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const openProjectSettings = useOpenProjectSettings()
+  const [history, setHistory] = useState(false)
+  const compactions = useCaptainCompactions(projectId)
+  const count = compactions.data?.length ?? 0
+  const facts = Boolean(model || lastActive || meter)
+  // What opens next takes ⋯ as the place focus returns to, not the row that's about to go.
+  const then = (next: () => void) => () => {
+    trigger.current?.focus()
+    setOpen(false)
+    next()
+  }
+  return (
+    <>
+      <Button
+        ref={trigger}
+        size="sm"
+        variant="ghost"
+        className="px-1.5"
+        aria-label="Captain menu"
+        title="More"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </Button>
+      {open && (
+        <Modal title="Captain actions" size="sm" placement="sheet" onClose={() => setOpen(false)} bodyClassName="scroll-thin min-h-0 flex-1 overflow-y-auto p-3 text-sm [&_button]:min-h-11">
+          {facts && (
+            <div className="space-y-1 px-2 pt-1.5 pb-2.5 text-xs text-zinc-500">
+              {model && (
+                <p className="truncate" title="Captains' model and effort (Settings → Coordinator → Project Captains)">
+                  <span className="text-zinc-300">{model}</span>
+                </p>
+              )}
+              {lastActive && (
+                <p>
+                  Active <TimeAgo ts={lastActive} />
+                </p>
+              )}
+              {meter && <ContextMeter className="pt-1.5" {...meter} />}
+            </div>
+          )}
+          <div className={cx("space-y-0.5", facts && "border-t border-zinc-800/80 pt-1.5")}>
+            <button type="button" className={menuItem} onClick={then(() => openProjectSettings(projectId))} data-testid="captain-project-settings">
+              <Settings className="h-3.5 w-3.5 text-zinc-500" />
+              <span className="flex-1">Project settings</span>
+            </button>
+            <button
+              type="button"
+              className={cx(menuItem, "disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent")}
+              disabled={count === 0}
+              onClick={then(() => setHistory(true))}
+            >
+              <Archive className="h-3.5 w-3.5 text-zinc-500" />
+              <span className="flex-1">{count === 0 ? "No compactions yet" : "Compaction history"}</span>
+              {count > 0 && <span className="rounded-full bg-zinc-800 px-1.5 text-[11px] text-zinc-400 tabular-nums">{count}</span>}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {history && <CompactionHistory compactions={compactions.data ?? []} onClose={() => setHistory(false)} />}
+    </>
+  )
+}
+
+/** The Captain's compaction summaries, newest first; the newest is open. */
+function CompactionHistory({ compactions, onClose }: { compactions: CaptainCompaction[]; onClose: () => void }) {
+  const list = useMemo(() => [...compactions].reverse(), [compactions])
+  const [openFile, setOpenFile] = useState<string | null>(list[0]?.file ?? null)
+  return (
+    <Modal onClose={onClose} size="xl" title="Captain compaction history" description="Context summaries this Captain wrote before compacting. They're separate from task compactions.">
+      {list.length === 0 ? (
+        <p className="text-sm text-zinc-500">No compactions yet.</p>
+      ) : (
+        <ol className="space-y-2">
+          {list.map((c) => {
+            const open = openFile === c.file
+            return (
+              <li key={c.file} className="rounded-xl border border-zinc-800 bg-zinc-900/30">
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => setOpenFile(open ? null : c.file)}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-zinc-900/60"
+                >
+                  <ChevronRight className={cx("h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform", open && "rotate-90")} />
+                  <span className="text-zinc-200">{new Date(c.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                  <span className="text-xs text-zinc-500">
+                    <TimeAgo ts={c.at} />
+                  </span>
+                  <span className="ml-auto text-xs text-zinc-500 tabular-nums">
+                    {c.tokensBefore !== null ? formatTokens(c.tokensBefore) : "?"} → {c.tokensAfter !== null ? formatTokens(c.tokensAfter) : "?"} tokens
+                  </span>
+                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">{c.trigger}</span>
+                </button>
+                {open && (
+                  <div className="border-t border-zinc-800 px-4 py-3 text-sm text-zinc-300">
+                    <Markdown>{stripFrontMatter(c.content)}</Markdown>
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </Modal>
+  )
+}
