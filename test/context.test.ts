@@ -9,13 +9,13 @@ import {
   SUMMARY_PROMPT,
   cleanSummary,
   compactionStamp,
-  compactionsPrompt,
   finishCompaction,
   lastCompaction,
   listCompactions,
   summaryLooksValid,
   writeCompaction,
 } from "../server/compactions.js"
+import { CompactionIndex, compactionIndexPrompt } from "../server/compactionIndex.js"
 import { tmpDir } from "./helpers.js"
 
 const memStore = () => new Store(openDb(tmpDir(), ":memory:"))
@@ -153,7 +153,9 @@ describe("compaction log", () => {
     expect(names.slice(1, 4)).toEqual(["2026-10-22T03-40-05.000Z.md", "2026-10-22T03-40-05.000Z-2.md", "2026-10-22T03-40-05.000Z-3.md"])
     expect(names.at(-1)).toBe("2026-10-22T03-40-05.000Z-11.md")
     expect(lastCompaction(dir)).toMatchObject({ tokensBefore: 11 })
-    expect(compactionsPrompt(dir)).toContain(`The newest: ${dir}/2026-10-22T03-40-05.000Z-11.md, ${dir}/2026-10-22T03-40-05.000Z-10.md,`)
+    const store = new Store(openDb(dir, ":memory:"))
+    expect(compactionIndexPrompt(new CompactionIndex(store, "coordinator", dir))).toContain("2026-10-22T03-40-05.000Z-11")
+    store.db.close()
   })
   it("cleans and validates summaries", () => {
     expect(cleanSummary("Sure!\n\n## Decisions and preferences\n- a")).toBe("## Decisions and preferences\n- a")
@@ -162,16 +164,20 @@ describe("compaction log", () => {
     expect(summaryLooksValid(`## Decisions and preferences\n${"- a thing\n".repeat(10)}`)).toBe(true)
     expect(SUMMARY_PROMPT).toContain("## Open threads and next steps")
   })
-  it("the prompt points at the folder, says it is chronological, and lists the newest files", () => {
+  it("the prompt gives a bounded dated index and navigation to every older entry", () => {
     const dir = path.join(tmpDir(), "orchestrator", "compactions")
-    expect(compactionsPrompt(dir)).toContain(dir)
-    expect(compactionsPrompt(dir)).toMatch(/chronological/)
-    expect(compactionsPrompt(dir)).toMatch(/newest first/)
-    expect(compactionsPrompt(dir)).toContain("There are none yet")
-    for (let i = 0; i < 7; i++) writeCompaction(dir, { at: Date.UTC(2026, 0, 1, 0, 0, i), sessionId: "s", model: "m", trigger: "button", tokensBefore: 1 }, "## Decisions and preferences\n- x")
-    const p = compactionsPrompt(dir)
-    expect(p).toContain("are 7 files")
-    expect(p).toContain("2026-01-01T00-00-06.000Z.md")
-    expect(p).not.toContain("2026-01-01T00-00-00.000Z.md")
+    const store = new Store(openDb(tmpDir(), ":memory:"))
+    try {
+      const index = new CompactionIndex(store, "coordinator", dir)
+      expect(compactionIndexPrompt(index)).toContain("Retained: 0")
+      for (let i = 0; i < 7; i++) writeCompaction(dir, { at: Date.UTC(2026, 0, 1, 0, 0, i), sessionId: "s", model: "m", trigger: "button", tokensBefore: 1 }, "## Decisions and preferences\n- Keep dated navigation.")
+      const p = compactionIndexPrompt(index)
+      expect(p).toMatch(/chronological/); expect(p).toMatch(/newest first/)
+      expect(p).toContain("Retained: 7")
+      expect(p).toContain("Keep dated navigation.")
+      expect(p).toContain("nextBefore: 2026-01-01T00-00-02.000Z")
+      expect(p).toContain("2026-01-01T00:00:00.000Z") // Coverage reaches the oldest.
+      expect(p).not.toContain('"id":"2026-01-01T00-00-00.000Z"')
+    } finally { store.db.close() }
   })
 })

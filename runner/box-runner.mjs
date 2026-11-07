@@ -1894,6 +1894,23 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "compaction_history",
+    description: "Browse this task's retained saved compaction recaps: dated topics, descriptions, total, coverage and nextBefore. No other task/project is accessible. Use read_compaction level=summary, then level=full as needed. Native provider auto-compactions are not exported as saved recaps.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      before: { type: "string", description: "nextBefore from the previous page or exclusive ISO time" },
+      since: { type: "string", description: "Inclusive ISO date/time" }, until: { type: "string", description: "Inclusive ISO date/time" },
+      limit: { type: "integer", minimum: 1, maximum: 20 },
+    } },
+  },
+  {
+    name: "read_compaction",
+    description: "Read a compaction id from this task's compaction_history. Default summary is a bounded extractive excerpt. level=full reads the saved recap in bounded chunks; pass nextOffset verbatim until null.",
+    inputSchema: { type: "object", additionalProperties: false, required: ["compaction"], properties: {
+      compaction: { type: "string" }, level: { type: "string", enum: ["summary", "full"] },
+      offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 16000 },
+    } },
+  },
+  {
     name: "create_pull_request",
     description:
       "Push the current branch and open a GitHub pull request; if one is open, update its title and body. Commit your changes first. Screenshots: publish them with publish_artifact and put their /artifacts/ links in the body; this copies them to the repo's pr-assets branch so GitHub shows them.",
@@ -2018,6 +2035,25 @@ function sh(cmd, args, opts = {}) {
   })
 }
 
+/** Server-polled request/reply: works on local, SSH and hosted runners without a worker->server connection. */
+async function compactionHistory(tool, args) {
+  const turnId = currentTurnId()
+  if (!turnId) return text("No active turn for compaction history.", true)
+  const id = `hist_${randomUUID().replace(/-/g, "").slice(0, 24)}`
+  const file = path.join(taskDir, `history-reply-${id}.json`)
+  await emit({ t: "compaction_history", id, request: { tool, args } })
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    const reply = readJson(file, null)
+    if (reply?.turnId === turnId) {
+      try { fs.rmSync(file, { force: true }) } catch {}
+      return reply.error ? text(reply.error, true) : text(JSON.stringify(reply.data))
+    }
+    await sleep(400)
+  }
+  return text("Compaction history timed out waiting for the server poll. Retry the same request; saved history is unchanged.", true)
+}
+
 async function liveDirectory() {
   if (task.redis?.url) {
     const raw = await redis(["GET", "boxyard:directory"])
@@ -2079,6 +2115,9 @@ async function callTool(name, args = {}) {
       if (!notes.length) return text("No notes yet.")
       return text(notes.map((n) => `- (${n.author}) ${n.content}`).join("\n"))
     }
+    case "compaction_history":
+    case "read_compaction":
+      return compactionHistory(name, args)
     case "create_pull_request":
       return createPullRequest(args)
     case "report_preview": {
