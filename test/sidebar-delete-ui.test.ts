@@ -423,6 +423,7 @@ describe("sidebar deletion semantics", () => {
     expect(taskRow(child)).not.toBeNull()
     expect(new URLSearchParams(location.search).get("session")).toBe(child.id)
     expect(currentToasts().some((t) => t.title.includes("Couldn't delete"))).toBe(true)
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Example refusal")
   })
 })
 
@@ -524,6 +525,7 @@ describe("visible failed-task deletion", () => {
     answer(true)
     await flush()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Stop queued or running tasks before deleting.")
   })
 
   it("restores a failed task and its current panel when the API refuses deletion", async () => {

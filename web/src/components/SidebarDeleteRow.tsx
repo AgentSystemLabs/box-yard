@@ -179,7 +179,7 @@ function DeleteAction({ target, close }: { target: SidebarDeleteTarget; close: (
   const projects = useProjects()
   const captain = useCaptainState(target.projectId)
   const { pending, remove } = useRestingDelete(target, close)
-  const blocked = !tasks.data || !projects.data || (target.kind === "project" && !captain.data) ? "Checking running work…" : sidebarDeleteBlocked(target, tasks.data, Boolean(captain.data?.busy || captain.data?.compacting || captain.data?.compactQueued))
+  const blocked = !tasks.data || (target.kind === "project" && (!projects.data || !captain.data)) ? "Checking running work…" : sidebarDeleteBlocked(target, tasks.data, Boolean(captain.data?.busy || captain.data?.compacting || captain.data?.compactQueued))
   return (
     <button
       type="button"
