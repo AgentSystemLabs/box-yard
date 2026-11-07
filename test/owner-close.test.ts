@@ -18,7 +18,7 @@ function setup() {
     return store.getTask(id)!
   })
   const broadcast = vi.fn()
-  return { store, alpha, beta, task, closeTask, broadcast, deps: { store, tasks: { closeTask }, hub: { broadcast } } }
+  return { store, alpha, beta, task, closeTask, broadcast, deps: { store, tasks: { closeTask }, hub: { broadcast }, authenticatedOwner: true } }
 }
 
 describe("whole-message owner close commands", () => {
@@ -80,6 +80,12 @@ describe("owner close exact target resolution", () => {
 })
 
 describe("direct owner chat action", () => {
+  it("fails closed without configured owner authentication, regardless of intent", async () => {
+    const r = setup()
+    await closeFromOwnerChat({ ...r.deps, authenticatedOwner: false }, { kind: "coordinator" }, `close ${r.task.id}`)
+    expect(r.closeTask).not.toHaveBeenCalled()
+    expect(r.store.listChat().at(-1)?.content).toContain("requires configured owner sign-in")
+  })
   it("records a request and clear result, without returning private task fields", async () => {
     const r = setup()
     r.store.updateTask(r.task.id, { status: "failed", error: "PRIVATE-ERROR", summary: "PRIVATE-SUMMARY", question: "PRIVATE-QUESTION" })

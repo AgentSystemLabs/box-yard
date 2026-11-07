@@ -1321,7 +1321,7 @@ export function createBoxYard(
     const body = parse(schemas.chat, req.body)
     const picks = await chatPicks(body, id)
     const files = withAttachments(body.content, body.attachments)
-    const closed = await closeFromOwnerChat({ store, tasks, hub }, { kind: "captain", projectId: id }, body.content, { id: body.id, attachments: files })
+    const closed = await closeFromOwnerChat({ store, tasks, hub, authenticatedOwner: auth.enabled && auth.isAuthed(req) }, { kind: "captain", projectId: id }, body.content, { id: body.id, attachments: files })
     if (closed) return void res.status(201).json(closed)
     const message = captains.send(id, body.content, { id: body.id, attachments: files, source: "cody", ...(Object.keys(picks).length ? { meta: picks } : {}) })
     orchestrator.directMessages.record({ projectId: id }, body.content)
@@ -1385,7 +1385,7 @@ export function createBoxYard(
     if (!row) return void res.status(404).json({ error: "Task not found" })
     const files = withAttachments(body.content, body.attachments)
     // Owner-only action before requireRunner/sendInput: closing never starts a turn or needs a working runner.
-    if (await closeFromOwnerChat({ store, tasks, hub }, { kind: "task", taskId: row.id, projectId: row.project_id }, body.content, { attachments: files })) {
+    if (await closeFromOwnerChat({ store, tasks, hub, authenticatedOwner: auth.enabled && auth.isAuthed(req) }, { kind: "task", taskId: row.id, projectId: row.project_id }, body.content, { attachments: files })) {
       return void res.json(store.getTask(row.id))
     }
     await tasks.requireRunner(body.runsOn, row?.project_id, row ? store.taskEnv(row.id) : {}, { ...(row ? { agentCli: taskAgentCli(row) } : {}), machineLabel: body.machineLabel, gpu: body.gpu })
@@ -1836,7 +1836,7 @@ export function createBoxYard(
     const body = parse(schemas.chat, req.body)
     const picks = await chatPicks(body, null)
     const files = withAttachments(body.content, body.attachments)
-    const closed = await closeFromOwnerChat({ store, tasks, hub }, { kind: "coordinator", ...(picks.project ? { projectId: picks.project.value } : {}) }, body.content, { id: body.id, attachments: files })
+    const closed = await closeFromOwnerChat({ store, tasks, hub, authenticatedOwner: auth.enabled && auth.isAuthed(req) }, { kind: "coordinator", ...(picks.project ? { projectId: picks.project.value } : {}) }, body.content, { id: body.id, attachments: files })
     if (closed) return void res.status(201).json(closed)
     res.status(201).json(orchestrator.send(body.content, body.id, files, picks))
   })

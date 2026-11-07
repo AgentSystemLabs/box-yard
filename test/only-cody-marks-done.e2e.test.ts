@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Server } from "node:http"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
@@ -18,6 +18,7 @@ interface Running {
   server: Server
   base: string
   dataDir: string
+  closing: Promise<void>[]
 }
 const running: Running[] = []
 const clients: { close(): Promise<void> }[] = []
@@ -26,13 +27,22 @@ async function start(): Promise<Running> {
   const port = await freePort()
   const config = testConfig({ port })
   const yard = createBoxYard(config, { webDir: "/nonexistent" })
+  // Mark done returns before its stop/archive/eviction completes. Keep the database open until that work ends.
+  const closing: Promise<void>[] = []
+  const manager = yard.tasks as unknown as { evictWhenSettled(id: string): Promise<void> }
+  const evict = manager.evictWhenSettled.bind(manager)
+  vi.spyOn(manager, "evictWhenSettled").mockImplementation((id) => {
+    const job = evict(id)
+    closing.push(job)
+    return job
+  })
   // Captains would wake on task notices and start turns of their own.
   yard.captains.tuning.wakeDebounceMs = 10 * 60_000
   const server = await new Promise<Server>((resolve) => {
     const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
   })
   await yard.start()
-  const r = { yard, server, base: `http://127.0.0.1:${port}`, dataDir: config.dataDir }
+  const r = { yard, server, base: `http://127.0.0.1:${port}`, dataDir: config.dataDir, closing }
   running.push(r)
   return r
 }
@@ -40,9 +50,13 @@ async function start(): Promise<Running> {
 afterEach(async () => {
   for (const c of clients.splice(0)) await c.close().catch(() => {})
   for (const r of running.splice(0)) {
+    await waitFor(() => r.yard.store.listTaskRows().every((t) => !t.current_turn_id), "worker turns to settle before teardown")
+    await Promise.all(r.closing)
+    await waitFor(() => !r.yard.orchestrator.busy, "Coordinator to settle before teardown")
     r.yard.stop()
     await new Promise((res) => r.server.close(() => res(null)))
   }
+  vi.restoreAllMocks()
 })
 
 async function call<T>(r: Running, method: string, url: string, body?: unknown): Promise<T> {

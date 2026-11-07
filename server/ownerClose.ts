@@ -47,7 +47,7 @@ export function resolveOwnerClose(store: Pick<Store, "getTask" | "listTasks">, t
  * No capability or approval string is exposed to a model, persisted for reuse, or inferred from chat history.
  */
 export async function closeFromOwnerChat(
-  deps: { store: Store; tasks: Pick<TaskManager, "closeTask">; hub: Pick<Hub, "broadcast"> },
+  deps: { store: Store; tasks: Pick<TaskManager, "closeTask">; hub: Pick<Hub, "broadcast">; authenticatedOwner: boolean },
   chat: OwnerCloseChat,
   content: string,
   options: { id?: string; attachments?: Attachment[] } = {},
@@ -76,7 +76,8 @@ export async function closeFromOwnerChat(
   const message = add("user", content)
   const task = resolveOwnerClose(store, target, chat)
   let result: string
-  if (typeof task === "string") result = task
+  if (!deps.authenticatedOwner) result = "Chat closing requires configured owner sign-in. Use Mark done, or configure sign-in and send this request again."
+  else if (typeof task === "string") result = task
   else if (task.status === "done") result = `Task "${task.title}" (${task.id}) is already done.`
   else {
     try {
