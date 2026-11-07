@@ -41,11 +41,25 @@ describe("project GitHub references", () => {
 
   it("quotes title terms, fixes repo scope, and rejects upstream results from another repo", async () => {
     const { source, fetcher } = setup()
-    fetcher.mockResolvedValue(json({ items: [row(), row(4, { repository_url: "https://api.github.com/repos/acme/other" })] }))
+    fetcher.mockImplementation(async (url) => String(url).includes("/search/")
+      ? json({ items: [row(), row(4, { repository_url: "https://api.github.com/repos/acme/other" })] })
+      : json([]))
     expect((await source.get("site", 'retry repo:acme/other "OR"')).items).toHaveLength(1)
-    const url = new URL(String(fetcher.mock.calls[0]![0]))
+    const url = new URL(String(fetcher.mock.calls.find(([url]) => String(url).includes("/search/"))![0]))
     expect(url.searchParams.get("q")).toBe('repo:acme/site in:title "retry" "repo:acme/other" "or"')
     expect(url.searchParams.get("per_page")).toBe("20")
+  })
+
+  it("matches partial title words from a shared recent index and finds older full-title results", async () => {
+    const { source, fetcher } = setup()
+    fetcher.mockImplementation(async (url) => String(url).includes("/search/")
+      ? json({ items: String(url).includes("webhooks") ? [row(1, { title: "Older webhooks work" }), row()] : [] })
+      : json(Array.from({ length: 30 }, (_, i) => row(100 + i, { title: i === 29 ? "Retry webhooks" : "Other work" }))))
+    // Bare # stays short, while partial matching reaches beyond the first 20 rows.
+    expect((await source.get("site", "")).items).toHaveLength(20)
+    expect((await source.get("site", "retr webh")).items.map((item) => item.number)).toEqual([129])
+    expect((await source.get("site", "webhooks")).items.map((item) => item.number)).toEqual([129, 1, 12])
+    expect(fetcher.mock.calls.filter(([url]) => !String(url).includes("/search/"))).toHaveLength(1)
   })
 
   it("deduplicates pending requests, caches briefly and separates projects, repos and credentials", async () => {

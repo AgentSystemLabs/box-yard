@@ -28,8 +28,8 @@ it("resolves the repository and credentials from the requested project and rejec
   expect((await get(site.id)).status).toBe(200)
   expect((await get(other.id)).status).toBe(200)
   expect(calls).toEqual([
-    { url: "https://api.github.com/repos/acme/site/issues?state=all&sort=updated&direction=desc&per_page=20", token: `Bearer token-for-${site.id}` },
-    { url: "https://api.github.com/repos/acme/other/issues?state=all&sort=updated&direction=desc&per_page=20", token: `Bearer token-for-${other.id}` },
+    { url: "https://api.github.com/repos/acme/site/issues?state=all&sort=updated&direction=desc&per_page=100", token: `Bearer token-for-${site.id}` },
+    { url: "https://api.github.com/repos/acme/other/issues?state=all&sort=updated&direction=desc&per_page=100", token: `Bearer token-for-${other.id}` },
   ])
   expect((await get("prj_missing")).status).toBe(404)
   expect((await get(site.id, "?q=a&q=b")).status).toBe(400)

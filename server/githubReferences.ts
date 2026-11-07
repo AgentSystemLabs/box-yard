@@ -30,13 +30,19 @@ export class GithubReferences {
     if (!token) return empty("No GitHub token for this project. Check Settings › Identities or Credentials.")
     if (!this.d.fetch) return empty("GitHub lookup is unavailable in mock mode.")
     const q = query.trim().toLowerCase()
-    const key = JSON.stringify([projectId, repo, createHash("sha256").update(token).digest("hex"), q])
+    const scope = JSON.stringify([projectId, repo, createHash("sha256").update(token).digest("hex")])
+    const result = await this.lookup(scope, repo, token, q)
+    return { ...result, items: result.items.slice(0, 20) }
+  }
+
+  private async lookup(scope: string, repo: string, token: string, q: string): Promise<GithubReferenceAnswer> {
+    const key = JSON.stringify([scope, q])
     const now = this.d.now?.() ?? Date.now()
     const cached = this.cache.get(key)
     if (cached && cached.until > now) return cached.value
     const pending = this.pending.get(key)
     if (pending) return pending
-    const work = this.read(repo, token, q).then((value) => {
+    const work = this.read(scope, repo, token, q).then((value) => {
       if (!value.problem) {
         this.cache.delete(key)
         this.cache.set(key, { until: (this.d.now?.() ?? Date.now()) + GITHUB_REFERENCES_FRESH_MS, value })
@@ -48,7 +54,7 @@ export class GithubReferences {
     return work
   }
 
-  private async read(repo: string, token: string, q: string): Promise<GithubReferenceAnswer> {
+  private async read(scope: string, repo: string, token: string, q: string): Promise<GithubReferenceAnswer> {
     const answer = (items: GithubReference[], problem: string | null = null): GithubReferenceAnswer => ({ repo, items, problem })
     const numeric = /^\d+$/.test(q)
     if (numeric && (!Number.isSafeInteger(Number(q)) || Number(q) < 1)) return answer([])
@@ -57,7 +63,24 @@ export class GithubReferences {
     const repoPath = `/repos/${repo.split("/").map(encodeURIComponent).join("/")}/issues`
     const path = numeric ? `${repoPath}/${Number(q)}` : terms
       ? `/search/issues?${new URLSearchParams({ q: `repo:${repo} in:title ${terms}`, sort: "updated", order: "desc", per_page: "20" })}`
-      : `${repoPath}?state=all&sort=updated&direction=desc&per_page=20`
+      : `${repoPath}?state=all&sort=updated&direction=desc&per_page=100`
+    // GitHub search matches whole words. A shared recent-title index supplies substring matches while typing;
+    // full-word search still finds older work, and exact numbers always use the direct repository endpoint.
+    if (!numeric && terms) {
+      const [recent, searched] = await Promise.all([
+        this.lookup(scope, repo, token, ""),
+        this.request(repo, token, path, false),
+      ])
+      const words = q.split(/\s+/).filter(Boolean)
+      const local = recent.items.filter((item) => words.every((word) => item.title.toLowerCase().includes(word)))
+      const items = [...new Map([...local, ...searched.items].map((item) => [item.number, item])).values()]
+      return answer(items, searched.problem ?? (!items.length ? recent.problem : null))
+    }
+    return this.request(repo, token, path, numeric)
+  }
+
+  private async request(repo: string, token: string, path: string, numeric: boolean): Promise<GithubReferenceAnswer> {
+    const answer = (items: GithubReference[], problem: string | null = null): GithubReferenceAnswer => ({ repo, items, problem })
     try {
       const res = await this.d.fetch!(`${API}${path}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
@@ -69,7 +92,7 @@ export class GithubReferences {
         : res.status === 403 || res.status === 429 ? "GitHub refused the lookup or its rate limit was reached. Try again shortly."
         : `Couldn't read this project's GitHub issues and pull requests (${res.status}).`)
       const body = await res.json()
-      const rows: unknown = numeric ? [body] : terms ? body?.items : body
+      const rows: unknown = numeric ? [body] : path.startsWith("/search/") ? body?.items : body
       if (!Array.isArray(rows)) return answer([], "GitHub returned an unexpected response. Try again.")
       const items = rows.flatMap((row): GithubReference[] => {
         if (!row || !Number.isSafeInteger(row.number) || row.number < 1 || typeof row.title !== "string" || !["open", "closed"].includes(row.state)) return []
