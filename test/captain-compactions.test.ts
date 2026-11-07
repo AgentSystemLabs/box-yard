@@ -258,6 +258,10 @@ describe("compaction tools and Captain compactions (#52)", () => {
     expect((await alpha.json("list_compactions", { task: ta.id })).map((c: { id: string }) => c.id)).toEqual(["2026-10-20T10-00-00.000Z"])
     expect((await alpha.json("find_compactions_by_task", { task: ta.id })).captainCompactions.map((c: { id: string }) => c.id)).toEqual(["2026-10-20T10-00-00.000Z"])
     for (const [name, args] of [
+      ["compaction_history", { project: "beta", since: "2026-01-01", limit: 1 }],
+      ["compaction_history", { task: tb.id }],
+      ["read_compaction", { compaction: "2026-10-21T10-00-00.000Z", project: b.id, level: "summary" }],
+      ["read_compaction", { compaction: "2026-10-21T10-00-00.000Z", project: b.id, level: "full" }],
       ["list_compactions", { project: "beta" }],
       ["list_compactions", { task: tb.id }],
       ["read_compaction", { compaction: "2026-10-21T10-00-00.000Z", project: b.id }],
@@ -274,6 +278,11 @@ describe("compaction tools and Captain compactions (#52)", () => {
       expect(res.content[0]!.text).toMatch(/^No Captain compaction/)
     }
 
+    const toc = await alpha.json("compaction_history", { since: "2026-10-20", until: "2026-10-20T10:00:00Z" })
+    expect(toc).toMatchObject({ total: 1, matched: 1, nextBefore: null })
+    expect(toc.entries[0]).toMatchObject({ id: "2026-10-20T10-00-00.000Z", title: expect.stringContaining("Cody wants short replies") })
+    expect(await alpha.json("read_compaction", { compaction: toc.entries[0].id, level: "summary" })).toMatchObject({ extractive: true })
+    expect(await alpha.json("read_compaction", { compaction: toc.entries[0].id, level: "full", limit: 30 })).toMatchObject({ offset: 0, nextOffset: 30 })
     const coordinator = await mcpAs(r, { kind: "coordinator" })
     expect((await coordinator.json("find_compactions_by_task", { task: tb.id })).captainCompactions.map((c: { id: string }) => c.id)).toEqual(["2026-10-21T10-00-00.000Z"])
     expect((await coordinator.json("read_compaction", { compaction: "2026-10-21T10-00-00.000Z", project: "beta" })).captain).toBe(b.id)

@@ -73,6 +73,7 @@ export const THREAD_TOOLS: ReadonlySet<string> = new Set([
   "get_task",
   "search_history",
   "list_compactions",
+  "compaction_history",
   "read_compaction",
   "find_compactions_by_task",
   "list_inbox",
@@ -636,7 +637,7 @@ export class SideThreads {
 
     const upTo = this.store.chatUpTo(thread.projectId, thread.anchorId, 400) ?? []
     const main = host.session()
-    const compactions = this.compactions(host.compactionsDir)
+    const compactions = this.compactionsFor(host)
     // Codex can't fork a session at a message: a thread on a Codex chat always starts from the summary.
     const fork = main.started && host.cli() === "claude" ? forkPoint(upTo, main.id, compactions.at(-1)?.at ?? null) : null
     const anchor = upTo.at(-1)
@@ -790,7 +791,7 @@ export class SideThreads {
 
     const recent = this.store.listChat(400)
     const main = host.session()
-    const compactions = this.compactions(host.compactionsDir)
+    const compactions = this.compactionsFor(host)
     // Codex can't fork a session at a message: a thread on a Codex chat always starts from the summary.
     const fork = main.started && host.cli() === "claude" ? forkPoint(recent, main.id, compactions.at(-1)?.at ?? null) : null
     const notices = host.statusOnly?.(task.projectId) ? "" : noticeLines(this.store.taskNotices([task.id], TASK_NOTICES))
@@ -819,6 +820,11 @@ export class SideThreads {
     const message = this.store.addSideThreadMessage(id, "error", `The side thread hit an error: ${result.error.slice(0, 1500)}`)
     this.hub.broadcast({ type: "thread.message", message })
     this.publish(id)
+  }
+
+  private compactionsFor(host: ThreadHost): { at: number; file: string }[] {
+    if (host.caller.kind === "coordinator" && this.store.listProjects().some(p => host.statusOnly?.(p.id))) return []
+    return this.compactions(host.compactionsDir)
   }
 
   /** A chat's compactions, oldest first: when, and the summary file. */

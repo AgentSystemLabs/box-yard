@@ -1,3 +1,4 @@
+import { CompactionIndex, compactionIndexPrompt } from "./compactionIndex.js"
 import { spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import fs from "node:fs"
@@ -21,7 +22,6 @@ import {
   cleanSummary,
   compactCommand,
   compactionsDir,
-  compactionsPrompt,
   finishCompaction,
   lastCompaction,
   recapBlock,
@@ -455,6 +455,7 @@ export class Orchestrator {
 
   /** The newest summary file, read back, or null when there is none (or it can't be read). */
   private latestSummary(): { at: number; file: string; markdown: string } | null {
+    if (this.store.listProjects().some(p => this.statusOnly(p.id))) return null
     const last = lastCompaction(this.compactionsDir)
     if (!last) return null
     try {
@@ -483,6 +484,7 @@ export class Orchestrator {
    * (`compacted`) only that state: the CLI's own summary carries the rest.
    */
   private recap(file: string, opts: { lead?: string; compacted?: boolean } = {}): string | null {
+    if (this.store.listProjects().some(p => this.statusOnly(p.id))) return null
     let markdown: string
     try {
       markdown = fs.readFileSync(file, "utf8")
@@ -908,14 +910,20 @@ export class Orchestrator {
   /** Box Yard's part of the system prompt. Settings are read here, so changes apply from the next run. */
   private systemPrompt(): string {
     const st = this.settings.get()
-    const base = `${withOwner(ORCHESTRATOR_PROMPT, st.ownerName)}\n\n${routingInstructions(this.c.dataDir, st)}\n\n${withOwner(compactionsPrompt(this.compactionsDir), st.ownerName)}`
+    const base = `${withOwner(ORCHESTRATOR_PROMPT, st.ownerName)}\n\n${routingInstructions(this.c.dataDir, st)}\n\n${this.historyPrompt()}`
     return st.orchestratorCli === "codex" ? `${base}\n\n${codexManagerNote(st.ownerName)}` : base
+  }
+
+  private historyPrompt(): string {
+    // Historical Coordinator prose mixes projects: it cannot safely be redacted after a project is sealed.
+    if (this.store.listProjects().some(p => this.statusOnly(p.id))) return "Coordinator compaction history is withheld while any project is status only, because older saved prose may contain its content. Unsealed project/task history remains available through compaction_history; ask the scoped Captain for sealed history."
+    return compactionIndexPrompt(new CompactionIndex(this.store, "coordinator", this.compactionsDir))
   }
 
   /** Read access is limited to these folders (absolute paths use a `//` prefix in permission rules). */
   private readRules(): string[] {
     // The uploads folder holds files Cody attached in the chat.
-    return [`Read(/${this.compactionsDir}/**)`, `Read(/${uploadsDir(this.c.dataDir)}/**)`]
+    return [...(this.store.listProjects().some(p => this.statusOnly(p.id)) ? [] : [`Read(/${this.compactionsDir}/**)`]), `Read(/${uploadsDir(this.c.dataDir)}/**)`]
   }
 
   /** How this run starts: Claude Code with its flags, or Codex (which has no /compact or /context: see doCompact). */
