@@ -21,12 +21,12 @@ import type { Attachment, Project, Task, TaskMessage } from "../../../shared/typ
 
 /**
  * How many of the row's 44px buttons (and the gap after one) a chip takes with its label, at text-xs to a finger:
- * "Side question" 119px, "Captain" 85px, "To Captain" 104px. Without its label a chip (38px) counts as one.
+ * "Side question" 119px, "Captain" 85px, "To Captain" 104px. Without its label a chip counts as one 44px touch slot.
  */
 const LABELLED = { ask: 2.6, captain: 1.9, toCaptain: 2.25 }
 
 const CHIP =
-  "inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:px-3"
+  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3"
 
 const queuedLabel = (n: number) => (n === 1 ? "1 queued message" : `${n} queued messages`)
 
@@ -88,10 +88,11 @@ export const TaskComposer = memo(function TaskComposer({
   // only where the whole row fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
   const chips = (ask ? 1 : 0) + (showCaptain ? 1 : 0)
   const labels = labelFrom(
-    rowWidth(3 + (stop ? 1 : 0) + (asking ? 0 : 1) + (ask ? LABELLED.ask : 0) + (showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0)),
+    rowWidth(4 + (stop ? 1 : 0) + (asking ? 0 : 1) + (ask ? LABELLED.ask : 0) + (showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0)),
   )
   const askToggle = ask?.toggle
   const toggleAsk = useCallback(() => {
+    handle.current?.clearSendTo()
     setToCaptain(false)
     askToggle?.()
   }, [askToggle])
@@ -100,7 +101,7 @@ export const TaskComposer = memo(function TaskComposer({
     if (!asking) box.current?.focus()
     toggleAsk()
   }, [asking, toggleAsk])
-  const toggleCaptain = useCallback(() => setToCaptain((on) => !on), [])
+  const toggleCaptain = useCallback(() => { handle.current?.clearSendTo(); setToCaptain((on) => !on) }, [])
   const answer = !asking && ask && (ask.busy || ask.unread) ? (ask.busy ? "An answer is on its way" : "A new answer") : null
 
   const submit = useCallback(
@@ -163,6 +164,7 @@ export const TaskComposer = memo(function TaskComposer({
 
   return (
     <Composer
+      onDestinationPick={() => { setToCaptain(false); if (asking) askToggle?.() }}
       handleRef={handle}
       textareaRef={box}
       className={cx(COMPOSER_FOOTER, "mt-3 @container/composer", className)}

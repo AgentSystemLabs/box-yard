@@ -8,6 +8,7 @@ import { act, createElement, createRef, Profiler } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Composer } from "../web/src/components/Composer.js"
+import { resetDrafts } from "../web/src/lib/composerDraft.js"
 import { TAG_COLOR, tagLines, tagParts, tagStyle } from "../web/src/components/ComposerTags.js"
 import { buildHarnessTargets, buildProjectTargets, buildRunTargets, tagsIn, type RunTarget } from "../shared/runTargets.js"
 import { PROJECT_COLOR_HEX, projectColors } from "../shared/projectColors.js"
@@ -92,6 +93,7 @@ let root: Root
 let host: HTMLElement
 
 beforeEach(() => {
+  resetDrafts()
   host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
@@ -173,14 +175,14 @@ describe("Composer tags", () => {
     })
   })
 
-  async function mount(runTargets: boolean, projectId: string | null = null) {
+  async function mount(runTargets: boolean, projectId: string | null = null, draftKey?: string) {
     const panel = createRef<HTMLElement>()
     act(() =>
       root.render(
         createElement(
           QueryClientProvider,
           { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-          createElement(Profiler, { id: "composer", onRender: commits }, createElement("section", { ref: panel }, createElement(Composer, { onSubmit: () => {}, placeholder: "Ask", panelRef: panel, runTargets, runTargetsProject: projectId }))),
+          createElement(Profiler, { id: "composer", onRender: commits }, createElement("section", { ref: panel }, createElement(Composer, { onSubmit: () => {}, placeholder: "Ask", panelRef: panel, runTargets, runTargetsProject: projectId, draftKey }))),
         ),
       ),
     )
@@ -311,8 +313,8 @@ describe("Composer tags", () => {
     ])
   })
 
-  it("still commits once per key with tags in the draft", async () => {
-    await mount(true)
+  it.each([undefined, "coordinator"])("still commits once per key with tags in the draft (%s)", async (draftKey) => {
+    await mount(true, null, draftKey)
     await type("on @box with !codex h")
     commits.mockClear()
     for (const text of ["on @box with !codex he", "on @box with !codex hel", "on @box with !codex hell"]) await type(text)

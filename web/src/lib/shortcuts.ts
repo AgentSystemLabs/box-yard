@@ -53,6 +53,8 @@ export const paletteChord = (mac: boolean): Chord => [capsFor(mac).mod, "K"]
 /** The composer jump: ⌥⇧C / Alt+Shift+C, by key position like ⌥⇧V (Option changes the letter on a Mac). */
 export const composerChord = (mac: boolean): Chord => [capsFor(mac).alt, capsFor(mac).shift, "C"]
 
+export const sendToChord = (mac: boolean): Chord => [capsFor(mac).mod, capsFor(mac).shift, "Enter"]
+
 /** Voice on or off: ⌥⇧V / Alt+Shift+V (components/VoiceControl.tsx). */
 export const voiceChord = (mac: boolean): Chord => [capsFor(mac).alt, capsFor(mac).shift, "V"]
 
@@ -117,6 +119,7 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
       title: "Composer",
       rows: [
         { id: "send", label: "Send", keys: [["Enter"]] },
+        { id: "send-to", label: "Choose a task, Captain or Coordinator to send this draft to", keys: [[">"], sendToChord(mac)] },
         { id: "newline", label: "New line", keys: [[caps.shift, "Enter"]] },
         { id: "history", label: "Earlier prompts, in an empty composer", keys: [["↑"], ["↓"]] },
         { id: "where", label: "Choose where its tasks run", keys: [["@"]] },

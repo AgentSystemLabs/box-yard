@@ -64,12 +64,12 @@ describe("the task box's row", () => {
     box(task({ status: "working", pendingCount: 1 }))
     // Mic, Send, Stop, Side question, Captain and Attach: six 44px buttons need an 18.5rem box (a 320px phone's is 18.4).
     expect(chips().className).toContain("@max-[18.5rem]/composer:hidden")
-    expect(byTestId("composer-more")!.className).toContain("@min-[18.5rem]/composer:hidden")
-    // Below 15.5rem (320px at 125% zoom) Attach goes in too: More, Mic, Stop, Send.
-    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[15.5rem]/composer:hidden")
-    // With their labels the chips are wider: they show from 29rem, the row with Expand's place kept for long text.
-    expect(label("task-ask-toggle").className).toBe("@max-[29rem]/composer:sr-only")
-    expect(label("captain-target").className).toBe("@max-[29rem]/composer:sr-only")
+    expect(byTestId("composer-more")!.className).toContain("@min-[21.5rem]/composer:hidden")
+    // Attach and Send to fold together first, leaving the Captain/Side question thresholds unchanged.
+    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[21.5rem]/composer:hidden")
+    // With their labels the chips are wider: they show from 32rem, the row with Expand's place kept for long text.
+    expect(label("task-ask-toggle").className).toBe("@max-[32rem]/composer:sr-only")
+    expect(label("captain-target").className).toBe("@max-[32rem]/composer:sr-only")
     // Send and Stop never fold.
     expect(document.querySelector('button[type="submit"]')!.className).not.toMatch(/composer:hidden/)
   })
@@ -77,12 +77,12 @@ describe("the task box's row", () => {
   it("an idle task keeps both chips: with no Stop they're labelled sooner, and fold later", () => {
     box(task())
     expect(byTestId("captain-target")).not.toBeNull()
-    expect(label("task-ask-toggle").className).toBe("@max-[26rem]/composer:sr-only")
-    expect(label("captain-target").className).toBe("@max-[26rem]/composer:sr-only")
-    // Mic, Send, the two chips and Attach fit down to 15.5rem; below it the chips fold, then Attach below 12.5rem.
+    expect(label("task-ask-toggle").className).toBe("@max-[29rem]/composer:sr-only")
+    expect(label("captain-target").className).toBe("@max-[29rem]/composer:sr-only")
+    // With Attach and Send to in More, Mic, Send, More and the two chips fit down to 15.5rem.
     expect(chips().className).toContain("@max-[15.5rem]/composer:hidden")
-    expect(byTestId("composer-more")!.className).toContain("@min-[15.5rem]/composer:hidden")
-    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[12.5rem]/composer:hidden")
+    expect(byTestId("composer-more")!.className).toContain("@min-[18.5rem]/composer:hidden")
+    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[18.5rem]/composer:hidden")
   })
 
   it("an idle task's folded Captain line says what it does, as a working task's does", async () => {
