@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import ReactMarkdown from "react-markdown"
+import { buildHarnessTargets, buildProjectTargets, buildRunTargets, tagsIn } from "../shared/runTargets.js"
 import { GithubReferences, GITHUB_REFERENCES_FRESH_MS } from "../server/githubReferences.js"
 import { githubMentionAt, insertGithubReference } from "../web/src/lib/githubReferences.js"
 
@@ -117,5 +118,17 @@ describe("GitHub reference text", () => {
     expect(html.match(/<a /g)).toHaveLength(1)
     expect(html).toContain("Use [webhooks] &amp; *backoff*")
     expect(html).not.toContain("<em>")
+  })
+
+  it("keeps shortcut-like title text literal without reopening lookup or adding routing picks", () => {
+    const title = "Fix #123 with @box !codex %site"
+    const next = insertGithubReference("#", { start: 0, end: 1 }, { number: 12, title, kind: "issue", state: "open", url: "https://github.com/acme/site/issues/12" }, "acme/site")
+    expect(githubMentionAt(next.value, next.caret)).toBeNull()
+    expect(tagsIn(next.value, {
+      runsOn: buildRunTargets({ problems: { local: null, box: null, docker: null, gpu: null }, machines: [], localLabel: null }),
+      agent: buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null } }),
+      project: buildProjectTargets([{ id: "prj_site", name: "Site" }]),
+    })).toEqual([])
+    expect(renderToStaticMarkup(createElement(ReactMarkdown, null, next.value))).toContain(title)
   })
 })

@@ -14,7 +14,8 @@ export function githubMentionAt(text: string, caret: number): { start: number; e
 /** Full URL plus kind, repository, number and title survives routing/forwarding to any recipient. */
 export function insertGithubReference(text: string, mention: { start: number; end: number }, ref: GithubReference, repo: string): { value: string; caret: number } {
   const after = text.slice(mention.end)
-  const title = ref.title.replace(/[\r\n]+/g, " ").replace(/[\\[\]`*_<>]/g, "\\$&")
+  // Literal title punctuation must neither open another # lookup nor become @/!/% routing picks.
+  const title = ref.title.replace(/[\r\n]+/g, " ").replace(/[\\[\]`*_<>@!%#]/g, "\\$&")
   const insert = `[${ref.kind === "pull" ? "PR" : "Issue"} ${repo}#${ref.number}: ${title}](${ref.url})${after.startsWith(" ") ? "" : " "}`
   return { value: text.slice(0, mention.start) + insert + after, caret: mention.start + insert.length + (after.startsWith(" ") ? 1 : 0) }
 }
