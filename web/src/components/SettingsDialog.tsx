@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
-import { ArrowLeft, BarChart3, Bell, Bot, Boxes, Check, CircleAlert, Cloud, Container, Laptop, Cpu, DollarSign, Fingerprint, FolderGit2, Info, KeyRound, Network, Plug, Server, Search, X, Volume2, Webhook, type LucideIcon } from "lucide-react"
+import { ArrowLeft, Palette, BarChart3, Bell, Bot, Boxes, Check, CircleAlert, Cloud, Container, Laptop, Cpu, DollarSign, Fingerprint, FolderGit2, Info, KeyRound, Network, Plug, Server, Search, X, Volume2, Webhook, type LucideIcon } from "lucide-react"
 import { useAgentSettings, useHealth, useResetSettings, useSaveSettings, useSettings } from "../lib/queries"
 import {
   SETTINGS_SECTIONS,
@@ -15,6 +15,7 @@ import { SettingsDraftContext, draftSlots, updateParts, useDraft, type DraftPart
 import { SettingsField, SettingsSearchProvider, SearchHighlight, useSettingsSearch } from "../lib/settingsSearch"
 import { NUMBER_RULES, numberText, problemSections, refusedByBrowser, settingsProblems, typedNumber, type SettingPath } from "../lib/settingsValidation"
 import { LEGACY_POOL_DEFAULTS, sizeCapacities } from "../lib/capacity"
+import { AppearancePanel } from "./AppearanceSettings"
 import { VoicePanel } from "./VoiceSettings"
 import { SendSoundRow } from "./SendSoundSettings"
 import { BrowserNotificationsRow } from "./BrowserNotificationSettings"
@@ -67,7 +68,7 @@ import {
 } from "../../../shared/types"
 
 
-const SECTION_ICON: Record<SettingsSection, LucideIcon> = { orchestrator: Network, projects: FolderGit2, agents: Bot, runners: Server, local: Laptop, upstash: Cloud, credentials: KeyRound, identities: Fingerprint, connectors: Plug, runpod: Cpu, vast: Cpu, daytona: Cpu, docker: Container, machines: Server, hooks: Webhook, limits: Boxes, costs: DollarSign, notifications: Bell, voice: Volume2, about: Info }
+const SECTION_ICON: Record<SettingsSection, LucideIcon> = { orchestrator: Network, projects: FolderGit2, agents: Bot, runners: Server, local: Laptop, upstash: Cloud, credentials: KeyRound, identities: Fingerprint, connectors: Plug, runpod: Cpu, vast: Cpu, daytona: Cpu, docker: Container, machines: Server, hooks: Webhook, limits: Boxes, costs: DollarSign, notifications: Bell, voice: Volume2, appearance: Palette, about: Info }
 const TOP_TABS: SettingsTab<SettingsSection>[] = SETTINGS_TOP_SECTIONS.map((s) => ({ key: s.key, label: s.label, icon: SECTION_ICON[s.key] }))
 
 // ------------------------------------------------------------------ building blocks
@@ -516,6 +517,8 @@ export function SettingsDialog({
                 </Panel>
               ) : category === "projects" ? (
                 <Panel section="projects"><SettingsField label="Project" keywords="configure repository project settings"><ProjectSettingsPicker /></SettingsField></Panel>
+              ) : category === "appearance" ? (
+                <AppearancePanel />
               ) : category === "about" ? (
                 <AboutPanel />
               ) : !s ? (
@@ -784,7 +787,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("acli")}
                     label="Agent"
-                    help="The coding agent new tasks run on: a project can pick its own, a task keeps the agent it started on, a task given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
+                    help="The coding agent new tasks run on: a project can pick its own. Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
                     hint={hint("agentCli")}
                   >
                     <AgentCliSelect id={fid("acli")} clis={AGENT_CLIS} value={s.agentCli} onChange={(v) => set("agentCli", v)} testId="agent-cli" />

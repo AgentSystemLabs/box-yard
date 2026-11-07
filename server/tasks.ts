@@ -4,6 +4,7 @@ import path from "node:path"
 import { createHash, randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import type { Config } from "./config.js"
+import { harnessHandoffKey, type HarnessHandoff, type TaskContinuation } from "../shared/taskContinuation.js"
 import type { Hub } from "./hub.js"
 import type { BoxRow, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
 import { BadRequestError, ConflictError, NotFoundError, cloneUrl, githubSlug, boxRowCost, meterTick, normalizeBoxSize, sourceOf, taskAgentCli, taskGpuPick } from "./store.js"
@@ -438,7 +439,7 @@ export interface NewTask {
   machineLabel?: string | null
   /** With runsOn "gpu": its own cloud and GPU ("@gpu:daytona:h100"), over its project's. Check it first with requireRunner. */
   gpu?: GpuPick | null
-  /** The CLI it runs on for good (Task.agentCli); omitted: what its model names, else its project's Agent, else Settings. */
+  /** The CLI it starts on (Task.agentCli); omitted: what its model names, else its project's Agent, else Settings. */
   agentCli?: AgentCli | null
   /** Its icon (shared/taskIcons.ts); omitted picks one from its title. */
   icon?: TaskIconName | null
@@ -1229,7 +1230,7 @@ export class TaskManager {
 
   /**
    * The CLI a new task runs on: the one asked for, else the one its model names (a gpt-* model is Codex's), else its
-   * project's Agent, else Settings › Box agents › Agent. It keeps it for good.
+   * project's Agent, else Settings › Box agents › Agent. Explicit continuation can change it later.
    */
   private agentCliFor(input: Pick<NewTask, "agentCli" | "model">, project: Project): AgentCli {
     return input.agentCli ?? cliForModel(input.model) ?? project.agentCli ?? this.settings.get().agentCli
@@ -1868,14 +1869,66 @@ export class TaskManager {
     return this.store.getTask(row.id)!
   }
 
+  /** Continue the same work on an explicitly selected CLI, without moving its runner or borrowing a CLI session. */
+  async continueTask(taskId: string, options: TaskContinuation = {}, source: InputSource = "cody"): Promise<Task> {
+    const before = this.requireRow(taskId)
+    const available = (row: TaskRow) => {
+      if (row.current_turn_id || !["idle", "failed", "pr_ready"].includes(row.status) || row.compacting || row.compact_pending || this.archiving.has(row.id) || this.janitor.isBusy(row.id) || this.ownCleanup.isBusy(row.id) || (row.box_id && this.boxOps.has(row.box_id))) {
+        throw new ConflictError("Wait for the task's turn and workspace operations to finish before continuing with a harness. Stop a busy task first.")
+      }
+    }
+    available(before)
+    const project = this.store.getProject(before.project_id)!
+    const agent = options.agent === "default" ? project.agentCli ?? this.settings.get().agentCli : options.agent ?? taskAgentCli(before)
+    const modelCli = cliForModel(options.model)
+    if (options.model && modelCli && agent !== "cursor" && modelCli !== agent) throw new BadRequestError(`Model ${options.model} cannot run on ${AGENT_CLI_LABEL[agent]}. Choose a compatible model or use its defaults.`)
+    if (options.model && agent === "cursor" && !cursorModel(options.model, "", (id) => this.cursorModels.has(id))) throw new BadRequestError(`Model ${options.model} is not a Cursor model in its catalog. Choose a Cursor model or use its defaults.`)
+    if (options.effort === "ultra" && agent !== "codex") throw new BadRequestError("Ultra effort is only available on Codex.")
+    if (agent === "cursor" && options.effort) throw new BadRequestError("Cursor's effort is part of its model id; omit effort.")
+    const runner = this.store.taskRunner(before)
+    await this.requireRunner(runner, before.project_id, this.store.taskEnv(taskId), { agentCli: agent, machineLabel: before.machine_label, gpu: taskGpuPick(before) })
+    // Credential/capability checks can yield while another request sends a message or starts a turn.
+    const row = this.requireRow(taskId)
+    available(row)
+    if (row.session_id !== before.session_id || taskAgentCli(row) !== taskAgentCli(before) || this.store.taskRunner(row) !== runner || row.box_id !== before.box_id || row.machine_label !== before.machine_label) throw new ConflictError("The task changed while its harness was checked. Try again.")
+    const switched = agent !== taskAgentCli(row)
+    const reset = switched || options.agent === "default"
+    this.store.db.transaction(() => {
+      if (switched) {
+        const pending = this.handoff(row.id)
+        this.store.setKv(harnessHandoffKey(row.id), JSON.stringify({ from: pending?.from ?? taskAgentCli(row), to: agent, needsWorkspace: Boolean(row.session_started || row.turn_count || row.archive_path || pending?.needsWorkspace) } satisfies HarnessHandoff))
+      }
+      this.store.updateTask(row.id, {
+        agentCli: agent,
+        // session_started also guards workspace moves/cleanup: retain it so changing CLI cannot bypass work safety.
+        ...(switched ? { sessionId: randomUUID(), contextTokens: null, contextWindow: null, turnFlags: {} } : {}),
+        ...(reset ? { model: null, effort: null, routingRule: null, routingReason: null } : {}),
+        ...(options.model !== undefined ? { model: options.model } : {}),
+        ...(options.effort !== undefined ? { effort: options.effort } : {}),
+      })
+      this.enqueue(this.requireRow(row.id), options.message?.trim() || this.retryPrompt(row), source, [])
+    })()
+    this.addEvent(row.id, `Continuing this task on ${AGENT_CLI_LABEL[agent]}${switched ? ` (was ${AGENT_CLI_LABEL[taskAgentCli(row)]}); a new CLI session receives a bounded recap` : ""}. ${reset ? "Old model, effort and routing pins cleared; unspecified choices follow this harness's defaults and routing. " : ""}The task, runner, branch, workspace and queued messages are kept.`)
+    this.emitTask(taskId)
+    this.schedule()
+    return this.store.getTask(taskId)!
+  }
+
+  private handoff(taskId: string): HarnessHandoff | null {
+    const saved = this.store.getKv(harnessHandoffKey(taskId))
+    return saved ? JSON.parse(saved) as HarnessHandoff : null
+  }
+
+  private retryPrompt(row: TaskRow): string {
+    return row.turn_count === 0 ? "Start the task." : `Your last turn ended${row.error ? ` with an error (${row.error.slice(0, 500)})` : ""}. Check where things stand and continue.`
+  }
+
   retryTask(taskId: string): Task {
     const row = this.requireRow(taskId)
     if (row.current_turn_id) throw new BadRequestError("Task is still running")
     return this.sendInput(
       row.id,
-      row.turn_count === 0
-        ? "Start the task."
-        : `Your last turn ended with an error${row.error ? ` (${row.error.slice(0, 500)})` : ""}. Check where things stand and continue.`,
+      this.retryPrompt(row),
       "system",
     )
   }
@@ -1895,6 +1948,7 @@ export class TaskManager {
     this.archiveErrors.delete(row.id)
     if (this.redis) await this.redis.cmd("DEL", redisEventsKey(row.id)).catch(() => {})
     this.store.setKv(`branch_naming:${row.id}`, null)
+    this.store.setKv(harnessHandoffKey(row.id), null)
     this.logins?.release(row.id)
     this.store.deleteTask(row.id)
     this.hub.broadcast({ type: "task.deleted", taskId: row.id })
@@ -5892,6 +5946,7 @@ export class TaskManager {
       this.cancelledAll.delete(taskId)
       const inputs = await this.deliverAttachments(boxId, dir, queued)
       const firstTurn = !row.session_started
+      const handoff = this.handoff(taskId)
       const directory = this.directory()
       const notes = this.store.listNotes(project.id)
       // The prompt gets the notes that fit the budget and says how many didn't; read_notes still has them all.
@@ -5909,6 +5964,8 @@ export class TaskManager {
       }
       const prompt = compact
         ? "/compact"
+        : handoff
+        ? `${recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { handoff })}\n\n---\n\n${followup}`
         : firstTurn
         ? firstTurnPrompt({ task: row, notes: budgeted.shown, hiddenNotes: budgeted.hidden.length, directory, extraInputs: inputs.length ? [followup] : [], ownerName })
         : recapped
@@ -5926,7 +5983,7 @@ export class TaskManager {
       }
       const author = await this.turnAuthor(row, project, boxId, dir)
       // The login it runs on, round robin over Settings › Credentials' and the added ones (docs/logins.md).
-      const login = this.pickTurnLogin(row, project.id, boxId, !firstTurn && !recapped)
+      const login = this.pickTurnLogin(row, project.id, boxId, !firstTurn && !recapped && !handoff)
       // The connectors its scope reaches here (docs/connectors.md › Sessions), OAuth tokens refreshed to last 45 minutes.
       const connectors = await this.turnConnectors(row, project.id, boxId)
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
@@ -5951,13 +6008,13 @@ export class TaskManager {
           turnId,
           prompt,
           sessionId: row.session_id,
-          resume: !firstTurn && !recapped,
+          resume: !firstTurn && !recapped && !handoff,
           compact,
           ...agent,
           systemPrompt: workerSystemPrompt({ project, task: row, branch: row.branch, port: row.port_base ?? PORT_BASE, ownerName, pushAtTurnEnd: this.pushAtTurnEnd(project), box: this.boxPromptInfo(boxId, project), agent: taskAgentCli(row), subtasks: this.subtaskPromptInfo(row) }),
           directory,
           notes: notes.map((n) => ({ author: n.author, content: n.content })),
-          recap: recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60)),
+          recap: recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { handoff: handoff ?? undefined }),
           ...(this.depCache(project) ? { deps: { npm: true, dir: `${this.provider.root(boxId)}/${DEPS_DIR}`, maxMb: this.settings.get().depCacheMaxMb } } : {}),
         }),
       )
@@ -6013,7 +6070,7 @@ export class TaskManager {
         trigger: compact ? "compaction" : (trigger ?? null),
         model: agent.model ?? null,
         effort: agent.effort ?? null,
-        resumed: !firstTurn && !recapped,
+        resumed: !firstTurn && !recapped && !handoff,
       })
       if (superseded()) {
         await this.provider.exec(boxId, turnKillScript(dir)).catch(() => {})
@@ -6041,6 +6098,7 @@ export class TaskManager {
         lastActiveAt: Date.now(),
         question: null,
       })
+      this.store.setKv(harnessHandoffKey(taskId), null)
       this.lastEventAt.set(taskId, Date.now())
       this.emitTask(taskId)
       this.publishDirectory()
@@ -6475,8 +6533,11 @@ export class TaskManager {
           if (isUploadTooBig(err)) break
         }
       }
+      // A harness continuation must not turn failed recovery into a fresh checkout missing the old WIP.
+      if (this.handoff(row.id)) throw new Error(`Cannot continue with another harness until the workspace archive is restored: ${errorMessage(failure)}. The archive and queued inputs are preserved.`)
       return this.recapAfterFailedRestore(row, project, boxId, dir, mirror, failure)
     }
+    if (this.handoff(row.id)?.needsWorkspace) throw new Error("Cannot continue with another harness: the previous workspace and its archive are unavailable. Recover the workspace first; queued inputs are preserved.")
     return this.cloneWorkspace(row, project, boxId, dir, mirror)
   }
 
@@ -8005,8 +8066,9 @@ export class TaskManager {
    * How the task's next turn gets its workspace and session back: still on its
    * box, restored from its archive, or (archive gone) a fresh session from a recap.
    */
-  resumeMode(taskId: string): "box" | "archive" | "recap" | "new" {
+  resumeMode(taskId: string): "box" | "archive" | "recap" | "new" | "handoff" {
     const row = this.requireRow(taskId)
+    if (this.handoff(taskId)) return "handoff"
     if (row.box_id) return "box"
     if (row.archive_path && fs.existsSync(row.archive_path)) return "archive"
     return row.session_started ? "recap" : "new"

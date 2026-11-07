@@ -3,7 +3,7 @@
 // side panel. Exactly one row looks selected (lib/sidebar.ts sidebarSelection); keyboard focus is an outline with no
 // fill. A full column on a wide screen, a rail while a panel needs the room, a drawer on a phone. A project's tasks sit
 // one step in from it, beside a faint guide line (NEST_PAD). A task's sub-tasks nest under it as a tree, each level one
-// step in from its parent at any depth (nestAt; its chevron folds them, in memory only; so does a double click on its
+// step in from its parent within a width budget (nestAt; its chevron folds them, in memory only; so does a double click on its
 // row); picking one opens its chain of panels. A double click on a project's rail icon (two taps, to a finger) opens
 // its Captain and also expands the sidebar on its tasks; the rail's "Waiting on you", there only while something
 // waits, expands it on that section. Search is the palette (⌘K): on a desktop the top row's 🔍 opens it, on a phone the
@@ -856,7 +856,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
   )
 })
 
-/** A tree level's indent in the rail's tree (Rails.tsx): narrower to a mouse, and narrower again in a narrow list, so depth 3 fits at 320px. */
+/** The rail's indentation step. TreeRow caps its total indent against the popover's actual width. */
 export const TREE_STEP = "[--tree-step:0.75rem] pointer-coarse:[--tree-step:0.875rem] @max-[16rem]/side:[--tree-step:0.5rem]"
 /** The rail's tree's chevron column: the width of a project row's, so a top task's icon sits under the Captain's tile. */
 const TWISTIE = "w-6 shrink-0 pointer-coarse:w-11"
@@ -878,15 +878,19 @@ const NEST_PAD = "pl-[calc(1.5rem+var(--nest,0rem))] pointer-coarse:pl-[calc(2.7
  * Their guide runs under the left of the parent's icon (at 10px, its edge), still clear of the chevron. Under 20rem the
  * deep step is 10px, and only two levels step in fully on a touch screen (its chevron column is 20px wider); under 16rem
  * (a phone at 125% zoom) only a project's tasks do, with either pointer (the touch rule would outrank a plain one). From
- * 20rem the deep step is 14px, and from 26rem every level steps 20px. Container queries: the sidebar is resizable, and a
- * phone's drawer.
+ * 20rem the deep step is 14px, and from 26rem the step is 20px. nestAt caps the total indent to keep actions and
+ * titles visible. Container queries follow the resizable sidebar and phone drawer.
  */
 const TREE_STEPS = cx(
   "[--tree-full:3] [--tree-deep:0.625rem] @max-[16rem]/side:[--tree-deep:0.375rem] @min-[20rem]/side:[--tree-deep:0.875rem] @min-[26rem]/side:[--tree-deep:1.25rem]",
   "pointer-coarse:@max-[20rem]/side:[--tree-full:2] @max-[16rem]/side:[--tree-full:1] pointer-coarse:@max-[16rem]/side:[--tree-full:1]",
 )
-/** The `--nest` of a tree's rows at `level` (1: a project's tasks, 2: their sub-tasks, and so on, to any depth). */
-export const nestAt = (level: number) => `calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep))`
+/**
+ * Budget the indent against the actual sidebar container, including its gutters. Leave 13rem for the chevron,
+ * icon, readable title and non-shrinking Mark done target, even at arbitrary depth. The groups remain full width,
+ * so this bounds each absolute indent rather than accumulating padding through the recursive wrappers.
+ */
+export const nestAt = (level: number) => `min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(1.25rem, calc(100cqw - 13rem)))`
 /**
  * A nested list's guide: a still, faint 1px line in the border colour, 10px left of its rows' icons (under the middle
  * of their parent's icon at a full step), down to the list's last row. It's drawn over every row's fill, so a hover
@@ -932,8 +936,8 @@ function TreeCountChip({ tree }: { tree: TreeCount }) {
  * width and the status sits under it, so a deep row on a phone still reads. Nothing animates: a fold shows or hides at
  * once. `twice`: false where a pick closes the list and nothing brings it back on the second click (the strip's tree,
  * Rails.tsx), so only the chevron folds. `guides`: the sidebar's nesting, each level one step in (nestAt) beside its
- * parent's guide; without it (the strip's tree) each level moves in by TREE_STEP. Either way a row's box, so its fill
- * and its selected bar, starts at its level.
+ * parent's guide; without it (the strip's tree) each level moves in by TREE_STEP. Both stop indenting when the
+ * content needs the room; the level label and the tree's true ARIA level preserve the depth.
  */
 export const TreeNode = memo(function TreeNode({ row, depth, folds, selection, onPick, twice = true, guides = false }: { row: SidebarRow; depth: number; folds: Readonly<Record<string, true>>; selection: Selection; onPick: Pick["task"]; twice?: boolean; guides?: boolean }) {
   const kids = row.kids ?? []
@@ -994,8 +998,9 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
     <div
       // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
       {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected }) : undefined)}
-      style={depth && !guides ? { marginLeft: `calc(${depth} * var(--tree-step))` } : undefined}
-      className={cx("flex items-stretch rounded-lg transition", inTree && FOCUS, guides && cx("group/tree relative", TREE_BOX), selected ? SELECTED : cx(dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900", inside && INSIDE))}
+      // The rail popover has a narrower chevron column and no sidebar guide padding. Reserve its content/actions too.
+      style={depth && !guides ? { "--rail-indent": `calc(${depth} * var(--tree-step))` } as CSSProperties : undefined}
+      className={cx("flex items-stretch rounded-lg transition", inTree && FOCUS, guides ? cx("group/tree relative", TREE_BOX) : "ml-[min(var(--rail-indent,0rem),max(0rem,calc(100cqw-12rem)))]", selected ? SELECTED : cx(dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900", inside && INSIDE))}
     >
       {folded === null ? (
         !guides && <span aria-hidden className={TWISTIE} />
@@ -1027,13 +1032,18 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
         onMouseDown={keepFocusForPick}
         data-open-task={task.id}
         {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
-        title={`${task.title} · ${label}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
-        className={cx("grid min-h-9 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2.5 rounded-lg py-1 pr-2 text-left text-sm pointer-coarse:min-h-11", guides && TREE_PAD, FOCUS)}
+        title={`${task.title} · ${label}${depth ? ` · Task level ${depth + 1}` : ""}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
+        className={cx("grid min-h-9 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2.5 rounded-lg py-1 pr-2 text-left text-sm pointer-coarse:min-h-11", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD, FOCUS)}
       >
         <span className="col-start-2 row-start-1 truncate">{task.title}</span>
         <RowIcon task={task} label={label} dim={dim} />
-        <span className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4">
-          <span aria-hidden={saysState(meta, label)} className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>
+        <span className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 @max-[14rem]/side:flex-wrap">
+          <span className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>
+            {/* The actual depth stays readable after the visual indent stops growing. ARIA already announces it. */}
+            {/* At the resizable column's 200px minimum, abbreviate Level so its number still fits. */}
+            {depth > 0 && <span aria-hidden={inTree || undefined}>L<span className="@max-[14rem]/side:hidden">evel </span>{depth + 1} · </span>}
+            <span aria-hidden={saysState(meta, label)}>{meta}</span>
+          </span>
           {folded && tree && <TreeCountChip tree={tree} />}
         </span>
       </button>

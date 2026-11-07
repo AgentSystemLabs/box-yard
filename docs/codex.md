@@ -9,7 +9,7 @@ Box Yard's agents can run on OpenAI's [Codex CLI](https://developers.openai.com/
 | A project's task agents | Project › Settings › Agent (or Settings › Box agents › Agent for every project that doesn't pick one) |
 | One task | `agent: "codex"` on `create_task` / `create_tasks`, or a `gpt-*` / `o*` model, which picks Codex on its own |
 
-A task keeps the agent it started on, so changing a project's Agent only changes its new tasks. The Coordinator and Captains switch from their next turn: their old session belongs to the other CLI, so the next turn starts a new one with a recap of the conversation, the same way as when a session goes missing.
+Changing a project's Agent or Settings' default only changes new tasks. To switch existing work explicitly, use **Continue with…** on a resting task or `continue_task {task, agent: "codex"}` (choose `claude` or `cursor` as needed). This keeps the same task and workspace; see [continuing tasks](task-continuation.md). The Coordinator and Captains switch from their next turn: their old session belongs to the other CLI, so the next turn starts a new one with a recap of the conversation, the same way as when a session goes missing.
 
 ## Logging in
 
@@ -38,7 +38,7 @@ This is an explicit opt-in to share that login with the tasks that use the globa
 
 The existing turn handoff delivers the login to an isolated worker Codex home with mode 600 and excludes it from archives. Newer same-account tokens refreshed by remote turns are kept in Box Yard's credential store; Box Yard does not modify the referenced file. Avoid independently refreshing copies of the same login on several machines (see below).
 
-If a remote Codex task fails with `401 Unauthorized: Missing bearer or basic authentication in header`, check for a configured Codex login first. A successful local `codex login` alone does not authenticate boxes. On an already running server, the existing authenticated `PUT /api/setup/credentials` can save `codexAuthJson` without a restart; automation should read the file and send it in the request body in memory, print only redacted status, and never put it in a prompt, command argument, or temporary request file. Retry the original task on its original runner after setup; changing its model does not change its immutable CLI.
+If a remote Codex task fails with `401 Unauthorized: Missing bearer or basic authentication in header`, check for a configured Codex login first. A successful local `codex login` alone does not authenticate boxes. On an already running server, the existing authenticated `PUT /api/setup/credentials` can save `codexAuthJson` without a restart; automation should read the file and send it in the request body in memory, print only redacted status, and never put it in a prompt, command argument, or temporary request file. Retry the original task on its original runner after setup; changing its model alone does not change its CLI. To switch harness explicitly, use same-task continuation.
 
 OpenAI documents credential caching and remote login setup in [Codex authentication](https://developers.openai.com/codex/auth).
 

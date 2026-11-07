@@ -323,7 +323,12 @@ describe("boot data", () => {
     for (const file of ["../web/src/lib/boot.ts", "../web/src/lib/bootSeed.ts"]) {
       expect(strip(readFileSync(join(__dirname, file), "utf8"))).not.toMatch(/localStorage|sessionStorage|indexedDB|caches\.|serviceWorker|persist/i)
     }
-    expect(strip(html)).not.toMatch(/localStorage|sessionStorage|indexedDB|caches\.|serviceWorker|persist/i)
+    // Only the theme bootstrap may read its single preference key; boot/conversation data
+    // still cannot touch storage. The bootstrap never writes or consumes API responses.
+    const theme = /<script id="theme-init">([\s\S]*?)<\/script>/.exec(html)!
+    expect(theme).not.toBeNull()
+    expect(strip(theme[1]!).replace('localStorage.getItem("boxyard:theme")', "")).not.toMatch(/localStorage|sessionStorage|indexedDB|caches\.|serviceWorker|persist|fetch\(/i)
+    expect(strip(html.replace(theme[0], ""))).not.toMatch(/localStorage|sessionStorage|indexedDB|caches\.|serviceWorker|persist/i)
   })
 })
 

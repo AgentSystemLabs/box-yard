@@ -27,6 +27,7 @@ import type { DockerImageBuild, DockerStatus, ProjectDocker } from "../../../sha
 import type { MachineSettings, MachineStatus, MachinesStatus } from "../../../shared/machines"
 import type { DefaultProvider, Runner } from "../../../shared/runner"
 import { AGENT_CLI_LABEL, DEFAULT_AGENT_CLI, canSteer, type AgentCli, type CursorModelList } from "../../../shared/agentCli"
+import type { TaskContinuation } from "../../../shared/taskContinuation"
 import type { ProjectColor } from "../../../shared/projectColors"
 import { setTtsInfo } from "./tts"
 import { settleOptimistic } from "./queued"
@@ -383,9 +384,10 @@ export const forgetCaptainTail = (projectId: string) => void captainTails.delete
 export const useCaptainMessages = (projectId: string, o: { enabled?: boolean } = {}) =>
   useQuery({
     queryKey: keys.captainMessages(projectId),
-    queryFn: async ({ client, queryKey }) => {
+    queryFn: async ({ client, queryKey, signal }) => {
       // A refetch of what's on screen (a prefetched tail's whole history) goes once the chat it opens is painted.
       if (client.getQueryData(queryKey) !== undefined) await afterPaint()
+      signal.throwIfAborted()
       const list = await api<CaptainMessage[]>(`/api/projects/${projectId}/captain/messages`)
       forgetCaptainTail(projectId)
       return list
@@ -417,7 +419,11 @@ export function shareById(prev: unknown, next: unknown): unknown {
 export const useCaptainCompactions = (projectId: string) =>
   useQuery({
     queryKey: keys.captainCompactions(projectId),
-    queryFn: () => afterPaint().then(() => api<CaptainCompaction[]>(`/api/projects/${projectId}/captain/compactions`)),
+    queryFn: async ({ signal }) => {
+      await afterPaint()
+      signal.throwIfAborted()
+      return api<CaptainCompaction[]>(`/api/projects/${projectId}/captain/compactions`)
+    },
   })
 export const useAgentSettings = (o: { enabled?: boolean } = {}) =>
   useQuery({ queryKey: keys.agentSettings, queryFn: () => api<SettingsInfo>("/api/agent-settings"), staleTime: Infinity, enabled: o.enabled })
@@ -700,7 +706,11 @@ export const useMachines = (o?: Quiet & { enabled?: boolean }) =>
  */
 const runTargetsQuery = (projectId: string | null) => ({
   queryKey: keys.runTargets(projectId),
-  queryFn: () => afterPaint().then(() => api<RunTarget[]>(`/api/run-targets${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`)),
+  queryFn: async ({ signal }: QueryFunctionContext) => {
+    await afterPaint()
+    signal.throwIfAborted()
+    return api<RunTarget[]>(`/api/run-targets${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`)
+  },
   staleTime: 30_000,
   refetchOnWindowFocus: true,
   retry: false,
@@ -719,8 +729,10 @@ export function useRunTargets(projectId: string | null, enabled = true, activity
 
 const harnessTargetsQuery = (projectId: string | null, runsOn: string | null) => ({
   queryKey: keys.harnessTargets(projectId, runsOn),
-  queryFn: async () => {
+  queryFn: async ({ signal }: QueryFunctionContext) => {
     await afterPaint()
+    // Reading the signal before the wait lets React Query cancel when the last observer leaves.
+    signal.throwIfAborted()
     const q = new URLSearchParams({ ...(projectId ? { project: projectId } : {}), ...(runsOn ? { runsOn } : {}) }).toString()
     return api<RunTarget[]>(`/api/harness-targets${q ? `?${q}` : ""}`)
   },
@@ -1363,6 +1375,15 @@ export function useSetStayOpenOnMerge() {
 export const useStopTask = () => useTaskAction("stop", stoppedPatch, "stop the task")
 export const useCloseTask = () => useTaskAction("close", () => ({ status: "done" as TaskStatus, question: null }), "close the task")
 export const useRetryTask = () => useTaskAction("retry", () => ({ status: "queued" as TaskStatus, error: null }), "retry the task")
+
+export function useContinueTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ taskId, ...options }: TaskContinuation & { taskId: string }) => api<Task>(`/api/tasks/${taskId}/continue`, { method: "POST", body: options }),
+    onSuccess: (task) => qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task)),
+    onError: fail("Couldn't continue the task"),
+  })
+}
 
 /**
  * "Mark done" for one task or several (the Cards view's selection, "Mark all idle as done"): the same close as the task

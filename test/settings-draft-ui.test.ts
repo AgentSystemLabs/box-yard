@@ -8,6 +8,7 @@ import { keys } from "../web/src/lib/queries.js"
 import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
 import { getVoiceSettings } from "../web/src/lib/speech.js"
 import { VOICE_KEY } from "../web/src/lib/voice.js"
+import { setTheme, THEME_KEY } from "../web/src/lib/theme"
 import { draftChanges } from "../web/src/lib/settingsDraft.js"
 import type { SettingsSection } from "../web/src/lib/settingsNav.js"
 import { DEFAULT_SETTINGS } from "../server/settings.js"
@@ -711,3 +712,35 @@ function seedSearchPanels(client: QueryClient) {
   client.setQueryData(keys.docker, { docker: { installed: false, running: false, version: null, error: null, cpus: null, memoryBytes: null }, settings: DEFAULT_DOCKER_SETTINGS, image: { tag: "test", present: false }, build, containers: [] })
   client.setQueryData(keys.machines, { machines: [], labels: [], settings: { localLabel: null } })
 }
+
+
+describe("Appearance drafts", () => {
+  it("applies and persists the theme only on Save, with Discard restoring the saved choice", async () => {
+    setTheme("dark")
+    section = "appearance"
+    render()
+    const label = () => [...document.querySelectorAll("label")].find((l) => l.textContent === "Theme")!
+    const select = () => document.getElementById(label().htmlFor) as HTMLSelectElement
+    const choose = async (value: string) => {
+      act(() => { select().value = value; select().dispatchEvent(new Event("change", { bubbles: true })) })
+      await settle()
+    }
+    expect(select().tagName).toBe("SELECT")
+    await choose("light")
+    expect(localStorage.getItem(THEME_KEY)).toBe("dark")
+    expect(document.documentElement.classList.contains("dark")).toBe(true)
+    expect(unsaved()).toContain("1")
+    expect(navDot("appearance")).toBe(true)
+    await click(button("Discard"))
+    expect(select().value).toBe("dark")
+    await choose("light")
+    await click(saveButton())
+    expect(localStorage.getItem(THEME_KEY)).toBe("light")
+    expect(document.documentElement.classList.contains("dark")).toBe(false)
+    expect(unsaved()).toBe(null)
+    await choose("system")
+    await click(saveButton())
+    expect(localStorage.getItem(THEME_KEY)).toBe("system")
+    expect(writes()).toEqual([])
+  })
+})

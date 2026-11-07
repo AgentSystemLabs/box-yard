@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { afterPaint } from "../web/src/lib/afterPaint.js"
 // The sidebar as a WAI-ARIA tree view (lib/treeView.ts): its roles and levels, one tab stop, and every key.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
@@ -139,9 +138,11 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
-  act(() => root.unmount())
-  // Keep deferred chat requests inside the mocked fetch lifetime.
-  await act(async () => { await afterPaint() })
+  await act(async () => {
+    root.unmount()
+    // Deferred availability queries must reach the stub before fetch is restored.
+    await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+  })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)
@@ -170,9 +171,9 @@ describe("the sidebar's tree: roles and attributes", () => {
       "box-yard, Captain ▾ (3/5)",
       "  Check SSH into the benchasks (1/2)",
       "  Plan the launchworking ▾ (2/2)",
-      "    Write the launch postworking ▾ (1/2)",
-      "      Draft the pricing sectionworking (1/1)",
-      "    Pick the imagesworking (2/2)",
+      "    Write the launch postLevel 2 · working ▾ (1/2)",
+      "      Draft the pricing sectionLevel 3 · working (1/1)",
+      "    Pick the imagesLevel 2 · working (2/2)",
       "marketing-site, Captain ▾ (4/5)",
       "  Refresh the portfolio#19 (1/1)",
       "More projects1 ▸ (5/5)",
@@ -225,6 +226,32 @@ describe("the sidebar's tree: roles and attributes", () => {
 })
 
 describe("the sidebar's tree: keys", () => {
+  it("keeps the real parent, level and single tab stop through twelve child levels", async () => {
+    const deep: Task[] = []
+    for (let i = 0; i < 13; i++) deep.push(task(`task_level${i}`, YARD.id, `Example task ${i + 1}`, "idle", deep.at(-1)))
+    render(APP_HOME, deep)
+    const leaf = deep.at(-1)!
+    const parent = deep.at(-2)!
+    const item = row(leaf)
+    expect(item.getAttribute("aria-level")).toBe("14")
+    expect(item.getAttribute("aria-posinset")).toBe("1")
+    expect(item.getAttribute("aria-setsize")).toBe("1")
+    expect(item.textContent).toContain("Level 13")
+    expect(item.querySelector("[data-testid=sidebar-mark-done]")?.getAttribute("tabindex")).toBe("-1")
+    focus(item)
+    press("ArrowLeft")
+    expect(focusedKey()).toBe(taskKey(parent.id, "project"))
+    press(" ")
+    await flush()
+    expect(row(leaf)).toBeNull()
+    expect(stops()).toEqual([taskKey(parent.id, "project")])
+    press("ArrowRight")
+    await flush()
+    press("ArrowRight")
+    expect(focusedKey()).toBe(taskKey(leaf.id, "project"))
+    expect(stops()).toEqual([taskKey(leaf.id, "project")])
+  })
+
   it("↓ and ↑ move through the items on screen, top to bottom, and stop at the ends", () => {
     render()
     focus(at(COORDINATOR))

@@ -133,7 +133,7 @@ export function runTargetNote(pick: RunTargetPick, ownerName: string | undefined
 
 /**
  * The line under a message with a "!" pick, in the turn's prompt. Box Yard applies it to create_task and
- * create_tasks; a task keeps its agent for good, so send_to_task to a task on the other CLI doesn't switch it.
+ * create_tasks; send_to_task keeps the existing harness. continue_task explicitly switches a resting task.
  */
 export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, relay: boolean): string {
   return withOwner(
@@ -141,7 +141,7 @@ export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, 
       (pick.model !== undefined ? ` Model "${pick.model}"${pick.effort ? `, effort "${pick.effort}"` : pick.value === "cursor" ? " with effort included in its model ID" : " with the harness's Settings effort"}.` : " Use this harness's model and effort defaults in Settings.") + " " +
       `Every task you create for it gets agent "${pick.value}": Box Yard applies it to create_task and create_tasks during this turn` +
       (relay ? ", and a Captain you message this turn gets the same pick." : ".") +
-      ` A task keeps its agent for good: send_to_task to a task on another agent doesn't switch it, so when the work must run on ${pick.label}, create a new task for it instead.]`,
+      ` send_to_task keeps the saved harness. To continue the same work on ${pick.label}, wait for it to stop and finish saving, then call continue_task with the same task and agent "${pick.value}" (and this pick's model/effort if specified); do not create a replacement task.]`,
     ownerName,
   )
 }

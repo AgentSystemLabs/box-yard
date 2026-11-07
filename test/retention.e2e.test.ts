@@ -163,7 +163,7 @@ describe("resuming after retention", () => {
     expect(r.yard.tasks.resumeMode(done.id)).toBe("archive")
 
     const sent = await sendToTask(r, done.id, "one more thing")
-    expect(sent.delivery).toMatch(/^resuming: the workspace and Claude session are restored from the archive/)
+    expect(sent.delivery).toMatch(/^resuming: the workspace and Claude Code session are restored from the archive/)
     const resumed = await archivedDone(r, done.id, 2)
     const turn = turnJson(r, resumed)
     expect(turn.resume).toBe(true)
@@ -212,7 +212,7 @@ describe("resuming after retention", () => {
     expect(turn.resume).toBe(false)
     expect(after.sessionId).not.toBe(pushed.sessionId)
     expect(turn.sessionId).toBe(after.sessionId)
-    expect(turn.prompt).toContain("Your previous Claude session for this task was lost")
+    expect(turn.prompt).toContain("Your previous CLI session for this task was lost")
     expect(turn.prompt).toContain(`Branch: ${pushed.branch}`)
     expect(turn.prompt).toContain("Last summary: Fixed the widget and opened a PR.")
     expect(turn.prompt).toContain("checked out from origin")

@@ -224,6 +224,12 @@ const schemas = {
   }),
   note: z.object({ content: z.string().trim().min(1).max(MAX_NOTE_CHARS) }),
   taskPatch: z.object({ stayOpenOnMerge: z.boolean() }).strict(),
+  taskContinuation: z.object({
+    agent: z.enum([...AGENT_CLIS, "default"]).optional(),
+    model: z.string().trim().min(1).max(100).nullable().optional(),
+    effort: z.enum([...EFFORTS, "ultra"]).nullable().optional(),
+    message: z.string().trim().min(1).max(50_000).optional(),
+  }).strict(),
   task: z.object({
     id: idSchema,
     projectId: z.string().min(1),
@@ -240,7 +246,7 @@ const schemas = {
     machineLabel: machineLabelSchema,
     /** With runsOn "gpu": its own cloud, and GPU, over Settings' Default GPU cloud (Task.gpu). */
     gpu: gpuPickSchema,
-    /** Run on Claude Code, Codex or Cursor over the project's Agent (Task.agentCli), for good. */
+    /** Run on Claude Code, Codex or Cursor over the project's Agent (Task.agentCli). */
     agentCli: z.enum(AGENT_CLIS).nullish(),
   }),
   message: z.object({
@@ -1426,6 +1432,9 @@ export function createBoxYard(
   })
   api.post("/tasks/:id/retry", (req, res) => {
     res.json(tasks.retryTask(req.params.id!))
+  })
+  api.post("/tasks/:id/continue", async (req, res) => {
+    res.json(await tasks.continueTask(req.params.id!, parse(schemas.taskContinuation, req.body ?? {})))
   })
   api.post("/tasks/:id/preview", async (req, res) => {
     const port = Number((req.body as { port?: unknown })?.port)
