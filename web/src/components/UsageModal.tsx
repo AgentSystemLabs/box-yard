@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { X } from "lucide-react"
 import { Modal } from "./Modal"
 import { Loading } from "./Loading"
+import { SubscriptionLimits } from "./LoginLimits"
 import { Button, Select, cx, useMinuteClock } from "./ui"
 import { prefetchUsageLedger, useUsageBudget, useUsageLedger } from "../lib/queries"
 import { money, pct } from "../lib/usage"
@@ -69,32 +70,45 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
     })
 
   return (
-    <Modal size="wide" title="Usage" description={ledger ? `${dayLabel(ledger.days[0]!)} – ${dayLabel(ledger.to - 1)} · LLM and compute, in US dollars` : "LLM and compute, in US dollars"} onClose={onClose} className="max-sm:h-dvh">
-      <div className="@container space-y-5" data-testid="usage-modal">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
-          {ledger && <FilterChips ledger={ledger} filter={filter} onDrop={drop} onClear={() => setFilter({})} />}
-        </div>
+    <Modal size="wide" title="Usage" description="Subscription allowances, model usage and box costs" onClose={onClose} className="max-sm:h-dvh [&_[data-dismiss]]:h-11 [&_[data-dismiss]]:w-11">
+      <div className="@container min-w-0 space-y-8" data-testid="usage-modal">
+        <SubscriptionLimits />
 
-        {!view ? (
-          q.isError ? (
-            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-zinc-400">
-              Couldn't load usage.
-              <Button type="button" size="sm" onClick={() => void q.refetch()}>Retry</Button>
+        <section aria-labelledby="usage-spending-title" className="min-w-0 space-y-4 border-t border-zinc-800 pt-6" data-testid="usage-spending">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 id="usage-spending-title" className="text-base font-semibold text-zinc-100">Cost &amp; tokens</h3>
+              <p className="mt-1 text-xs text-zinc-500">{ledger ? `${dayLabel(ledger.days[0]!)} – ${dayLabel(ledger.to - 1)} · ` : ""}US dollars · ≈ means estimated</p>
             </div>
-          ) : (
-            <Loading kind="rows" label="Loading usage" />
-          )
-        ) : (
-          <div aria-busy={q.isPlaceholderData} className={cx("space-y-5", q.isPlaceholderData && "opacity-60")}>
-            <Totals view={view} />
-            <CostChart view={view} day={shownDay} onDay={setDay} onNarrow={narrow} />
-            <TokenChart view={view} day={shownDay} onDay={setDay} />
-            <Breakdown view={view} group={group} onGroup={setGroup} onDrill={(row) => row.filter && narrow(row.filter, group)} />
-            <HowEstimated ledger={ledger!} />
-            <CloudLimits />
+            <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
           </div>
-        )}
+          <p className="text-sm text-zinc-400">Model costs are reported or estimated API-equivalent values, not your subscription bill. Box costs are tracked separately.</p>
+          {ledger && <FilterChips ledger={ledger} filter={filter} onDrop={drop} onClear={() => setFilter({})} />}
+          {!view ? (
+            q.isError ? (
+              <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-zinc-400">
+                Couldn't load usage.
+                <Button type="button" onClick={() => void q.refetch()}>Retry costs</Button>
+              </div>
+            ) : (
+              <Loading kind="rows" label="Loading usage" />
+            )
+          ) : (
+            <div aria-busy={q.isPlaceholderData} className={cx("space-y-4", q.isPlaceholderData && "opacity-60")}>
+              {view.totals.turns === 0 && view.totals.computeHours === 0 && view.totals.costUsd === 0 && (
+                <p className="text-sm text-zinc-400" data-testid="usage-empty">No recorded usage in this range{Object.keys(filter).length ? " for these filters" : ""}.</p>
+              )}
+              <Totals view={view} />
+              <div className="grid items-start gap-4 @4xl:grid-cols-2">
+                <CostChart view={view} day={shownDay} onDay={setDay} onNarrow={narrow} />
+                <TokenChart view={view} day={shownDay} onDay={setDay} />
+              </div>
+              <Breakdown view={view} group={group} onGroup={setGroup} onDrill={(row) => row.filter && narrow(row.filter, group)} />
+              <HowEstimated ledger={ledger!} />
+            </div>
+          )}
+        </section>
+        <CloudLimits />
       </div>
     </Modal>
   )
@@ -102,7 +116,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
 
 function RangePicker({ value, onChange, onPrefetch }: { value: UsageRangeDays; onChange: (d: UsageRangeDays) => void; onPrefetch: (d: UsageRangeDays) => void }) {
   return (
-    <div role="group" aria-label="Range" className="grid grid-cols-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5">
+    <div role="group" aria-label="Range" className="grid w-full grid-cols-4 @sm:w-auto rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5">
       {USAGE_RANGES.map((d) => (
         <button
           key={d}
@@ -113,7 +127,7 @@ function RangePicker({ value, onChange, onPrefetch }: { value: UsageRangeDays; o
           onPointerEnter={() => onPrefetch(d)}
           onPointerDown={() => onPrefetch(d)}
           onFocus={() => onPrefetch(d)}
-          className={cx("min-h-11 rounded-md px-3 text-sm font-medium whitespace-nowrap sm:min-h-9", FOCUS, value === d ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-100")}
+          className={cx("min-h-11 rounded-md px-3 text-sm font-medium whitespace-nowrap", FOCUS, value === d ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-100")}
         >
           {d}
           <span className="@sm:hidden">d</span>
@@ -138,7 +152,7 @@ function FilterChips({ ledger, filter, onDrop, onClear }: { ledger: UsageLedger;
             onClick={() => onDrop(k)}
             aria-label={`Remove filter ${FILTER_NAMES[k]}: ${label}`}
             title="Remove this filter"
-            className={cx("inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-yard-500/40 bg-yard-500/10 pr-2 pl-3 text-xs text-yard-100 hover:bg-yard-500/20 sm:min-h-8", FOCUS)}
+            className={cx("inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-yard-500/40 bg-yard-500/10 pr-2 pl-3 text-xs text-yard-100 hover:bg-yard-500/20", FOCUS)}
           >
             <span className="text-yard-300/80">{FILTER_NAMES[k]}</span>
             <span className="min-w-0 truncate font-medium">{label}</span>
@@ -147,7 +161,7 @@ function FilterChips({ ledger, filter, onDrop, onClear }: { ledger: UsageLedger;
         )
       })}
       {set.length > 1 && (
-        <button type="button" onClick={onClear} className={cx("min-h-11 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100 sm:min-h-8", FOCUS)}>
+        <button type="button" onClick={onClear} className={cx("min-h-11 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
           Clear all
         </button>
       )}
@@ -172,9 +186,9 @@ function Totals({ view }: { view: UsageView }) {
   const computeEstimated = view.cost.some((s) => s.kind === "compute" && s.estimated)
   return (
     <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-4">
-      <Tile testId="usage-total" label="Total" value={usd(t.costUsd, t.estimatedUsd > 0)} sub={`${usd(t.costUsd / n, t.estimatedUsd > 0)} a day on average`} />
-      <Tile label="LLM" value={usd(t.llmUsd, llmEstimated)} sub={`${t.turns.toLocaleString("en-US")} runs · ${pct(t.llmUsd, t.costUsd)}`} />
-      <Tile label="Compute" value={usd(t.computeUsd, computeEstimated)} sub={`${t.computeHours.toFixed(1)} box-hours · ${pct(t.computeUsd, t.costUsd)}`} />
+      <Tile testId="usage-total" label="Tracked cost" value={usd(t.costUsd, t.estimatedUsd > 0)} sub={`${usd(t.costUsd / n, t.estimatedUsd > 0)} a day on average`} />
+      <Tile label="Model cost" value={usd(t.llmUsd, llmEstimated)} sub={`${t.turns.toLocaleString("en-US")} runs · ${pct(t.llmUsd, t.costUsd)}`} />
+      <Tile label="Box cost" value={usd(t.computeUsd, computeEstimated)} sub={`${t.computeHours.toFixed(1)} box-hours · ${pct(t.computeUsd, t.costUsd)}`} />
       <Tile testId="usage-tokens" label="Tokens" value={compact(t.tokens.total)} sub={`${compact(t.tokens.total / n)} a day on average`} />
     </div>
   )
@@ -188,7 +202,7 @@ const colorOf = (i: number) => (i < 0 ? OTHER_COLOR : USAGE_COLORS[i]!)
 function CostChart({ view, day, onDay, onNarrow }: { view: UsageView; day: number | null; onDay: (d: number | null) => void; onNarrow: (f: UsageFilter) => void }) {
   const stacks: Stack[] = view.cost.map((s) => ({ key: s.key, label: s.label, color: colorOf(s.color), daily: s.daily, total: s.totalUsd, estimated: s.estimated, onPick: s.filter ? () => onNarrow(s.filter!) : undefined }))
   return (
-    <ChartCard title="Daily cost" sub="LLM by model, compute by provider" testId="usage-cost-chart">
+    <ChartCard title="Daily cost" sub="Models and boxes · US dollars" testId="usage-cost-chart">
       <StackedBars days={view.days} stacks={stacks} byDay={view.costByDay} format={(n) => money(n)} axis={axisMoney} day={day} onDay={onDay} noun="cost" />
     </ChartCard>
   )
@@ -218,7 +232,7 @@ function TokenChart({ view, day, onDay }: { view: UsageView; day: number | null;
 function ChartCard({ title, sub, testId, children }: { title: string; sub: string; testId: string; children: ReactNode }) {
   const id = useId()
   return (
-    <section aria-labelledby={id} data-testid={testId} className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
+    <section aria-labelledby={id} data-testid={testId} className="@container/chart min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
       <h3 id={id} className="text-sm font-semibold text-zinc-100">{title}</h3>
       <p className="text-xs text-zinc-500">{sub}</p>
       {children}
@@ -282,7 +296,7 @@ function StackedBars({
       <Readout id={readoutId} days={days} day={shown} stacks={stacks} byDay={byDay} total={total} format={format} noun={noun} />
       <div className="mt-2 flex gap-2">
         {/* y-axis labels */}
-        <div aria-hidden className="relative h-40 w-10 shrink-0 text-right text-[11px] text-zinc-500 tabular-nums @lg:h-52 @lg:w-12">
+        <div aria-hidden className="relative h-40 w-10 shrink-0 text-right text-[11px] text-zinc-500 tabular-nums @lg/chart:h-52 @lg/chart:w-12">
           {ticks.map((t) => (
             <span key={t} className="absolute right-0 -translate-y-1/2 leading-none" style={{ top: `${(1 - t / top) * 100}%` }}>
               {axis(t)}
@@ -297,12 +311,12 @@ function StackedBars({
             aria-describedby={readoutId}
             onKeyDown={onKey}
             onPointerLeave={() => setHover(null)}
-            className={cx("relative h-40 rounded-sm @lg:h-52", FOCUS)}
+            className={cx("relative h-40 rounded-sm @lg/chart:h-52", FOCUS)}
           >
             {ticks.map((t) => (
               <div key={t} aria-hidden className={cx("absolute inset-x-0 border-t", t === 0 ? "border-zinc-600" : "border-zinc-800/80")} style={{ top: `${(1 - t / top) * 100}%` }} />
             ))}
-            <div className={cx("absolute inset-0 flex items-end", n > 31 ? "gap-px" : "gap-0.5 @lg:gap-1")}>
+            <div className={cx("absolute inset-0 flex items-end", n > 31 ? "gap-px" : "gap-0.5 @lg/chart:gap-1")}>
               {days.map((_, i) => (
                 <div
                   key={i}
@@ -339,7 +353,7 @@ function StackedBars({
               <span
                 key={i}
                 // On a phone, every other date (counting back from today's), so "Oct 30" and "Nov 5" don't touch.
-                className={cx("absolute top-0 whitespace-nowrap", !week && (labels.length - 1 - k) % 2 === 1 && "hidden @sm:inline")}
+                className={cx("absolute top-0 whitespace-nowrap", !week && (labels.length - 1 - k) % 2 === 1 && "hidden @sm/chart:inline")}
                 style={i === n - 1 && !week ? { right: 0 } : i === 0 && !week ? { left: 0 } : { left: `${((i + 0.5) / n) * 100}%`, transform: "translateX(-50%)" }}
               >
                 {dayLabel(days[i]!, week)}
@@ -400,7 +414,7 @@ function Legend({ stacks, format }: { stacks: Stack[]; format: (n: number) => st
                 onClick={s.onPick}
                 title={s.pressed ? "Show all" : `Narrow to ${s.label}`}
                 className={cx(
-                  "inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs sm:min-h-8",
+                  "inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs",
                   FOCUS,
                   s.pressed ? "border-yard-500/50 bg-yard-500/10" : "border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/60",
                 )}
@@ -408,7 +422,7 @@ function Legend({ stacks, format }: { stacks: Stack[]; format: (n: number) => st
                 {body}
               </button>
             ) : (
-              <span className="inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-md border border-transparent px-2 text-xs sm:min-h-8" title="Several models together: narrow by the table's Model rows">
+              <span className="inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-md border border-transparent px-2 text-xs" title="Several models together: narrow by the table's Model rows">
                 {body}
               </span>
             )}
@@ -430,7 +444,7 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
         <h3 id={id} className="text-sm font-semibold text-zinc-100">Breakdown</h3>
         <label className="flex items-center gap-2 text-xs text-zinc-400">
           By
-          <Select size="sm" value={group} onChange={(e) => { onGroup(e.target.value as UsageGroup); setAll(false) }} aria-label="Break down by" className="min-h-11 rounded-md sm:min-h-0">
+          <Select size="sm" value={group} onChange={(e) => { onGroup(e.target.value as UsageGroup); setAll(false) }} aria-label="Break down by" className="min-h-11 rounded-md">
             {GROUPS.map((g) => (
               <option key={g} value={g}>{USAGE_GROUP_LABEL[g]}</option>
             ))}
@@ -439,8 +453,8 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
       </div>
       <div className="mt-2 hidden grid-cols-[minmax(0,1fr)_6rem_6rem_5rem_8.5rem] gap-x-3 border-b border-zinc-800 pb-1 text-[11px] text-zinc-500 uppercase @2xl:grid">
         <span>{USAGE_GROUP_LABEL[group]}</span>
-        <span className="text-right">LLM</span>
-        <span className="text-right">Compute</span>
+        <span className="text-right">Models</span>
+        <span className="text-right">Boxes</span>
         <span className="text-right">Tokens</span>
         <span className="text-right">Total</span>
       </div>
@@ -486,7 +500,7 @@ function RowBody({ r, total }: { r: UsageTableRow; total: number }) {
         {r.detail && <span className="line-clamp-1 text-xs text-zinc-500 wrap-anywhere">{r.detail}</span>}
       </span>
       <span className="mt-0.5 text-xs text-zinc-500 tabular-nums @2xl:hidden">
-        {[r.llmUsd > 0 ? `LLM ${money(r.llmUsd)}` : null, r.computeUsd > 0 || r.computeHours > 0 ? `Compute ${usd(r.computeUsd, est)}` : null, r.tokens > 0 ? `${compact(r.tokens)} tokens` : null].filter(Boolean).join(" · ")}
+        {[r.llmUsd > 0 ? `Models ${money(r.llmUsd)}` : null, r.computeUsd > 0 || r.computeHours > 0 ? `Boxes ${usd(r.computeUsd, est)}` : null, r.tokens > 0 ? `${compact(r.tokens)} tokens` : null].filter(Boolean).join(" · ")}
       </span>
       <span className="mt-0.5 text-right text-sm font-medium text-zinc-100 tabular-nums @2xl:hidden">
         {usd(r.costUsd, est)} <span className="text-xs font-normal text-zinc-500">{pct(r.costUsd, total)}</span>
@@ -506,9 +520,9 @@ function HowEstimated({ ledger }: { ledger: UsageLedger }) {
   const up = Object.entries(r.upstashCpuHourUsd).map(([size, usd]) => `${size} $${usd.toFixed(2)}`).join(", ")
   return (
     <details className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 text-sm text-zinc-400 @lg:px-4" data-testid="usage-estimates">
-      <summary className={cx("min-h-11 cursor-pointer content-center font-medium text-zinc-200 sm:min-h-0", FOCUS)}>How these numbers are made (≈ marks an estimate)</summary>
+      <summary className={cx("min-h-11 cursor-pointer content-center font-medium text-zinc-200", FOCUS)}>How these numbers are made (≈ marks an estimate)</summary>
       <ul className="mt-2 list-disc space-y-1.5 pl-5">
-        <li><strong className="text-zinc-200">LLM</strong>: each run's cost as the Claude CLI reported it, on the day the run started. A run it didn't price (Codex) is an estimate.</li>
+        <li><strong className="text-zinc-200">Models</strong>: each run's cost as the Claude CLI reported it, on the day the run started. A run it didn't price (Codex) is an estimate.</li>
         <li><strong className="text-zinc-200">Upstash boxes</strong>: the CPU each box used, at Settings › Usage's rate per active CPU hour ({up}), plus storage; Upstash's own figure where it reports one. ≈ unless it's Upstash's own.</li>
         <li><strong className="text-zinc-200">Daytona sandboxes</strong> ≈: each sandbox's size at Daytona's list price while it was up: ${r.daytona.vcpuHour}/vCPU-hour + ${r.daytona.memoryGibHour}/GiB-hour of memory, plus its GPU's hourly price.</li>
         <li><strong className="text-zinc-200">RunPod and Vast.ai GPUs</strong> ≈: the pod's $/hr when it started (from the box history), from then until it was terminated.</li>
@@ -526,15 +540,23 @@ function HowEstimated({ ledger }: { ledger: UsageLedger }) {
 
 /** Box spend against Settings › Usage's cloud limits (Claude isn't counted against them). */
 function CloudLimits() {
-  const budget = useUsageBudget().data
-  if (!budget) return null
+  const q = useUsageBudget()
+  const budget = q.data
   return (
     <section className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:px-4" aria-label="Boxes against your cloud limits">
-      <h3 className="text-sm font-semibold text-zinc-100">Boxes against your cloud limits</h3>
+      <h3 className="text-base font-semibold text-zinc-100">Box spending limits</h3>
+      <p className="mt-1 mb-2 text-xs text-zinc-500">Current box spending only. Model costs and subscription allowances do not count toward these limits.</p>
+      {!budget ? q.isError ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-400">
+          Box spending limits are unavailable.
+          <Button type="button" onClick={() => void q.refetch()}>Retry box limits</Button>
+        </div>
+      ) : <Loading kind="rows" label="Loading box spending limits" /> : (
       <ul className="divide-y divide-zinc-800/60">
         <LimitRow label="Daily cloud limit" phrase="today" state={budget.daily} />
         <LimitRow label="Monthly cloud limit" phrase="in the last 30 days" state={budget.monthly} />
       </ul>
+      )}
     </section>
   )
 }
@@ -551,7 +573,7 @@ function LimitRow({ label, phrase, state }: { label: string; phrase: string; sta
           <span className="block text-sm text-zinc-100">{label}</span>
           <span className={cx("block text-xs", state.exceeded ? "text-red-300" : state.warning ? "text-amber-300" : "text-zinc-500")}>Box spend {phrase} · {status}</span>
         </span>
-        <span className="text-right text-sm font-medium text-zinc-100 tabular-nums">
+        <span className="shrink-0 text-right text-sm font-medium text-zinc-100 tabular-nums">
           {money(state.usedUsd)}
           {on && <span className="block text-xs font-normal text-zinc-500">of {money(state.limitUsd)}</span>}
         </span>
