@@ -51,10 +51,48 @@ export function releaseListBottom(el: Element) {
  * of the bottom first and holds the view where the scroll leaves it: pinned, content growing meanwhile (the card
  * opening as it's revealed, its history loading) would pull the view back down, cancel the scroll, or push `el` up
  * out of view. Reaching the bottom again pins it, as ever.
+ *
+ * Only the list scrolls. `Element.scrollIntoView` scrolls every ancestor that has overflow too, `overflow: hidden`
+ * ones included: a Captain panel taller than its frame slid its header up out of sight, where nothing could scroll it
+ * back. The element's `scroll-margin` is honoured, as scrollIntoView would.
  */
-export function scrollIntoList(el: Element, options?: ScrollIntoViewOptions) {
+export function scrollIntoList(el: Element, options: ScrollIntoListOptions = {}) {
   releaseListBottom(el)
-  el.scrollIntoView?.(options)
+  const list = el.parentElement?.closest<HTMLElement>("[data-scroller]")
+  if (!list) return void el.scrollIntoView?.(options)
+  const top = listScrollTop(list, el, options.block ?? "start")
+  if (top !== null) list.scrollTo({ top, behavior: options.behavior ?? "auto" })
+}
+
+export type ScrollIntoListOptions = { block?: "start" | "center" | "end" | "nearest"; behavior?: ScrollBehavior }
+
+// DOMRects include CSS zoom/transforms; scrollTop/clientHeight use the list's unscaled CSS pixels.
+const scrollScale = (list: HTMLElement) => {
+  const style = getComputedStyle(list)
+  // Computed border-box height keeps fractional flex sizing, which offsetHeight rounds.
+  const height = (style.boxSizing === "border-box" ? parseFloat(style.height) : 0) || list.offsetHeight
+  return height ? list.getBoundingClientRect().height / height || 1 : 1
+}
+
+/** The `scrollTop` that shows `el` at `block` in `list` (the browser clamps it), or null if `nearest` needs none. */
+function listScrollTop(list: HTMLElement, el: Element, block: NonNullable<ScrollIntoListOptions["block"]>) {
+  const style = getComputedStyle(el)
+  const frame = list.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  const scale = scrollScale(list)
+  // Where `el` sits in the list's content, its scroll margins added.
+  const start = (rect.top - frame.top) / scale - list.clientTop + list.scrollTop - (parseFloat(style.scrollMarginTop) || 0)
+  const end = (rect.bottom - frame.top) / scale - list.clientTop + list.scrollTop + (parseFloat(style.scrollMarginBottom) || 0)
+  const view = list.clientHeight
+  if (block === "center") return (start + end - view) / 2
+  if (block === "end") return end - view
+  if (block === "nearest") {
+    const above = start < list.scrollTop
+    const below = end > list.scrollTop + view
+    if ((!above && !below) || (above && below)) return null
+    return (above && end - start <= view) || (below && end - start > view) ? start : end - view
+  }
+  return start
 }
 
 /**
@@ -123,8 +161,10 @@ export function StickyScroll({
   resetKey,
   restoreKey,
   hidden = 0,
+  earlierLabel,
   onLoadEarlier,
   onTrim,
+  onJump,
   onFill,
   onFilled,
   growing = false,
@@ -139,8 +179,10 @@ export function StickyScroll({
   resetKey?: string
   restoreKey?: string
   hidden?: number
+  earlierLabel?: string
   onLoadEarlier?: () => void
   onTrim?: () => void
+  onJump?: () => void
   onFill?: () => boolean
   onFilled?: (share: number) => void
   growing?: boolean
@@ -170,7 +212,7 @@ export function StickyScroll({
   const [unread, setUnread] = useState(0)
   const sentinel = useRef<HTMLButtonElement>(null)
   // Scroll metrics captured just before older items are added above.
-  const beforePrepend = useRef<{ height: number; top: number; hidden: number } | null>(null)
+  const beforePrepend = useRef<{ height: number; top: number; hidden: number; anchor: { node: Element; top: number } | null } | null>(null)
   // A spot from Back/Forward being put back: `since` it started, `found` when its row (or content) first showed.
   const restoring = useRef<{ spot: LiveSpot; since: number; found: number } | null>(null)
   // Gliding to the bottom after a send: how far short of the bottom it started, and when (see glideFrame).
@@ -216,7 +258,16 @@ export function StickyScroll({
   // Write scrollTop ourselves, remembering where it landed so the scroll event it fires is ignored.
   const setTop = (el: HTMLElement, top: number) => {
     const target = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight))
-    if (el.scrollTop !== target) el.scrollTop = target
+    if (el.scrollTop !== target) {
+      el.scrollTop = target
+      // WebKit floors scrollTop to whole CSS pixels. Pick the nearest representable position, so zoomed
+      // prepends do not accumulate a full pixel of drift on each compensation. Chromium keeps fractions.
+      const landed = el.scrollTop
+      if (Math.abs(landed - target) > 0.5) {
+        el.scrollTop = landed < target ? Math.ceil(target) : Math.floor(target)
+        if (Math.abs(el.scrollTop - target) > Math.abs(landed - target)) el.scrollTop = landed
+      }
+    }
     lastTop.current = el.scrollTop
     seeBottom(Math.max(0, el.scrollHeight - el.clientHeight))
   }
@@ -263,7 +314,7 @@ export function StickyScroll({
       if (rows[mid]!.getBoundingClientRect().bottom > viewTop) hi = mid
       else lo = mid + 1
     }
-    const node = rows[lo]!
+    const node = (rows[lo] === sentinel.current ? rows[lo + 1] ?? rows[lo] : rows[lo])!
     anchor.current = { node, top: node.getBoundingClientRect().top - viewTop }
   }
 
@@ -315,7 +366,7 @@ export function StickyScroll({
           ? { node: byId, offset: spot.offset ?? 0 }
           : null
     if (row) {
-      setTop(el, el.scrollTop + row.node.getBoundingClientRect().top - el.getBoundingClientRect().top - row.offset)
+      setTop(el, el.scrollTop + (row.node.getBoundingClientRect().top - el.getBoundingClientRect().top - row.offset) / scrollScale(el))
     } else {
       const { hidden, onLoadEarlier } = latest.current
       // The row is in the older part that isn't rendered yet: render more (the prepend keeps the view), then retry.
@@ -547,7 +598,7 @@ export function StickyScroll({
     const a = anchor.current
     if (!a || !a.node.isConnected) return markAnchor()
     const shift = a.node.getBoundingClientRect().top - box.getBoundingClientRect().top - a.top
-    if (Math.abs(shift) >= 1) setTop(box, box.scrollTop + shift)
+    if (Math.abs(shift) >= 1) setTop(box, box.scrollTop + shift / scrollScale(box))
     markAnchor()
   }
 
@@ -596,7 +647,8 @@ export function StickyScroll({
     const el = scroller.current
     const { hidden, onLoadEarlier } = latest.current
     if (!el || !onLoadEarlier) return
-    beforePrepend.current = { height: el.scrollHeight, top: el.scrollTop, hidden }
+    markAnchor()
+    beforePrepend.current = { height: el.scrollHeight, top: el.scrollTop, hidden, anchor: anchor.current }
     onLoadEarlier()
   }, [])
 
@@ -607,7 +659,11 @@ export function StickyScroll({
     if (!el || !prev || prev.hidden === hidden) return
     beforePrepend.current = null
     if (stuck.current) return
-    setTop(el, prev.top + (el.scrollHeight - prev.height))
+    const a = prev.anchor
+    // Bounded windows also drop rows below the viewport: total height no longer measures the prepend.
+    setTop(el, a?.node.isConnected
+      ? el.scrollTop + (a.node.getBoundingClientRect().top - el.getBoundingClientRect().top - a.top) / scrollScale(el)
+      : prev.top + (el.scrollHeight - prev.height))
     // The bottom moved for rows above, not for anything new at the end: where it was is no bottom to reach.
     pastBottoms.current = []
     markAnchor()
@@ -629,6 +685,7 @@ export function StickyScroll({
 
   // Re-pin and go to the bottom: a glide for "Jump to latest", a jump after a send.
   const jump = (smooth = true) => {
+    onJump?.()
     restoring.current = null
     pin()
     toBottom(smooth)
@@ -677,9 +734,9 @@ export function StickyScroll({
               ref={sentinel}
               type="button"
               onClick={loadEarlier}
-              className="block w-full py-1 text-center text-xs text-zinc-500 hover:text-zinc-300"
+              className="block min-h-11 w-full py-1 text-center text-xs text-zinc-500 hover:text-zinc-300"
             >
-              Show {hidden} earlier message{hidden === 1 ? "" : "s"}
+              {earlierLabel ?? `Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`}
             </button>
           )}
           {children}

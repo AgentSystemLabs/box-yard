@@ -8,6 +8,7 @@ import { selfUrl } from "./bind.js"
 import { browserBoundary, secureBrowserCookie } from "./browserBoundary.js"
 import { configProblems, qstashEnabled, redisEnabled, tildePath, type Config } from "./config.js"
 import { openDb, type DB } from "./db.js"
+import { transcriptHistoryRoutes } from "./transcriptHistory.js"
 import { Store, BadRequestError, ConflictError, NotFoundError, taskAgentCli } from "./store.js"
 import { Hub } from "./hub.js"
 import { Artifacts } from "./artifacts.js"
@@ -978,6 +979,7 @@ export function createBoxYard(
 
   const api = express.Router()
   api.use(auth.middleware())
+  transcriptHistoryRoutes(api, store)
 
   /** The Coordinator's CLI versions, looked up once, before /api/health reads them. */
   const lookUpClis = async () => {

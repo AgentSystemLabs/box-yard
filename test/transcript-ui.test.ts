@@ -139,7 +139,7 @@ describe("the Coordinator's transcript", () => {
   it.each(["d1", "d2"])("a day-summary bullet opens its collapsed update %s and highlights the message rather than its group", async (id) => {
     render()
     const chat = centre()
-    act(() => chat.querySelector<HTMLButtonElement>('[data-chat-history] nav button')!.focus())
+    click(chat.querySelector<HTMLButtonElement>('[data-chat-history] nav button')!)
     const bullet = [...chat.querySelectorAll<HTMLElement>('[data-summary-jump]')].find((b) => b.textContent?.includes(id === "d1" ? "Finished: Write the docs" : "Finished: Fix login"))!
     click(bullet)
     await frames()
@@ -216,7 +216,7 @@ describe("a picked Captain", () => {
     await frames() // Let the chat switch finish focusing its composer before starting another interaction.
     const chat = document.querySelector<HTMLElement>('[data-testid=captain-chat][data-centre]')!
     expect(chat.querySelector('#captain-d2')).toBeNull()
-    act(() => chat.querySelector<HTMLButtonElement>('[data-chat-history] nav button')!.focus())
+    click(chat.querySelector<HTMLButtonElement>('[data-chat-history] nav button')!)
     const bullet = [...chat.querySelectorAll<HTMLElement>('[data-summary-jump]')].find((b) => b.textContent?.includes("Finished: Fix login"))!
     click(bullet)
     await frames()
