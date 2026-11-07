@@ -157,7 +157,8 @@ describe('Composer "@" run targets', () => {
     const enter = key("Enter")
     expect(enter.defaultPrevented).toBe(true)
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(textarea().value).toBe("fix it @box")
+    // Enter on a partial token drills with a trailing ":" so sizes stay open.
+    expect(textarea().value).toBe("fix it @box:")
     expect(options()).toEqual(["box", "box:small", "box:medium", "box:large"])
     key("Enter")
     expect(textarea().value).toBe("fix it @box ")
@@ -184,6 +185,7 @@ describe('Composer "@" run targets', () => {
     mount(true)
     await type("fix it @bo")
     await tap(option("box"))
+    expect(textarea().value).toBe("fix it @box:")
     expect(option("box").textContent).toContain("Default size")
     expect(listTitle()).toContain("Upstash box")
     await tap(document.querySelector<HTMLElement>('button[aria-label="Back to choices"]')!)
@@ -221,12 +223,12 @@ describe('Composer "@" run targets', () => {
     vi.stubGlobal("fetch", (url: string) => (String(url).startsWith("/api/run-targets") ? Promise.resolve(json(gpuTargets)) : fetchAll(url)))
     mount(true)
     await type("train it @gpu")
-    expect(options()).toEqual(["gpu", "gpu:runpod", "gpu:daytona"])
+    expect(options().filter((t) => t === "gpu" || t?.startsWith("gpu:"))).toEqual(["gpu", "gpu:runpod", "gpu:daytona"])
     // A cloud with GPUs says it opens them; plain @gpu (the default cloud) doesn't.
     expect(option("gpu:daytona").querySelector('[data-testid="run-target-opens"]')).not.toBeNull()
     expect(option("gpu").querySelector('[data-testid="run-target-opens"]')).toBeNull()
     await tap(option("gpu:daytona"))
-    expect(textarea().value).toBe("train it @gpu:daytona")
+    expect(textarea().value).toBe("train it @gpu:daytona:")
     expect(menu()).not.toBeNull()
     expect(options()[0]).toBe("gpu:daytona")
     expect(options()).toContain("gpu:daytona:h100")
@@ -265,12 +267,15 @@ describe('Composer "!" harness', () => {
     expect(options()).toEqual(["claude", "codex", "cursor"])
     expect(asked).toContain("/api/harness-targets?runsOn=box")
     await type("fix it @box !co")
-    // Tokens that start with it first, then labels that contain it ("Claude Code").
-    expect(options()).toEqual(["codex", "claude"])
+    // Codex leads (token prefix); Cursor and Claude Code also match "co".
+    expect(options()[0]).toBe("codex")
+    expect(options()).toEqual(expect.arrayContaining(["codex", "cursor", "claude"]))
     key("Tab")
-    expect(textarea().value).toBe("fix it @box !codex")
+    // Partial "co" → Tab drills into Codex models with a trailing ":".
+    expect(textarea().value).toBe("fix it @box !codex:")
     expect(options()[0]).toBe("codex")
     expect(option("codex").textContent).toContain("Settings default")
+    // On `!codex:` the Settings default row picks (no further drill).
     key("Tab")
     expect(textarea().value).toBe("fix it @box !codex ")
     expect(harnessButton().getAttribute("aria-label")).toBe("Harness: !codex (Codex)")
@@ -285,14 +290,15 @@ describe('Composer "!" harness', () => {
     mount(true)
     await type("build !")
     await tap(option("codex"))
-    expect(textarea().value).toBe("build !codex")
+    expect(textarea().value).toBe("build !codex:")
     expect(options()).toContain("codex:gpt-6.1-sol")
     await tap(option("codex:gpt-6.1-sol"))
+    expect(textarea().value).toBe("build !codex:gpt-6.1-sol:")
     expect(options()[0]).toBe("codex:gpt-6.1-sol")
     expect(option("codex:gpt-6.1-sol").textContent).toContain("Default effort")
     expect(options()).toContain("codex:gpt-6.1-sol:ultra")
     key("Escape")
-    expect(textarea().value).toBe("build !codex")
+    expect(textarea().value).toBe("build !codex:")
     await tap(document.querySelector<HTMLElement>('button[aria-label="Back to choices"]')!)
     expect(textarea().value).toBe("build !")
     await tap(option("codex"))
@@ -302,6 +308,43 @@ describe('Composer "!" harness', () => {
     expect(menu()).toBeNull()
     key("Enter")
     expect(onSubmit).toHaveBeenCalledWith("build !codex:gpt-6.1-sol:xhigh", [], { agent: expect.objectContaining({ value: "codex", model: "gpt-6.1-sol", effort: "xhigh" }) })
+  })
+
+  it("Tab or Space on an exact harness advances so typing filters models (no colon to discover)", async () => {
+    mount(true)
+    await type("build !cursor")
+    await act(async () => client.setQueryData(keys.cursorModels, {
+      models: [
+        { id: "auto", label: "Auto" },
+        { id: "deepseek-v3", label: "DeepSeek V3" },
+        { id: "gpt-6.1-sol-high", label: "GPT 6.1 Sol High" },
+      ],
+      source: "cli",
+    }))
+    await settle()
+    expect(options()).toEqual(["cursor", "cursor:auto", "cursor:deepseek-v3", "cursor:gpt-6.1-sol-high"])
+    // Exact !cursor + Tab advances into models (trailing ":"); Enter would have picked Settings default.
+    const tab = key("Tab")
+    expect(tab.defaultPrevented).toBe(true)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea().value).toBe("build !cursor:")
+    await type("build !cursor:deep")
+    expect(options()).toEqual(["cursor:deepseek-v3"])
+    expect(listTitle()).toMatch(/Harness/)
+    expect(listTitle()).toMatch(/Cursor|DeepSeek|↑↓|Tab/)
+    key("Tab")
+    expect(textarea().value).toBe("build !cursor:deepseek-v3 ")
+    expect(menu()).toBeNull()
+    key("Enter")
+    expect(onSubmit.mock.calls.at(-1)?.[2].agent).toMatchObject({ value: "cursor", model: "deepseek-v3" })
+    expect(onSubmit.mock.calls.at(-1)?.[2].agent.effort).toBeUndefined()
+
+    // Space on an exact harness advances the same way.
+    await type("again !cursor")
+    const space = key(" ")
+    expect(space.defaultPrevented).toBe(true)
+    expect(textarea().value).toBe("again !cursor:")
+    expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
   it("uses Cursor's live ids as leaves, and preserves model-only and plain tags typed with whitespace", async () => {
@@ -482,7 +525,8 @@ describe("Composer picks typed in one item of a list of tasks", () => {
     expect(textarea().selectionStart).toBe(1)
     expect(listTitle()).toContain("Where this message's tasks run")
     await tap(option("box"))
-    expect(textarea().value.startsWith("@box Two tasks:")).toBe(true)
+    // Drill keeps a trailing ":" so sizes stay open; the @box token still counts as the message's pick.
+    expect(textarea().value.startsWith("@box: Two tasks:")).toBe(true)
     expect(whereButton().getAttribute("aria-label")).toBe("Where tasks run: @box (Upstash box)")
     // A pick typed in an item isn't the button's: pressing Harness adds the message's own, on top too.
     await type("@box Two tasks:\n1. Port the pickaxe\n2. Fix the bridge !claude")
