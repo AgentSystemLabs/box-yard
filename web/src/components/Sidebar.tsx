@@ -828,7 +828,8 @@ const META_TONE: Partial<Record<Task["status"], string>> = { needs_input: "text-
 /**
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
  * project), so the copy Cody clicked is the one drawn selected. `project` adds context to the tooltip. One
- * ready for Cody's review ends with Mark done's ✓. It leads with the task's icon (TaskStatusIcon), which has a still dot when it asks or failed. Working titles carry the motion, and the icon names the state. A PR number links to
+ * ready for Cody's review, or failed, ends with Mark done's ✓. Its icon names the state, with a still dot when it
+ * asks or failed. Working titles carry the motion. A PR number links to
  * GitHub beside the task button, so each action has its own keyboard target.
  */
 export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, project }: { row: SidebarRow; spot: RowSpot; selected: boolean; onPick: Pick["task"]; project?: { name: string; color: Parameters<typeof projectColorStyle>[0]; icon?: string | null } }) {
@@ -864,7 +865,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
       {prMeta && <PrChip task={task} variant="number" className={cx(FOCUS, "mr-2 shrink-0 text-xs leading-5 tabular-nums pointer-coarse:min-h-11")} />}
-      {readyForReview(task.status) && <DoneButton task={task} />}
+      {(readyForReview(task.status) || task.status === "failed") && <DoneButton task={task} />}
     </div>
   )
 })
@@ -1056,13 +1057,13 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
         {prMeta && <PrChip task={task} variant="number" className={cx(FOCUS, "shrink-0 text-[11px] pointer-coarse:min-h-11")} />}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("shrink-0 text-[11px] @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </div>
-      {readyForReview(task.status) && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
+      {(readyForReview(task.status) || task.status === "failed") && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
     </div>
   )
 })
 
 /**
- * ✓ at the end of a row ready for Cody's review (lib/taskActions.ts readyForReview): Mark done without opening the
+ * ✓ at the end of a failed row or one ready for Cody's review: Mark done without opening the
  * task, done at once with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target.
  * On a tree's row it closes the whole tree (`subtasks`), so a tree with a
  * sub-task running or asking has none. Search results have none: they list finished work, and the task's header has it.

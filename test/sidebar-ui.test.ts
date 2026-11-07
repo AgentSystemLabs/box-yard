@@ -883,11 +883,11 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     expect(section("box-yard")!.textContent).toContain("Write the changelog")
   })
 
-  it.each([1440, 400].flatMap((width) => [false, true].map((selected) => ({ width, selected }))))(
-    "the direct check works at $width px on a selected=$selected row without navigating",
-    async ({ width, selected }) => {
+  it.each([1440, 400].flatMap((width) => [false, true].flatMap((selected) => ["idle", "failed"].map((status) => ({ width, selected, status: status as "idle" | "failed" })))))(
+    "the direct check works on $status at $width px on a selected=$selected row without navigating",
+    async ({ width, selected, status }) => {
       viewport(width)
-      render(`/?session=${selected ? IDLE.id : RUN.id}`, [RUN, IDLE])
+      render(`/?session=${selected ? IDLE.id : RUN.id}`, [RUN, { ...IDLE, status }])
       if (width === 400) click(document.querySelector('[data-testid="task-header"] button[aria-label^="Projects and tasks"]')!)
       const row = section("box-yard")!.querySelector(`[data-open-task="${IDLE.id}"]`)!.closest<HTMLElement>('[role="treeitem"]')!
       expect(row.getAttribute("aria-current") === "page").toBe(selected)
@@ -909,7 +909,7 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     const row = section("box-yard")!.querySelector(`[data-open-task="${failed.id}"]`)!.closest<HTMLElement>('[role="treeitem"]')!
     expect(row.querySelector('[data-delete-task], [data-sidebar-delete], [data-row-actions]')).toBeNull()
     expect(row.getAttribute("aria-keyshortcuts")).toBeNull()
-    expect(checks(row)).toEqual([])
+    expect(checks(row)).toHaveLength(1)
     const open = row.querySelector<HTMLButtonElement>('[data-open-task]')!
     const capture = vi.fn()
     row.setPointerCapture = capture

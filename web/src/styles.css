@@ -379,7 +379,7 @@ body.resizing iframe {
       background-position: 100% 0;
       background-clip: text;
       color: transparent;
-      animation: task-title-sweep 6s linear infinite;
+      animation: task-title-sweep 6s steps(24, end) infinite;
     }
   }
 }
