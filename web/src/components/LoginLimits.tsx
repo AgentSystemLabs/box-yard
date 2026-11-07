@@ -1,5 +1,5 @@
 // Subscription limits per login (docs/limits.md): how much of each Claude subscription's and Codex plan's 5-hour and
-// weekly windows its login has used, and when each resets, as that login's runs last reported them. Settings › Usage
+// weekly windows its login has used, and when each resets, as that login's runs last reported them. The Usage modal
 // shows every login (SubscriptionLimits); Settings › Credentials and Identities show their own login's in a line
 // (LoginLimitsLine). Every figure is visible text; the titles only repeat it.
 import { memo, useId, useMemo } from "react"
@@ -7,7 +7,7 @@ import { Gauge } from "lucide-react"
 import { useLimits } from "../lib/queries"
 import { runDayTime, untilText } from "../lib/scheduleText"
 import { Loading } from "./Loading"
-import { cx, timeAgo, useMinuteClock } from "./ui"
+import { Button, cx, timeAgo, useMinuteClock } from "./ui"
 import { WARN_PCT, isCurrent, isFull, type LimitHarness, type LimitWindow, type LoginLimits } from "../../../shared/loginLimits"
 
 const HARNESS_LABEL: Record<LimitHarness, string> = { claude: "Claude", codex: "Codex" }
@@ -38,16 +38,16 @@ const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 export function usedLabel(pct: number | null): string {
   if (pct === null) return "—"
   if (pct > 0 && pct < 1) return "<1%"
-  return `${Math.round(pct)}%`
+  return `${Math.round(pct * 10) / 10}%`
 }
 
 /** What a window says in words: "64% used · resets Tomorrow 9:00 AM (in 7h)", or that it has reset since. */
 export function windowText(w: LimitWindow, now: number, tz = zone()): { used: string; reset: string } {
   const when = w.resetsAt === null ? null : `${runDayTime(w.resetsAt, tz, now)}`
   if (!isCurrent(w, now)) {
-    return { used: "reset since", reset: when ? `Reset ${when}. No run since to read it again` : `Last read ${readAgo(w.asOf, now)}` }
+    return { used: when ? "reset since" : "reading expired", reset: when ? `Reset ${when}. No run since to read it again` : `Last read ${readAgo(w.asOf, now)}. No reset time was reported` }
   }
-  const used = w.usedPct === null ? (isFull(w) ? "at the limit" : "in use") : `${usedLabel(w.usedPct)} used`
+  const used = w.usedPct === null ? (isFull(w) ? "at the limit" : "Usage not reported") : `${usedLabel(w.usedPct)} used`
   return { used, reset: when ? `Resets ${when} (${untilText(w.resetsAt!, now)})` : "Reset time not reported" }
 }
 
@@ -60,7 +60,7 @@ function useServerMinute(report: { now: number } | undefined, fetchedAt: number)
   return report && fetchedAt ? minute + (report.now - fetchedAt) : minute
 }
 
-// ------------------------------------------------------------------ Settings › Usage's card
+// ------------------------------------------------------------------ Usage modal's allowances
 
 export function SubscriptionLimits() {
   const limits = useLimits()
@@ -68,24 +68,27 @@ export function SubscriptionLimits() {
   const logins = limits.data?.logins ?? []
   const headingId = useId()
   return (
-    <section data-settings-context aria-labelledby={headingId} className="@container mb-8 min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-4" data-testid="subscription-limits">
-      <div className="mb-3 min-w-0">
-        <h4 id={headingId} className="text-sm font-semibold text-zinc-100">
-          Subscription limits
-        </h4>
-        <p className="mt-0.5 text-xs text-zinc-500">Each Claude and Codex login's 5-hour and weekly windows, as its last run reported them.</p>
+    <section aria-labelledby={headingId} className="@container min-w-0 space-y-4" data-testid="subscription-limits">
+      <div className="min-w-0">
+        <h3 id={headingId} className="text-base font-semibold text-zinc-100">
+          Subscription allowances
+        </h3>
+        <p className="mt-1 text-xs text-zinc-500 wrap-anywhere">Claude and Codex limits per login, from their latest runs. Separate from the dollar costs below; date and project filters do not apply.</p>
       </div>
       {limits.isLoading ? (
         <Loading kind="rows" count={2} label="Loading subscription limits" />
-      ) : limits.isError ? (
-        <p className="text-sm text-zinc-500">Couldn't load them: {limits.error.message}</p>
+      ) : limits.isError && !limits.data ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 p-4 text-sm text-zinc-400">
+          <p>Subscription readings are unavailable.</p>
+          <Button type="button" className="min-h-11 sm:min-h-11" onClick={() => void limits.refetch()}>Retry allowances</Button>
+        </div>
       ) : !logins.length ? (
-        <p className="text-sm text-zinc-500" data-testid="limits-empty">
+        <p className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-4 text-sm text-zinc-400" data-testid="limits-empty">
           No readings yet. Claude Code reports a subscription's 5-hour and weekly limits while it runs, and Codex at the end of each turn, so each login shows up here after its next run. API keys pay per token
           and have no such limits.
         </p>
       ) : (
-        <ul className="grid gap-3 @xl:grid-cols-2">
+        <ul className="grid gap-4 @3xl:grid-cols-2">
           {logins.map((l) => (
             <LoginCard key={l.loginId} login={l} now={now} />
           ))}
@@ -98,12 +101,12 @@ export function SubscriptionLimits() {
 const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; now: number }) {
   const at = login.state.atLimit && login.state.resetsAt !== null && login.state.resetsAt > now ? login.state.resetsAt : null
   return (
-    <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-950/40 p-3" data-testid="limits-login" data-login={login.loginId}>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</span>
-        <span className="min-w-0 text-sm text-zinc-300">{login.source}</span>
+    <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4" data-testid="limits-login" data-login={login.loginId}>
+      <div className="space-y-0.5">
+        <h4 className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</h4>
+        <span className="block min-w-0 text-sm text-zinc-300 wrap-anywhere">{login.source}</span>
       </div>
-      <div className="mt-0.5 text-xs text-zinc-500">
+      <div className="mt-1 text-xs text-zinc-500 wrap-anywhere">
         {loginDetail(login)} · <time title={new Date(login.asOf).toLocaleString()}>as of {readAgo(login.asOf, now)}</time>
       </div>
       {at !== null && (
@@ -129,25 +132,33 @@ function loginDetail(l: LoginLimits): string {
 function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string }) {
   const tone = toneOf(w, now)
   const text = windowText(w, now)
-  const fill = tone === "stale" ? 0 : Math.min(100, w.usedPct ?? (tone === "full" ? 100 : 0))
+  // A missing percentage or an expired reading is unknown, never an empty (0%) allowance.
+  const known = isCurrent(w, now) && w.usedPct !== null
+  const fill = known ? Math.max(0, Math.min(100, w.usedPct!)) : null
+  const remaining = known && !(isFull(w) && w.usedPct! < 100) ? Math.max(0, 100 - w.usedPct!) : null
+  const title = `${who} ${w.label}: ${text.used}.${remaining !== null ? ` ${usedLabel(remaining)} remaining.` : ""} ${text.reset}. Read ${readAgo(w.asOf, now)}.`
   return (
-    <div title={`${who} ${w.label}: ${text.used}. ${text.reset}. Read ${readAgo(w.asOf, now)}.`} data-testid="limits-window" data-window={w.window}>
-      <div className="flex items-baseline justify-between gap-2 text-sm">
-        <span className="min-w-0 truncate text-zinc-300">{w.label}</span>
-        <span className={cx("shrink-0 font-semibold whitespace-nowrap tabular-nums", TEXT_TONE[tone])}>{text.used}</span>
+    <div title={title} data-testid="limits-window" data-window={w.window} className="min-w-0">
+      <div className="text-sm font-medium text-zinc-300">{w.label}</div>
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-sm tabular-nums">
+        <span className={cx("font-semibold", TEXT_TONE[tone])}>{text.used}</span>
+        {remaining !== null && <span className="text-xs text-zinc-400">{usedLabel(remaining)} remaining</span>}
       </div>
-      <div
-        className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-800"
-        role="meter"
-        aria-label={`${who} ${w.label} limit used`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fill)}
-        aria-valuetext={text.used}
-      >
-        <div className={cx("h-full rounded-full", BAR_TONE[tone])} style={{ width: `${fill}%` }} />
-      </div>
-      <div className={cx("mt-1 text-xs", tone === "full" ? "text-red-300" : "text-zinc-500")}>{text.reset}</div>
+      {fill !== null && (
+        <div
+          className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-800"
+          role="meter"
+          title={title}
+          aria-label={`${who} ${w.label} limit used`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={fill}
+          aria-valuetext={`${text.used}, ${remaining === null ? "at the limit" : `${usedLabel(remaining)} remaining`}`}
+        >
+          <div className={cx("h-full rounded-full", BAR_TONE[tone])} style={{ width: `${fill}%` }} />
+        </div>
+      )}
+      <div className={cx("mt-1.5 text-xs", tone === "full" ? "text-red-300" : "text-zinc-500")}>{text.reset}</div>
     </div>
   )
 }
