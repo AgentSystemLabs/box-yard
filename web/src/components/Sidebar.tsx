@@ -55,10 +55,11 @@ import {
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
+import { FOCUS_SIDEBAR, focusSidebar, isChatComposer } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { SidebarDeleteRow } from "./SidebarDeleteRow"
 import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
-import { DismissButton } from "./Modal"
+import { DismissButton, isDialogOpen } from "./Modal"
 import { ChatIcon } from "./ChatIcons"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
 import { focusComposer, keepFocusForPick, pickFocusesComposer } from "../lib/chatSwitch"
@@ -382,7 +383,33 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     return chatHidden ? { ...selection, behind: null } : selection
   }, [current, overlay, picked, rail, waiting.shown, groups.shown, folds, treeFolds, chatHidden])
   const selection = useKept(computed, keepSelection)
-  const tree = useTreeView(currentTreeKey(selection))
+  const { focusCurrent, ...tree } = useTreeView(currentTreeKey(selection))
+  const navigation = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const take = (e: Event) => {
+      const nav = navigation.current
+      if (e.defaultPrevented || !nav || !nav.checkVisibility() || (isDialogOpen() && !drawer)) return
+      if (focusCurrent()) e.preventDefault()
+      else if (rail && onExpand && (e as CustomEvent<{ expand: boolean }>).detail.expand) {
+        e.preventDefault()
+        onExpand()
+        requestAnimationFrame(() => focusSidebar(false))
+      }
+    }
+    // Window runs after the composer's pickers and document-level popovers. Inline panels handle their own Escape
+    // after modal steps; covering dialogs always keep it. Returning focus never opens a different conversation.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isDialogOpen() || !isChatComposer(e.target)) return
+      if ((e.target as Element).closest("[role=dialog]")) return
+      if (focusSidebar()) e.preventDefault()
+    }
+    window.addEventListener(FOCUS_SIDEBAR, take)
+    window.addEventListener("keydown", escape)
+    return () => {
+      window.removeEventListener(FOCUS_SIDEBAR, take)
+      window.removeEventListener("keydown", escape)
+    }
+  }, [focusCurrent, rail, drawer, onExpand])
 
   // A double click on a project's rail icon opens its Captain (the first click does that at once, never waiting to see
   // if a second follows) and expands the sidebar, that project's tasks unfolded and in view.
@@ -432,7 +459,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
 
   if (rail)
     return (
-      <nav aria-label="Projects and tasks" className="flex h-full w-14 flex-col items-center gap-1 bg-zinc-950 py-2">
+      <nav ref={navigation} aria-label="Projects and tasks" className="flex h-full w-14 flex-col items-center gap-1 bg-zinc-950 py-2">
         <button type="button" onClick={onExpand} title="Show the sidebar" aria-label="Show the sidebar" className={ICON_BUTTON}>
           <PanelLeftOpen className="h-4 w-4" />
         </button>
@@ -470,6 +497,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   const empty = groups.shown.length || !projects.data ? null : projects.data.length ? "unpinned" : "none"
   return (
     <nav
+      ref={navigation}
       aria-label="Projects and tasks"
       className={cx("@container/side flex h-full w-full flex-col bg-zinc-950", drawer && "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]")}
       onMouseDownCapture={(e) => {
