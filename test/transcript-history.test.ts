@@ -61,6 +61,8 @@ describe("retained transcript cursors", () => {
     expect(() => history.page({ kind: "captain", id: a.id }, { before: position })).toThrow("not found in this conversation")
     expect(() => history.page({ kind: "chat" }, { before: "h:invalid" })).toThrow("Invalid history cursor")
     expect(history.days({ kind: "captain", id: a.id }, "UTC")).toEqual([])
+    expect(history.oldest({ kind: "captain", id: a.id })).toBeNull()
+    expect(history.oldest({ kind: "captain", id: b.id })).toBe(captain.id)
     expect(() => history.page({ kind: "chat" }, { before: "a", after: "b" })).toThrow("one history cursor")
   })
 
@@ -103,6 +105,17 @@ describe("retained transcript cursors", () => {
       ["last-hour", "2026-11-02T04:59:59Z"], ["next", "2026-11-02T05:00:00Z"],
     ]) insert.run(id, Date.parse(at!))
     expect(history.days({ kind: "chat" }, "America/New_York").map((d) => d.messageId)).toEqual(["previous", "midnight", "next"])
+  })
+
+  it("indexes visible dates while retaining queued/cancelled rows in cursor pages", () => {
+    const { history } = setup()
+    const insert = db.prepare("INSERT INTO chat_messages (id, role, content, meta_json, created_at) VALUES (?, 'user', 'Example', ?, ?)")
+    for (const [i, meta] of ['{"queued":true}', '{"cancelled":true}', '{}', 'legacy invalid JSON'].entries()) {
+      insert.run(`m-${i}`, meta, Date.UTC(2026, 0, i + 1))
+    }
+    expect(history.days({ kind: "chat" }, "UTC").map((d) => d.messageId)).toEqual(["m-2", "m-3"])
+    expect(history.oldest({ kind: "chat" })).toBe("m-0")
+    expect(history.page({ kind: "chat" }).messages).toHaveLength(4)
   })
 
 })

@@ -10,7 +10,7 @@ import { ChatHistory, DayBoundary } from "../web/src/components/ChatHistory"
 
 vi.mock("../web/src/lib/api", async (original) => ({ ...await original<typeof import("../web/src/lib/api")>(), api: vi.fn() }))
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-const item = (i: number) => ({ id: `m-${i}`, createdAt: Date.UTC(2026, 0, 1) + i * 86400_000, role: "assistant", content: "Example reply" })
+const item = (i: number) => ({ id: `m-${i}`, createdAt: Date.UTC(2026, 0, 1) + i * 86400_000, role: "assistant", content: "Example reply", meta: null as Record<string, unknown> | null })
 const live = Array.from({ length: 500 }, (_, i) => item(i + 1000))
 let state: ReturnType<typeof useTranscriptHistory<(typeof live)[number]>>
 let tail: ReturnType<typeof useTail<(typeof live)[number]>>
@@ -27,7 +27,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host)
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   vi.mocked(api).mockImplementation(async (path) => {
-    if (String(path).includes("days=1")) return [{ at: item(0).createdAt, messageId: "m-0" }] as never
+    if (String(path).includes("days=1")) return { days: [{ at: item(0).createdAt, messageId: "m-0" }], oldestId: "m-0" } as never
     if (String(path).includes("around=m-0")) return { messages: Array.from({ length: 80 }, (_, i) => item(i)), before: null, after: "m-79" } as never
     if (String(path).includes("before=")) return { messages: Array.from({ length: 100 }, (_, i) => item(i + 900)), before: "m-900", after: "m-999" } as never
     return { messages: Array.from({ length: 100 }, (_, i) => item(i + 80)), before: "m-80", after: "m-179" } as never
@@ -133,5 +133,7 @@ describe("bounded retained history", () => {
     expect(state.days?.at(-1)?.messageId).toBe("m-1600")
     expect(vi.mocked(api).mock.calls).toHaveLength(count)
     expect(host.querySelectorAll('nav button').length).toBeLessThanOrEqual(80)
+    render(undefined, [...live, { ...item(1601), meta: { queued: true } }, { ...item(1602), meta: { cancelled: true } }])
+    expect(state.days?.at(-1)?.messageId).toBe("m-1499")
   })
 })

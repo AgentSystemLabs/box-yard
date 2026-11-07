@@ -21,6 +21,11 @@ function readPosition(value: string | undefined): { id: string; at: number; rid:
 export class TranscriptHistory {
   constructor(private db: DB) {}
 
+  oldest(scope: HistoryScope): string | null {
+    const { table, where, args } = this.source(scope)
+    return (this.db.prepare(`SELECT id FROM ${table} WHERE ${where} ORDER BY created_at, rowid LIMIT 1`).get(...args) as { id: string } | undefined)?.id ?? null
+  }
+
   private source(scope: HistoryScope) {
     const table = scope.kind === "chat" ? "chat_messages" : scope.kind === "captain" ? "captain_messages" : "task_messages"
     const where = scope.kind === "chat" ? "1" : scope.kind === "captain" ? "project_id = ?" : "task_id = ?"
@@ -67,7 +72,10 @@ export class TranscriptHistory {
     try { format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }) }
     catch { throw new BadRequestError("Invalid history timezone") }
     const { table, where, args } = this.source(scope)
-    const select = `SELECT id, created_at FROM ${table} WHERE ${where} AND role <> 'tool'`
+    const meta = "CASE WHEN json_valid(meta_json) THEN meta_json END"
+    const select = `SELECT id, created_at FROM ${table} WHERE ${where} AND role <> 'tool'
+      AND COALESCE(json_type(${meta}, '$.queued'), '') <> 'true'
+      AND COALESCE(json_type(${meta}, '$.cancelled'), '') <> 'true'`
     const first = this.db.prepare(`${select} ORDER BY created_at, rowid LIMIT 1`)
     const next = this.db.prepare(`${select} AND created_at >= ? ORDER BY created_at, rowid LIMIT 1`)
     type DayRow = Pick<Row, "id" | "created_at">
@@ -106,7 +114,7 @@ export function transcriptHistoryRoutes(api: Router, store: Store) {
         if (v !== undefined && (typeof v !== "string" || !v || v.length > 256)) throw new BadRequestError("Invalid history query")
         return v as string | undefined
       }
-      if (value("days") === "1") return void res.json(history.days(scope, value("tz") ?? "UTC"))
+      if (value("days") === "1") return void res.json({ days: history.days(scope, value("tz") ?? "UTC"), oldestId: history.oldest(scope) })
       res.json(history.page(scope, { before: value("before"), after: value("after"), around: value("around") }))
     })
   }

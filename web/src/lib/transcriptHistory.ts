@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { HISTORY_WINDOW_SIZE, type HistoryDay, type HistoryPage } from "../../../shared/transcriptHistory"
+import { HISTORY_WINDOW_SIZE, type HistoryDates, type HistoryPage } from "../../../shared/transcriptHistory"
 import { api } from "./api"
 import { dayKey } from "./calendarDay"
 import type { ChatDay } from "./chatDays"
 import { toast } from "./toast"
 
-type Message = { id: string; createdAt: number; role?: string }
+type Message = { id: string; createdAt: number; role?: string; meta?: Record<string, unknown> | null }
 
 /** An independent, bounded reading window. SSE keeps the latest query current while the reader browses old
  * pages. Returning to latest is immediate; sparse date jumps never splice gaps into the live conversation. */
@@ -18,7 +18,7 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const metadata = useQuery({
     queryKey: ["history-days", path, timeZone],
-    queryFn: () => api<HistoryDay[]>(`${path}?days=1&tz=${encodeURIComponent(timeZone)}`),
+    queryFn: () => api<HistoryDates>(`${path}?days=1&tz=${encodeURIComponent(timeZone)}`),
     staleTime: 60_000,
   })
   const page = window?.path === path ? window.page : null
@@ -98,13 +98,11 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
     setLoading(false)
     setWindow(null)
   }, [])
-  const oldest = metadata.data?.[0]
-  const first = items[0]
-  const moreBefore = page ? !!page.before : !!first && (!oldest || oldest.at < first.createdAt || (oldest.at === first.createdAt && oldest.messageId !== first.id))
+  const moreBefore = page ? !!page.before : !!items.length && (!metadata.data || metadata.data.oldestId !== items[0]?.id)
   const days = useMemo<ChatDay[] | undefined>(() => {
-    if (!metadata.data) return undefined
+    if (!metadata.data?.days) return undefined
     const byDay = new Map<string, ChatDay>()
-    for (const d of [...metadata.data, ...live.filter((m) => m.role !== "tool").map((m) => ({ at: m.createdAt, messageId: m.id }))]) {
+    for (const d of [...metadata.data.days, ...live.filter((m) => m.role !== "tool" && m.meta?.queued !== true && m.meta?.cancelled !== true).map((m) => ({ at: m.createdAt, messageId: m.id }))]) {
       const key = dayKey(d.at)
       const previous = byDay.get(key)
       if (!previous || previous.at > d.at) byDay.set(key, { ...d, key })
