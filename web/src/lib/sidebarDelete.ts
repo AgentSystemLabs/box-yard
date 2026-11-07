@@ -21,7 +21,7 @@ export function sidebarDeleteTasks(target: SidebarDeleteTarget, tasks: readonly 
 
 export function sidebarDeleteBlocked(target: SidebarDeleteTarget, tasks: readonly Task[], captainBusy: boolean): string | null {
   if (target.kind === "project" && captainBusy) return "Stop the Captain before deleting this project."
-  if (sidebarDeleteTasks(target, tasks).some((t) => ["queued", "starting", "working"].includes(t.status) || t.turnStartedAt != null || t.compacting)) {
+  if (sidebarDeleteTasks(target, tasks).some((t) => ["queued", "starting", "working"].includes(t.status) || t.turnStartedAt != null || t.compacting || t.pendingCount > 0)) {
     return "Stop queued or running tasks before deleting."
   }
   return null

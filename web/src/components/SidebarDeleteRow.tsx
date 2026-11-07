@@ -44,7 +44,7 @@ export function SidebarDeleteRow({ target, enabled = true, children, className, 
   useEffect(() => {
     if (!open) return
     const outside = (e: Event) => { if (!row.current?.contains(e.target as Node)) reveal(null) }
-    const scroll = () => reveal(null)
+    const scroll = (e: Event) => { if (e.target instanceof Node && row.current && e.target.contains(row.current)) reveal(null) }
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || currentConfirm()) return
       e.preventDefault()
@@ -127,7 +127,8 @@ export function SidebarDeleteRow({ target, enabled = true, children, className, 
       }}
       onPointerUp={(e) => finish(e)}
       onPointerCancel={(e) => finish(e, true)}
-      onLostPointerCapture={(e) => finish(e, true)}
+      // Touch starts with implicit capture on its hit target. Losing that child capture while we take it is expected.
+      onLostPointerCapture={(e) => { if (e.target === e.currentTarget) finish(e, true) }}
       onClickCapture={(e) => {
         if (suppress.current && e.detail !== 0) {
           suppress.current = false
@@ -138,7 +139,7 @@ export function SidebarDeleteRow({ target, enabled = true, children, className, 
         if (open && !(e.target as Element).closest("[data-sidebar-delete]")) {
           e.preventDefault()
           e.stopPropagation()
-          if (!open || !(e.target as Element).closest("[data-sidebar-delete]")) reveal(null)
+          reveal(null)
         }
       }}
       onDoubleClickCapture={(e) => { if (open || performance.now() - swipedAt.current < 500) { e.preventDefault(); e.stopPropagation() } }}
@@ -173,9 +174,10 @@ function DeleteAction({ target, close }: { target: SidebarDeleteTarget; close: (
         if (pending || blocked) return
         setConfirming(true)
         const project = target.kind === "project"
+        const descendants = Math.max(0, sidebarDeleteTasks(target, tasks.data ?? []).length - 1)
         const ok = await confirmDialog(project
           ? { title: "Delete project?", body: `Delete ${target.name} and all its tasks? This can't be undone.`, confirmLabel: "Delete project", danger: true }
-          : { title: "Delete task?", body: "Delete this task, its workspace and its archive?", confirmLabel: "Delete task", danger: true })
+          : { title: "Delete task?", body: descendants ? `Delete this task and its ${descendants} sub-task${descendants === 1 ? "" : "s"}, their workspaces and archives?` : "Delete this task, its workspace and its archive?", confirmLabel: "Delete task", danger: true })
         setConfirming(false)
         if (!ok) { close(); return }
         const latest = qc.getQueryData<Task[]>(keys.tasks)
@@ -203,7 +205,7 @@ function DeleteAction({ target, close }: { target: SidebarDeleteTarget; close: (
         } catch { /* The shared mutation reports the error and restores the rows. */ }
       }}
     >
-      {pending ? "Deleting…" : "Delete"}
+      {deleteTask.isPending || deleteProject.isPending ? "Deleting…" : "Delete"}
       {blocked && <span className="sr-only">: {blocked}</span>}
     </button>
   )

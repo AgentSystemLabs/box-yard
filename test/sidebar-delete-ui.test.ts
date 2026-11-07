@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { act, createElement } from "react"
+import { act, createElement, Fragment } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Project, Task } from "../shared/types"
+import { ConfirmHost } from "../web/src/components/ConfirmDialog"
 import { Sidebar } from "../web/src/components/Sidebar"
 import { keys } from "../web/src/lib/queries"
 import { currentConfirm, settleConfirm } from "../web/src/lib/confirm"
@@ -54,7 +55,7 @@ function key(el: HTMLElement, name: string, shiftKey = false) {
 }
 function render(tasks = [parent, child, sibling]) {
   qc.setQueryData(keys.tasks, tasks)
-  act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(Sidebar))))
+  act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(Fragment, null, createElement(Sidebar), createElement(ConfirmHost)))))
 }
 function answer(ok: boolean) {
   const confirm = currentConfirm()!
@@ -140,7 +141,7 @@ describe("sidebar reveal gestures", () => {
     for (const end of ["pointercancel", "lostpointercapture"]) {
       pointer(b, "pointerdown", 200, 100)
       pointer(b, "pointermove", 130, 100)
-      pointer(b, end, 130, 100)
+      pointer(end === "lostpointercapture" ? el : b, end, 130, 100)
       expect(action(el)).toBeNull()
     }
     swipe(el)
@@ -163,6 +164,23 @@ describe("sidebar reveal gestures", () => {
     swipe(first)
     pointer(document.body, "pointerdown", 0, 0)
     expect(action(first)).toBeNull()
+  })
+
+  it("ignores implicit capture transfer from the hit child and unrelated chat scrolls", () => {
+    render()
+    const el = taskRow(parent)
+    const b = openButton(el)
+    pointer(b, "pointerdown", 200, 100)
+    pointer(b, "pointermove", 170, 100)
+    pointer(b, "lostpointercapture", 170, 100)
+    pointer(el, "pointermove", 130, 100)
+    pointer(el, "pointerup", 130, 100)
+    expect(action(el)).not.toBeNull()
+    const unrelated = document.createElement("div")
+    document.body.append(unrelated)
+    act(() => unrelated.dispatchEvent(new Event("scroll")))
+    expect(action(el)).not.toBeNull()
+    unrelated.remove()
   })
 
   it("leaves fixed navigation, chevrons, pins and nested action buttons alone", () => {
@@ -226,6 +244,13 @@ describe("sidebar deletion semantics", () => {
     expect(action(row(captainKey(project.id))).title).toContain("Captain")
   })
 
+  it("blocks pending messages and compaction without changing completion semantics", () => {
+    render([parent, { ...child, pendingCount: 1, compacting: true }])
+    key(taskRow(parent), "ContextMenu")
+    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(taskRow(parent).querySelector("[data-testid=sidebar-mark-done]")).not.toBeNull()
+  })
+
   it("cancel does not call DELETE and closes the reveal", async () => {
     render()
     const el = taskRow(child)
@@ -236,6 +261,39 @@ describe("sidebar deletion semantics", () => {
     await flush()
     expect(action(el)).toBeNull()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
+  it("Escape cancels the shared confirmation, and repeated Delete presses cannot queue another", async () => {
+    render()
+    key(taskRow(child), "ContextMenu")
+    const del = action(taskRow(child))
+    click(del, 0)
+    const first = currentConfirm()!.id
+    expect(del.disabled).toBe(true)
+    click(del, 0)
+    expect(currentConfirm()!.id).toBe(first)
+    const dialog = document.querySelector<HTMLElement>("[role=dialog]")!
+    key(dialog, "Escape")
+    await flush()
+    expect(currentConfirm()).toBeUndefined()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
+  it("keeps a reveal on its row through a re-sort and preserves the selected item", async () => {
+    render()
+    const el = taskRow(sibling)
+    key(el, "ContextMenu")
+    act(() => qc.setQueryData(keys.tasks, [{ ...sibling, updatedAt: Date.now() }, parent, child]))
+    await flush()
+    expect(taskRow(sibling)).toBe(el)
+    expect(action(el)).not.toBeNull()
+    expect(row("coordinator").getAttribute("aria-current")).toBe("page")
+  })
+
+  it("includes hidden/done descendants when protecting a parent from active work", () => {
+    render([parent, { ...child, status: "done", turnStartedAt: 123 }])
+    key(taskRow(parent), "ContextMenu")
+    expect(action(taskRow(parent)).disabled).toBe(true)
   })
 
   it("rechecks running descendants after confirmation before sending DELETE", async () => {
@@ -255,6 +313,7 @@ describe("sidebar deletion semantics", () => {
     fetchMock.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response('{"ok":true}', { status: 200 }) : new Promise(() => {}))
     key(taskRow(parent), "ContextMenu")
     click(action(taskRow(parent)), 0)
+    expect(currentConfirm()?.body).toContain("1 sub-task, their workspaces and archives")
     answer(true)
     await flush()
     expect(fetchMock).toHaveBeenCalledWith(`/api/tasks/${parent.id}`, expect.objectContaining({ method: "DELETE" }))
@@ -276,6 +335,18 @@ describe("sidebar deletion semantics", () => {
     expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${project.id}`, expect.objectContaining({ method: "DELETE" }))
     expect(qc.getQueryData<Project[]>(keys.projects)).toEqual([other])
     expect(chatProjectFilter()).toBeNull()
+  })
+
+  it("deleting an inactive task preserves the current task and its selection", async () => {
+    render()
+    history.replaceState(null, "", `/?session=${sibling.id}`)
+    fetchMock.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response('{"ok":true}', { status: 200 }) : new Promise(() => {}))
+    key(taskRow(child), "ContextMenu")
+    click(action(taskRow(child)), 0)
+    answer(true)
+    await flush()
+    expect(new URLSearchParams(location.search).get("session")).toBe(sibling.id)
+    expect(taskRow(sibling).getAttribute("aria-current")).toBe("page")
   })
 
   it("restores optimistic rows and reports errors without navigating away", async () => {
