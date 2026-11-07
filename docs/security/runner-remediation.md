@@ -32,8 +32,9 @@ if subsequent changes move line numbers.
 | Original risk | Preconditions and impact | Change and evidence |
 | --- | --- | --- |
 | **Critical: worker delegation could select an unsandboxed runner** | An isolated task emits a local/SSH child request, changes the effective default, or reuses placement/retry paths. Host execution bypasses the container without a kernel escape. | `server/tasks.ts:1169` stores a server-only ceiling, validates child ancestry/project, and checks the actual provider at assignment and launch (`:5830`, `:6029`). `place` checks requested and inherited placement (`:3871`). Choosing isolation narrows authority; switching a project default cannot widen existing tasks. |
-| **High: privileged tool delegation could broaden runner trust** | Worker/repository content persuades a privileged control-plane agent to create local tasks or schedules in an isolated project. | `server/mcp.ts:439` requires a server-trusted authenticated human runner pick for a one-off host override. Create/batch validate before any write; schedules require an already human-selected matching host project default. Model tool arguments cannot supply this approval. Existing task changes still pass the task ceiling. |
-| **High: direct worker messages/reports cross into host task authority** | An isolated worker addresses an existing local/SSH task, sends an FYI, or returns a report/question to a host parent. | `TaskManager.deliverAgentMessage` now rejects delivery across different host authority before queue/history writes. `reportToParent` withholds report bodies/questions; `writeSubtasksFile` also rechecks saved reports. Offline dispatch/report tests cover these cases. Broader manager and indirect content paths remain open below. |
+| **High: privileged tool delegation could broaden runner trust** | Worker/repository content persuades a privileged control-plane agent to create or control host tasks or automation. | **Partial mitigation:** `server/mcp.ts:439` validates one-off overrides against server-trusted human picks; create/batch validate before writes. Model arguments cannot supply a pick. Matching host defaults and existing host targets remain allowed, and whole-turn picks are too broad for hostile persistent context. This is not the permanent manager boundary proposed below. |
+| **High: direct worker messages/reports cross into host task authority** | An isolated worker addresses an existing local/SSH task, sends an FYI, or returns a report/question to a host parent. | `TaskManager.deliverAgentMessage` rejects delivery across different host authority before queue/history writes. `reportToParent` withholds report bodies/questions; `writeSubtasksFile` rechecks saved reports and withholds child titles. Claimed worker inputs are checked again at launch/steer, including recovered claims and attachments. Already delivered history/context is not erased; broader manager and indirect content paths remain open below. |
+| **High: task-derived automation loses source containment** | A task hook creates work on a changed host project default, or a schedule carries an earlier isolated title/summary into a later host run. | `TaskManager.createTaskFromTask` retains the hook source's actual runner and checks its ceiling, including recursive hooks. `Scheduler.startRun` pins the resolved target and withholds previous output that cannot enter that host authority. Manual, timed and catch-up fixtures cover default changes. Other automation actions and manager-created persistent state remain outside this partial fix. |
 | **Critical: hostile workspace archives could write or execute outside their intended state** | A task-controlled TAR is restored, potentially on a later local runner. Sibling members, links, server config and Git hooks/config turn restoration into host writes or execution. | `server/safeArchive.ts:49` parses into fresh private staging before any provider upload. `server/tasks.ts:6671` uploads only canonical output, rejects an existing destination, extracts into a new staging directory, and restores a server-selected Git origin before reconstruction. |
 | **High: worker output/file reads could exhaust host memory** | A hostile process emits excessive output or advertises a small artifact while returning large content. | `server/workerFiles.ts:35` caps incoming bytes independently of worker stat or event size. Artifact dispatch (`server/tasks.ts:7325`) enforces 25 MiB and a task-workspace root. Local, Docker CLI and SSH collectors bound output before retaining it; Daytona bounds HTTP bodies before JSON decoding. Upstash limitations remain below. |
 | **High: shared worker Redis authority** | A worker holds shared Redis credentials and can read project information or forge another task's control events. | New worker configuration has `redis: null` (`server/tasks.ts:6630`), and server event reading uses worker files, not Redis (`:810`). New workers receive no Redis bus credentials from this path. This removes that authority rather than trying to enforce a task prefix with an unrestricted Redis token. **Existing credentials and workers are not revoked by this code.** |
@@ -53,7 +54,9 @@ if subsequent changes move line numbers.
 - The explicit elevation API requires enabled authentication, an authenticated
   session and confirmation. Authenticated browser runner selections and trusted
   server-side whole-message runner picks preserve normal human workflows.
-  Open-access mode cannot call the elevation API.
+  Open-access mode cannot call the elevation API. A whole-message selection does
+  not authorize arbitrary future model actions after hostile content is read;
+  replacing that manager capability is a pending product/security decision.
 - A team credential is still a powerful control-plane credential, not a
   task-scoped token. Other trusted REST task/project/settings routes remain
   available to an authenticated operator. An exposed open-access server can also
@@ -133,9 +136,10 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    privileged decisions. A possible sequence is malicious worker message →
    Captain forwards a purported repair → existing local agent executes it with
    host permissions. Model compliance is a precondition; this sequence was not
-   executed against any live agent. Enforce server-side authorization tied to
-   message origin and the approved action/target across messages, reports, hooks
-   and mixed-source turns. A worker's claim that the human approved something
+   executed against any live agent. Enforce a permanent server-owned manager
+   capability ceiling regardless of message origin or retained model context.
+   Any exceptional approval must bind the exact action/target and payload, not a
+   whole human turn or a model-accessible token. A worker's claim that the human approved something
    must never itself supply authority. Manager shell restrictions alone do not
    close this indirect execution path. This remains unresolved in this PR. The
    [manager authority review](manager-authority-review.md) records the verified
@@ -196,7 +200,10 @@ read, network enumeration, daemon reconfiguration or production data deletion ra
   persistence after restart and project-default change; authenticated elevation
   API and composer; trusted versus model-supplied MCP runner picks; Redis omitted.
   It also covers isolated-to-host direct messages/FYIs and withheld child reports,
-  including old saved reports rechecked when preparing the parent's wait file.
+  including old saved reports/child titles checked when preparing the parent's
+  wait file and queued/recovered worker inputs checked at launch/steer. Real hook
+  and scheduler fixtures cover recursive task-derived creation and previous
+  output carried across changed defaults, including manual/timed/catch-up runs.
 - `test/safe-archive.test.ts`: sibling/traversal/link/special/alias/truncation/bounds
   fixtures, PAX long paths, actual restore rejection before upload, malicious Git
   hook/config removal, and a pre-existing destination symlink with an untouched
@@ -209,6 +216,11 @@ read, network enumeration, daemon reconfiguration or production data deletion ra
 - Existing archive integration coverage: seven files, 58 passing tests (whole/
   partial/thin/Git-first, streaming/shutdown); focused provider coverage: five
   files, 94 passing tests. No provider purchase/live smoke test was performed.
+- The latest containment, hooks, schedules, subtask and steer regression run passed
+  65 tests in five files. All four requested reviews reported; the complete
+  82-tool proposed manager catalog matches the actual registrations. One review
+  supplied source-derived test seams without dependencies/runtime coverage; the
+  primary workspace executed the real regression tests above.
 
 The final stable-HEAD gate and its exact results belong in the remediation PR.
 Passing tests demonstrate these cases, not the absence of escapes. The read-only
@@ -227,8 +239,11 @@ or Linux-host runtime validation has occurred.
 4. Confirm authenticated control-plane access, absence of team tokens in worker
    environments, daemon access restrictions and the intended host/LAN network
    boundary without exploiting them.
-5. Review message-origin authorization before treating manager or task-to-task
-   messaging as a safe boundary between isolated and host-authorized agents.
+5. Obtain the owner's decision on contained-only managers versus an exact-action
+   approval broker, including the documented loss of host-task/administration and
+   unrestricted connector workflows. Review implementation across dispatch,
+   automation, callbacks, external connectors and alternate REST paths before
+   treating model messaging as a safe boundary into host-authorized agents.
    Review the remaining provider buffering, aggregate quotas, shared-project trust,
    image pinning and container hardening as follow-up work. A revert restores the
    previous weaker behavior; it does not reset saved ceilings, rotate credentials,
