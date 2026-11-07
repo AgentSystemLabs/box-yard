@@ -72,7 +72,7 @@ import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
 import { CueDot, ProjectAvatar, TaskStatusIcon, WORKING_PULSE, projectColorStyle } from "./TaskIcon"
 import { CaptainTile } from "./CaptainIcon"
-import { STATUS, TAP_AREA, cx, useMinuteClock } from "./ui"
+import { PrChip, STATUS, TAP_AREA, cx, useMinuteClock } from "./ui"
 
 /** Keyboard focus: a white outline and no fill, so it's never mistaken for the selected row (or a hover). */
 const FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-zinc-100"
@@ -97,7 +97,8 @@ const ROW_TOOL = cx("grid h-8 w-8 shrink-0 place-items-center rounded-md text-zi
  * settings, Mark done), which the keyboard reaches elsewhere (the palette's Pin and Unpin, the Captain's and the task's
  * headers). A group's children follow it in a role="group" beside it, not inside it, so the row's name and its focus
  * ring are its own. Between the tree and a row there are only plain divs: Chromium shows a treeitem under anything else
- * (a section, say) as a generic. The rail's tree (Rails.tsx) draws the same rows as plain buttons.
+ * (a section, say) as a generic. The rail's tree (Rails.tsx) draws the same rows as plain buttons. PR numbers are
+ * separate links with their own tab stops.
  */
 const InTree = createContext(false)
 
@@ -809,11 +810,13 @@ const META_TONE: Partial<Record<Task["status"], string>> = { needs_input: "text-
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
  * project), so the copy Cody clicked is the one drawn selected. `project`: its project's name, on a second line. One
  * ready for Cody's review ends with Mark done's ✓. It leads with the task's icon (TaskStatusIcon), which pulses while
- * the task works and has a still dot when it asks or failed; its meta says the state in words.
+ * the task works and has a still dot when it asks or failed; its meta says the state in words. A PR number links to
+ * GitHub beside the task button, so each action has its own keyboard target.
  */
 export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, project }: { row: SidebarRow; spot: RowSpot; selected: boolean; onPick: Pick["task"]; project?: { name: string; color: Parameters<typeof projectColorStyle>[0]; icon?: string | null } }) {
   const { task, dim, meta } = row
   const label = stateLabel(task)
+  const prMeta = Boolean(task.prUrl && (meta === "PR" || meta.includes("#")))
   const tree = useContext(InTree)
   const id = useId()
   return (
@@ -832,7 +835,8 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
           // The icon, the title and the meta share the first line; the project line sits under the title. The block is
           // centred in the row, so a one-line row's 44px (to a finger) doesn't push the icon and meta to its top edge.
           ROW_BOX,
-          "grid min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)_auto] content-center items-center gap-x-2.5 py-1",
+          "grid min-w-0 flex-1 content-center items-center gap-x-2.5 py-1",
+          prMeta ? "grid-cols-[1.25rem_minmax(0,1fr)]" : "grid-cols-[1.25rem_minmax(0,1fr)_auto]",
           // Under a project, a task's icon sits past the chevron's column and its list's indent (NEST_PAD): in the
           // sidebar, under the project's name; in the rail's tree, which sets none, under its tile.
           spot === "project" && NEST_PAD,
@@ -842,15 +846,16 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         <RowIcon task={task} label={label} dim={dim} />
         {project && (
           // A narrow sidebar drops the project line; the title and the tooltip still say it.
-          <span className="col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-zinc-500 @max-[14rem]/side:hidden">
+          <span className={cx("col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-zinc-500 @max-[14rem]/side:hidden", !prMeta && "col-span-2")}>
             <ProjectAvatar src={project.icon} className="h-3 w-3 rounded-[3px]">
               <span aria-hidden style={projectColorStyle(project.color)} className="h-1.5 w-1.5 shrink-0 rounded-[2px] bg-(--pc)" />
             </ProjectAvatar>
             <span className="truncate">{project.name}</span>
           </span>
         )}
-        <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>
+        {!prMeta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
+      {prMeta && <PrChip task={task} variant="number" className={cx(TAP_AREA, FOCUS, "mr-2 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden")} />}
       {readyForReview(task.status) && <DoneButton task={task} />}
     </div>
   )

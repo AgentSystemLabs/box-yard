@@ -167,7 +167,8 @@ describe("the sidebar's tree: roles and attributes", () => {
       "Coordinator (1/5)",
       "Waiting on you2 ▾ (2/5)",
       "  Check SSH into the benchbox-yardasks (1/2)",
-      "  Refresh the portfoliomarketing-site#19 (2/2)",
+      // The PR number has its own named link beside the button that names the treeitem.
+      "  Refresh the portfoliomarketing-site (2/2)",
       "box-yard, Captain ▾ (3/5)",
       "  Check SSH into the benchasks (1/2)",
       "  Plan the launchworking ▾ (2/2)",
@@ -175,7 +176,7 @@ describe("the sidebar's tree: roles and attributes", () => {
       "      Draft the pricing sectionLevel 3 · working (1/1)",
       "    Pick the imagesLevel 2 · working (2/2)",
       "marketing-site, Captain ▾ (4/5)",
-      "  Refresh the portfolio#19 (1/1)",
+      "  Refresh the portfolio (1/1)",
       "More projects1 ▸ (5/5)",
     ])
     expect(items().map((i) => i.dataset.treeKey)).toEqual(ALL)
