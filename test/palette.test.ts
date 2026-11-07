@@ -278,7 +278,8 @@ describe("prefixes", () => {
     expect(groups.map((g) => g.key)).toEqual(["command"])
     expect(titles(groups[0])).toEqual(["New project…"])
     expect(search(items, ">settings")[0]!.items[0]!.command).toBe("settings")
-    expect(search(items, ">")[0]!.total).toBe(5)
+    // Two pages, three actions and each project's Pin.
+    expect(search(items, ">")[0]!.total).toBe(5 + projects.length)
     expect(titles(search(items, ">hotkeys")[0])).toEqual(["Keyboard shortcuts"])
     expect(search(items, ">new task")).toEqual([])
   })
@@ -562,6 +563,21 @@ describe("empty query", () => {
     const groups = search(buildItems({ tasks: [task("Finished", "done")] }), "")
     expect(groups.map((g) => g.key)).toEqual(["command"])
     expect(groups[0]!.items).toHaveLength(5)
+  })
+})
+
+describe("project pins", () => {
+  it("each project has its Pin, or its Unpin once pinned, as the sidebar's row has it", () => {
+    const pins = (raw: string, state = {}) => search(buildItems({ projects, pins: state }), raw)[0]?.items.map((i) => [i.title, i.command, i.project])
+    expect(pins(">pin box")).toEqual([["Pin box-yard", "pin-project", "prj_yard"]])
+    expect(pins(">unpin", { prj_notes: "pinned", prj_yard: "unpinned" })).toEqual([["Unpin Notes app", "unpin-project", "prj_notes"]])
+    expect(pins("sidebar notes")).toEqual([["Pin Notes app", "pin-project", "prj_notes"]])
+  })
+
+  it("stay out of the empty query's commands until used", () => {
+    const items = buildItems({ projects })
+    expect(titles(group(search(items, ""), "command"))).not.toContain("Pin box-yard")
+    expect(titles(group(search(items, "", { usage: { "action:pin:prj_yard": 1 } }), "command"))[0]).toBe("Pin box-yard")
   })
 })
 

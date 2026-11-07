@@ -6,11 +6,12 @@ import { projectChatHref, taskSessionHref } from "./navigation"
 import { COORDINATOR_CHAT } from "./threads"
 import { ALIASES as SETTINGS_ALIASES, SETTINGS_SECTIONS, settingsPath, type SettingsSection } from "./settingsNav"
 import { taskTree } from "./subtaskSearch"
+import type { BarPins } from "./projectBar"
 
 export type PaletteKind = "action" | "page" | "setting" | "task" | "pr" | "project" | "schedule" | "artifact" | "box"
 
-/** Dialogs the palette opens itself instead of navigating. */
-export type PaletteCommand = "settings" | "new-project" | "coordinator" | "shortcuts"
+/** Dialogs the palette opens itself instead of navigating, and what it does in place (a project's pin in the sidebar). */
+export type PaletteCommand = "settings" | "new-project" | "coordinator" | "shortcuts" | "pin-project" | "unpin-project"
 
 export interface PaletteItem {
   /** Unique across kinds: `<kind>:<id>`. */
@@ -42,6 +43,8 @@ export interface PaletteItem {
   chat?: string
   /** The Settings section a "settings" command opens. */
   section?: SettingsSection
+  /** The project a "pin-project" or "unpin-project" command pins or unpins. */
+  project?: string
   /** The key that does the same from anywhere, shown on the row ("?" for the shortcuts sheet). */
   shortcut?: string
   /** A task's pill: its status, or "merged" when it is done because its PR merged. */
@@ -76,6 +79,8 @@ export interface PaletteData {
   schedules?: Schedule[]
   artifacts?: Artifact[]
   boxes?: BoxInfo[]
+  /** The sidebar's pins (lib/projectBar.ts), so each project has its Pin or its Unpin. */
+  pins?: BarPins
 }
 
 export const PAGES: PaletteItem[] = [
@@ -135,7 +140,7 @@ export function buildItems(data: PaletteData): PaletteItem[] {
     items.push(...cached(a, project, () => [artifactItem(a, project)]))
   }
 
-  items.push(...buildActions(projects), ...SETTINGS_ITEMS)
+  items.push(...buildActions(projects, data.pins), ...SETTINGS_ITEMS)
   return items
 }
 
@@ -210,12 +215,29 @@ function artifactItem(a: Artifact, project: string | undefined): PaletteItem {
   }
 }
 
-export function buildActions(_projects: Project[]): PaletteItem[] {
+export function buildActions(projects: Project[], pins: BarPins = {}): PaletteItem[] {
   return [
     { key: "action:new-project", kind: "action", title: "New project…", command: "new-project" },
     { key: "action:settings", kind: "action", title: "Open settings", command: "settings" },
     { key: "action:shortcuts", kind: "action", title: "Keyboard shortcuts", aliases: ["hotkeys", "keybindings", "keys", "help"], command: "shortcuts", shortcut: "?" },
+    ...projects.map((p) => pinAction(p, pins[p.id] === "pinned")),
   ]
+}
+
+/**
+ * A project's pin, as the sidebar's row has it: Pin keeps a quiet project in the list, Unpin moves it to More projects.
+ * The keyboard's way to it, since the sidebar's tree is one tab stop and the row's buttons are out of the Tab order.
+ */
+function pinAction(p: Project, pinned: boolean): PaletteItem {
+  return {
+    key: `action:pin:${p.id}`,
+    kind: "action",
+    title: `${pinned ? "Unpin" : "Pin"} ${p.name}`,
+    subtitle: pinned ? "Move it to More projects in the sidebar" : "Keep it in the sidebar when it's quiet",
+    keywords: ["sidebar"],
+    command: pinned ? "unpin-project" : "pin-project",
+    project: p.id,
+  }
 }
 
 /** Item key for a route the user viewed, if it is one the palette remembers: the task panel (`?session=`) or Captain panel. */

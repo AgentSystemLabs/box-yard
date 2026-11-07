@@ -8,7 +8,7 @@
 // its Captain and also expands the sidebar on its tasks; the rail's "Waiting on you", there only while something
 // waits, expands it on that section. Search is the palette (⌘K): on a desktop the top row's 🔍 opens it, on a phone the
 // chats' headers do.
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
 import { Link } from "wouter"
 import { AlarmClock, BarChart3, Check, ChevronDown, ChevronRight, Inbox, Keyboard, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Plus, Settings as SettingsIcon } from "lucide-react"
 import type { Task } from "../../../shared/types"
@@ -54,6 +54,7 @@ import {
   type TreeCount,
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
+import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { DismissButton } from "./Modal"
 import { ChatIcon } from "./ChatIcons"
@@ -87,6 +88,54 @@ const ICON_BUTTON = cx("grid h-9 w-9 shrink-0 place-items-center rounded-lg text
  * always to a finger (there's no hover on a touch screen). They appear and go at once, with no fade (like the message
  * actions toolbar): only their hover colours ease. */
 const ROW_TOOL = cx("grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:opacity-100 focus-visible:opacity-100", FOCUS)
+
+/*
+ * The column and the drawer are a tree to the keyboard and a screen reader (lib/treeView.ts): the Coordinator, "Waiting
+ * on you", each project and More projects at the top level; a project's tasks, the waiting rows and the other projects
+ * one level in; each sub-task level one more. A row is a treeitem, one tab stop for the whole tree, holding the buttons a
+ * mouse or a finger uses as before: the one its Enter clicks (it names the row), its chevron, and its tools (pin,
+ * settings, Mark done), which the keyboard reaches elsewhere (the palette's Pin and Unpin, the Captain's and the task's
+ * headers). A group's children follow it in a role="group" beside it, not inside it, so the row's name and its focus
+ * ring are its own. Between the tree and a row there are only plain divs: Chromium shows a treeitem under anything else
+ * (a section, say) as a generic. The rail's tree (Rails.tsx) draws the same rows as plain buttons.
+ */
+const InTree = createContext(false)
+
+/**
+ * A row's treeitem attributes: its key, its level, whether it's unfolded (none: it has no children), whether it's the
+ * page on screen, and its open button's id, which names it. The tree writes its place among its siblings and the tab
+ * stop.
+ */
+function treeItem(key: string, level: number, label: string, { expanded, current }: { expanded?: boolean | null; current?: boolean } = {}) {
+  return {
+    role: "treeitem",
+    "data-tree-key": key,
+    "aria-level": level,
+    "aria-expanded": expanded ?? undefined,
+    "aria-current": current ? ("page" as const) : undefined,
+    "aria-labelledby": label,
+    tabIndex: -1,
+  }
+}
+/** A treeitem's open button: what Enter clicks, and the row's name. Out of the Tab order, as is every button in a row. */
+const openPart = (id: string) => ({ id, tabIndex: -1, [TREE_OPEN]: "" })
+/** A treeitem's chevron: what →, ← and Space click. */
+const TOGGLE_PART = { tabIndex: -1, [TREE_TOGGLE]: "" }
+/** "Waiting on you" and More projects: their head only folds, so Enter and the arrows click the same button. */
+const OPEN_TOGGLE_PART = { ...TOGGLE_PART, [TREE_OPEN]: "" }
+/** The tree's keys for rows that aren't a chat or a task. */
+const WAITING_HEAD = "group:waiting"
+const WAITING_MORE = "waiting:more"
+const MORE_HEAD = "group:more"
+
+/** Where Tab enters the tree: the row selected, else the folded group or tree row that holds it. */
+function currentTreeKey(selection: Selection) {
+  if (selection.selected) return selection.selected
+  const inside = selection.inside
+  if (!inside) return null
+  if (inside === WAITING_FOLD) return WAITING_HEAD
+  return inside.startsWith("task:") ? inside : captainKey(inside)
+}
 
 /**
  * `value`, sharing with the last one whatever `keep` finds unchanged (lib/sidebar.ts keepGroups), so the memo'd rows
@@ -293,6 +342,8 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   const prefetchUsage = usePrefetchUsage()
   const [creating, setCreating] = useState(false)
   const [allWaiting, setAllWaiting] = useState(false)
+  const coordinatorId = useId()
+  const emptyId = useId()
 
   const all = useMemo(
     () => sidebarGroups(projects.data ?? [], tasks.data ?? [], pins, { now, current, closing }),
@@ -328,6 +379,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     return chatHidden ? { ...selection, behind: null } : selection
   }, [current, overlay, picked, rail, waiting.shown, groups.shown, folds, treeFolds, chatHidden])
   const selection = useKept(computed, keepSelection)
+  const tree = useTreeView(currentTreeKey(selection))
 
   // A double click on a project's rail icon opens its Captain (the first click does that at once, never waiting to see
   // if a second follows) and expands the sidebar, that project's tasks unfolded and in view.
@@ -361,7 +413,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   }
 
   // A group asked to be revealed (a project, or Waiting on you), or a tree row: it scrolls into view once the full list is
-  // on screen (this column, or the drawer opened in the rail's place). A group's head takes the focus when the keyboard pressed the rail button that asked, since that
+  // on screen (this column, or the drawer opened in the rail's place). A group's head row takes the focus when the keyboard pressed the rail button that asked, since that
   // button went with the rail; a click leaves the focus where it was (in the drawer, the drawer's own first stop).
   const reveal = useSidebarReveal()
   const list = useRef<HTMLDivElement>(null)
@@ -372,7 +424,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     const [attr, id] = "taskId" in reveal ? ["data-tree-node", reveal.taskId] : ["data-sidebar-group", reveal.group]
     const target = [...(box?.querySelectorAll<HTMLElement>(`[${attr}]`) ?? [])].find((el) => el.getAttribute(attr) === id)
     if (box && target) box.scrollTop += revealScroll(box.getBoundingClientRect(), target.getBoundingClientRect())
-    if (reveal.focus) target?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true })
+    if (reveal.focus) target?.querySelector<HTMLElement>("[role=treeitem]")?.focus({ preventScroll: true })
   }, [reveal, rail])
 
   if (rail)
@@ -411,6 +463,8 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     )
 
   const coordinator = mark(selection, coordinatorKey)
+  /** Why the list has no project: none yet, or none pinned or busy (the rest are under More projects). */
+  const empty = groups.shown.length || !projects.data ? null : projects.data.length ? "unpinned" : "none"
   return (
     <nav
       aria-label="Projects and tasks"
@@ -455,41 +509,61 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         )}
       </div>
 
-      <div className="shrink-0 px-2 pt-2">
-        <button
-          type="button"
-          onClick={pick.coordinator}
-          onMouseDown={keepFocusForPick}
-          aria-current={coordinator === "selected" ? "page" : undefined}
-          className={cx(ROW, "font-medium", coordinator === "selected" ? SELECTED : "text-zinc-300 hover:bg-zinc-900")}
+      {/* With no project yet, the tree is the Coordinator alone; what to do about it is under it, not one of its rows. */}
+      <InTree.Provider value>
+        <div
+          {...tree}
+          role="tree"
+          aria-label="Projects and tasks"
+          aria-describedby={empty === "unpinned" ? emptyId : undefined}
+          className={cx("flex min-h-0 flex-col", empty !== "none" && "flex-1")}
         >
-          <CoordinatorIcon />
-          <span className="min-w-0 flex-1 truncate">Coordinator</span>
-          <CoordinatorState />
-          {coordinator === "behind" && <BehindMark />}
-        </button>
-      </div>
+          <div className="shrink-0 px-2 pt-2">
+            <div {...treeItem(coordinatorKey, 1, coordinatorId, { current: coordinator === "selected" })} className={cx("rounded-lg", FOCUS)}>
+              <button
+                type="button"
+                onClick={pick.coordinator}
+                onMouseDown={keepFocusForPick}
+                {...openPart(coordinatorId)}
+                className={cx(ROW, "font-medium", coordinator === "selected" ? SELECTED : "text-zinc-300 hover:bg-zinc-900")}
+              >
+                <CoordinatorIcon />
+                <span className="min-w-0 flex-1 truncate">Coordinator</span>
+                <CoordinatorState />
+                {coordinator === "behind" && <BehindMark />}
+              </button>
+            </div>
+          </div>
 
-      <div ref={list} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        <WaitingOnYou
-          rows={waiting.shown}
-          total={waitingAll.length}
-          hidden={waiting.hidden}
-          asks={inbox.asks}
-          folded={Boolean(folds[WAITING_FOLD])}
-          expanded={allWaiting}
-          onExpand={setAllWaiting}
-          selection={selection}
-          onPick={pick.task}
-        />
-        {groups.shown.map((g) => (
-          <ProjectGroup key={g.project.id} group={g} folded={Boolean(folds[g.project.id])} treeFolds={treeFolds} selection={selection} pick={pick} />
-        ))}
-        {!groups.shown.length &&
-          projects.data &&
-          (projects.data.length ? <p className="px-2 pt-4 text-xs text-zinc-500">No project is pinned or busy. Pin one below.</p> : <NoProjects onCreate={() => setCreating(true)} />)}
-        <MoreProjects groups={groups.others} selection={selection} onPick={pick.captain} />
-      </div>
+          <div ref={list} className={cx("scroll-thin min-h-0 flex-1 overflow-y-auto px-2", empty !== "none" && "pb-3")}>
+            <WaitingOnYou
+              rows={waiting.shown}
+              total={waitingAll.length}
+              hidden={waiting.hidden}
+              asks={inbox.asks}
+              folded={Boolean(folds[WAITING_FOLD])}
+              expanded={allWaiting}
+              onExpand={setAllWaiting}
+              selection={selection}
+              onPick={pick.task}
+            />
+            {groups.shown.map((g) => (
+              <ProjectGroup key={g.project.id} group={g} folded={Boolean(folds[g.project.id])} treeFolds={treeFolds} selection={selection} pick={pick} />
+            ))}
+            {empty === "unpinned" && (
+              <p id={emptyId} role="none" className="px-2 pt-4 text-xs text-zinc-500">
+                No project is pinned or busy. Pin one below.
+              </p>
+            )}
+            <MoreProjects groups={groups.others} selection={selection} onPick={pick.captain} />
+          </div>
+        </div>
+      </InTree.Provider>
+      {empty === "none" && (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <NoProjects onCreate={() => setCreating(true)} />
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center gap-1 border-t border-zinc-900 px-2 py-1.5">
         <button type="button" onClick={() => setCreating(true)} title="New project" aria-label="New project" className={ICON_BUTTON}>
@@ -653,12 +727,17 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
   const { project, rows } = group
   const state = mark(selection, captainKey(project.id), project.id)
   const tasksId = `sidebar-tasks-${project.id}`
+  const nameId = useId()
   return (
-    <section aria-label={project.name} data-sidebar-group={project.id} className="pt-1">
-      <div className={cx("group/head flex items-center rounded-lg transition", state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}>
+    <div data-sidebar-group={project.id} className="pt-1">
+      <div
+        {...treeItem(captainKey(project.id), 1, nameId, { expanded: rows.length ? !folded : null, current: state === "selected" })}
+        className={cx("group/head flex items-center rounded-lg transition", FOCUS, state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}
+      >
         <button
           type="button"
           onClick={() => toggleSidebarFold(project.id)}
+          {...TOGGLE_PART}
           aria-expanded={!folded}
           aria-controls={folded ? undefined : tasksId}
           aria-label={`${folded ? "Show" : "Hide"} ${project.name} tasks`}
@@ -673,7 +752,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
           onMouseDown={keepFocusForPick}
           // A press starts rendering its chat, hidden, so the click only shows it (lib/captainPrerender.ts).
           data-open-captain={project.id}
-          aria-current={state === "selected" ? "page" : undefined}
+          {...openPart(nameId)}
           title={`Talk to the ${project.name} Captain${busy ? " (working)" : ""}`}
           className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg pr-1.5 text-left text-sm font-medium pointer-coarse:min-h-11", FOCUS, state === "selected" ? "text-zinc-50" : "text-zinc-200")}
         >
@@ -693,7 +772,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
         <PinButton id={project.id} name={project.name} pinned={group.pin === "pinned"} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
       </div>
       {!folded && rows.length > 0 && (
-        <div id={tasksId} className={cx("space-y-px pt-px", PROJECT_TASKS)}>
+        <div id={tasksId} role="group" aria-label={`${project.name} tasks`} className={cx("space-y-px pt-px", PROJECT_TASKS)}>
           {rows.map((r) =>
             r.kids ? (
               <TreeNode key={r.task.id} row={r} depth={0} folds={treeFolds} selection={selection} onPick={pick.task} guides />
@@ -703,7 +782,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
           )}
         </div>
       )}
-    </section>
+    </div>
   )
 })
 
@@ -716,6 +795,7 @@ function PinButton({ id, name, pinned, reveal, shown }: { id: string; name: stri
       title={pinned ? `Unpin ${name}: it moves to More projects` : `Pin ${name}: it stays here when it's quiet`}
       aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
       aria-pressed={pinned}
+      tabIndex={-1}
       className={cx(ROW_TOOL, !shown && cx("opacity-0", reveal))}
     >
       <Pin className={cx("h-3.5 w-3.5", pinned && "fill-current")} aria-hidden />
@@ -734,14 +814,19 @@ const META_TONE: Partial<Record<Task["status"], string>> = { needs_input: "text-
 export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, project }: { row: SidebarRow; spot: RowSpot; selected: boolean; onPick: Pick["task"]; project?: { name: string; color: Parameters<typeof projectColorStyle>[0]; icon?: string | null } }) {
   const { task, dim, meta } = row
   const label = stateLabel(task)
+  const tree = useContext(InTree)
+  const id = useId()
   return (
-    <div className={cx("flex items-center rounded-lg transition", selected ? SELECTED : dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900")}>
+    <div
+      {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected }) : undefined)}
+      className={cx("flex items-center rounded-lg transition", tree && FOCUS, selected ? SELECTED : dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900")}
+    >
       <button
         type="button"
         onClick={(e) => onPick(task.id, spot, e)}
         onMouseDown={keepFocusForPick}
         data-open-task={task.id}
-        aria-current={selected ? "page" : undefined}
+        {...(tree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
         title={`${task.title} · ${label}${project ? ` · ${project.name}` : ""}`}
         className={cx(
           // The icon, the title and the meta share the first line; the project line sits under the title. The block is
@@ -902,11 +987,15 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
   const { task, dim, meta, tree } = row
   const label = stateLabel(task)
   const twice = useTreeDoubleClick(task.id, foldTwice && folded !== null)
+  const inTree = useContext(InTree)
+  const id = useId()
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
   return (
     <div
+      // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
+      {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected }) : undefined)}
       style={depth && !guides ? { marginLeft: `calc(${depth} * var(--tree-step))` } : undefined}
-      className={cx("flex items-stretch rounded-lg transition", guides && cx("group/tree relative", TREE_BOX), selected ? SELECTED : cx(dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900", inside && INSIDE))}
+      className={cx("flex items-stretch rounded-lg transition", inTree && FOCUS, guides && cx("group/tree relative", TREE_BOX), selected ? SELECTED : cx(dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900", inside && INSIDE))}
     >
       {folded === null ? (
         !guides && <span aria-hidden className={TWISTIE} />
@@ -918,6 +1007,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           aria-controls={controls}
           aria-label={`${folded ? "Show" : "Hide"} the sub-tasks of ${task.title}`}
           title={folded ? "Show its sub-tasks" : "Hide its sub-tasks"}
+          {...(inTree ? TOGGLE_PART : undefined)}
           className={cx(guides ? NESTED_CHEVRON : cx("grid min-h-9 place-items-center rounded-lg pointer-coarse:min-h-11", TWISTIE), "text-zinc-500 hover:text-zinc-100", FOCUS)}
         >
           {guides ? (
@@ -936,7 +1026,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
         onDoubleClick={twice.onDoubleClick}
         onMouseDown={keepFocusForPick}
         data-open-task={task.id}
-        aria-current={selected ? "page" : undefined}
+        {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
         title={`${task.title} · ${label}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
         className={cx("grid min-h-9 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2.5 rounded-lg py-1 pr-2 text-left text-sm pointer-coarse:min-h-11", guides && TREE_PAD, FOCUS)}
       >
@@ -960,11 +1050,13 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
  */
 function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
   const markDone = useMarkDone()
+  const tree = useContext(InTree)
   const kids = subtasks ? ` and its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""
   return (
     <button
       type="button"
       onClick={() => void markDone(task)}
+      tabIndex={tree ? -1 : undefined}
       aria-label={`Mark ${task.title}${kids} done`}
       title={`Mark done${kids ? `, with its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""}. Messaging it picks it back up.`}
       data-testid="sidebar-mark-done"
@@ -1006,6 +1098,7 @@ function ProjectSettingsButton({ id, name, reveal, shown }: { id: string; name: 
       title={`${name} project settings`}
       aria-label={`${name} project settings`}
       data-testid="sidebar-project-settings"
+      tabIndex={-1}
       className={cx(ROW_TOOL, !shown && cx("opacity-0", reveal))}
     >
       <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
@@ -1032,23 +1125,29 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, asks, fol
   const colors = useTiles().colors
   // Each row's project line, the same object across renders so the memo'd rows can skip.
   const lines = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, { name: p.name, color: colors.get(p.id), icon: p.iconUrl }])), [projects.data, colors])
+  const headId = useId()
+  const moreId = useId()
   if (!total) return null
   const inside = selection.inside === WAITING_FOLD
   return (
-    <section aria-label="Waiting on you" data-sidebar-group={WAITING_FOLD} className="mt-1 mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.03]">
-      <button
-        type="button"
-        onClick={() => toggleSidebarFold(WAITING_FOLD)}
-        aria-expanded={!folded}
-        className={cx("flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase hover:text-amber-100 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
-      >
-        <Inbox className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">Waiting on you</span>
-        <Badge count={total} asks={asks} className="h-4 min-w-4 px-1 text-[10px]" />
-        <span className="ml-auto text-amber-200/50" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
-      </button>
+    <div data-sidebar-group={WAITING_FOLD} className="mt-1 mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.03]">
+      <div {...treeItem(WAITING_HEAD, 1, headId, { expanded: !folded })} className={cx("rounded-lg", FOCUS)}>
+        <button
+          type="button"
+          onClick={() => toggleSidebarFold(WAITING_FOLD)}
+          aria-expanded={!folded}
+          {...OPEN_TOGGLE_PART}
+          id={headId}
+          className={cx("flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase hover:text-amber-100 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
+        >
+          <Inbox className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 truncate">Waiting on you</span>
+          <Badge count={total} asks={asks} className="h-4 min-w-4 px-1 text-[10px]" />
+          <span className="ml-auto text-amber-200/50" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
+        </button>
+      </div>
       {!folded && (
-        <div className="space-y-px px-1 pb-1">
+        <div role="group" aria-label="Waiting on you" className="space-y-px px-1 pb-1">
           {rows.map((r) => (
             <TaskRow
               key={r.task.id}
@@ -1060,14 +1159,16 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, asks, fol
             />
           ))}
           {(hidden > 0 || (expanded && total > WAITING_CAP)) && (
-            <button type="button" onClick={() => onExpand(!expanded)} className={cx(ROW, "text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")}>
-              <span className="w-5 shrink-0" aria-hidden />
-              {expanded ? "Show fewer" : `Show ${hidden} more`}
-            </button>
+            <div {...treeItem(WAITING_MORE, 2, moreId)} className={cx("rounded-lg", FOCUS)}>
+              <button type="button" onClick={() => onExpand(!expanded)} {...openPart(moreId)} className={cx(ROW, "text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")}>
+                <span className="w-5 shrink-0" aria-hidden />
+                {expanded ? "Show fewer" : `Show ${hidden} more`}
+              </button>
+            </div>
           )}
         </div>
       )}
-    </section>
+    </div>
   )
 })
 
@@ -1094,48 +1195,57 @@ const MoreProjects = memo(function MoreProjects({ groups, selection, onPick }: {
   const [open, setOpen] = useState(false)
   const toggle = useCallback(() => setOpen((o) => !o), [])
   const colors = useTiles().colors
+  const headId = useId()
   if (!groups.length) return null
   return (
-    <section aria-label="More projects" className="pt-4">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        className={cx("flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-semibold tracking-wider text-zinc-500 uppercase hover:text-zinc-300 pointer-coarse:min-h-11", FOCUS)}
-      >
-        More projects
-        <span className="font-normal tracking-normal text-zinc-600">{groups.length}</span>
-        <span className="ml-auto text-zinc-600">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
-      </button>
+    <div className="pt-4">
+      <div {...treeItem(MORE_HEAD, 1, headId, { expanded: open })} className={cx("rounded-md", FOCUS)}>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          {...OPEN_TOGGLE_PART}
+          id={headId}
+          className={cx("flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-semibold tracking-wider text-zinc-500 uppercase hover:text-zinc-300 pointer-coarse:min-h-11", FOCUS)}
+        >
+          More projects
+          <span className="font-normal tracking-normal text-zinc-600">{groups.length}</span>
+          <span className="ml-auto text-zinc-600">{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</span>
+        </button>
+      </div>
       {open && (
-        <div className="space-y-px">
-          {groups.map((g) => {
-            const selected = selection.selected === captainKey(g.project.id)
-            return (
-              <div key={g.project.id} className={cx("group/more flex items-center rounded-lg transition", selected ? SELECTED : "hover:bg-zinc-900")}>
-                <button
-                  type="button"
-                  onClick={(e) => onPick(g.project.id, e)}
-                  onMouseDown={keepFocusForPick}
-                  data-open-captain={g.project.id}
-                  aria-current={selected ? "page" : undefined}
-                  title={`Talk to the ${g.project.name} Captain`}
-                  className={cx(ROW, "min-w-0 flex-1", selected ? "text-zinc-50" : "text-zinc-400 hover:text-zinc-200")}
-                >
-                  <span className="grid h-5 w-5 shrink-0 place-items-center" aria-hidden>
-                    <span style={projectColorStyle(colors.get(g.project.id))} className="h-2 w-2 rounded-[3px] bg-(--pc)" />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">{g.project.name}</span>
-                  {g.needs > 0 && <span className="shrink-0 text-xs text-amber-300">{g.needs} asks</span>}
-                  {!g.needs && g.running > 0 && <span className="shrink-0 text-xs text-sky-300">{g.running} running</span>}
-                </button>
-                <ProjectSettingsButton id={g.project.id} name={g.project.name} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
-                <PinButton id={g.project.id} name={g.project.name} pinned={false} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
-              </div>
-            )
-          })}
+        <div role="group" aria-label="More projects" className="space-y-px">
+          {groups.map((g) => (
+            <MoreProject key={g.project.id} group={g} color={colors.get(g.project.id)} selected={selection.selected === captainKey(g.project.id)} onPick={onPick} />
+          ))}
         </div>
       )}
-    </section>
+    </div>
   )
 })
+
+function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGroup; color: Parameters<typeof projectColorStyle>[0]; selected: boolean; onPick: Pick["captain"] }) {
+  const id = useId()
+  return (
+    <div {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("group/more flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
+      <button
+        type="button"
+        onClick={(e) => onPick(g.project.id, e)}
+        onMouseDown={keepFocusForPick}
+        data-open-captain={g.project.id}
+        {...openPart(id)}
+        title={`Talk to the ${g.project.name} Captain`}
+        className={cx(ROW, "min-w-0 flex-1", selected ? "text-zinc-50" : "text-zinc-400 hover:text-zinc-200")}
+      >
+        <span className="grid h-5 w-5 shrink-0 place-items-center" aria-hidden>
+          <span style={projectColorStyle(color)} className="h-2 w-2 rounded-[3px] bg-(--pc)" />
+        </span>
+        <span className="min-w-0 flex-1 truncate">{g.project.name}</span>
+        {g.needs > 0 && <span className="shrink-0 text-xs text-amber-300">{g.needs} asks</span>}
+        {!g.needs && g.running > 0 && <span className="shrink-0 text-xs text-sky-300">{g.running} running</span>}
+      </button>
+      <ProjectSettingsButton id={g.project.id} name={g.project.name} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
+      <PinButton id={g.project.id} name={g.project.name} pinned={false} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
+    </div>
+  )
+}

@@ -21,6 +21,7 @@ import { taskSessionHref, APP_HOME } from "../web/src/lib/navigation.js"
 import { currentToasts, dismiss } from "../web/src/lib/toast.js"
 import { resetScrollMemory } from "../web/src/lib/scrollMemory.js"
 import type { CaptainMessage, ChatMessage, Project, Task, TaskStatus } from "../shared/types"
+import { sidebarGroup } from "./sidebarTree.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -82,7 +83,7 @@ function render(path = APP_HOME) {
 }
 
 const nav = () => document.querySelector<HTMLElement>("nav[aria-label='Projects and tasks']")!
-const section = (name: string) => nav().querySelector<HTMLElement>(`section[aria-label='${name}']`)!
+const section = (name: string) => sidebarGroup(nav(), name)!
 const button = (within: ParentNode, name: string) => [...within.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.startsWith(name) || b.getAttribute("aria-label") === name)!
 /** The links stop propagation, so read `defaultPrevented` off the event; a click the app leaves alone goes nowhere. */
 const click = (el: Element) => {
