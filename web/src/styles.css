@@ -42,8 +42,13 @@
 
 /* The app already shares one zinc surface/ink scale and semantic accent palette. Resolve those
    tokens here, including opacity utilities, so dialogs, chats and lazy panels agree without
-   changing their layout or rerendering transcripts. Dark keeps Tailwind's original palette. */
+   changing their layout or rerendering transcripts. Dark keeps its surfaces and accents;
+   muted ink is lifted enough to read on the chat and composer. */
 :root { color-scheme: dark; }
+:root.dark {
+  --color-zinc-500: #94949e;
+  --color-zinc-600: #8c8c96;
+}
 :root:not(.dark) {
   color-scheme: light;
   --color-control: #85858f;
