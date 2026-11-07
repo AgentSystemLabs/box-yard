@@ -250,6 +250,28 @@ describe("StickyScroll", () => {
     expect(jumpButton()).toBeDefined()
   })
 
+  it("scrollIntoList converts zoomed rectangles into the scroller's CSS pixels", () => {
+    const target = rows()[3]!
+    Object.defineProperty(scroller, "offsetHeight", { value: 400, configurable: true })
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 500, height: 500 } as DOMRect)
+    const y = rowTop(target) * 1.25
+    target.getBoundingClientRect = () => ({ top: y, bottom: y + 125, height: 125 } as DOMRect)
+    act(() => scrollIntoList(target, { block: "start" }))
+    expect(top).toBe(300)
+  })
+
+  it("scrollIntoList leaves clipped ancestors and the page header in place", () => {
+    host.style.overflow = "hidden"
+    host.scrollTop = 42
+    const outerScroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
+    const target = rows()[3]!
+    target.style.scrollMarginTop = "12px"
+    act(() => scrollIntoList(target, { block: "start" }))
+    expect(top).toBe(288)
+    expect(host.scrollTop).toBe(42)
+    expect(outerScroll).not.toHaveBeenCalled()
+  })
+
   it("scrollIntoList lets go of the bottom first, so growth before its scroll lands can't pull the view back down", () => {
     // A card far up, revealed by a search pick.
     const target = rows()[5]!

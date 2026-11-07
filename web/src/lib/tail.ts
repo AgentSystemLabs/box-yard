@@ -63,6 +63,9 @@ export function resetFirstPaintRows() {
  * app stays open for days), until every layout, keyboard and rotation takes seconds. So `trim` drops back to
  * the newest items; StickyScroll calls it while the reader is at the bottom, where nothing moves.
  *
+ * With `max`, reading older items keeps at most that many rows, with `later`/`loadLater` to move forward again.
+ * `reset` returns to the newest rows after a send or a latest jump.
+ *
  * With `first` under `initial`, a list's first paint (a task just opened) has only its newest `first` items, a
  * screenful or more, so it's on screen sooner; the rest of the newest `initial` render right after that paint, `grow`
  * more a frame (all at once by default), and `growing` says so meanwhile. `fill` doubles them at once, for a first paint
@@ -179,7 +182,7 @@ export function useTail<T extends { id: string }>(
     const { items, start } = latest.current
     const idx = items.findIndex((m) => m.id === id)
     if (idx < 0) return false
-    if (idx < start) {
+    if (idx < start || idx >= start + max) {
       const to = Math.max(0, idx - 5)
       pinned.current.id = items[to]!.id
       following.current = to + max >= items.length

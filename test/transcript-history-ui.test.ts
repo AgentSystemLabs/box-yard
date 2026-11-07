@@ -86,6 +86,15 @@ describe("bounded retained history", () => {
     act(() => tail.loadLater())
     expect(tail.visible).toHaveLength(200)
     expect(tail.visible[0]?.id).toBe("m-1050")
+    act(() => { tail.reveal("m-1400") })
+    expect(tail.visible.some((m) => m.id === "m-1400")).toBe(true)
+  })
+
+  it("applies live edits to messages inside an older reading window", async () => {
+    render(); await settle()
+    act(() => state.earlier()); await settle()
+    render(undefined, live.map((m) => m.id === "m-1000" ? { ...m, content: "Edited example reply" } : m))
+    expect(state.items.find((m) => m.id === "m-1000")?.content).toBe("Edited example reply")
   })
 
   it("adds a newly streamed date to the complete rail without another transcript request", async () => {

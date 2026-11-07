@@ -22,7 +22,11 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
     staleTime: 60_000,
   })
   const page = window?.path === path ? window.page : null
-  const items = page?.messages ?? live
+  const items = useMemo(() => {
+    if (!page) return live
+    const updates = new Map(live.map((m) => [m.id, m]))
+    return page.messages.map((m) => updates.get(m.id) ?? m)
+  }, [page, live])
   const latest = useRef({ path, page, items })
   latest.current = { path, page, items }
   useEffect(() => {

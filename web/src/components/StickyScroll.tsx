@@ -66,14 +66,23 @@ export function scrollIntoList(el: Element, options: ScrollIntoListOptions = {})
 
 export type ScrollIntoListOptions = { block?: "start" | "center" | "end" | "nearest"; behavior?: ScrollBehavior }
 
+// DOMRects include CSS zoom/transforms; scrollTop/clientHeight use the list's unscaled CSS pixels.
+const scrollScale = (list: HTMLElement) => {
+  const style = getComputedStyle(list)
+  // Computed border-box height keeps fractional flex sizing, which offsetHeight rounds.
+  const height = (style.boxSizing === "border-box" ? parseFloat(style.height) : 0) || list.offsetHeight
+  return height ? list.getBoundingClientRect().height / height || 1 : 1
+}
+
 /** The `scrollTop` that shows `el` at `block` in `list` (the browser clamps it), or null if `nearest` needs none. */
 function listScrollTop(list: HTMLElement, el: Element, block: NonNullable<ScrollIntoListOptions["block"]>) {
   const style = getComputedStyle(el)
   const frame = list.getBoundingClientRect()
   const rect = el.getBoundingClientRect()
+  const scale = scrollScale(list)
   // Where `el` sits in the list's content, its scroll margins added.
-  const start = rect.top - frame.top - list.clientTop + list.scrollTop - (parseFloat(style.scrollMarginTop) || 0)
-  const end = rect.bottom - frame.top - list.clientTop + list.scrollTop + (parseFloat(style.scrollMarginBottom) || 0)
+  const start = (rect.top - frame.top) / scale - list.clientTop + list.scrollTop - (parseFloat(style.scrollMarginTop) || 0)
+  const end = (rect.bottom - frame.top) / scale - list.clientTop + list.scrollTop + (parseFloat(style.scrollMarginBottom) || 0)
   const view = list.clientHeight
   if (block === "center") return (start + end - view) / 2
   if (block === "end") return end - view
@@ -346,7 +355,7 @@ export function StickyScroll({
           ? { node: byId, offset: spot.offset ?? 0 }
           : null
     if (row) {
-      setTop(el, el.scrollTop + row.node.getBoundingClientRect().top - el.getBoundingClientRect().top - row.offset)
+      setTop(el, el.scrollTop + (row.node.getBoundingClientRect().top - el.getBoundingClientRect().top - row.offset) / scrollScale(el))
     } else {
       const { hidden, onLoadEarlier } = latest.current
       // The row is in the older part that isn't rendered yet: render more (the prepend keeps the view), then retry.
@@ -578,7 +587,7 @@ export function StickyScroll({
     const a = anchor.current
     if (!a || !a.node.isConnected) return markAnchor()
     const shift = a.node.getBoundingClientRect().top - box.getBoundingClientRect().top - a.top
-    if (Math.abs(shift) >= 1) setTop(box, box.scrollTop + shift)
+    if (Math.abs(shift) >= 1) setTop(box, box.scrollTop + shift / scrollScale(box))
     markAnchor()
   }
 
@@ -642,7 +651,7 @@ export function StickyScroll({
     const a = prev.anchor
     // Bounded windows also drop rows below the viewport: total height no longer measures the prepend.
     setTop(el, a?.node.isConnected
-      ? el.scrollTop + a.node.getBoundingClientRect().top - el.getBoundingClientRect().top - a.top
+      ? el.scrollTop + (a.node.getBoundingClientRect().top - el.getBoundingClientRect().top - a.top) / scrollScale(el)
       : prev.top + (el.scrollHeight - prev.height))
     // The bottom moved for rows above, not for anything new at the end: where it was is no bottom to reach.
     pastBottoms.current = []

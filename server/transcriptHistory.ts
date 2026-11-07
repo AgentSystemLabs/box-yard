@@ -1,6 +1,6 @@
 import type { Router } from "express"
 import type { DB } from "./db.js"
-import { BadRequestError, type Store } from "./store.js"
+import { BadRequestError, json, type Store } from "./store.js"
 import { HISTORY_PAGE_SIZE, type HistoryDay, type HistoryPage, type TranscriptMessage } from "../shared/transcriptHistory.js"
 
 export type HistoryScope = { kind: "chat" } | { kind: "captain" | "task"; id: string }
@@ -36,7 +36,7 @@ export class TranscriptHistory {
       `SELECT 1 FROM ${table} WHERE ${where} AND (created_at, rowid) ${op} (?, ?) LIMIT 1`,
     ).get(...args, row.created_at, row.rid)
     return {
-      messages: rows.map((r) => ({ id: r.id, role: r.role, content: r.content, meta: r.meta_json ? JSON.parse(r.meta_json) : null,
+      messages: rows.map((r) => ({ id: r.id, role: r.role, content: r.content, meta: json(r.meta_json, null),
         createdAt: r.created_at, ...(scope.kind === "task" ? { taskId: scope.id } : scope.kind === "captain" ? { projectId: scope.id } : {}),
       }) as TranscriptMessage),
       before: exists(rows[0], "<") ? rows[0]!.id : null,
