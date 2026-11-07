@@ -46,6 +46,23 @@ describe("Codex app-server task transport", () => {
     expect(f.events().at(-1)).toMatchObject({ ok: false })
     expect(f.events().some((e) => e.delivery === "accepted")).toBe(false)
   })
+  it("does not replay a steer after an internal error that cannot establish non-delivery", async () => {
+    const f = await fixture("internal-error"); f.steer(); await f.exit
+    expect(f.journal().entries[0].state).toBe("uncertain")
+    expect(f.events().at(-1)).toMatchObject({ ok: false })
+  })
+  it("holds accepted input when successful completion cannot correlate its client ID", async () => {
+    const f = await fixture("uncorrelated"); f.steer(); await f.exit
+    expect(f.journal()).toMatchObject({ terminal: "completed", entries: [{ state: "uncertain", accepted: true, incorporated: false }] })
+    expect(f.calls().filter((c) => c.method === "turn/steer")).toHaveLength(1)
+  })
+  it("holds an accepted input when Stop interrupts the turn instead of silently replaying it", async () => {
+    const f = await fixture("accepted-stop"); f.steer()
+    await waitFor(() => f.events().some((e) => e.delivery === "accepted"), "steer acceptance")
+    f.child.kill("SIGTERM"); await f.exit
+    expect(f.journal()).toMatchObject({ terminal: "interrupted", entries: [{ state: "uncertain", accepted: true, incorporated: true }] })
+    expect(f.events().at(-1)).toMatchObject({ stopped: true })
+  })
   it("resumes only the selected thread and interrupts the native turn on stop", async () => {
     const f = await fixture("success", true)
     f.child.kill("SIGTERM"); await f.exit

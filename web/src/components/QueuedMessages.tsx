@@ -4,8 +4,8 @@
 // in place or cancelled until a turn takes it; the server refuses changes after that ("already delivered"), so an
 // edit or cancel never races the delivery. Cancel takes the message back: its text and files go back in the
 // chat's message box to fix and send again (lib/takeBack.ts), and Undo queues it again. On the task page, Steer
-// hands the whole queue to the running turn: the agent reads it at its next step, without stopping (Stop is the
-// task header's). A Codex agent can't take a message mid-turn, so its rows say they wait for the turn's end.
+// requests delivery of the whole queue into a running Claude/Codex turn; Stop is a separate action.
+// Codex acceptance/uncertainty stays visible until the turn settles. Cursor waits for the turn's end.
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Clock, Loader2, Navigation2, Pencil, X } from "lucide-react"
@@ -30,7 +30,7 @@ const STEER_BUTTON =
   "flex h-11 shrink-0 items-center gap-1 rounded-md px-2.5 text-[11px] font-semibold text-yard-300 transition hover:bg-zinc-800 hover:text-yard-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none disabled:opacity-50 sm:h-6 sm:px-1.5"
 
 const CANCEL_TITLE = "Cancel: it goes back in the message box to edit"
-const STEER_TITLE = "Steer: the agent reads the queued messages at its next step, without stopping"
+const STEER_TITLE = "Steer: request delivery of the queued messages into the running turn"
 
 export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string }) {
   const queue = useTaskQueue(taskId)
@@ -73,6 +73,7 @@ export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string })
 
   const onDelete = useCallback(
     (m: QueuedMessage) => {
+      if (m.status === "uncertain") { remove.mutate(m.id); return }
       if (editing === m.id) setEditing(null)
       const untake = takeBack(`task:${taskId}`, m.text, m.attachments, root.current)
       untakes.current.set(m.id, untake)
@@ -108,7 +109,7 @@ export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string })
     setDeleted((d) => d.filter((x) => x.id !== id))
   }, [])
   const running = Boolean(steerState?.running)
-  // Turn: a running turn can take it, so Steer shows; a Codex or Cursor turn can't (its rows say so).
+  // Turn: a running turn can take it, so Steer shows; a Cursor turn can't (its rows say so).
   const noSteer = steerState?.noSteer ?? null
   const turn: QueuedTurn = !running ? "none" : noSteer ? "unsteerable" : steerState?.compacting ? "compacting" : "steerable"
   const onSteer = useCallback(() => {
@@ -141,12 +142,12 @@ export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string })
   )
 })
 
-/** The turn a queued row waits on: none running, one Steer can reach, a /compact, or a Codex or Cursor turn (no steering). */
+/** The turn a queued row waits on: none running, one Steer can reach, a /compact, or a Cursor turn (no steering). */
 type QueuedTurn = "none" | "steerable" | "compacting" | "unsteerable"
 
 const WAITS: Record<QueuedTurn, (cli: string) => string> = {
   none: () => "Delivered when the agent's next turn starts.",
-  steerable: () => "Delivered when the current turn ends, or at the agent's next step with Steer.",
+  steerable: () => "Delivered when the current turn ends, or during the turn with Steer.",
   compacting: () => "Delivered once the agent has compacted its context.",
   unsteerable: (cli) => `Delivered when the current turn ends: ${cli} can't take a message mid-turn.`,
 }
@@ -168,7 +169,7 @@ const QueuedRow = memo(function QueuedRow({
   onSave: (m: QueuedMessage, text: string) => void
   onDelete: (m: QueuedMessage) => void
   turn: QueuedTurn
-  /** The CLI's name when it can't take a message mid-turn (Codex, Cursor). */
+  /** The CLI's name when it can't take a message mid-turn (Cursor). */
   noSteer: string | null
   /** A Steer is on its way to the server. */
   steering: boolean
@@ -176,7 +177,7 @@ const QueuedRow = memo(function QueuedRow({
 }) {
   const ownerName = useOwnerName()
   const steered = m.status === "steering"
-  const locked = m.status === "delivering" || steered
+  const locked = m.status === "delivering" || steered || m.status === "accepted" || m.status === "uncertain"
   // An optimistic row (just sent) has no server id yet.
   const settled = !m.id.startsWith("tmp-")
   return (
@@ -189,15 +190,16 @@ const QueuedRow = memo(function QueuedRow({
         {steered ? (
           <LineIcon icon={Navigation2} className="h-3 w-3 rotate-90 text-yard-300" />
         ) : (
-          <LineIcon icon={locked ? Loader2 : Clock} className={cx("h-3 w-3", locked && "animate-spin")} />
+          <LineIcon icon={m.status === "accepted" || m.status === "uncertain" ? Clock : locked ? Loader2 : Clock} className={cx("h-3 w-3", m.status === "delivering" && "animate-spin")} />
         )}
-        <span className={cx("font-semibold", steered ? "text-yard-300" : "text-zinc-400")}>{steered ? "Steering" : locked ? "Delivering" : "Queued"}</span>
+        <span className={cx("font-semibold", steered ? "text-yard-300" : "text-zinc-400")}>{m.status === "uncertain" ? "Delivery uncertain" : m.status === "accepted" ? "Accepted by Codex" : steered ? "Steering" : locked ? "Delivering" : "Queued"}</span>
         <span aria-hidden>·</span>
         <span className="min-w-0 truncate">{m.sender || ownerName}</span>
         {/* Too narrow for the time next to Steer and two 44px buttons (a 320px phone): it goes, so nothing overflows. */}
         <span className="hidden shrink-0 text-[10px] text-zinc-600 @min-[19rem]:inline">
           <TimeAgo ts={m.createdAt} />
         </span>
+        {m.status === "uncertain" && <button type="button" className={ICON_BUTTON + " ml-auto"} title="Remove hold after reviewing the transcript; this does not undo delivery" aria-label="Remove delivery hold" onClick={() => onDelete(m)}><X className="h-3.5 w-3.5" /></button>}
         {!locked && settled && !editing && (
           <span className="-my-2.5 ml-auto flex shrink-0 sm:-my-0.5">
             {turn === "steerable" && (
@@ -221,8 +223,10 @@ const QueuedRow = memo(function QueuedRow({
         m.text && <div className="mt-0.5 line-clamp-6 text-sm whitespace-pre-wrap wrap-anywhere text-zinc-300">{m.text}</div>
       )}
       <AttachmentList files={m.attachments.length ? m.attachments : undefined} />
+      {m.status === "accepted" && <div className="mt-1 text-[11px] text-zinc-500">Codex accepted this input. This does not confirm that the model processed it.</div>}
+      {m.status === "uncertain" && <div className="mt-1 text-[11px] text-zinc-500">It may already have reached Codex. Automatic retry is paused. Review the transcript, then remove this hold before resuming.</div>}
       {(steered || !locked) && (
-        <div className="mt-1 text-[11px] text-zinc-500">{steered ? "On its way into the running turn: the agent reads it at its next step." : WAITS[turn](noSteer ?? "this agent")}</div>
+        <div className="mt-1 text-[11px] text-zinc-500">{steered ? "Delivery requested; waiting for the runner to acknowledge it." : WAITS[turn](noSteer ?? "this agent")}</div>
       )}
     </div>
   )

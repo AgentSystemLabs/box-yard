@@ -875,9 +875,8 @@ function translate(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Codex (docs/codex.md). The same turn as runClaude, with `codex exec --json`: the arguments, the translation of its
-// events and the context reading are server/codex.ts's, copied here (this file runs on boxes with plain Node);
-// test/codex-task.e2e.test.ts keeps them in step.
+// Codex tasks use app-server JSON-RPC over stdio. The event/context helpers mirror server/codex.ts's exec adapter
+// (still used by managers). This file must run on every worker with plain Node and an installed Codex CLI.
 
 const codexState = path.join(taskDir, "codex")
 // SSH machines keep a forwarded ChatGPT login in tmpfs even while Codex replaces auth.json on refresh.
@@ -886,7 +885,7 @@ const codexMemoryHome = task.memoryCodexHome && task.secretsDir ? path.join(task
 const codexHome = codexMemoryHome || codexState
 const codexAuthDelivery = path.join(taskDir, "codex-auth.json")
 
-/** The Codex home this turn uses: the task's own, or this computer's when it runs on the owner's own `codex login`. */
+/** Every task uses its own Codex home, including tasks that import this computer's login. */
 function codexHomeInUse() {
   return codexHome
 }
@@ -1175,7 +1174,7 @@ async function runCodex({ turn, sessionId, resume, prompt }) {
       const call = calls.get(msg.id)
       if (!call) return
       calls.delete(msg.id); clearTimeout(call.expiry)
-      if (msg.error) call.reject(Object.assign(new Error(msg.error.message || JSON.stringify(msg.error)), { rejected: true }))
+      if (msg.error) call.reject(Object.assign(new Error(msg.error.message || JSON.stringify(msg.error)), { rejected: true, rpcCode: msg.error.code }))
       else call.resolve(msg.result)
       return
     }
@@ -1255,9 +1254,11 @@ async function runCodex({ turn, sessionId, resume, prompt }) {
           entry.state = "accepted"; entry.accepted = true; writeCodexDelivery(state)
           queue({ t: "codex_delivery", inputIds: entry.inputIds, delivery: "accepted" })
         } catch (err) {
-          entry.state = err.rejected ? "rejected" : "uncertain"; writeCodexDelivery(state)
+          // Only validation/precondition failures establish non-delivery. An internal server error is ambiguous.
+          const rejected = err.rejected && (err.rpcCode === -32602 || /no active turn|no turn.*active|expectedTurnId.*(mismatch|does not match)|turn id mismatch/i.test(err.message))
+          entry.state = rejected ? "rejected" : "uncertain"; writeCodexDelivery(state)
           // A timeout/disconnect might already have applied the input. Stop instead of accepting more work blindly.
-          if (!err.rejected) fail(err.message)
+          if (!rejected) fail(err.message)
         }
         fs.rmSync(path.join(taskDir, f), { force: true })
       }
@@ -2123,6 +2124,13 @@ async function callTool(name, args = {}) {
       return text(`Cancelling ${kids.length}: ${kids.map((c) => `${c.title} (${c.id})`).join(", ")}. They won't report.`)
     }
     case "finish": {
+      if (task.agent === "codex") {
+        const turnId = currentTurnId()
+        const journal = readJson(path.join(taskDir, `codex-delivery-${turnId}.json`), null)
+        const pending = fs.readdirSync(taskDir).some((f) => STEER_FILE.test(f) && readJson(path.join(taskDir, f), null)?.turnId === turnId) ||
+          journal?.entries?.some((e) => e.state === "submitted" || e.state === "uncertain" || e.state === "accepted" && !e.incorporated)
+        if (pending) return text("Instructions are pending delivery. Read the follow-up before finishing; acceptance alone does not confirm processing.", true)
+      }
       const running = subtaskState().children.filter((c) => LIVE_SUBTASK.includes(c.status))
       if (running.length) {
         return text(

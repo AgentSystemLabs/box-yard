@@ -317,11 +317,11 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
           <div className={cx("mb-0.5 flex items-center gap-1 text-[11px] font-semibold", hook ? "text-teal-300" : "text-yard-400")}>
             {hook && <Webhook className="h-3 w-3" />}
             {userMessageLabel(m.meta, ownerName)}
-            {/* Steer handed it to the running turn (server/tasks.ts steerQueued): the agent read it at its next step. */}
+            {/* Transport acceptance does not establish when the model processed a follow-up. */}
             {m.meta?.steered === true && (
-              <span className="inline-flex items-center gap-0.5 rounded bg-yard-500/10 px-1 text-[10px] font-semibold text-yard-300" title="Steered into the running turn: the agent read it at its next step">
+              <span className="inline-flex items-center gap-0.5 rounded bg-yard-500/10 px-1 text-[10px] font-semibold text-yard-300" title={m.meta?.steerAccepted ? "Codex accepted this input; model processing is not confirmed" : "Written to the agent's input stream; model processing is not confirmed"}>
                 <Navigation2 className="h-2.5 w-2.5 rotate-90" aria-hidden />
-                Steered
+                {m.meta?.steerAccepted ? "Accepted by Codex" : "Steered"}
               </span>
             )}
             {time}
@@ -329,6 +329,7 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
           {m.content && <div className="text-sm whitespace-pre-wrap wrap-anywhere text-zinc-200">{m.content}</div>}
           <AttachmentList files={m.meta?.attachments} />
           {m.meta?.undelivered === true && <div className="mt-1 text-[11px] text-zinc-500">Not delivered: the task was stopped or marked done first.</div>}
+          {m.meta?.deliveryUncertain === true && <div className="mt-1 text-[11px] text-zinc-500">Delivery uncertain: this may already have reached Codex. Removing it from the queue does not undo delivery.</div>}
           {!m.meta?.pending && <MessageActions text={m.content} />}
         </div>
       )

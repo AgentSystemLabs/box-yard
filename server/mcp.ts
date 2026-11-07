@@ -137,13 +137,13 @@ function safe<A>(fn: (args: A) => Promise<ToolResult> | ToolResult) {
 const STATUS_ONLY_FIELD = "(status only: ask the project's Captain)"
 
 const STEER_DESCRIPTION =
-  "true: steer it into a mid-turn agent's running turn, with every other queued message, in send order: the agent reads them at its next step (between tool calls) and carries on, nothing is stopped. Use it when the message changes what it's doing right now. A Codex or Cursor agent can't take messages mid-turn; theirs wait for the turn's end (the delivery field says so). To stop the turn instead, call stop_task: the queued messages are kept and start its next turn."
+  "true: steer it into a mid-turn agent's running turn, with every other queued message, in send order. Requests delivery without stopping; the result is not confirmation that the model processed them. Use it when the message changes what it's doing right now. A Cursor agent can't take messages mid-turn; theirs wait for the turn's end (the delivery field says so). To stop the turn instead, call stop_task: the queued messages are kept and start its next turn."
 const INTERRUPT_DESCRIPTION = "Old name for steer, with the same effect: it no longer stops the turn (stop_task does)."
 
 /** What steerQueued did, for the MCP reply. */
 function steerDelivery(r: SteerResult): string {
   const them = r.queued === 1 ? "the queued message" : `all ${r.queued} queued messages`
-  if (r.delivery === "steering") return `steering: the agent reads ${them}, in order, at its next step (between tool calls), in this same turn; nothing is stopped`
+  if (r.delivery === "steering") return `steering: delivery requested for ${them}, in order, in the running turn; acknowledgment is pending, not confirmation that the model processed them`
   if (r.delivery === "after_turn") return `after this turn: ${r.note ?? "the running turn can't take it"}, so ${them} go${r.queued === 1 ? "es" : ""} in when this turn ends (a note on the task says so)`
   if (r.delivery === "after_compaction") return "after compaction: the agent is compacting its context; the queued messages go out right after, in the same session"
   if (r.delivery === "already_delivered") return "already delivered: a turn has taken the queued messages (or none were queued)"
@@ -1521,7 +1521,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     text: preview(m.text, 2000, "the rest is in the task page's queue"),
     attachments: m.attachments.length ? m.attachments.map((f) => f.name) : undefined,
     status:
-      m.status === "delivering"
+      m.status === "accepted"
+        ? "accepted by Codex; this does not confirm model processing"
+        : m.status === "uncertain"
+          ? "delivery uncertain; automatic retry is paused, review the transcript before removing the hold"
+          : m.status === "delivering"
         ? "delivering: a turn is starting with it, it can't be changed any more"
         : m.status === "steering"
           ? "steering: on its way into the running turn, it can't be changed any more"
@@ -1549,8 +1553,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     "deliver_queued_now",
     {
       description:
-        "Steer: hand the messages queued for a task to its agent in the turn it's running now, without stopping it. The agent reads every queued message, in send order, at its next step (between tool calls) and carries on from there; the transcript marks them steered. " +
-        "Use it when a queued message changes what the agent is doing and waiting for the turn to end would waste work. If no turn is running, the messages simply go out with the next turn. A Codex or Cursor agent can't take messages mid-turn: they wait for the turn's end, and the delivery field says so. " +
+        "Steer: hand the messages queued for a task to its agent in the turn it's running now, without stopping it. Delivery is requested in send order; Codex acceptance is recorded separately and does not confirm model processing. " +
+        "Use it when a queued message changes what the agent is doing and waiting for the turn to end would waste work. If no turn is running, the messages simply go out with the next turn. A Cursor agent can't take messages mid-turn: they wait for the turn's end, and the delivery field says so. " +
         "To stop the turn instead, call stop_task: the queued messages are kept and start the next turn.",
       inputSchema: { task: z.string() },
     },
@@ -1565,7 +1569,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     "cancel_queued_message",
     {
       description:
-        "Withdraw a message queued for a task's next turn, before the agent gets it (ids from list_queued_messages or send_to_task's queuedMessageId). Fails with \"already delivered\" once a turn has taken it: then send a correction with send_to_task instead. If it was the only message, the agent isn't woken for it.",
+        "Withdraw a queued message, or remove an uncertain-delivery hold after reviewing its transcript (this cannot undo delivery; an uncertain hold has no Undo). For a message awaiting its next turn, before the agent gets it (ids from list_queued_messages or send_to_task's queuedMessageId). Fails with \"already delivered\" once a turn has taken it: then send a correction with send_to_task instead. If it was the only message, the agent isn't woken for it.",
       inputSchema: { task: z.string(), message_id: z.string() },
     },
     safe(async (a: { task: string; message_id: string }) => {
