@@ -25,7 +25,13 @@ const tasks = titles.map((title, i) => ({
   createdAt: at(i === 3 ? 3 : i === 2 ? 0 : 1), updatedAt: at(0),
   prUrl: i === 0 ? "https://github.com/example/studio/pull/42" : null,
   prState: i === 0 ? "merged" : null, prMergedAt: i === 0 ? at(1, 45) : null,
+  parentTaskId: null, rootTaskId: null, subtaskDepth: 0,
 }))
+// Exercise the real nested panel path, not another top-level task with a different title.
+Object.assign(tasks[2], { parentTaskId: tasks[0].id, rootTaskId: tasks[0].id, subtaskDepth: 1 })
+Object.assign(tasks[3], { parentTaskId: tasks[2].id, rootTaskId: tasks[0].id, subtaskDepth: 2 })
+const isTask = (kind) => kind === "task" || kind === "subtask"
+const taskFor = (kind) => tasks[kind === "subtask" ? 3 : 0]
 const messages = []
 for (const ago of [3, 2, 1, 0]) {
   const add = (role, content, meta = null) => messages.push({ id: `chat_day${ago}-${messages.length}`, role, content, meta, createdAt: at(ago, messages.length % 60) })
@@ -55,9 +61,9 @@ const retained = Array.from({ length: 600 }, (_, i) => ({
 async function fixture(context, long = false) {
   const full = long ? [...retained, ...messages] : messages
   const fullCaptain = full.map((m) => ({ ...m, projectId: project.id }))
-  const fullTask = full.map((m) => m.role === "notice" ? {
-    ...m, taskId: tasks[0].id, role: "event", content: "Turn 1 finished. · Keyboard navigation checked.", meta: null,
-  } : { ...m, taskId: tasks[0].id })
+  const taskMessages = (id) => full.map((m) => m.role === "notice" ? {
+    ...m, taskId: id, role: "event", content: "Turn 1 finished. · Keyboard navigation checked.", meta: null,
+  } : { ...m, taskId: id })
   // Link checks open a local stand-in page; the fixture never asks GitHub for data or state.
   await context.route("https://github.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>GitHub reference</title>" }))
   await context.addInitScript(() => {
@@ -75,7 +81,7 @@ async function fixture(context, long = false) {
     if (path === "/api/boot" || path === "/api/stream") return route.abort()
     let body
     if (path.endsWith("/history")) {
-      const list = path.startsWith("/api/tasks/") ? fullTask : path.includes("/captain/") ? fullCaptain : full
+      const list = path.startsWith("/api/tasks/") ? taskMessages(path.split("/")[3]) : path.includes("/captain/") ? fullCaptain : full
       const query = new URL(route.request().url()).searchParams
       if (query.has("days")) {
         const days = [...new Set(list.map((m) => new Date(m.createdAt).toDateString()))].map((key) => {
@@ -97,17 +103,17 @@ async function fixture(context, long = false) {
     else if (path === "/api/projects") body = [project]
     else if (path === `/api/projects/${project.id}`) body = project
     else if (path === `/api/projects/${project.id}/captain/messages`) body = fullCaptain.slice(-messages.length)
-    else if (path === `/api/tasks/${tasks[0].id}/messages`) body = fullTask.slice(-messages.length)
-    else if (path === `/api/tasks/${tasks[0].id}`) body = tasks[0]
+    else if (/^\/api\/tasks\/[^/]+\/messages$/.test(path)) body = taskMessages(path.split("/")[3]).slice(-messages.length)
+    else if (tasks.some((t) => path === `/api/tasks/${t.id}`)) body = tasks.find((t) => path === `/api/tasks/${t.id}`)
     else return route.continue()
     return route.fulfill({ json: body })
   })
 }
-const historySelector = (kind) => `${kind === "captain" ? "[data-testid=captain-chat]" : kind === "task" ? "[data-testid=side-thread]" : "[data-testid=chat-panel]"} [data-chat-history]`
+const historySelector = (kind) => `${kind === "captain" ? "[data-testid=captain-chat]" : isTask(kind) ? `[data-view="session:${taskFor(kind).id}"]` : "[data-testid=chat-panel]"} [data-chat-history]`
 const history = (page, kind) => page.locator(historySelector(kind)).filter({ visible: true }).last()
 const wait = (page) => page.waitForTimeout(350)
-async function open(page, kind) {
-  await page.goto(base + (kind === "captain" ? `/?project=${project.id}` : kind === "task" ? `/?session=${tasks[0].id}` : "/"))
+async function open(page, kind, stacked = false) {
+  await page.goto(base + (kind === "captain" ? `/?project=${project.id}` : stacked ? `/?session=${tasks[0].id}&stack=${tasks[2].id},${tasks[3].id}` : isTask(kind) ? `/?session=${taskFor(kind).id}` : "/"))
   const box = history(page, kind)
   await box.locator("nav button").last().waitFor()
   try {
@@ -121,8 +127,32 @@ async function open(page, kind) {
     console.error(kind, await box.locator("[data-scroller]").evaluate((el) => ({ top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, rows: el.firstElementChild.childElementCount })))
     throw error
   }
+  if (stacked) await box.evaluate((el) => { const strip = el.closest('[data-testid="columns"]'); strip.scrollLeft = strip.scrollWidth })
   await wait(page)
   return box
+}
+
+// Assert against the conversation column, not just ChatHistory: a centred outer width cap can move the entire
+// history (including its correctly positioned absolute popup) inward while a history-relative check still passes.
+async function placement(box, kind) {
+  const geometry = await box.evaluate((el) => {
+    const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width } }
+    const column = el.closest('[data-testid="column"]')
+    const frame = column ?? el.closest('[data-testid="captain-chat"], [data-testid="chat-panel"]')
+    const bar = column?.querySelector(':scope > [data-testid="rail"]')
+    return { frame: rect(frame), bar: bar?.getBoundingClientRect().width ?? 0,
+      history: rect(el), popup: rect(el.querySelector('[role="region"]')) }
+  })
+  const { frame, bar, history, popup } = geometry
+  assert.ok(Math.abs(history.x - frame.x - bar) < 2, `${kind}: date rail sits on the conversation edge (${JSON.stringify(geometry)})`)
+  assert.ok(Math.abs(history.width - (frame.width - bar)) < 2, `${kind}: date navigation fills the conversation frame`)
+  assert.ok(Math.abs(popup.x - history.x - 48) < 2, `${kind}: popup clears the date rail by the shared offset`)
+  assert.ok(Math.abs(popup.y - history.y - 8) < 2, `${kind}: popup sits at the transcript top`)
+  assert.equal(await box.getByRole("region").evaluate((el) => el.scrollWidth > el.clientWidth), false, `${kind}: popup fits`)
+  return box.getByRole("region").evaluate((el) => {
+    const style = getComputedStyle(el)
+    return Object.fromEntries(["backgroundColor", "borderRadius", "borderWidth", "padding", "fontSize", "boxShadow"].map((key) => [key, style[key]]))
+  })
 }
 
 for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]) {
@@ -227,7 +257,8 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
     console.log(`${engine} ${kind}: touch preview, hidden-day jump, alignment${kind === "coordinator" ? ", SSE and reflow anchoring" : ""}, reference links, isolated new-tab taps, grouped-source jump and static highlight passed`)
     await context.close()
   }
-  for (const kind of ["coordinator", "captain", "task"]) {
+  const referenceStyle = new Map()
+  for (const kind of ["coordinator", "captain", "task", "subtask"]) {
     if (process.env.CHAT_DAYS_KIND && process.env.CHAT_DAYS_KIND !== kind) continue
     for (const mobile of [false, true]) {
       const context = await browser.newContext({ viewport: { width: mobile ? 400 : 1280, height: mobile ? 844 : 900 }, isMobile: mobile, hasTouch: mobile })
@@ -247,6 +278,9 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
       const bounds = await box.boundingBox()
       const panel = await popup.boundingBox()
       assert.ok(Math.abs(panel.y - bounds.y - 8) < 2, "navigation opens at the top regardless of the selected day")
+      const style = await placement(box, kind)
+      if (kind === "coordinator") referenceStyle.set(mobile, style)
+      else if (referenceStyle.has(mobile)) assert.deepEqual(style, referenceStyle.get(mobile), `${kind}: same date panel appearance as the Coordinator`)
       if (!process.env.CHAT_DAYS_CHECKS_ONLY) await page.screenshot({ path: `${output}/${engine}-${kind}-${mobile ? "mobile" : "desktop"}-navigation.png` })
       const actions = popup.getByRole("group", { name: "Transcript navigation" })
       const start = actions.getByRole("button", { name: "Jump to start", exact: true })
@@ -283,8 +317,8 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
       await page.waitForFunction((el) => el === document.activeElement && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2, await list.elementHandle())
       assert.equal(await oldest.count(), 0, "end returns to the live tail")
       const late = { id: `chat_end-${kind}-${mobile}`, role: "assistant", content: "A new reply after returning to the end. ".repeat(12), meta: null, createdAt: Date.now(),
-        ...(kind === "task" ? { taskId: tasks[0].id } : kind === "captain" ? { projectId: project.id } : {}) }
-      const type = kind === "task" ? "task.message" : kind === "captain" ? "captain.message" : "chat.message"
+        ...(isTask(kind) ? { taskId: taskFor(kind).id } : kind === "captain" ? { projectId: project.id } : {}) }
+      const type = isTask(kind) ? "task.message" : kind === "captain" ? "captain.message" : "chat.message"
       await page.evaluate((event) => window.__streams.forEach((s) => s.onmessage?.({ data: JSON.stringify(event) })), { type, message: late })
       await page.waitForFunction((el) => el.textContent.includes("A new reply after returning") && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2, await list.elementHandle())
       assert.equal(await box.getByRole("region").count(), 0)
@@ -292,6 +326,31 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
       console.log(`${engine} ${kind} ${mobile ? "mobile" : "desktop"}: double click, top placement, retained start, keyboard start/end, bounded DOM and live end pin passed`)
       await context.close()
     }
+  }
+  // Wide filling columns expose the former outer width cap. Stacked and folded-sidebar columns also have
+  // borders or a sub-task bar: navigation belongs at the conversation edge, after that bar, at every depth.
+  for (const [kind, width, stacked, folded] of [
+    ["task", 1800, false, false], ["subtask", 1800, false, false],
+    ["subtask", 2300, true, false], ["subtask", 1280, true, false],
+    ["task", 1800, false, true], ["subtask", 1800, false, true],
+  ]) {
+    if (process.env.CHAT_DAYS_KIND && process.env.CHAT_DAYS_KIND !== kind) continue
+    const context = await browser.newContext({ viewport: { width, height: 900 } })
+    await fixture(context)
+    const page = await context.newPage()
+    const box = await open(page, kind, stacked)
+    if (folded) {
+      await page.getByRole("button", { name: "Fold the sidebar", exact: true }).click()
+      await wait(page)
+    }
+    await box.locator("nav button").last().click()
+    await box.getByRole("region").waitFor()
+    await placement(box, kind)
+    const popup = await box.getByRole("region").boundingBox()
+    assert.ok(popup.x >= 0 && popup.x + popup.width <= width, "date panel stays in the visible conversation")
+    if (!process.env.CHAT_DAYS_CHECKS_ONLY) await page.screenshot({ path: `${output}/${engine}-${kind}-${width}${stacked ? "-stacked" : ""}${folded ? "-folded" : ""}-placement.png` })
+    console.log(`${engine} ${kind} ${width}px${stacked ? " stacked" : ""}${folded ? " folded sidebar" : ""}: date navigation matches the full conversation frame`)
+    await context.close()
   }
   if (engine === "chromium" && !process.env.CHAT_DAYS_CHECKS_ONLY) {
     for (const width of [320, 400, 560, 800]) {
@@ -301,7 +360,7 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
         const context = await browser.newContext({ viewport: { width: Math.round(width / zoom), height: Math.round(900 / zoom) }, deviceScaleFactor: zoom, hasTouch: true, isMobile: true })
         await fixture(context)
         const page = await context.newPage()
-        for (const kind of ["coordinator", "captain", "task"]) {
+        for (const kind of ["coordinator", "captain", "task", "subtask"]) {
           const box = await open(page, kind)
           const yesterday = box.getByRole("button", { name: /^Yesterday: preview/ })
           await yesterday.tap()
@@ -309,6 +368,7 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
           await wait(page)
           await yesterday.tap()
           await box.locator('[role="region"]').waitFor()
+          await placement(box, kind)
           const overflows = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
           assert.equal(overflows, false, `${width}px at ${zoom} doesn't overflow`)
           assert.equal(await box.locator('[role="region"]').evaluate((el) => el.scrollWidth > el.clientWidth), false, "summary fits its panel")

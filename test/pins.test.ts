@@ -296,9 +296,9 @@ describe("Columns, rule 1: clicking anything shows just it and the pins", () => 
     expect(panelIds()).toEqual([DOCS.id])
     expect(chat()).toBe("closed")
     expect(folds()).toEqual(["fill"])
-    // The panel fills from its own width up, its content at a reading width in the middle; no edge to drag.
+    // The frame fills the column; TaskSession's chat-column centres the text without insetting the date rail.
     expect(columns()[0]!.className).toContain("flex-1")
-    expect(columns()[0]!.querySelector(":scope > div")!.className).toContain(FOCUS_MAX)
+    expect(columns()[0]!.querySelector(":scope > div")!.className).not.toContain(FOCUS_MAX)
     expect(document.querySelector("[role=separator][aria-label^='Width of']")).toBeNull()
     // The chat stays mounted under it, out of Tab's and screen readers' reach.
     expect(aside()!.dataset.covering).toBe("true")
@@ -349,6 +349,22 @@ describe("Columns, rule 1: clicking anything shows just it and the pins", () => 
 })
 
 describe("Columns, rule 2: a sub-task opens alone, and its crumbs lead up", () => {
+  it.each([LOGO, DESIGNER, RATER])("keeps $title's date navigation in the full conversation frame", async (task) => {
+    render(opened(task))
+    await settle()
+    const frame = column(task.id)
+    expect(frame.dataset.fold).toBe("fill")
+    const history = frame.querySelector<HTMLElement>("[data-chat-history]")!
+    // An outer reading-width cap moves both the date rail and its absolute popup, even if ChatHistory itself
+    // fills its parent. Check the whole containing chain for tasks, sub-tasks and a third nesting level.
+    for (let parent = history.parentElement; parent && parent !== frame; parent = parent.parentElement) {
+      expect(parent.className).not.toMatch(/\bmax-w-/)
+    }
+    expect(history.querySelector("[data-scroller]")!.className).toContain("chat-column")
+    click(history.querySelector("nav button")!)
+    expect(history.querySelector('[role="group"][aria-label="Transcript navigation"]')?.textContent).toBe("Jump to startJump to end")
+  })
+
   it("from the sidebar: only the sub-task; each crumb shows its level alone, a step of its own in history", async () => {
     render("/")
     await settle()

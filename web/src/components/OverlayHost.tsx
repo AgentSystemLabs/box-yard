@@ -47,7 +47,7 @@ interface Panel {
   content: React.ReactNode
 }
 const FILL = "flex min-h-0 flex-1 flex-col overflow-hidden"
-/** The panel filling the room keeps its content to a comfortable reading width, centred. */
+/** Non-task panels filling the room keep their content to a comfortable reading width, centred. */
 export const FOCUS_MAX = "max-w-[56rem]"
 
 /**
@@ -278,7 +278,9 @@ function StackColumn({ index, panel, label, last, fold, edge, rail, children }: 
       )}
     >
       {rail}
-      <div className={cx("flex min-h-0 w-full flex-1 flex-col", fold === "fill" && cx("mx-auto", FOCUS_MAX))}>
+      {/* TaskSession centres its text with chat-column, like the Coordinator and Captain. Keep its frame full
+          width so the date rail, summary and scroll area share the conversation panel's edge. */}
+      <div className={cx("flex min-h-0 w-full flex-1 flex-col", fold === "fill" && viewOf(panel).kind !== "session" && cx("mx-auto", FOCUS_MAX))}>
         {children}
       </div>
       {index > 0 && fold === "open" && <ResizeHandle {...size.handle} label={`Width of ${label}`} belowHeader className="@min-[35.5rem]/coord:block" />}
