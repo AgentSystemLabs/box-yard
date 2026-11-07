@@ -2913,6 +2913,7 @@ export class Store {
     const rows = this.db.prepare(`SELECT * FROM captain_messages
       WHERE project_id = ? AND role = 'user' AND created_at >= ?
         AND json_extract(meta_json, '$.cancelled') IS NOT 1
+        AND json_extract(meta_json, '$.ownerAction') IS NOT 'close_task'
         AND NOT (json_extract(meta_json, '$.source') IS 'agent' AND json_extract(meta_json, '$.fyi') IS 1)
       ORDER BY created_at ASC, rowid ASC`).all(projectId, since) as
       { id: string; project_id: string; role: ChatRole; content: string; meta_json: string | null; created_at: number }[]

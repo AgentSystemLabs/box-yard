@@ -696,7 +696,7 @@ export class Orchestrator {
   /** Messages Cody sent since the orchestrator last replied. */
   private unansweredUserMessages(): ChatMessage[] {
     const since = Number(this.store.getKv("orchestrator_last_turn_at") ?? 0)
-    return this.store.listChat(200).filter((m) => m.role === "user" && m.createdAt >= since && m.meta?.cancelled !== true)
+    return this.store.listChat(200).filter((m) => m.role === "user" && m.createdAt >= since && m.meta?.cancelled !== true && m.meta?.ownerAction !== "close_task")
   }
 
   private promptText(messages: ChatMessage[]): string[] {
