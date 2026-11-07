@@ -103,14 +103,24 @@ async function fixture(context, long = false) {
     return route.fulfill({ json: body })
   })
 }
-const history = (page, kind) => page.locator(`${kind === "captain" ? "[data-testid=captain-chat]" : kind === "task" ? "[data-testid=side-thread]" : "[data-testid=chat-panel]"} [data-chat-history]`).filter({ visible: true }).last()
+const historySelector = (kind) => `${kind === "captain" ? "[data-testid=captain-chat]" : kind === "task" ? "[data-testid=side-thread]" : "[data-testid=chat-panel]"} [data-chat-history]`
+const history = (page, kind) => page.locator(historySelector(kind)).filter({ visible: true }).last()
 const wait = (page) => page.waitForTimeout(350)
 async function open(page, kind) {
   await page.goto(base + (kind === "captain" ? `/?project=${project.id}` : kind === "task" ? `/?session=${tasks[0].id}` : "/"))
   const box = history(page, kind)
   await box.locator("nav button").last().waitFor()
-  await page.waitForFunction((el) => el.firstElementChild.childElementCount >= 60 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2,
-    await box.locator("[data-scroller]").elementHandle())
+  try {
+    // Opening can replace the chat's first pre-render. Poll the current scroller, not a detached ElementHandle.
+    await page.waitForFunction((selector) => {
+      const el = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length).at(-1)
+      return el && el.firstElementChild.childElementCount >= 60 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2
+    }, `${historySelector(kind)} [data-scroller]`)
+  } catch (error) {
+    await page.screenshot({ path: `${output}/${kind}-open-failure.png` })
+    console.error(kind, await box.locator("[data-scroller]").evaluate((el) => ({ top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, rows: el.firstElementChild.childElementCount })))
+    throw error
+  }
   await wait(page)
   return box
 }
@@ -323,6 +333,7 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
           assert.ok(bounds.y >= view.y - 2 && bounds.y < view.y + view.height, "destination is visible")
           await page.screenshot({ path: `${output}/${kind}-jump-after-${suffix}.png` })
         }
+        console.log(`${engine} ${width}px at ${zoom}: all chat panels fit; explicit day and source navigation passed`)
         await context.close()
       }
     }
