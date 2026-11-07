@@ -227,7 +227,7 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
       className="group grid h-11 w-12 shrink-0 place-items-center rounded-lg disabled:opacity-50 sm:h-7 sm:w-10"
     >
       <span className={cx("relative h-5 w-9 rounded-full transition", checked ? "bg-yard-500" : "bg-zinc-700 group-hover:bg-zinc-600")}>
-        <span className={cx("absolute top-0.5 h-4 w-4 rounded-full bg-zinc-50 shadow transition-all", checked ? "left-[1.125rem]" : "left-0.5")} />
+        <span className={cx("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", checked ? "left-[1.125rem]" : "left-0.5")} />
       </span>
     </button>
   )
