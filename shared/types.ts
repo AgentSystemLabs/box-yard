@@ -412,7 +412,7 @@ export interface QueuedMessage {
   sender: string
   text: string
   attachments: Attachment[]
-  status: "queued" | "delivering" | "steering"
+  status: "queued" | "delivering" | "steering" | "accepted" | "uncertain"
   /** Bumped on every edit; pass it back to an edit to refuse it when someone else changed the message first. */
   version: number
   createdAt: number
@@ -421,8 +421,8 @@ export interface QueuedMessage {
 
 /**
  * What Steer did (POST /api/tasks/:id/queue/steer, deliver_queued_now, send_to_task steer): "steering": the queue
- * is on its way into the running turn, which reads it at its next step without stopping; "after_turn": the
- * running turn can't take it (a Codex agent, or the box couldn't be reached), so it goes in when that turn ends;
+ * is on its way into the running turn, without a provider acknowledgment yet; "after_turn": the
+ * running turn can't take it (Cursor, or the box couldn't be reached), so it goes in when that turn ends;
  * "next_turn": no turn is running (or one is starting and takes them all); "after_compaction": a /compact turn
  * runs first; "already_delivered": a turn already took them (nothing was queued any more).
  */

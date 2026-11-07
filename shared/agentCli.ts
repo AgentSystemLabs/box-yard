@@ -24,11 +24,8 @@ export const AGENT_CLI_SHORT: Record<AgentCli, string> = { claude: "Claude", cod
 export const isAgentCli = (v: unknown): v is AgentCli => typeof v === "string" && (AGENT_CLIS as readonly string[]).includes(v)
 export const isManagerCli = (v: unknown): v is ManagerCli => typeof v === "string" && (MANAGER_CLIS as readonly string[]).includes(v)
 
-/**
- * The CLIs that read a message sent while a turn runs at the agent's next step (a steer). Codex's `codex exec` and
- * Cursor's `cursor-agent -p` read their prompt once, so a message to them waits for the turn's end.
- */
-export const canSteer = (cli: AgentCli | null | undefined) => (cli ?? DEFAULT_AGENT_CLI) === "claude"
+/** Claude uses streaming stdin; Codex uses app-server turn/steer. Cursor waits for the next turn. */
+export const canSteer = (cli: AgentCli | null | undefined) => (cli ?? DEFAULT_AGENT_CLI) !== "cursor"
 
 /** A Claude model id or alias (claude-opus-5-5, opus, sonnet[1m], haiku, fable…): Codex can't run it. */
 export function isClaudeModel(model: string | null | undefined): boolean {
@@ -55,7 +52,7 @@ export function cliForModel(model: string | null | undefined): AgentCli | null {
 }
 
 /**
- * The model a Codex run passes to `codex exec -m`: `chosen` (a task's or the route's) unless it is a Claude model,
+ * The model a Codex run requests: `chosen` (a task's or the route's) unless it is a Claude model,
  * else the Codex model setting. An explicitly saved empty setting keeps the CLI's own default.
  */
 export function codexModel(chosen: string | null | undefined, setting: string | null | undefined): string | null {
