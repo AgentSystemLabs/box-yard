@@ -125,6 +125,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/setup.test.ts": "Full Box Yard server/task-manager fixture",
   "test/shared-git.e2e.test.ts": "End-to-end runner/server integration",
   "test/side-threads.e2e.test.ts": "End-to-end runner/server integration",
+  "test/sidebar-delete-api.test.ts": "Full Box Yard server/task-manager/Captain HTTP fixture",
   "test/size-placement.e2e.test.ts": "End-to-end runner/server integration",
   "test/slot-limit.e2e.test.ts": "End-to-end runner/server integration",
   "test/steer.e2e.test.ts": "End-to-end runner/server integration",

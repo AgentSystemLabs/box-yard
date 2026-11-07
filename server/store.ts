@@ -930,6 +930,55 @@ const queuedInputRow = (r: InputRow): QueuedInputRow => ({
 export class Store {
   constructor(readonly db: DB) {}
 
+  // A conditional sidebar deletion reserves its entire scope before cleanup can await. Every input/turn admission
+  // uses this Store, so a message, scheduled start or new child cannot enter the scope during destructive cleanup.
+  private readonly deletingTasks = new Set<string>()
+  private readonly deletingProjects = new Set<string>()
+
+  projectDeletionPending(projectId: string): boolean {
+    return this.deletingProjects.has(projectId)
+  }
+
+  taskDeletionPending(taskId: string, projectId?: string): boolean {
+    if (this.deletingTasks.has(taskId)) return true
+    return this.deletingProjects.size > 0 && this.deletingProjects.has(projectId ?? this.getTaskRow(taskId)?.project_id ?? "")
+  }
+
+  private assertTaskNotDeleting(taskId: string) {
+    if (this.taskDeletionPending(taskId)) throw new ConflictError("This task is being deleted; wait for deletion to finish.")
+  }
+
+  /** Check live rows and reserve synchronously, before the first workspace/archive cleanup await. No status changes. */
+  reserveRestingDeletion(target: { taskId: string } | { projectId: string }): () => void {
+    const projectId = "projectId" in target ? target.projectId : undefined
+    if (projectId && !this.getProject(projectId)) throw new NotFoundError(`Project ${projectId} not found`)
+    const rows = this.listTaskRows(projectId ? { projectId } : {})
+    const ids = new Set("taskId" in target ? [target.taskId] : rows.map((r) => r.id))
+    if ("taskId" in target) {
+      if (!rows.some((r) => r.id === target.taskId)) throw new NotFoundError(`Task ${target.taskId} not found`)
+      let added = true
+      while (added) {
+        added = false
+        for (const r of rows) if (r.parent_task_id && ids.has(r.parent_task_id) && !ids.has(r.id)) { ids.add(r.id); added = true }
+      }
+    }
+    if ((projectId && this.projectDeletionPending(projectId)) || rows.some((r) => ids.has(r.id) && this.taskDeletionPending(r.id, r.project_id))) {
+      throw new ConflictError("Deletion is already in progress for this task or project.")
+    }
+    if (rows.some((r) => ids.has(r.id) && (r.current_turn_id || ["queued", "starting", "working"].includes(r.status) || r.compacting || r.compact_pending || this.hasInputs(r.id) || this.hasUncertainCodexInput(r.id)))) {
+      throw new ConflictError("Stop queued or running tasks before deleting.")
+    }
+    for (const id of ids) this.deletingTasks.add(id)
+    if (projectId) this.deletingProjects.add(projectId)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      for (const id of ids) this.deletingTasks.delete(id)
+      if (projectId) this.deletingProjects.delete(projectId)
+    }
+  }
+
   /**
    * What only a provider knows about a box (a RunPod pod's GPU type and id, a Docker container's name), merged
    * into Task.placement. Set by the app; tests leave it unset.
@@ -1712,6 +1761,8 @@ export class Store {
     /** A sub-task's place in its tree (TaskRow.parent_task_id, root_task_id, subtask_depth, with_parent). */
     subtask?: { parentId: string; rootId: string; depth: number; withParent: boolean } | null
   }): Task {
+    if (this.projectDeletionPending(input.projectId)) throw new ConflictError("This project is being deleted; wait for deletion to finish.")
+    if (input.subtask) this.assertTaskNotDeleting(input.subtask.parentId)
     const now = Date.now()
     const id = input.id ?? newId("task")
     this.db
@@ -1839,6 +1890,7 @@ export class Store {
    * `touch: false` keeps updated_at (the "last active" time) as it was.
    */
   updateTask(id: string, patch: TaskPatch, opts: { quiet?: boolean; touch?: boolean } = {}): Task {
+    if (patch.currentTurnId || patch.compactPending || patch.compacting || (patch.status && ["queued", "starting", "working"].includes(patch.status))) this.assertTaskNotDeleting(id)
     const before =
       patch.status !== undefined && !opts.quiet
         ? (this.db.prepare("SELECT status, compacting FROM tasks WHERE id = ?").get(id) as { status: TaskStatus; compacting: number } | undefined)
@@ -1939,6 +1991,7 @@ export class Store {
    * nothing changes then.
    */
   claimTurnSlot(taskId: string, boxId: string, slots: number, patch: TaskPatch): boolean {
+    if (this.taskDeletionPending(taskId)) return false
     return this.db.transaction(() => {
       const row = this.db.prepare("SELECT current_turn_id, status FROM tasks WHERE id = ?").get(taskId) as { current_turn_id: string | null; status: TaskStatus } | undefined
       if (!row || row.current_turn_id || row.status === "starting" || row.status === "working") return false
@@ -2183,6 +2236,7 @@ export class Store {
    * `message` is the transcript line's meta, written when the message is delivered (none for agent/system messages).
    */
   queueInput(taskId: string, source: string, content: string, attachments: string[] = [], opts: { prefix?: string; message?: Record<string, unknown> } = {}): string {
+    this.assertTaskNotDeleting(taskId)
     const id = newId("in")
     const now = Date.now()
     this.db
@@ -2376,6 +2430,7 @@ export class Store {
 
   /** Undo a cancel: the input is queued again, in its old place. */
   restoreInput(taskId: string, id: string): InputChange {
+    this.assertTaskNotDeleting(taskId)
     const res = this.db
       .prepare("UPDATE task_inputs SET status = 'queued', version = version + 1, updated_at = ? WHERE id = ? AND task_id = ? AND status = 'cancelled' AND (claim IS NULL OR claim NOT LIKE 'codex-%')")
       .run(Date.now(), id, taskId)

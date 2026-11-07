@@ -5,7 +5,7 @@ import path from "node:path"
 import type { Config } from "./config.js"
 import type { Hub } from "./hub.js"
 import type { CaptainNoticeEntry, Store } from "./store.js"
-import { BadRequestError, queuedChatError, type QueuedChatChange } from "./store.js"
+import { BadRequestError, ConflictError, queuedChatError, type QueuedChatChange } from "./store.js"
 import { compactThreshold, noteBudgetOf, type SettingsStore } from "./settings.js"
 import { contextTokens, contextWindowOf, formatTokens, parseContextReport, resultUsageObject, sessionUsageOf } from "./usage.js"
 import { routingInstructions } from "./routing.js"
@@ -279,6 +279,7 @@ export class CaptainManager {
   ) {}
 
   get(projectId: string) {
+    if (this.store.projectDeletionPending(projectId)) throw new ConflictError("This project is being deleted; wait for deletion to finish.")
     const project = this.store.getProject(projectId)
     if (!project) throw new BadRequestError(`No project ${projectId}`)
     let captain = this.captains.get(project.id)
@@ -500,6 +501,18 @@ export class CaptainManager {
     return this.get(projectId).repo
   }
 
+  /** Reserve the Captain and all project tasks in the same synchronous admission check. */
+  reserveRestingDeletion(projectId: string): () => void {
+    const captain = this.captains.get(projectId)
+    if (captain?.active) throw new ConflictError("Stop the Captain and its queued work before deleting this project.")
+    const release = this.store.reserveRestingDeletion({ projectId })
+    return () => {
+      release()
+      // A scheduled wake may have reached drain while reserved. Resume it if deletion failed and the project stays.
+      if (this.store.getProject(projectId)) captain?.nudge()
+    }
+  }
+
   /** Its project was deleted: its Captain's clone goes (its compactions stay in the folder). */
   async projectDeleted(projectId: string) {
     await (this.captains.get(projectId)?.repo ?? this.detachedRepo(projectId)).remove()
@@ -687,6 +700,7 @@ class Captain {
   }
 
   send(content: string, { id, attachments = [], source = "coordinator", tool, meta: extra }: CaptainSendOptions = {}): CaptainMessage {
+    this.assertNotDeleting()
     // Mid-turn it waits for the next turn: queued (see Store.deliverQueued).
     const meta = { ...extra, source, ...(tool ? { tool } : {}), ...(attachments.length ? { attachments } : {}), ...(this.running ? { queued: true } : {}) }
     const msg = this.store.addCaptainMessage(this.project.id, "user", content.trim(), meta, id)
@@ -714,6 +728,7 @@ class Captain {
   }
 
   restoreQueued(id: string): CaptainMessage {
+    this.assertNotDeleting()
     const since = Number(this.store.getKv(lastTurnKey(this.project.id)) ?? 0)
     const msg = this.queuedChanged(
       this.store.restoreQueuedChat("captain_messages", id, this.project.id, { queued: this.running, at: Math.max(Date.now(), since) }),
@@ -737,6 +752,7 @@ class Captain {
    * throttle ends or something new arrives. `heldUntil` says when, so the server can tell the agent.
    */
   fromAgent(input: AgentCaptainMessage): { message: CaptainMessage; heldUntil: number | null } {
+    this.assertNotDeleting()
     const meta: Record<string, unknown> = {
       source: "agent",
       tool: "message_captain",
@@ -881,6 +897,7 @@ class Captain {
   }
 
   requestCompact(trigger: "button" | "auto" = "button") {
+    this.assertNotDeleting()
     if (!this.session().started) throw new BadRequestError("This Captain hasn't started a conversation yet, so there is nothing to compact.")
     if (this.compacting || this.compactWanted) return this.state()
     this.compactWanted = trigger
@@ -921,8 +938,12 @@ class Captain {
     return { id, started: this.store.getKv(startedKey(this.project.id)) === "1" }
   }
 
+  private assertNotDeleting() {
+    if (this.store.projectDeletionPending(this.project.id)) throw new ConflictError("This project is being deleted; wait for deletion to finish.")
+  }
+
   private async drain() {
-    if (this.running || this.stopped) return
+    if (this.running || this.stopped || this.store.projectDeletionPending(this.project.id) || !this.store.getProject(this.project.id)) return
     this.running = true
     this.publishState()
     try {
