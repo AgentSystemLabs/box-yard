@@ -32,7 +32,7 @@ A project can pick its own image in Project › Settings › Runs on:
 - **Its own image**: run as it is (it needs bash, node, git and claude).
 - **Its own Dockerfile**: built on this computer with `ARG BOXYARD_BASE` set to the image above, so it can start `FROM ${BOXYARD_BASE}` and add what the project needs (the editor prefills that template). A Dockerfile wins over an image.
 
-`update_project` sets the same thing with `docker: { image, dockerfile }`.
+The authenticated project settings API accepts `docker: { image, dockerfile }`; the current Captain `update_project` tool does not expose these fields.
 
 ## How it works
 
