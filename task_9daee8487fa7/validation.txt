@@ -1,7 +1,9 @@
-Commit: 6f68fa54a5e56978361f652bf31795bb86886c91
+Commit: 8586fa65f3d496e95dff44652d0e572893c45c84
+Merged main: 7a8eea9c4c4e766e3e1664bfea088ba2830c01e9
 Production build, isolated mock yard, example data; every browser write intercepted.
-Typecheck and build passed.
-Fast gate: 279 files, 3240 tests passed, execution 199.090s.
-Focused: 13 files, 178 tests passed.
+Typecheck and build passed on the same committed head.
+Fast gate: 283 files, 3288 tests passed, execution 206.699s, lock wait 0.001s.
+Focused: 13 files, 178 tests passed after merging main.
 Browser: 20 idle/working cases at 320, 393, 400, 560, 800px; 100% and emulated 125% zoom.
 Checks: 44px touch controls, fold thresholds, overflow, touch/typed picker, clear, one destination POST, stay in source.
+Protected sidebar deletion, compaction index and Days history fallback files match merged main.
