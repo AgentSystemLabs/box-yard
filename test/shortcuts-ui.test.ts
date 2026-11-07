@@ -96,7 +96,7 @@ describe("the keyboard shortcuts sheet", () => {
     expect(sheet()).toBeNull()
     expect(key("?", document.body, { shiftKey: true }).defaultPrevented).toBe(true)
     expect(sheet()).not.toBeNull()
-    expect([...sheet()!.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["Anywhere", "Composer", "Command palette", "File preview", "Settings"])
+    expect([...sheet()!.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["Anywhere", "Sidebar", "Composer", "Command palette", "File preview", "Settings"])
     for (const id of ["palette", "switch", "composer", "voice", "close", "help", "send", "newline", "history", "move", "new-tab", "step", "zoom", "find"]) expect(shortcut(id), id).not.toBeNull()
     // Each row says its keys for a screen reader, the caps themselves are hidden from it.
     expect(shortcut("composer")!.querySelector(".sr-only")!.textContent).toMatch(/^(Option\+Shift\+C|Alt\+Shift\+C)$/)
