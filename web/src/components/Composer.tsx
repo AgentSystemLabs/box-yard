@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode, type RefObject, type Ref } from "react"
 import { createPortal, flushSync } from "react-dom"
-import { Clock, Maximize2, Minimize2, Paperclip, Send, Square } from "lucide-react"
+import { Clock, Maximize2, Minimize2, ArrowUpRight, Paperclip, Send, Square } from "lucide-react"
 import { composerMaxHeight, isTouchDevice } from "../lib/composer"
 import { useSettings } from "../lib/queries"
 import { Button, cx } from "./ui"
@@ -17,6 +17,7 @@ import { ComposerMenuItem, MoreButton, MoreMenu, useMoreMenu, type MoreDot } fro
 import { foldPlan, inMenu, onRow } from "../lib/composerRow"
 import type { Attachment } from "../../../shared/types"
 import { connectionState, useConnectionLive } from "../lib/connection"
+import { SendToMenu, SendToNote, sendToHint, useSendTo } from "./SendToMenu"
 import { ConnectionLine } from "./ConnectionLine"
 import { ComposerTags } from "./ComposerTags"
 import { tagsIn, type TextTag } from "../../../shared/runTargets"
@@ -31,6 +32,7 @@ export interface ComposerHandle {
   fill(text: string, select?: string): void
   /** Send the draft as Enter would (a hint's one-tap "send it there" after the parent switched its target). */
   submit(): void
+  clearSendTo(): void
 }
 
 /**
@@ -98,7 +100,9 @@ export function Composer({
   runTargetsProject = null,
   githubProject = runTargetsProject,
   stop = null,
+  onDestinationPick,
 }: {
+  onDestinationPick?: () => void
   onSubmit: (text: string, attachments: Attachment[], extra?: ComposerExtra) => void | Promise<unknown>
   placeholder: string
   label?: string
@@ -166,8 +170,9 @@ export function Composer({
   const picker = useRef<HTMLInputElement>(null)
   const maxMb = useSettings().data?.maxUploadMb ?? 20
   const boxRef = useRef<HTMLDivElement>(null)
+  const sendTo = useSendTo({ enabled: /^(coordinator$|captain:|task:)/.test(key), draftKey: key, value, setValue, input, onPick: onDestinationPick })
   const picks = useChatPicks({ enabled: runTargets, projectId: runTargetsProject, value, setValue, input })
-  const github = useGithubReferences({ projectId: githubProject ?? picks.picked.project?.value ?? null, draftKey: key, value, setValue, input, blocked: picks.open })
+  const github = useGithubReferences({ projectId: githubProject ?? picks.picked.project?.value ?? null, draftKey: key, value, setValue, input, blocked: picks.open || sendTo.open })
   // The "%project", "@runner" and "!harness" words the lists name. While there's one, the textarea's text is
   // transparent and ComposerTags draws it under the textarea, tags in colour.
   const tags = useMemo(() => {
@@ -187,8 +192,8 @@ export function Composer({
     picks: runTargets ? picks.kinds.length : 0,
     expand: showExpand ? 1 : 0,
     tools: toolsMenu ? toolWidth : 0,
-    attach: allowFiles ? 1 : 0,
-  })
+    attach: (allowFiles ? 1 : 0) + (sendTo.enabled ? 1 : 0),
+  }, { toolsLast: sendTo.enabled })
 
   // Uploads run in the draft store, so they finish (or fail, with Retry) while the box is away.
   const add = (picked: File[]) => attachFiles(key, picked, maxMb)
@@ -200,7 +205,7 @@ export function Composer({
   const failed = files.some((f) => f.status === "error")
   const ready = draftAttachments(files)
   // Picks that can't go together (Codex on an SSH machine) wait for a fix; the line over the buttons says why.
-  const canSend = !uploading && !failed && !picks.conflict && Boolean(value.trim() || ready.length)
+  const canSend = !sendTo.open && !uploading && !failed && !picks.conflict && Boolean(value.trim() || ready.length)
 
   const setTextarea = useCallback(
     (el: HTMLTextAreaElement | null) => {
@@ -311,11 +316,12 @@ export function Composer({
     setHeld(false)
     const text = value.trim()
     const sent = files
+    const destination = sendTo.chosen ?? undefined
     // A failed send goes back to the draft it came from, even if the box has moved on to another chat or closed.
     const from = key
     const extra = picks.extra()
     more.close()
-    const pending = Object.keys(extra).length ? onSubmit(text, ready, extra) : onSubmit(text, ready)
+    const pending = sendTo.chosen ? sendTo.send(text, ready, extra) : Object.keys(extra).length ? onSubmit(text, ready, extra) : onSubmit(text, ready)
     writeDraft(from, EMPTY_DRAFT)
     const done = () => releaseFiles(sent)
     if (!pending) {
@@ -331,7 +337,7 @@ export function Composer({
       },
       // Back in the box, unless something new was typed meanwhile.
       () => {
-        setDraftText(from, (v) => v || text)
+        writeDraft(from, (draft) => draft.text ? draft : { ...draft, text: value, destination: draft.destination ?? destination })
         if (readDraft(from).files.length) done()
         else setDraftFiles(from, sent)
       },
@@ -366,6 +372,8 @@ export function Composer({
     send: () => submitRef.current(),
   })
 
+  const clearSendTo = useRef(sendTo.clear)
+  clearSendTo.current = sendTo.clear
   useImperativeHandle(
     handleRef,
     () => ({
@@ -379,6 +387,7 @@ export function Composer({
         else el.setSelectionRange(text.length, text.length)
       },
       submit: () => submitRef.current(),
+      clearSendTo: () => clearSendTo.current(),
     }),
     [],
   )
@@ -488,6 +497,7 @@ export function Composer({
       {/* Like the Claude and ChatGPT composers: attachments, then the text at full width, then a row of buttons. */}
       {picks.open && (picks.panel ? <RunTargetPanel picks={picks} returnFocus={() => input.current} /> : <RunTargetList list={picks.list} anchor={boxRef} />)}
       {github.open && <GithubReferenceMenu picker={github} anchor={boxRef} />}
+      {sendTo.open && <SendToMenu picker={sendTo} anchor={boxRef} input={input} />}
       <div
         ref={boxRef}
         className="@container/composer rounded-xl border border-zinc-800 bg-zinc-900 focus-within:border-yard-500/50"
@@ -522,20 +532,24 @@ export function Composer({
               setValue(e.target.value)
               picks.onCaret()
               github.onCaret()
+              sendTo.onCaret()
             }}
-            onSelect={() => { picks.onCaret(); github.onCaret() }}
+            onSelect={() => { picks.onCaret(); github.onCaret(); sendTo.onCaret() }}
             onPaste={onPaste}
-            onFocus={() => { picks.onFocus(true); github.onFocus(true) }}
+            onFocus={() => { picks.onFocus(true); github.onFocus(true); sendTo.onFocus(true) }}
             onBlur={() => {
               setBrowse(null)
               picks.onFocus(false)
               github.onFocus(false)
+              sendTo.onFocus(false)
             }}
             {...picks.inputProps}
             {...github.inputProps}
+            {...sendTo.inputProps}
             onKeyDown={(e) => {
               // Mid-composition (IME), Enter and the arrows belong to the input method.
               if (e.nativeEvent.isComposing || e.keyCode === 229) return
+              if (sendTo.onKeyDown(e)) return
               if (github.onKeyDown(e)) return
               // The "@", "!" or "%" list, while open, takes ↑/↓, Enter, Tab and Esc: Enter picks instead of sending.
               if (picks.onKeyDown(e)) return
@@ -584,7 +598,8 @@ export function Composer({
             </div>
           )}
         </div>
-        {hint && !browse && <div className="px-1.5 empty:hidden">{hint(value)}</div>}
+        <SendToNote picker={sendTo} />
+        {hint && !browse && !sendTo.chosen && <div className="px-1.5 empty:hidden">{hint(value)}</div>}
         {runTargets && <PickScope scoped={picks.scoped} />}
         {picks.conflict && <PickConflict text={picks.conflict} />}
         {/* One row at every width (lib/composerRow.ts): what doesn't fit folds into More, and Send never moves. */}
@@ -606,6 +621,7 @@ export function Composer({
                 <Paperclip className="h-4 w-4" />
               </Button>
             )}
+            {sendTo.enabled && <Button type="button" variant="ghost" size="sm" className={cx(TOOL, onRow(fold.attach))} title={sendToHint()} aria-label="Send to…" onClick={() => { more.close(); sendTo.openSheet() }}><ArrowUpRight className="h-4 w-4" aria-hidden /></Button>}
             {fold.more !== null && <MoreButton more={more} className={cx(TOOL, inMenu(fold.more))} dot={toolsMenu && toolsDot ? { label: toolsDot.label, className: cx(toolsDot.className, inMenu(fold.tools)) } : null} />}
             {runTargets && (
               <span className={cx("flex shrink-0 items-center gap-1", onRow(fold.picks))}>
@@ -659,6 +675,7 @@ export function Composer({
               }}
             />
           )}
+          {sendTo.enabled && <ComposerMenuItem data-testid="more-send-to" icon={ArrowUpRight} label="Send to…" detail="Type > or press Cmd/Ctrl+Shift+Enter" className={inMenu(fold.attach)} onClick={() => { more.close(); sendTo.openSheet() }} />}
           {runTargets && <PickMenuItems picks={picks} className={inMenu(fold.picks)} onDone={more.close} />}
           {toolsMenu && <div className={cx("flex flex-col", inMenu(fold.tools))}>{toolsMenu}</div>}
           {showExpand && (

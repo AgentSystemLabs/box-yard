@@ -12,11 +12,13 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import { uploadFile } from "./api"
 import { isImage } from "../components/Attachments"
 import { percent, tooLargeError, uploadError, type PendingFile } from "./pendingUploads"
+import type { SendDestination } from "./sendTo"
 import type { Attachment } from "../../../shared/types"
 
 export interface Draft {
   readonly text: string
   readonly files: readonly PendingFile[]
+  readonly destination?: SendDestination
 }
 
 export const EMPTY_DRAFT: Draft = Object.freeze({ text: "", files: Object.freeze([]) as readonly PendingFile[] })
@@ -29,7 +31,7 @@ const listeners = new Map<string, Set<() => void>>()
 const uploads = new Map<number, AbortController>()
 let nextFileKey = 0
 
-const isEmpty = (d: Draft) => !d.text && !d.files.length
+const isEmpty = (d: Draft) => !d.text && !d.files.length && !d.destination
 
 export function readDraft(key: string): Draft {
   return drafts.get(key) ?? EMPTY_DRAFT
@@ -184,12 +186,12 @@ export function clearDraft(key: string) {
 export function prependDraft(key: string, text: string, attachments: Attachment[] = []): () => void {
   const before = readDraft(key)
   const added = attachments.map(uploadedFile)
-  const next: Draft = { text: before.text.trim() ? (text ? `${text}\n\n${before.text}` : before.text) : text, files: [...added, ...before.files] }
+  const next: Draft = { ...before, text: before.text.trim() ? (text ? `${text}\n\n${before.text}` : before.text) : text, files: [...added, ...before.files] }
   writeDraft(key, next)
   return () => {
     const now = readDraft(key)
     if (now.text !== next.text) return
-    writeDraft(key, { text: before.text, files: now.files.filter((f) => !added.includes(f)) })
+    writeDraft(key, { ...now, text: before.text, files: now.files.filter((f) => !added.includes(f)) })
   }
 }
 

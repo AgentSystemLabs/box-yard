@@ -2,8 +2,9 @@
  * Keeps the composer's row of buttons on one line at every width: the buttons that don't fit fold into its More (⋯) menu.
  *
  * Below 32rem every row button is 2.75rem wide (44px, a finger's size) with 0.25rem between them, inside the box's
- * 0.375rem padding, so `n` of them need a box of 3n + 0.5 rem. The least used fold first: the @ ! # pick buttons, then
+ * 0.375rem padding, so `n` of them need a box of 3n + 0.5 rem. The least used fold first: the @ ! % pick buttons, then
  * Expand, then the tools (Pull requests; a task's Side question and Captain chips), then Attach. Mic (hold to talk),
+ * Send to shares Attach’s group. Chat rows use toolsLast so that pair folds before Captain and Side question.
  * Stop and Send never fold. Each width goes to CSS as a container query on the box (`@max-[Xrem]/composer`), never a
  * measurement or a viewport breakpoint, so a resize re-lays the row without a render. styles.css generates the classes
  * (`@source inline`), every half rem from 8 to 36, and `labelFrom`'s for the chips' labels.
@@ -33,9 +34,10 @@ export function rowWidth(slots: number): number {
   return Math.min(MAX, Math.max(MIN, Math.ceil((3 * slots + 0.5) * 2) / 2))
 }
 
-export function foldPlan(parts: RowParts): FoldPlan {
+export function foldPlan(parts: RowParts, { toolsLast = false }: { toolsLast?: boolean } = {}): FoldPlan {
   const plan: FoldPlan = { picks: null, expand: null, tools: null, attach: null, more: null }
-  const there = FOLD_ORDER.filter((g) => parts[g] > 0)
+  const order: readonly FoldGroup[] = toolsLast ? ["picks", "expand", "attach", "tools"] : FOLD_ORDER
+  const there = order.filter((g) => parts[g] > 0)
   const first = there[0]
   // One button alone gains nothing from folding: the More button would take its place.
   if (first === undefined || (there.length === 1 && parts[first] <= 1)) return plan

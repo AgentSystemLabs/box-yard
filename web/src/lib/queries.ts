@@ -1215,19 +1215,19 @@ export const refused = (err: unknown) => err instanceof ApiError && err.status >
 export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Error) => boolean } = {}) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: { content: string; attachments?: Attachment[] }) =>
-      api<Task>(`/api/tasks/${taskId}/messages`, { body: { content: input.content, attachments: input.attachments?.map((a) => a.id) } }),
-    onMutate: async ({ content, attachments }) => {
+    mutationFn: (input: { content: string; attachments?: Attachment[]; taskId?: string }) =>
+      api<Task>(`/api/tasks/${input.taskId ?? taskId}/messages`, { body: { content: input.content, attachments: input.attachments?.map((a) => a.id) } }),
+    onMutate: async ({ content, attachments, taskId: destinationId = taskId }) => {
       const undoTasks = snapshot<Task[]>(qc, keys.tasks)
-      const undoQueue = snapshot<QueuedMessage[]>(qc, keys.taskQueue(taskId))
-      const task = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === taskId)
+      const undoQueue = snapshot<QueuedMessage[]>(qc, keys.taskQueue(destinationId))
+      const task = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
       const running = task?.status === "working" || task?.status === "starting"
-      patchTask(qc, taskId, running ? { pendingCount: (task?.pendingCount ?? 0) + 1 } : { status: "queued", question: null })
+      patchTask(qc, destinationId, running ? { pendingCount: (task?.pendingCount ?? 0) + 1 } : { status: "queued", question: null })
       // It shows as a Queued row until a turn delivers it into the transcript.
       const now = Date.now()
-      qc.setQueryData<QueuedMessage[]>(keys.taskQueue(taskId), (list) => [
+      qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => [
         ...(list ?? []),
-        { id: `tmp-${now}`, taskId, source: "cody", kind: "owner", sender: "", text: content, attachments: attachments ?? [], status: "queued", version: 0, createdAt: now, updatedAt: now },
+        { id: `tmp-${now}`, taskId: destinationId, source: "cody", kind: "owner", sender: "", text: content, attachments: attachments ?? [], status: "queued", version: 0, createdAt: now, updatedAt: now },
       ])
       return { undo: () => (undoTasks(), undoQueue()) }
     },
@@ -1237,11 +1237,11 @@ export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Er
       playSendSound("failed")
       fail("Couldn't send the message")(err)
     },
-    onSuccess: (task) => {
+    onSuccess: (task, input) => {
       playSendSound()
       // Sent right after a Stop: the answer may still be the turn being stopped.
       if (!staleAfterStop(task)) qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task))
-      void qc.invalidateQueries({ queryKey: keys.taskQueue(taskId) })
+      void qc.invalidateQueries({ queryKey: keys.taskQueue(input.taskId ?? taskId) })
     },
   })
 }
@@ -1680,15 +1680,16 @@ export function useSendChat() {
 export function useSendCaptainMessage(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: ChatSend) => api<CaptainMessage>(`/api/projects/${projectId}/captain/messages`, { body: sendBody(input) }),
+    mutationFn: (input: ChatSend & { projectId?: string }) => api<CaptainMessage>(`/api/projects/${input.projectId ?? projectId}/captain/messages`, { body: sendBody(input) }),
     onMutate: async (input) => {
-      await qc.cancelQueries({ queryKey: keys.captainMessages(projectId) })
-      const undo = snapshot<CaptainMessage[]>(qc, keys.captainMessages(projectId))
-      const queued = Boolean(qc.getQueryData<CaptainState>(keys.captain(projectId))?.busy)
-      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(projectId), (list) =>
+      const destinationId = input.projectId ?? projectId
+      await qc.cancelQueries({ queryKey: keys.captainMessages(destinationId) })
+      const undo = snapshot<CaptainMessage[]>(qc, keys.captainMessages(destinationId))
+      const queued = Boolean(qc.getQueryData<CaptainState>(keys.captain(destinationId))?.busy)
+      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) =>
         upsert(list, {
           id: input.id,
-          projectId,
+          projectId: destinationId,
           role: "user",
           content: input.content,
           meta: { pending: true, source: "cody", ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...pickMeta(input), ...(queued ? { queued: true } : {}) },
@@ -1702,13 +1703,15 @@ export function useSendCaptainMessage(projectId: string) {
       playSendSound("failed")
       fail("Couldn't message the Captain")(err)
     },
-    onSuccess: (msg) => {
+    onSuccess: (msg, input) => {
+      const destinationId = input.projectId ?? projectId
       playSendSound()
-      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(projectId), (list) => settleOptimistic(list, msg))
+      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => settleOptimistic(list, msg))
     },
     // Sending cancelled the history still loading in above a prefetched tail: load it again.
-    onSettled: () => {
-      if (captainTails.has(projectId)) void qc.invalidateQueries({ queryKey: keys.captainMessages(projectId) })
+    onSettled: (_data, _err, input) => {
+      const destinationId = input.projectId ?? projectId
+      if (captainTails.has(destinationId)) void qc.invalidateQueries({ queryKey: keys.captainMessages(destinationId) })
     },
   })
 }
