@@ -3,8 +3,8 @@ import type { Task } from "../../../shared/types"
 import { useRestingDelete } from "../lib/restingDelete"
 import { HEADER_CHIP, HEADER_FOLD, cx } from "./ui"
 
-/** Explicit failed-task action in desktop rows and the header; touch rows use the swipe menu. */
-export function DeleteFailedTaskButton({ task, header = false }: { task: Task; header?: boolean }) {
+/** Failed-task header action; confirmation and queued-input consent are shared with other deletion surfaces. */
+export function DeleteFailedTaskButton({ task }: { task: Task }) {
   const { pending, remove } = useRestingDelete({ kind: "task", id: task.id, name: task.title, projectId: task.projectId })
   return (
     <button
@@ -17,9 +17,7 @@ export function DeleteFailedTaskButton({ task, header = false }: { task: Task; h
       disabled={pending}
       className={cx(
         "shrink-0 text-red-300 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-wait disabled:opacity-50",
-        header
-          ? cx(HEADER_CHIP, HEADER_FOLD.chip, "border border-red-500/30 bg-red-500/5")
-          : "mr-0.5 grid h-8 w-8 place-items-center self-center rounded-md focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-zinc-100 pointer-coarse:hidden",
+        HEADER_CHIP, HEADER_FOLD.chip, "border border-red-500/30 bg-red-500/5",
       )}
       onClick={(e) => {
         e.preventDefault()
@@ -28,8 +26,8 @@ export function DeleteFailedTaskButton({ task, header = false }: { task: Task; h
       }}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      <Trash2 className={cx("h-4 w-4", header && HEADER_FOLD.icon)} aria-hidden />
-      {header && <span className={HEADER_FOLD.label}>{pending ? "Deleting…" : "Delete"}</span>}
+      <Trash2 className={cx("h-4 w-4", HEADER_FOLD.icon)} aria-hidden />
+      <span className={HEADER_FOLD.label}>{pending ? "Deleting…" : "Delete"}</span>
     </button>
   )
 }

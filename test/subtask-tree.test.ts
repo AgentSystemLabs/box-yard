@@ -246,7 +246,7 @@ describe("the sidebar's sub-task tree", () => {
     expect(plain.className).toContain("pl-[calc(1.5rem+var(--nest,0rem))]")
     expect(plain.className).toContain("pointer-coarse:pl-[calc(2.75rem+var(--nest,0rem))]")
     for (const button of [open(OMELETTE), open(FRENCH)]) {
-      // The grid owns the shared indent for the task button and its separate PR link below it.
+      // The one-line flex row owns the shared indent for the title and its separate PR link.
       expect(button.parentElement!.className).toContain("pl-[2.75rem]")
       expect(button.parentElement!.className).toContain("pointer-coarse:pl-[4rem]")
       expect(button.closest<HTMLElement>("[role=treeitem]")!.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
@@ -254,7 +254,8 @@ describe("the sidebar's sub-task tree", () => {
       expect(button.closest<HTMLElement>("[role=treeitem]")!.style.marginLeft).toBe("")
     }
     // A plain task keeps its status on the right; a title still truncates.
-    expect(plain.querySelector(".col-start-3")!.textContent).toBe("working")
+    expect(plain.textContent).not.toContain("working")
+    expect(plain.querySelector(".task-title-working")!.textContent).toBe(OTHER.title)
     expect(open(FRENCH).querySelector(".col-start-2.row-start-1")!.className).toContain("truncate")
     // A chevron sits on its parent's guide, the guide broken behind it; it and the rows keep 44px to a finger.
     expect(chevron(OMELETTE).className).toContain("left-[17px]")
@@ -277,9 +278,8 @@ describe("the sidebar's sub-task tree", () => {
     await settle()
     const tree = document.querySelector<HTMLElement>("[data-testid=rail-tree]")!
     const french = tree.querySelector<HTMLElement>(`[data-open-task=${FRENCH.id}]`)!
-    // The outer row's box moves in, so its fill and selected bar start at its level;
-    // its inner swipe surface moves independently to reveal actions.
-    const row = french.closest<HTMLElement>("[aria-keyshortcuts='Shift+F10']")!
+    // The row's box moves in, so its fill and selected bar start at its level.
+    const row = french.closest<HTMLElement>("[data-tree-node]")!.firstElementChild as HTMLElement
     expect(row.style.getPropertyValue("--rail-indent")).toBe("calc(2 * var(--tree-step))")
     expect(row.className).toContain("ml-[min(var(--rail-indent,0rem),max(0rem,calc(100cqw-12rem)))]")
     expect(french.className).not.toContain("--nest")
@@ -477,7 +477,7 @@ describe("a double click on a tree row with sub-tasks folds or unfolds its tree"
 
   it("a row with no sub-tasks folds nothing, nor does a plain task's row", async () => {
     const qc = render()
-    expect(open(PANS).title).toBe(`${PANS.title} · Working · Task level 2`)
+    expect(open(PANS).title).toBe(`${PANS.title} · Working`)
     doubleClick(open(PANS), 1000)
     await settle()
     expect(location.search).toBe(`?session=${PANS.id}`)
@@ -571,7 +571,7 @@ describe("sub-task panels", () => {
     await settle()
     const parent = panel(OMELETTE).querySelector('[role="dialog"]')!
     // The transcript lists the sub-tasks it started, with their live status, and a report.
-    const listed = [...parent.querySelectorAll("[data-testid=subtasks-line] a")].map((a) => [a.querySelector(".truncate")!.textContent, a.querySelector(".row-start-2")?.textContent])
+    const listed = [...parent.querySelectorAll("[data-testid=subtasks-line] a")].map((a) => [a.querySelector(".truncate")!.textContent, a.querySelector("[data-subtask-status]")?.textContent])
     expect(listed).toEqual([CLASSIC, RATIOS, PANS, CHEFS].map((t) => [t.title, expect.any(String)]))
     expect(new Set(listed.map(([, status]) => status)).size).toBe(4)
     expect(parent.querySelector("[data-testid=subtask-report]")!.textContent).toContain("Report from")

@@ -57,8 +57,6 @@ import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
 import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
-import { SidebarDeleteRow } from "./SidebarDeleteRow"
-import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
 import { DismissButton, isDialogOpen } from "./Modal"
 import { ChatIcon } from "./ChatIcons"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
@@ -75,7 +73,8 @@ import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
 import { CueDot, ProjectAvatar, TaskStatusIcon, WORKING_PULSE, projectColorStyle } from "./TaskIcon"
 import { CaptainTile } from "./CaptainIcon"
-import { PrChip, STATUS, TAP_AREA, cx, useMinuteClock } from "./ui"
+import { TaskRowTitle } from "./TaskRowTitle"
+import { PrChip, STATUS, TAP_AREA, cx } from "./ui"
 
 /** Keyboard focus: a white outline and no fill, so it's never mistaken for the selected row (or a hover). */
 const FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-zinc-100"
@@ -335,7 +334,6 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   const chatHidden = useChatHidden() && panels.length > 0
   const lookedAt = focus !== null && panels.includes(focus) ? focus : focus === chatRef(current) && !chatHidden ? undefined : panels.at(-1)
   const overlay = useMemo(() => (lookedAt ? viewOf(lookedAt) : null), [lookedAt])
-  const now = useMinuteClock()
   const folds = useSidebarFolds()
   const treeFolds = useTreeFolds()
   const picked = usePickedRow()
@@ -350,14 +348,14 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   const emptyId = useId()
 
   const all = useMemo(
-    () => sidebarGroups(projects.data ?? [], tasks.data ?? [], pins, { now, current, closing }),
-    [projects.data, tasks.data, pins, now, current, closing],
+    () => sidebarGroups(projects.data ?? [], tasks.data ?? [], pins, { current, closing }),
+    [projects.data, tasks.data, pins, current, closing],
   )
   // A task update changes one task: everything else stays the same objects, so only its row re-renders.
   const groups = { shown: useKept(all.shown, keepGroups), others: useKept(all.others, keepGroups) }
   const openTask = overlay?.kind === "session" ? overlay.id : null
   const waitingAll = useKept(
-    useMemo(() => inboxRows(tasks.data ?? [], (t) => inInbox(t, closing), now), [tasks.data, closing, now]),
+    useMemo(() => inboxRows(tasks.data ?? [], (t) => inInbox(t, closing)), [tasks.data, closing]),
     keepRows,
   )
   const waiting = useMemo(() => cappedRows(waitingAll, { expanded: allWaiting, keep: openTask }), [waitingAll, allWaiting, openTask])
@@ -558,7 +556,6 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
           </div>
 
           <div ref={list} className={cx("scroll-thin min-h-0 flex-1 overflow-y-auto px-2", empty !== "none" && "pb-3")}>
-            {empty !== "none" && <p className="hidden px-2 pt-2 text-[11px] text-zinc-500 pointer-coarse:block">Swipe rows left or right for actions</p>}
             <WaitingOnYou
               rows={waiting.shown}
               total={waitingAll.length}
@@ -753,7 +750,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
   const nameId = useId()
   return (
     <div data-sidebar-group={project.id} className="pt-1">
-      <SidebarDeleteRow target={{ kind: "project", id: project.id, name: project.name, projectId: project.id }}
+      <div
         {...treeItem(captainKey(project.id), 1, nameId, { expanded: rows.length ? !folded : null, current: state === "selected" })}
         className={cx("group/head flex items-center rounded-lg transition", FOCUS, state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}
       >
@@ -793,7 +790,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
         </button>
         <ProjectSettingsButton id={project.id} name={project.name} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
         <PinButton id={project.id} name={project.name} pinned={group.pin === "pinned"} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
-      </SidebarDeleteRow>
+      </div>
       {!folded && rows.length > 0 && (
         <div id={tasksId} role="group" aria-label={`${project.name} tasks`} className={cx("space-y-px pt-px", PROJECT_TASKS)}>
           {rows.map((r) =>
@@ -830,19 +827,19 @@ const META_TONE: Partial<Record<Task["status"], string>> = { needs_input: "text-
 
 /**
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
- * project), so the copy Cody clicked is the one drawn selected. `project`: its project's name, on a second line. One
- * ready for Cody's review ends with Mark done's ✓; a failed task ends with Delete's trash icon. It leads with the task's icon (TaskStatusIcon), which pulses while
- * the task works and has a still dot when it asks or failed; its meta says the state in words. A PR number links to
+ * project), so the copy Cody clicked is the one drawn selected. `project` adds context to the tooltip. One
+ * ready for Cody's review, or failed, ends with Mark done's ✓. Its icon names the state, with a still dot when it
+ * asks or failed. Working titles carry the motion. A PR number links to
  * GitHub beside the task button, so each action has its own keyboard target.
  */
 export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, project }: { row: SidebarRow; spot: RowSpot; selected: boolean; onPick: Pick["task"]; project?: { name: string; color: Parameters<typeof projectColorStyle>[0]; icon?: string | null } }) {
   const { task, dim, meta } = row
   const label = stateLabel(task)
-  const prMeta = Boolean(task.prUrl && (meta === "PR" || meta.includes("#")))
+  const prMeta = Boolean(task.prUrl)
   const tree = useContext(InTree)
   const id = useId()
   return (
-    <SidebarDeleteRow target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }} doneTask={readyForReview(task.status) ? task : undefined}
+    <div
       {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected }) : undefined)}
       className={cx("flex items-center rounded-lg transition", tree && FOCUS, selected ? SELECTED : dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900")}
     >
@@ -854,33 +851,22 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         {...(tree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
         title={`${task.title} · ${label}${project ? ` · ${project.name}` : ""}`}
         className={cx(
-          // The icon, the title and the meta share the first line; the project line sits under the title. The block is
-          // centred in the row, so a one-line row's 44px (to a finger) doesn't push the icon and meta to its top edge.
+          // One line at every width; the title gives space to the separate PR and check targets.
           ROW_BOX,
           "grid min-w-0 flex-1 content-center items-center gap-x-2.5 py-1",
-          prMeta ? "grid-cols-[1.25rem_minmax(0,1fr)]" : "grid-cols-[1.25rem_minmax(0,1fr)_auto]",
+          prMeta || !meta ? "grid-cols-[1.25rem_minmax(0,1fr)]" : "grid-cols-[1.25rem_minmax(0,1fr)_auto]",
           // Under a project, a task's icon sits past the chevron's column and its list's indent (NEST_PAD): in the
           // sidebar, under the project's name; in the rail's tree, which sets none, under its tile.
           spot === "project" && NEST_PAD,
         )}
       >
-        <span className="col-start-2 row-start-1 truncate">{task.title}</span>
+        <TaskRowTitle title={task.title} status={task.status} />
         <RowIcon task={task} label={label} dim={dim} />
-        {project && (
-          // A narrow sidebar drops the project line; the title and the tooltip still say it.
-          <span className={cx("col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 text-zinc-500 @max-[14rem]/side:hidden", !prMeta && "col-span-2")}>
-            <ProjectAvatar src={project.icon} className="h-3 w-3 rounded-[3px]">
-              <span aria-hidden style={projectColorStyle(project.color)} className="h-1.5 w-1.5 shrink-0 rounded-[2px] bg-(--pc)" />
-            </ProjectAvatar>
-            <span className="truncate">{project.name}</span>
-          </span>
-        )}
-        {!prMeta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
+        {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
-      {prMeta && <PrChip task={task} variant="number" className={cx(TAP_AREA, FOCUS, "mr-2 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden")} />}
-      {readyForReview(task.status) && <DoneButton task={task} />}
-      {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
-    </SidebarDeleteRow>
+      {prMeta && <PrChip task={task} variant="number" className={cx(FOCUS, "mr-2 shrink-0 text-xs leading-5 tabular-nums pointer-coarse:min-h-11")} />}
+      {(readyForReview(task.status) || task.status === "failed") && <DoneButton task={task} />}
+    </div>
   )
 })
 
@@ -960,12 +946,11 @@ function TreeCountChip({ tree }: { tree: TreeCount }) {
 
 /**
  * A task in a sub-task tree, and below it its sub-tasks, to any depth. Its chevron folds them (lib/sidebar.ts
- * treeFolds, in memory), and so does a double click on its row; folded, it counts them. The title has the row's whole
- * width and the status sits under it, so a deep row on a phone still reads. Nothing animates: a fold shows or hides at
- * once. `twice`: false where a pick closes the list and nothing brings it back on the second click (the strip's tree,
+ * treeFolds, in memory), and so does a double click on its row; folded, it counts them. Every row is one line: its title truncates to
+ * reserve room for the PR and check. A fold shows or hides at once. `twice`: false where a pick closes the list and nothing brings it back on the second click (the strip's tree,
  * Rails.tsx), so only the chevron folds. `guides`: the sidebar's nesting, each level one step in (nestAt) beside its
  * parent's guide; without it (the strip's tree) each level moves in by TREE_STEP. Both stop indenting when the
- * content needs the room; the level label and the tree's true ARIA level preserve the depth.
+ * content needs the room; the tree's true ARIA level preserves the depth.
  */
 export const TreeNode = memo(function TreeNode({ row, depth, folds, selection, onPick, twice = true, guides = false }: { row: SidebarRow; depth: number; folds: Readonly<Record<string, true>>; selection: Selection; onPick: Pick["task"]; twice?: boolean; guides?: boolean }) {
   const kids = row.kids ?? []
@@ -1018,33 +1003,13 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
 }) {
   const { task, dim, meta, tree } = row
   const label = stateLabel(task)
-  const prMeta = Boolean(task.prUrl && (meta === "PR" || meta.includes("#")))
+  const prMeta = Boolean(task.prUrl)
   const twice = useTreeDoubleClick(task.id, foldTwice && folded !== null)
   const inTree = useContext(InTree)
   const id = useId()
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-  // The actual depth stays readable after the visual indent stops growing. ARIA already announces it.
-  // At the resizable column's 200px minimum, abbreviate Level so its number still fits.
-  const level = depth > 0 && <span aria-hidden={inTree || undefined}>L<span className="@max-[14rem]/side:hidden">evel </span>{depth + 1} · </span>
-  const metadata = (
-    <span className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 @max-[14rem]/side:flex-wrap">
-      {prMeta ? (
-        // A sibling of the task button: native link activation never picks or double-click-folds the task.
-        // Its touch height reserves its own space rather than extending a hit area over the title above it.
-        <>
-          {level && <span className="shrink-0 text-zinc-500">{level}</span>}
-          <PrChip task={task} variant="number" className={cx(FOCUS, "pointer-coarse:min-h-11")} />
-        </>
-      ) : (
-        <span className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>
-          {level}<span aria-hidden={saysState(meta, label)}>{meta}</span>
-        </span>
-      )}
-      {folded && tree && <TreeCountChip tree={tree} />}
-    </span>
-  )
   return (
-    <SidebarDeleteRow target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }} doneTask={readyForReview(task.status) && !tree?.running && !tree?.asks ? task : undefined} subtasks={tree?.total}
+    <div
       // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
       {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected }) : undefined)}
       // The rail popover has a narrower chevron column and no sidebar guide padding. Reserve its content/actions too.
@@ -1071,7 +1036,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           )}
         </button>
       )}
-      <div className={cx("grid min-h-9 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2.5 py-1 pr-2 text-sm pointer-coarse:min-h-11", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
+      <div className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-x-2 py-1 pr-2 text-sm pointer-coarse:min-h-11", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
         <button
           type="button"
           onClick={(e) => {
@@ -1082,24 +1047,24 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           onMouseDown={keepFocusForPick}
           data-open-task={task.id}
           {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
-          title={`${task.title} · ${label}${depth ? ` · Task level ${depth + 1}` : ""}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
-          className={cx("col-span-2 grid min-w-0 grid-cols-subgrid items-center rounded-lg text-left", prMeta && "pointer-coarse:min-h-11", FOCUS)}
+          title={`${task.title} · ${label}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
+          className={cx(folded && tree ? "grid-cols-[1.25rem_minmax(0,1fr)_auto]" : "grid-cols-[1.25rem_minmax(0,1fr)]", "grid min-h-7 min-w-0 flex-1 items-center gap-x-2.5 rounded-lg text-left @max-[14rem]/side:gap-x-0.5 pointer-coarse:min-h-9", FOCUS)}
         >
-          <span className="col-start-2 row-start-1 truncate">{task.title}</span>
+          <TaskRowTitle title={task.title} status={task.status} />
           <RowIcon task={task} label={label} dim={dim} />
-          {!prMeta && metadata}
+          {folded && tree && <span className="col-start-3 row-start-1"><TreeCountChip tree={tree} /></span>}
         </button>
-        {prMeta && metadata}
+        {prMeta && <PrChip task={task} variant="number" className={cx(FOCUS, "shrink-0 text-[11px] pointer-coarse:min-h-11")} />}
+        {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("shrink-0 text-[11px] @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </div>
-      {readyForReview(task.status) && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
-      {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
-    </SidebarDeleteRow>
+      {(readyForReview(task.status) || task.status === "failed") && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
+    </div>
   )
 })
 
 /**
- * ✓ at the end of a row ready for Cody's review (lib/taskActions.ts readyForReview): Mark done without opening the
- * task, done at once with an Undo toast (lib/markDone.ts). Always drawn on desktop; touch puts it in the swipe menu.
+ * ✓ at the end of a failed row or one ready for Cody's review: Mark done without opening the
+ * task, done at once with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target.
  * On a tree's row it closes the whole tree (`subtasks`), so a tree with a
  * sub-task running or asking has none. Search results have none: they list finished work, and the task's header has it.
  */
@@ -1110,12 +1075,16 @@ function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
   return (
     <button
       type="button"
-      onClick={() => void markDone(task)}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        void markDone(task)
+      }}
       tabIndex={tree ? -1 : undefined}
       aria-label={`Mark ${task.title}${kids} done`}
       title={`Mark done${kids ? `, with its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""}. Messaging it picks it back up.`}
       data-testid="sidebar-mark-done"
-      className={cx("mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:hidden", FOCUS)}
+      className={cx("mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)}
     >
       <Check className="h-3.5 w-3.5" aria-hidden />
     </button>
@@ -1135,7 +1104,7 @@ const saysState = (meta: string, label: string) => meta === label.toLowerCase() 
 function RowIcon({ task, label, dim }: { task: Task; label: string; dim: boolean }) {
   return (
     <span className="col-start-1 row-start-1 grid h-5 w-5 place-items-center">
-      <TaskStatusIcon task={task} label={label} muted={dim} />
+      <TaskStatusIcon task={task} label={label} muted={dim} pulse={task.status !== "working"} />
     </span>
   )
 }
@@ -1282,7 +1251,7 @@ const MoreProjects = memo(function MoreProjects({ groups, selection, onPick }: {
 function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGroup; color: Parameters<typeof projectColorStyle>[0]; selected: boolean; onPick: Pick["captain"] }) {
   const id = useId()
   return (
-    <SidebarDeleteRow target={{ kind: "project", id: g.project.id, name: g.project.name, projectId: g.project.id }} {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("group/more flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
+    <div {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("group/more flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
       <button
         type="button"
         onClick={(e) => onPick(g.project.id, e)}
@@ -1301,6 +1270,6 @@ function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGrou
       </button>
       <ProjectSettingsButton id={g.project.id} name={g.project.name} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
       <PinButton id={g.project.id} name={g.project.name} pinned={false} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
-    </SidebarDeleteRow>
+    </div>
   )
 }

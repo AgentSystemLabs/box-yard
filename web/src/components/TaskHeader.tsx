@@ -118,7 +118,7 @@ export function TaskHeader({
             {tree ? <TaskCrumbs task={task} project={project} /> : <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-1", backClassName)} />}
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {ready ? <MarkDoneButton task={task} crowded={false} /> : task.status === "done" && <ReopenButton task={task} crowded={false} />}
-              {task.status === "failed" && <DeleteFailedTaskButton task={task} header />}
+              {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
               {tools}
               {menu}
               {controls}
@@ -150,7 +150,7 @@ export function TaskHeader({
         {chips}
         {ready && <MarkDoneButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
         {task.status === "done" && <ReopenButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
-        {task.status === "failed" && <DeleteFailedTaskButton task={task} header />}
+        {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
         {tools}
         {menu}
         {controls}

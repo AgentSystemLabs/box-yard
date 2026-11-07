@@ -1,4 +1,4 @@
-// Browser regression for PR numbers beneath titles in parent and nested task rows.
+// Browser regression for PR numbers inline with titles in parent and nested task rows.
 // Build and start an isolated mock server on 4470–4479 (never the live yard), then:
 // PLAYWRIGHT_MODULE=/path/to/playwright-core/index.mjs CHROME_PATH=/path/to/chrome \
 //   node scripts/check-sidebar-pr-links.mjs http://localhost:4470 /tmp/example-pr-links
@@ -68,12 +68,12 @@ try {
         const rect = a.getBoundingClientRect()
         const row = a.closest("[data-tree-key]")
         const title = row.querySelector("[data-open-task]").getBoundingClientRect()
-        // Touch moves Mark done into the menu; only a visible trailing control bounds the PR's space.
-        const action = [...row.querySelectorAll('[data-testid="sidebar-mark-done"], [data-row-actions]')].find((el) => el.checkVisibility())?.getBoundingClientRect()
+        // The trailing Mark done button bounds the PR link on desktop and touch.
+        const action = [...row.querySelectorAll('[data-testid="sidebar-mark-done"]')].find((el) => el.checkVisibility())?.getBoundingClientRect()
         const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-        return { width: rect.width, height: rect.height, hitLink: a.contains(hit), beneathTitle: rect.top >= title.bottom, fits: rect.right <= (action?.left ?? row.getBoundingClientRect().right) + 1, nested: !!a.closest("button"), overflow: row.scrollWidth - row.clientWidth }
+        return { width: rect.width, height: rect.height, hitLink: a.contains(hit), inline: rect.top < title.bottom && rect.bottom > title.top, fits: rect.right <= (action?.left ?? row.getBoundingClientRect().right) + 1, nested: !!a.closest("button"), overflow: row.scrollWidth - row.clientWidth }
       })
-      assert.ok(geometry.hitLink && geometry.beneathTitle && geometry.fits && !geometry.nested && geometry.overflow <= 1, `${tag}: link hit target/layout ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.hitLink && geometry.inline && geometry.fits && !geometry.nested && geometry.overflow <= 1, `${tag}: link hit target/layout ${JSON.stringify(geometry)}`)
       if (touch) assert.ok(geometry.height >= 44, `${tag}: PR has its own 44px touch target`)
       assert.equal(await link.getAttribute("href"), t.prUrl)
       assert.equal(await link.getAttribute("target"), "_blank")
@@ -84,7 +84,6 @@ try {
       await popup.close()
       assert.equal(page.url(), original)
       assert.equal(await parent.getAttribute("aria-expanded"), "true")
-      assert.equal(await tree.locator("[data-sidebar-delete]").count(), 0)
       return geometry
     }
     const geometry = await openPr(audit, rootLink)

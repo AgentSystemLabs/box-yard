@@ -39,11 +39,11 @@ const listed = (rows: readonly SidebarRow[], id: string): boolean => rows.some((
  * it to any depth, as the sidebar draws them. Like the rail, it always has the tasks open in panels (`open`), even when
  * the sidebar doesn't list them (a done one, opened from the palette): a row of their own, last.
  */
-export function railTreeGroups(groups: readonly SidebarGroup[], captain: string | null, open: readonly Task[], now: number): RailTreeGroup[] {
+export function railTreeGroups(groups: readonly SidebarGroup[], captain: string | null, open: readonly Task[]): RailTreeGroup[] {
   const out = groups.filter((g) => captain === null || g.project.id === captain).map((g) => ({ project: g.project, rows: g.rows }))
   for (const task of open) {
     if (out.some((g) => listed(g.rows, task.id))) continue
-    const row: SidebarRow = { task, dim: task.status === "idle" || task.status === "done", meta: rowMeta(task, now) }
+    const row: SidebarRow = { task, dim: task.status === "idle" || task.status === "done", meta: rowMeta(task) }
     const home = out.find((g) => g.project.id === task.projectId)
     if (home) home.rows = [...home.rows, row]
     else if (captain === null || task.projectId === captain) {

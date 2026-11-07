@@ -13,7 +13,7 @@ export interface SidebarRow {
   task: Task
   /** Resting (idle), ready for Cody's review: drawn dim, so live work stands out. */
   dim: boolean
-  /** The short word on the right: "asks", "failed", "working", "#253", or how long an idle one has rested ("2h"). */
+  /** The short word on the right: "asks", "starting", or "#253". Working/failed use the title and icon. */
   meta: string
   /** Its sub-tasks (server/subtasks.ts), nested under it in spawn order, finished ones too. Only under a project. */
   kids?: SidebarRow[]
@@ -41,31 +41,21 @@ export interface SidebarGroup {
 const ORDER: Record<TaskStatus, number> = { needs_input: 0, failed: 1, working: 2, starting: 2, waiting: 3, queued: 4, pr_ready: 5, idle: 6, done: 7 }
 const LIVE: ReadonlySet<TaskStatus> = new Set(["needs_input", "failed", "working", "starting", "waiting", "queued", "pr_ready"])
 
-/** "now", "12m", "3h", "2d": an age that fits beside a title. */
-export function shortAge(ts: number, now: number): string {
-  const m = Math.floor(Math.max(0, now - ts) / 60_000)
-  if (m < 1) return "now"
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
-}
-
 const lastActive = (t: Task) => t.lastActiveAt ?? t.updatedAt
 
 /** The word a row ends with: what Cody would ask about first. */
-export function rowMeta(t: Task, now: number): string {
+export function rowMeta(t: Task): string {
   const pr = t.prUrl ? prNumber(t.prUrl) : null
   switch (t.status) {
     case "needs_input": return "asks"
-    case "failed": return "failed"
-    case "working": return "working"
+    case "failed": return ""
+    case "working": return ""
     case "starting": return "starting"
     case "queued": return "queued"
     case "waiting": return "waiting"
     case "pr_ready": return pr ? `#${pr}` : "PR"
     case "done": return t.prMergedAt ? (pr ? `merged #${pr}` : "merged") : "done"
-    default: return pr ? `#${pr}` : shortAge(lastActive(t), now)
+    default: return pr ? `#${pr}` : ""
   }
 }
 
@@ -80,7 +70,7 @@ const SUBTASK_RUNNING: ReadonlySet<TaskStatus> = new Set(["queued", "starting", 
  * while anything in it still runs; every sub-task of a shown task shows with it, finished ones dim, so the whole tree
  * stays in view until Cody marks it done.
  */
-function subtaskTrees(tasks: readonly Task[], shownAlone: (t: Task) => boolean, now: number) {
+function subtaskTrees(tasks: readonly Task[], shownAlone: (t: Task) => boolean) {
   const byId = new Map(tasks.map((t) => [t.id, t]))
   const kidsOf = new Map<string, Task[]>()
   for (const t of tasks) {
@@ -112,7 +102,7 @@ function subtaskTrees(tasks: readonly Task[], shownAlone: (t: Task) => boolean, 
   }
   const row = (t: Task, depth: number, seen: Set<string>): SidebarRow => {
     const kids = depth < 12 ? (kidsOf.get(t.id) ?? []).filter((k) => !seen.has(k.id)) : []
-    const base: SidebarRow = { task: t, dim: t.status === "idle" || (depth > 0 && t.status === "done"), meta: rowMeta(t, now) }
+    const base: SidebarRow = { task: t, dim: t.status === "idle" || (depth > 0 && t.status === "done"), meta: rowMeta(t) }
     if (!kids.length) return base
     for (const k of kids) seen.add(k.id)
     const rows = kids.map((k) => row(k, depth + 1, seen))
@@ -138,7 +128,7 @@ export function sidebarGroups(
   projects: readonly Project[],
   tasks: readonly Task[],
   pins: BarPins,
-  opts: { now: number; current?: string | null; closing?: ReadonlySet<string> },
+  opts: { now?: number; current?: string | null; closing?: ReadonlySet<string> },
 ): { shown: SidebarGroup[]; others: SidebarGroup[] } {
   const groups = new Map<string, SidebarGroup>()
   for (const p of projects) groups.set(p.id, { project: p, pin: pins[p.id] ?? null, rows: [], needs: 0, running: 0 })
@@ -149,7 +139,7 @@ export function sidebarGroups(
     Boolean(t && opts.closing?.size && depth < 12 && (opts.closing.has(t.id) || closing(t.parentTaskId ? byId.get(t.parentTaskId) : undefined, depth + 1)))
   const listed = tasks.filter((t) => groups.has(t.projectId) && !isQuietRun(t) && !closing(t))
   const shownAlone = (t: Task) => LIVE.has(t.status) || t.status === "idle"
-  const trees = subtaskTrees(listed, shownAlone, opts.now)
+  const trees = subtaskTrees(listed, shownAlone)
   for (const t of listed) {
     const g = groups.get(t.projectId)!
     if (t.status === "needs_input") g.needs++
@@ -170,11 +160,11 @@ export function sidebarGroups(
 }
 
 /** "Waiting on you": tasks asking, failed or with a PR to review, in that order, newest first within each. */
-export function inboxRows(tasks: readonly Task[], inInbox: (t: Task) => boolean, now: number): SidebarRow[] {
+export function inboxRows(tasks: readonly Task[], inInbox: (t: Task) => boolean): SidebarRow[] {
   return tasks
     .filter(inInbox)
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || lastActive(b) - lastActive(a))
-    .map((t) => ({ task: t, dim: false, meta: rowMeta(t, now) }))
+    .map((t) => ({ task: t, dim: false, meta: rowMeta(t) }))
 }
 
 // --- Keeping what didn't change: a task update re-renders only its own row ------------------------------------------

@@ -24,7 +24,7 @@ import { usePanels, viewOf } from "../lib/panelStack"
 import { navigateApp, openChat, taskSessionHref } from "../lib/navigation"
 import { focusComposer, pickFocusesComposer } from "../lib/chatSwitch"
 import { badgeStatus } from "../lib/prState"
-import { MERGED_BADGE, STATUS, cx, useMinuteClock } from "./ui"
+import { MERGED_BADGE, STATUS, cx } from "./ui"
 import { ProjectAvatar, TaskStatusIcon, projectColorStyle } from "./TaskIcon"
 import { DismissButton, modalDepth } from "./Modal"
 import { TREE_STEP, TaskRow, TreeNode } from "./Sidebar"
@@ -159,14 +159,13 @@ function useChatRail(captain: string | null, project: Project | undefined, below
   const tasks = useTasks().data
   const pins = useBarPins()
   const closing = usePendingCloses()
-  const now = useMinuteClock()
   const openIds = useOpenTaskIds()
   const groups = useMemo(() => {
-    const all = sidebarGroups(projects ?? [], tasks ?? [], pins, { now, current: captain, closing })
+    const all = sidebarGroups(projects ?? [], tasks ?? [], pins, { current: captain, closing })
     // Its own tasks only: a sub-task open has its parent's strip.
     const open = (tasks ?? []).filter((t) => !t.parentTaskId && (openIds.includes(t.id) || t.id === below))
     return chatRailGroups(project ? [...all.shown, ...all.others] : all.shown, project ? project.id : null, open)
-  }, [projects, tasks, pins, now, captain, closing, project, openIds, below])
+  }, [projects, tasks, pins, captain, closing, project, openIds, below])
   return { groups, openIds }
 }
 
@@ -294,16 +293,15 @@ function RailTree({ id, captain, title, anchor, takeFocus, onClose }: {
   const tasks = useTasks().data
   const pins = useBarPins()
   const closing = usePendingCloses()
-  const now = useMinuteClock()
   const folds = useTreeFolds()
   const openIds = useOpenTaskIds()
   const newest = openIds.at(-1) ?? null
   const groups = useMemo(() => {
     const project = captain ? projects?.find((p) => p.id === captain) : undefined
-    const all = sidebarGroups(projects ?? [], tasks ?? [], pins, { now, current: captain, closing })
+    const all = sidebarGroups(projects ?? [], tasks ?? [], pins, { current: captain, closing })
     const open = (tasks ?? []).filter((t) => openIds.includes(t.id))
-    return railTreeGroups(project ? [...all.shown, ...all.others] : all.shown, project ? project.id : null, open, now)
-  }, [projects, tasks, pins, now, captain, closing, openIds])
+    return railTreeGroups(project ? [...all.shown, ...all.others] : all.shown, project ? project.id : null, open)
+  }, [projects, tasks, pins, captain, closing, openIds])
   const selection = useMemo<Selection>(() => {
     if (!newest) return { selected: null, behind: null, inside: null }
     const under = treeHidden(groups, folds).get(newest)

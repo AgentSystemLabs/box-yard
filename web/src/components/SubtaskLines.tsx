@@ -6,6 +6,7 @@ import { GitFork, Users } from "lucide-react"
 import type { TaskMessage, TaskStatus } from "../../../shared/types"
 import { useTasks } from "../lib/queries"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
+import { TaskRowTitle } from "./TaskRowTitle"
 import { AppLink, LineIcon, Markdown, STATUS, TimeAgo, cx } from "./ui"
 
 type Listed = { id: string; title: string }
@@ -44,11 +45,11 @@ export function SubtasksLine({ m }: { m: TaskMessage }) {
               <li key={s.id} className="min-w-0">
                 <AppLink
                   href={`/tasks/${s.id}`}
-                  className="grid min-h-8 min-w-0 grid-cols-[0.5rem_minmax(0,1fr)] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm text-yard-300 hover:bg-zinc-900 hover:text-yard-200 @min-[20rem]/subtasks:grid-cols-[0.5rem_minmax(0,1fr)_auto] pointer-coarse:min-h-11"
+                  className="grid min-h-8 min-w-0 grid-cols-[0.5rem_minmax(0,1fr)_auto] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm text-yard-300 hover:bg-zinc-900 hover:text-yard-200 pointer-coarse:min-h-11"
                 >
                   <span aria-hidden className={cx("h-2 w-2 shrink-0 rounded-full", status ? STATUS[status].dot : "bg-zinc-700")} />
-                  <span className="col-start-2 min-w-0 truncate">{task?.title ?? s.title}</span>
-                  {status && <span className="col-start-2 row-start-2 text-[11px] text-zinc-500 @min-[20rem]/subtasks:col-start-3 @min-[20rem]/subtasks:row-start-1">{STATUS[status].label}</span>}
+                  <TaskRowTitle title={task?.title ?? s.title} status={status} />
+                  {status && <span data-subtask-status className={cx("col-start-3 row-start-1 text-[11px] text-zinc-500", (status === "working" || status === "failed") && "sr-only")}>{STATUS[status].label}</span>}
                 </AppLink>
               </li>
             )
