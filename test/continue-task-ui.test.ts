@@ -65,7 +65,7 @@ describe("Continue with a harness", () => {
     render({ status: "idle" })
     click("Continue with…")
     choose("default")
-    expect(document.body.textContent).toContain("Changing defaults in Settings only affects new tasks")
+    expect(document.body.textContent).toContain("Changing the default harness in Settings only affects new tasks")
     await submit()
     expect(requests[0]?.body).toEqual({ agent: "default" })
   })

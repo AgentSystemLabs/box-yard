@@ -32,7 +32,7 @@ export function ContinueTask({ task, className }: { task: Pick<Task, "id" | "age
           </Select>
         </label>
         <p className="text-zinc-400">{reset ? "Clear this task's model, effort and routing pins and use the chosen harness's defaults and routing. A different harness starts a new CLI session with a recap of this task." : "Keep the saved model and effort choices and resume its current CLI session."}</p>
-        <p className="text-xs text-zinc-500">This keeps its runner. Changing defaults in Settings only affects new tasks; this choice applies to this task explicitly.</p>
+        <p className="text-xs text-zinc-500">This keeps its runner. Changing the default harness in Settings only affects new tasks; this choice applies to this task explicitly.</p>
       </div>
     </Modal>}
   </>
