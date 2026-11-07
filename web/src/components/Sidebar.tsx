@@ -56,6 +56,7 @@ import {
 import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
+import { SidebarDeleteRow } from "./SidebarDeleteRow"
 import { DismissButton } from "./Modal"
 import { ChatIcon } from "./ChatIcons"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
@@ -731,7 +732,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
   const nameId = useId()
   return (
     <div data-sidebar-group={project.id} className="pt-1">
-      <div
+      <SidebarDeleteRow target={{ kind: "project", id: project.id, name: project.name, projectId: project.id }}
         {...treeItem(captainKey(project.id), 1, nameId, { expanded: rows.length ? !folded : null, current: state === "selected" })}
         className={cx("group/head flex items-center rounded-lg transition", FOCUS, state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}
       >
@@ -771,7 +772,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
         </button>
         <ProjectSettingsButton id={project.id} name={project.name} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
         <PinButton id={project.id} name={project.name} pinned={group.pin === "pinned"} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
-      </div>
+      </SidebarDeleteRow>
       {!folded && rows.length > 0 && (
         <div id={tasksId} role="group" aria-label={`${project.name} tasks`} className={cx("space-y-px pt-px", PROJECT_TASKS)}>
           {rows.map((r) =>
@@ -820,7 +821,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
   const tree = useContext(InTree)
   const id = useId()
   return (
-    <div
+    <SidebarDeleteRow enabled={tree} target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }}
       {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected }) : undefined)}
       className={cx("flex items-center rounded-lg transition", tree && FOCUS, selected ? SELECTED : dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900")}
     >
@@ -857,7 +858,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
       </button>
       {prMeta && <PrChip task={task} variant="number" className={cx(TAP_AREA, FOCUS, "mr-2 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden")} />}
       {readyForReview(task.status) && <DoneButton task={task} />}
-    </div>
+    </SidebarDeleteRow>
   )
 })
 
@@ -1000,7 +1001,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
   const id = useId()
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
   return (
-    <div
+    <SidebarDeleteRow enabled={inTree} target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }}
       // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
       {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected }) : undefined)}
       // The rail popover has a narrower chevron column and no sidebar guide padding. Reserve its content/actions too.
@@ -1053,7 +1054,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
         </span>
       </button>
       {readyForReview(task.status) && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
-    </div>
+    </SidebarDeleteRow>
   )
 })
 
@@ -1242,7 +1243,7 @@ const MoreProjects = memo(function MoreProjects({ groups, selection, onPick }: {
 function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGroup; color: Parameters<typeof projectColorStyle>[0]; selected: boolean; onPick: Pick["captain"] }) {
   const id = useId()
   return (
-    <div {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("group/more flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
+    <SidebarDeleteRow target={{ kind: "project", id: g.project.id, name: g.project.name, projectId: g.project.id }} {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("group/more flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
       <button
         type="button"
         onClick={(e) => onPick(g.project.id, e)}
@@ -1261,6 +1262,6 @@ function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGrou
       </button>
       <ProjectSettingsButton id={g.project.id} name={g.project.name} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
       <PinButton id={g.project.id} name={g.project.name} pinned={false} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
-    </div>
+    </SidebarDeleteRow>
   )
 }
