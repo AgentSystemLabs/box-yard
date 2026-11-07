@@ -21,6 +21,7 @@ import { nestAt } from "../web/src/components/Sidebar.js"
 import { resetScrollMemory } from "../web/src/lib/scrollMemory.js"
 import type { Project, Task, TaskMessage, TaskStatus } from "../shared/types"
 import { APP_HOME, openChat } from "../web/src/lib/navigation.js"
+import { sidebarGroup } from "./sidebarTree.js"
 
 beforeAll(() => warmLazyParts())
 
@@ -112,10 +113,12 @@ function render(path = APP_HOME, tasks: Task[] = TASKS) {
 }
 
 const nav = () => document.querySelector<HTMLElement>("nav[aria-label='Projects and tasks']")!
-const project = () => nav().querySelector<HTMLElement>(`section[aria-label='${YARD.name}']`)!
+const project = () => sidebarGroup(nav(), YARD.name)!
 const node = (t: Task) => project().querySelector<HTMLElement>(`[data-tree-node=${t.id}]`)
 const chevron = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(":scope > div > button[aria-expanded]")!
 const open = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(`:scope > div > button[data-open-task=${t.id}]`)!
+/** A task's row in the sidebar's tree: the treeitem around its open button. */
+const item = (t: Task) => open(t).closest<HTMLElement>("[role=treeitem]")!
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
 const columns = () => [...document.querySelectorAll<HTMLElement>("[data-testid=column]")]
 /** Beside the chat every panel shows, the strip scrolling when they don't fit; on a sheet only these do. */
@@ -201,7 +204,7 @@ describe("the sidebar's sub-task tree", () => {
     // Cody marks the tree done (its sub-tasks close with it): it leaves the list, and the quiet project folds away.
     act(() => void qc.setQueryData(keys.tasks, rested.map((t) => ({ ...t, status: "done" }) as Task)))
     await settle()
-    expect(nav().querySelector(`section[aria-label='${YARD.name}']`)).toBeNull()
+    expect(sidebarGroup(nav(), YARD.name)).toBeNull()
     expect(nav().querySelector(`[data-open-task=${OMELETTE.id}]`)).toBeNull()
   })
 
@@ -281,7 +284,7 @@ describe("the sidebar's sub-task tree", () => {
     await settle()
     expect(location.search).toBe(`?session=${FRENCH.id}`)
     expect(columns().map((c) => c.dataset.view)).toEqual([`session:${FRENCH.id}`])
-    expect(open(FRENCH).getAttribute("aria-current")).toBe("page")
+    expect(item(FRENCH).getAttribute("aria-current")).toBe("page")
     expect(nav().querySelectorAll("[aria-current=page]")).toHaveLength(1)
 
     click(chevron(OMELETTE))
@@ -376,7 +379,7 @@ describe("a sub-task tree five and more levels deep", () => {
     click(open(L5))
     await settle()
     expect(location.search).toBe(`?session=${L5.id}`)
-    expect(open(L5).getAttribute("aria-current")).toBe("page")
+    expect(item(L5).getAttribute("aria-current")).toBe("page")
     expect(nav().querySelectorAll("[aria-current=page]")).toHaveLength(1)
     // The fill and the bar are on the row's box, which starts at its level (its group's `--nest`).
     const box = open(L5).parentElement!
@@ -418,7 +421,7 @@ describe("a double click on a tree row with sub-tasks folds or unfolds its tree"
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.dataset.testid === "columns") return rect(0, 800, panels)
       if (node && this.dataset.treeNode === node.id) return rect(node.top, node.bottom)
-      if (this.parentElement?.tagName === "NAV" && this.classList.contains("overflow-y-auto")) return rect(100, 800)
+      if (this.parentElement?.getAttribute("role") === "tree" && this.classList.contains("overflow-y-auto")) return rect(100, 800)
       return real.call(this)
     })
   }
@@ -519,7 +522,7 @@ describe("a double click on a tree row with sub-tasks folds or unfolds its tree"
     expect(drawer()).not.toBeNull()
     expect(expanded(OMELETTE, drawer()!)).toBe("false")
     // Scrolled just enough to show the row.
-    expect(drawer()!.querySelector<HTMLElement>("nav > .overflow-y-auto")!.scrollTop).toBe(200)
+    expect(drawer()!.querySelector<HTMLElement>("[role=tree] > .overflow-y-auto")!.scrollTop).toBe(200)
     // A tap after that is a tap.
     clickAt(open(OMELETTE), 3000, { pointerType: "touch" })
     expect(drawer()).toBeNull()

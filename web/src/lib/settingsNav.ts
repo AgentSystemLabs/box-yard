@@ -175,7 +175,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   {
     key: "costs",
     label: "Usage",
-    description: "How much of each Claude and Codex login's 5-hour and weekly limits is used, and a link to Usage: daily cost and tokens over the last 7 to 90 days, by model, box, project and task. Below: what boxes may cost per day and per month, whether the Coordinator's header shows that spend, and the Upstash Box rates their cost is worked out with.",
+    description: "Open Usage for Claude and Codex subscription allowances, daily cost and tokens over the last 7 to 90 days, by model, box, project and task. Below: daily and monthly box spending limits, the Coordinator's spend meter, and Upstash Box rates.",
     fields: ["showCloudMeter", "costRates", "budget"],
   },
   {

@@ -99,6 +99,20 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
       ],
     },
     {
+      // The sidebar's list is a tree (lib/treeView.ts): one stop for Tab, then these.
+      title: "Sidebar",
+      rows: [
+        { id: "tree-tab", label: "Into the list, on the open chat or task, and out of it", keys: [["Tab"]] },
+        { id: "tree-move", label: "Move up or down the list", keys: [["↑"], ["↓"]] },
+        { id: "tree-unfold", label: "Unfold, then step into it", keys: [["→"]] },
+        { id: "tree-fold", label: "Fold, or step out to the row it's under", keys: [["←"]] },
+        { id: "tree-toggle", label: "Fold or unfold; on a row that doesn't fold, open it", keys: [["Space"]] },
+        { id: "tree-open", label: "Open", keys: [["Enter"]] },
+        { id: "tree-ends", label: "First or last row", keys: [["Home"], ["End"]] },
+        { id: "tree-find", label: "Jump to a row: type the start of its name", keys: [["A–Z"]] },
+      ],
+    },
+    {
       title: "Composer",
       rows: [
         { id: "send", label: "Send", keys: [["Enter"]] },

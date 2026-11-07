@@ -31,7 +31,6 @@ import { DaytonaPanel } from "./DaytonaSettings"
 import { DockerPanel } from "./DockerSettings"
 import { MachinesPanel } from "./MachineSettings"
 import { useOpenUsage } from "./UsageHost"
-import { SubscriptionLimits } from "./LoginLimits"
 import { ProjectSettingsPicker } from "./ProjectSettingsDialog"
 import { Modal } from "./Modal"
 import { Panel, Row, SourceHint } from "./SettingsBlocks"
@@ -1470,10 +1469,9 @@ function CostsPanel({
     )
   return (
     <Panel section="costs">
-      <SubscriptionLimits />
       <Row
-        label="Spend over time"
-        help="Daily cost and tokens for the last 7, 30, 60 or 90 days: Claude and Codex by model, boxes by provider, down to each project and task. It opens over Settings; closing it comes back here."
+        label="Allowances, cost and tokens"
+        help="Open Usage for each Claude and Codex login's session and weekly allowances, plus daily model and box costs by project and task. It opens over Settings; closing it comes back here."
       >
         <OpenUsage />
       </Row>

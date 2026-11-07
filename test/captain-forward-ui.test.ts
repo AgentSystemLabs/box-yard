@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, createRef } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { CaptainAnswerLine, TaskComposer, ToCaptainLine } from "../web/src/components/CaptainForward.js"
+import { CaptainAnswerLine, TaskComposer, ToCaptainLine, type TaskAskTarget } from "../web/src/components/CaptainForward.js"
 import { focusComposer } from "../web/src/lib/chatSwitch.js"
-import type { Project, Task, TaskMessage } from "../shared/types.js"
+import type { Project, Task, TaskMessage, TaskStatus } from "../shared/types.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -40,14 +40,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function render(t: Task) {
+function render(t: Task, ask?: TaskAskTarget) {
   const panel = createRef<HTMLElement>()
   act(() =>
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement("section", { ref: panel }, createElement(TaskComposer, { task: t, project, panelRef: panel, onSubmit })),
+        createElement("section", { ref: panel }, createElement(TaskComposer, { task: t, project, panelRef: panel, onSubmit, ask })),
       ),
     ),
   )
@@ -65,13 +65,42 @@ function type(text: string) {
 const submitForm = () => act(() => void document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
 
 describe("TaskComposer: send to the Captain", () => {
-  it("offers the Captain chip only while the task is busy or has queued messages", () => {
+  it("shows the Captain chip whatever the task's status, resting or busy", () => {
+    const statuses: TaskStatus[] = ["idle", "pr_ready", "needs_input", "failed", "done", "working", "starting", "queued"]
+    for (const status of statuses) {
+      render(task({ status, pendingCount: 0 }))
+      expect(q("captain-target")?.getAttribute("aria-pressed"), status).toBe("false")
+    }
+  })
+
+  it("the chip's tooltip mentions the turn only while the agent works, and the queue only when there is one", () => {
     render(task({ status: "idle", pendingCount: 0 }))
+    expect(q("captain-target")!.title).toBe("Send this to the demo Captain instead of the agent: it can split, reprioritise or start tasks")
+    render(task({ status: "working", pendingCount: 2 }))
+    expect(q("captain-target")!.title).toBe("Send this to the demo Captain instead of the agent: it can split, reprioritise or start tasks and edit this task's queue, now rather than after this turn")
+  })
+
+  it("Side question on hides the Captain chip; off, it's back", () => {
+    const ask: TaskAskTarget = { on: true, toggle() {}, unread: false, busy: false, submit: async () => {} }
+    render(task({ status: "idle", pendingCount: 0 }), ask)
+    expect(q("task-ask-toggle")!.getAttribute("aria-pressed")).toBe("true")
     expect(q("captain-target")).toBeNull()
-    render(task({ status: "idle", pendingCount: 1 }))
+    expect(q("more-captain-target")).toBeNull()
+    render(task({ status: "idle", pendingCount: 0 }), { ...ask, on: false })
     expect(q("captain-target")).not.toBeNull()
-    render(task({ status: "working", pendingCount: 0 }))
-    expect(q("captain-target")?.getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("on a resting task the chip sends to the Captain, then stays for the next message, back on the task", async () => {
+    render(task({ status: "pr_ready", pendingCount: 0 }))
+    act(() => q("captain-target")!.click())
+    expect(textarea().placeholder).toBe("Ask the demo Captain: split, reprioritise, new tasks…")
+    expect(q("captain-forward-note")!.textContent).toBe("To the demo Captain, not the agent. Its reply shows here.")
+    type("start a task for the docs")
+    await act(async () => submitForm())
+    expect(posts).toEqual([{ url: "/api/tasks/task_abc123/captain", body: { content: "start a task for the docs", attachments: [] } }])
+    expect(q("captain-target")!.getAttribute("aria-pressed")).toBe("false")
+    expect(q("captain-forward-note")).toBeNull()
+    expect(textarea().placeholder).toBe("Send feedback or a follow-up…")
   })
 
   it("by default a message goes to the task, even one that reads like task management", async () => {

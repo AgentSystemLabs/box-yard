@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { looksLikeTaskManagement, offersCaptain } from "../web/src/lib/captainForward.js"
+import { looksLikeTaskManagement, suggestsCaptain } from "../web/src/lib/captainForward.js"
 import { forwardedFromTask } from "../shared/captain.js"
 import { workerSystemPrompt } from "../server/prompts.js"
 import type { Project } from "../shared/types.js"
@@ -41,11 +41,11 @@ describe("looksLikeTaskManagement (the task chat's 'send this to the Captain?')"
   ])("no: %s", (text) => expect(looksLikeTaskManagement(text)).toBe(false))
 })
 
-describe("offersCaptain", () => {
-  it("offers the Captain while the task is busy or has queued messages", () => {
-    for (const status of ["working", "starting", "queued"] as const) expect(offersCaptain({ status }, 0)).toBe(true)
-    expect(offersCaptain({ status: "idle" }, 2)).toBe(true)
-    for (const status of ["idle", "done", "needs_input", "failed"] as const) expect(offersCaptain({ status }, 0)).toBe(false)
+describe("suggestsCaptain", () => {
+  it("suggests the Captain while the task is busy or has queued messages", () => {
+    for (const status of ["working", "starting", "queued"] as const) expect(suggestsCaptain({ status }, 0)).toBe(true)
+    expect(suggestsCaptain({ status: "idle" }, 2)).toBe(true)
+    for (const status of ["idle", "pr_ready", "done", "needs_input", "failed"] as const) expect(suggestsCaptain({ status }, 0)).toBe(false)
   })
 })
 

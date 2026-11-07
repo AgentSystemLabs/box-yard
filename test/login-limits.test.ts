@@ -339,7 +339,12 @@ describe("the meters' words", () => {
     expect(windowText(w({ resetsAt: T - H, asOf: T - 3 * H }), T, "UTC")).toEqual({ used: "reset since", reset: "Reset Today 9:00 AM. No run since to read it again" })
   })
 
+  it("does not claim usage or a reset without a reading", () => {
+    expect(windowText(w({ usedPct: null, resetsAt: null }), T, "UTC")).toEqual({ used: "Usage not reported", reset: "Reset time not reported" })
+    expect(windowText(w({ resetsAt: null, asOf: T - 7 * H }), T, "UTC")).toEqual({ used: "reading expired", reset: "Last read 7h ago. No reset time was reported" })
+  })
+
   it("never round a little use down to nothing", () => {
-    expect([usedLabel(0), usedLabel(0.4), usedLabel(64.6), usedLabel(null)]).toEqual(["0%", "<1%", "65%", "—"])
+    expect([usedLabel(0), usedLabel(0.4), usedLabel(64.6), usedLabel(99.6), usedLabel(null)]).toEqual(["0%", "<1%", "64.6%", "99.6%", "—"])
   })
 })

@@ -14,7 +14,7 @@ import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import { AttachmentList } from "./Attachments"
 import { AppLink, LineIcon, Markdown, TimeAgo, cx } from "./ui"
 import { useForwardToCaptain, useOwnerName, useStopTask } from "../lib/queries"
-import { looksLikeTaskManagement, offersCaptain } from "../lib/captainForward"
+import { looksLikeTaskManagement, suggestsCaptain } from "../lib/captainForward"
 import { useComposerFocus } from "../lib/chatSwitch"
 import { labelFrom, rowWidth } from "../lib/composerRow"
 import type { Attachment, Project, Task, TaskMessage } from "../../../shared/types"
@@ -42,10 +42,11 @@ export interface TaskAskTarget {
 }
 
 /**
- * The task page's box. While the task is busy or has queued messages, a "Captain" chip sends the next message to the
- * project's Captain (with the task's queue) instead of queueing it for the agent; after that send it goes back to the
- * task. A draft that reads like task management gets a one-tap "Send to Captain"; nothing is ever rerouted on its own.
- * With `ask`, a "Side question" toggle asks the Coordinator about the task instead, out of the agent's sight.
+ * The task page's box. Whatever the task's status, a "Captain" chip sends the next message to the project's Captain
+ * (with the task's queue) instead of the agent; after that send it goes back to the task. While the task is busy or has
+ * queued messages, a draft that reads like task management gets a one-tap "Send to Captain"; nothing is ever rerouted
+ * on its own. With `ask`, a "Side question" toggle asks the Coordinator about the task instead, out of the agent's
+ * sight (and hides the Captain chip: the box sends to one of them).
  * While the agent's turn runs, Stop before Send ends it, as the header's Stop does.
  */
 export const TaskComposer = memo(function TaskComposer({
@@ -77,12 +78,12 @@ export const TaskComposer = memo(function TaskComposer({
   const forward = useForwardToCaptain(task.id)
   const captain = `${project?.name ?? "project"} Captain`
   const color = useProjectColor(task.projectId)
-  const offered = offersCaptain(task, task.pendingCount)
+  const suggest = suggestsCaptain(task, task.pendingCount)
   const running = task.status === "working" || task.status === "starting"
   const asking = Boolean(ask?.on)
   const { mutate: stopTask } = useStopTask()
   const stop = useMemo(() => (running && !asking ? { label: "Stop the agent's turn", onStop: () => stopTask(task.id) } : null), [running, asking, stopTask, task.id])
-  const showCaptain = !asking && (offered || toCaptain)
+  const showCaptain = !asking
   // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts). Their labels show
   // only where the whole row fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
   const chips = (ask ? 1 : 0) + (showCaptain ? 1 : 0)
@@ -139,7 +140,7 @@ export const TaskComposer = memo(function TaskComposer({
             </span>
           </div>
         )
-      if (!offered || dismissed || !looksLikeTaskManagement(draft)) return null
+      if (!suggest || dismissed || !looksLikeTaskManagement(draft)) return null
       return (
         <div role="status" data-testid="captain-suggest" className="mx-1 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-yard-500/30 bg-yard-500/10 py-1 pr-1 pl-2 text-[11px] text-yard-200">
           <span className="min-w-0 flex-1 basis-40">
@@ -157,7 +158,7 @@ export const TaskComposer = memo(function TaskComposer({
         </div>
       )
     },
-    [asking, toCaptain, offered, dismissed, captain, task.projectId, task.pendingCount, running, sendToCaptain],
+    [asking, toCaptain, suggest, dismissed, captain, task.projectId, task.pendingCount, running, sendToCaptain],
   )
 
   return (
@@ -203,7 +204,11 @@ export const TaskComposer = memo(function TaskComposer({
               data-testid="captain-target"
               aria-pressed={toCaptain}
               onClick={toggleCaptain}
-              title={toCaptain ? "Sending to the Captain: tap to send to the task's agent instead" : `Send this to the ${captain} instead: it can split, reprioritise or start tasks and edit this task's queue now`}
+              title={
+                toCaptain
+                  ? "Sending to the Captain: tap to send to the task's agent instead"
+                  : `Send this to the ${captain} instead of the agent: it can split, reprioritise or start tasks${task.pendingCount ? " and edit this task's queue" : ""}${running ? ", now rather than after this turn" : ""}`
+              }
               className={cx(CHIP, toCaptain ? "bg-yard-500/15 text-yard-200 ring-1 ring-yard-500/40" : "text-zinc-500 hover:text-zinc-200")}
             >
               <CaptainIcon projectId={task.projectId} style={projectColorStyle(color)} className={cx("h-3.5 w-3.5", color ? "text-(--pc)" : "text-zinc-300")} />
@@ -246,7 +251,7 @@ export const TaskComposer = memo(function TaskComposer({
         asking
           ? "Ask about this task…"
           : toCaptain
-          ? `Ask the ${captain}: split, reprioritise, the queue…`
+          ? `Ask the ${captain}: split, reprioritise, ${task.pendingCount ? "the queue" : "new tasks"}…`
           : task.status === "needs_input"
             ? "Answer the agent…"
             : running

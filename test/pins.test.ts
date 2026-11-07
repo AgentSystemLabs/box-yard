@@ -22,6 +22,7 @@ import { arrangement, chatRef, columnLayout, COORDINATOR_REF, hierarchyStrips, o
 import { setSidebarCollapsed } from "../web/src/lib/sidebar.js"
 import { navigateApp, openChat, taskSessionHref } from "../web/src/lib/navigation.js"
 import type { Project, Task, TaskStatus } from "../shared/types"
+import { sidebarGroup } from "./sidebarTree.js"
 
 beforeAll(() => warmLazyParts())
 
@@ -131,7 +132,7 @@ const sidebar = () => document.querySelector<HTMLElement>("[data-testid=sidebar]
 const go = (href: string) => act(() => navigateApp(href))
 const pick = (projectId: string | null) => act(() => openChat(projectId))
 /** A project's row in the sidebar: its Captain. */
-const captainRow = (p: Project) => [...nav().querySelectorAll<HTMLButtonElement>(`section[aria-label='${p.name}'] button`)].find((b) => b.textContent?.startsWith(`${p.name}, Captain`) || b.getAttribute("aria-label") === `${p.name}, Captain`)!
+const captainRow = (p: Project) => [...(sidebarGroup(nav(), p.name)?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => b.textContent?.startsWith(`${p.name}, Captain`) || b.getAttribute("aria-label") === `${p.name}, Captain`)!
 /** A task's row in the sidebar, as a click on it. */
 const row = (t: Task) => click(nav().querySelector(`[data-open-task="${t.id}"]`)!)
 /** Not inside a chat kept hidden beside the one shown (React's Activity hides it with display: none). */
