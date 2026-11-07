@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Project, Task } from "../../../shared/types"
 import { ArrowDownRight, GitPullRequest } from "lucide-react"
@@ -12,8 +12,8 @@ import { REVEAL_CHAT_EVENT, revealChatMessage, type ChatReveal } from "../lib/re
 import type { HistoryIndexState } from "../lib/transcriptHistory"
 import { Loading } from "./Loading"
 import { DismissButton } from "./Modal"
-import { releaseListBottom, scrollIntoList } from "./StickyScroll"
-import { cx, NewTabLink } from "./ui"
+import { releaseListBottom, scrollIntoList, type StickyScrollHandle } from "./StickyScroll"
+import { Button, cx, NewTabLink } from "./ui"
 
 const summaryProjects = (projects: Project[]) => projects.map(({ id, repo }) => ({ id, repo }))
 
@@ -51,12 +51,13 @@ const DayDivider = memo(function DayDivider({ at, messageId }: { at: number; mes
 })
 
 /** A rail beside, rather than on top of, the list. Only this rail subscribes to task milestones. */
-export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, ensure, index, projectId, taskId, children }: {
+export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, ensure, index, scrollHandle, projectId, taskId, children }: {
   days: ChatDay[]
   messages: readonly NoticeLike[]
   reveal: (id: string) => boolean
   ensure?: (id: string) => Promise<boolean>
   index?: HistoryIndexState
+  scrollHandle: RefObject<StickyScrollHandle | null>
   projectId?: string
   taskId?: string
   children: ReactNode
@@ -64,6 +65,12 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
   const root = useRef<HTMLDivElement>(null)
   const scope = useId()
   const pendingReveal = useRef<(() => void) | null>(null)
+  const cancelReveal = useRef<(() => void) | null>(null)
+  const jumpToEnd = useCallback(() => {
+    cancelReveal.current?.()
+    scrollHandle.current?.scrollToEnd()
+    root.current?.querySelector<HTMLElement>("[data-scroller]")?.focus({ preventScroll: true })
+  }, [scrollHandle])
   useLayoutEffect(() => { pendingReveal.current?.() })
   useEffect(() => {
     const frames = new Set<number>()
@@ -81,6 +88,14 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
       highlighted = undefined
     }
     let sequence = 0
+    const cancel = () => {
+      sequence++
+      pendingReveal.current = null
+      frames.forEach(cancelAnimationFrame)
+      frames.clear()
+      clearHighlight()
+    }
+    cancelReveal.current = cancel
     const onReveal = (event: Event) => {
       const raw = (event as CustomEvent<ChatReveal>).detail
       if (typeof raw === "string" ? !!projectId || !!taskId : raw.scope !== scope) return
@@ -127,14 +142,12 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
     document.addEventListener("keydown", clearHighlight, true)
     document.addEventListener("wheel", clearHighlight, { passive: true, capture: true })
     return () => {
-      sequence++
-      pendingReveal.current = null
-      clearHighlight()
+      cancel()
+      cancelReveal.current = null
       window.removeEventListener(REVEAL_CHAT_EVENT, onReveal)
       document.removeEventListener("pointerdown", clearHighlight, true)
       document.removeEventListener("keydown", clearHighlight, true)
       document.removeEventListener("wheel", clearHighlight, true)
-      frames.forEach(cancelAnimationFrame)
     }
   }, [scope, reveal, ensure, projectId, taskId])
   return (
@@ -148,20 +161,21 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
         </div>}
       </div>}
       <div ref={root} data-chat-history className="@container/history relative flex min-h-0 min-w-0 flex-1">
-        {days.length > 0 && <DayRail days={days} messages={messages} scope={scope} projectId={projectId} taskId={taskId} complete={!index || index.status === "ready"} />}
+        {days.length > 0 && <DayRail days={days} messages={messages} scope={scope} projectId={projectId} taskId={taskId} complete={!index || index.status === "ready"} onEnd={jumpToEnd} />}
         {children}
       </div>
     </div>
   )
 })
 
-const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId, complete }: {
+const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId, complete, onEnd }: {
   days: ChatDay[]
   messages: readonly NoticeLike[]
   scope: string
   projectId?: string
   taskId?: string
   complete: boolean
+  onEnd: () => void
 }) {
   // The app already loads tasks. Observe only milestone fields in that cache, so status/context SSE updates don't
   // rebuild summaries and opening a rail never starts another request.
@@ -173,7 +187,6 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
   const now = useToday()
   const summaries = useMemo(() => daySummaries(messages, tasks ?? [], projects ?? [], projectId), [messages, tasks, projects, projectId])
   const [open, setOpen] = useState<string | null>(null)
-  const [top, setTop] = useState(8)
   const nav = useRef<HTMLElement>(null)
   const popup = useRef<HTMLDivElement>(null)
   const anchor = useRef<HTMLButtonElement | null>(null)
@@ -193,14 +206,6 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
   useLayoutEffect(() => {
     if (nav.current) { nav.current.scrollTop = nav.current.scrollHeight; setRailTop(nav.current.scrollTop) }
   }, [lastDay, days.length])
-  useLayoutEffect(() => {
-    const box = popup.current
-    const button = anchor.current
-    const root = nav.current?.parentElement
-    if (!box || !button || !root) return
-    const bounds = root.getBoundingClientRect()
-    setTop(Math.max(8, Math.min(button.getBoundingClientRect().top - bounds.top, bounds.height - box.offsetHeight - 8)))
-  }, [day, bullets])
   useEffect(() => {
     if (!open) return
     const outside = (e: PointerEvent) => {
@@ -226,7 +231,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
 
   return (
     <>
-      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label={`Chat days${complete ? "" : " (recent only; older dates may be missing)"}: activate to preview, activate again to jump`} className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
+      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label={`Chat days${complete ? "" : " (recent only; older dates may be missing)"}: activate to preview`} className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
         <p aria-hidden className="py-1 text-center text-[10px] text-zinc-500">{complete ? "Days" : "Recent"}</p>
         {railStart > 0 && <div aria-hidden style={{ height: railStart * 44 }} />}
         {days.slice(railStart, railEnd).map((d, index) => (
@@ -245,15 +250,12 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
               setRailTop(top)
               requestAnimationFrame(() => nav.current?.querySelector<HTMLElement>(`[data-day-index="${next}"]`)?.focus({ preventScroll: true }))
             }}
-            aria-label={`${dayLabel(d.at, now)}: preview day summary; activate again to jump`}
+            aria-label={`${dayLabel(d.at, now)}: preview day summary`}
             aria-expanded={d.key === open}
             aria-controls={d.key === open ? popupId : undefined}
             onClick={(e) => {
-              if (open === d.key) jump(d)
-              else {
-                anchor.current = e.currentTarget
-                setOpen(d.key)
-              }
+              anchor.current = e.currentTarget
+              setOpen(d.key)
             }}
             className={cx("flex h-11 min-h-11 w-11 flex-col items-center justify-center border-l-2 text-[10px] leading-tight focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400", d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300")}
           >
@@ -264,10 +266,14 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
         {railEnd < days.length && <div aria-hidden style={{ height: (days.length - railEnd) * 44 }} />}
       </nav>
       {day && (
-        <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} style={{ top }} className="scroll-thin absolute left-12 z-20 max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-xl">
+        <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} className="scroll-thin absolute top-2 left-12 z-20 max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-xl">
           <div className="flex min-h-11 items-center justify-between gap-2">
             <p className="font-semibold text-zinc-100">{dayLabel(day.at, now)}</p>
             <DismissButton kind="close" className="h-11 w-11 transition-none!" onClick={close} label="Close day summary" />
+          </div>
+          <div role="group" aria-label="Transcript navigation" className="mb-3 flex flex-wrap gap-2">
+            <Button variant="ghost" className="min-h-11! flex-1 transition-none" disabled={!complete} title={complete ? undefined : "Load all chat dates to jump to start"} onClick={() => jump(days[0]!)}>Jump to start</Button>
+            <Button variant="ghost" className="min-h-11! flex-1 transition-none" onClick={() => { setOpen(null); onEnd() }}>Jump to end</Button>
           </div>
           {bullets.length > 0 ? (
             <ul className="list-disc space-y-2 pl-4 text-zinc-300">
@@ -293,7 +299,6 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
             </ul>
           ) : <p className="py-1 text-zinc-400">No task milestones in the loaded messages. Jump to this day to read more.</p>}
           <p className="mt-3 text-[11px] text-zinc-400">Tap a summary to find it in chat. Links open GitHub.</p>
-          <p className="mt-1 text-zinc-400">Tap this day again to jump to its first message.</p>
           <button type="button" onClick={() => jump(day)} className="mt-2 min-h-11 w-full rounded-lg border border-zinc-700 px-3 text-left font-medium text-yard-300 hover:bg-zinc-800">Jump to day</button>
         </div>
       )}
