@@ -253,10 +253,11 @@ describe("StickyScroll", () => {
   it("scrollIntoList lets go of the bottom first, so growth before its scroll lands can't pull the view back down", () => {
     // A card far up, revealed by a search pick.
     const target = rows()[5]!
+    // A smooth scroll that hasn't moved the list yet.
     const scrolled = vi.fn()
-    target.scrollIntoView = scrolled
+    scroller.scrollTo = scrolled
     act(() => scrollIntoList(target, { block: "nearest", behavior: "smooth" }))
-    expect(scrolled).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" })
+    expect(scrolled).toHaveBeenCalledWith({ top: 500, behavior: "smooth" })
     const before = top
     // The card opens (or a reply streams) before the smooth scroll's first frame: the view waits for it.
     streamDelta()
@@ -272,8 +273,9 @@ describe("StickyScroll", () => {
   it("scrollIntoList holds what's in view already as it grows, instead of following the bottom; the bottom re-pins", () => {
     // Already in full view at the bottom: nothing scrolls, and the card opening below its head doesn't push it up.
     const target = rows().at(-1)!
-    target.scrollIntoView = () => {}
+    const scrolled = vi.spyOn(scroller, "scrollTo")
     act(() => scrollIntoList(target, { block: "nearest" }))
+    expect(scrolled).not.toHaveBeenCalled()
     const before = top
     streamDelta()
     expect(top).toBe(before)

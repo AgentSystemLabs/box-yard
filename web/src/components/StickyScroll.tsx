@@ -51,10 +51,37 @@ export function releaseListBottom(el: Element) {
  * of the bottom first and holds the view where the scroll leaves it: pinned, content growing meanwhile (the card
  * opening as it's revealed, its history loading) would pull the view back down, cancel the scroll, or push `el` up
  * out of view. Reaching the bottom again pins it, as ever.
+ *
+ * Only the list scrolls. `Element.scrollIntoView` scrolls every ancestor that has overflow too, `overflow: hidden`
+ * ones included: a Captain panel taller than its frame slid its header up out of sight, where nothing could scroll it
+ * back. The element's `scroll-margin` is honoured, as scrollIntoView would.
  */
-export function scrollIntoList(el: Element, options?: ScrollIntoViewOptions) {
+export function scrollIntoList(el: Element, options: ScrollIntoListOptions = {}) {
   releaseListBottom(el)
-  el.scrollIntoView?.(options)
+  const list = el.parentElement?.closest<HTMLElement>("[data-scroller]")
+  if (!list) return void el.scrollIntoView?.(options)
+  const top = listScrollTop(list, el, options.block ?? "start")
+  if (top !== null) list.scrollTo({ top, behavior: options.behavior ?? "auto" })
+}
+
+export type ScrollIntoListOptions = { block?: "start" | "center" | "end" | "nearest"; behavior?: ScrollBehavior }
+
+/** The `scrollTop` that shows `el` at `block` in `list` (the browser clamps it), or null if `nearest` needs none. */
+function listScrollTop(list: HTMLElement, el: Element, block: NonNullable<ScrollIntoListOptions["block"]>) {
+  const style = getComputedStyle(el)
+  const frame = list.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  // Where `el` sits in the list's content, its scroll margins added.
+  const start = rect.top - frame.top - list.clientTop + list.scrollTop - (parseFloat(style.scrollMarginTop) || 0)
+  const end = rect.bottom - frame.top - list.clientTop + list.scrollTop + (parseFloat(style.scrollMarginBottom) || 0)
+  const view = list.clientHeight
+  if (block === "center") return (start + end - view) / 2
+  if (block === "end") return end - view
+  if (block === "nearest") {
+    if (start >= list.scrollTop && end <= list.scrollTop + view) return null
+    return start < list.scrollTop || end - start > view ? start : end - view
+  }
+  return start
 }
 
 /**
