@@ -585,6 +585,7 @@ const SLOT_MS = 15 * 60_000
 const SOURCE_RANKS: UsageSource[] = ["actual", "measured", "estimated"]
 
 type TaskPatch = Partial<{
+  agentCli: AgentCli
   title: string
   status: TaskStatus
   boxId: string | null
@@ -641,6 +642,7 @@ type TaskPatch = Partial<{
 }>
 
 const TASK_COLUMNS: Record<keyof TaskPatch, string> = {
+  agentCli: "agent_cli",
   title: "title",
   status: "status",
   boxId: "box_id",
@@ -1695,7 +1697,7 @@ export class Store {
     machineLabel?: string | null
     /** With runsOn "gpu": its own cloud and GPU (TaskRow.gpu_provider, gpu_type). */
     gpu?: GpuPick | null
-    /** The CLI its agent runs on for good (TaskRow.agent_cli); omitted: Claude Code. */
+    /** The CLI its agent starts on (TaskRow.agent_cli); omitted: Claude Code. */
     agentCli?: AgentCli | null
     /** Its icon (shared/taskIcons.ts); omitted picks one from its title. */
     icon?: TaskIconName | null

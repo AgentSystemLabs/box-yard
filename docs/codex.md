@@ -9,7 +9,7 @@ Box Yard's agents can run on OpenAI's [Codex CLI](https://developers.openai.com/
 | A project's task agents | Project › Settings › Agent (or Settings › Box agents › Agent for every project that doesn't pick one) |
 | One task | `agent: "codex"` on `create_task` / `create_tasks`, or a `gpt-*` / `o*` model, which picks Codex on its own |
 
-A task keeps the agent it started on, so changing a project's Agent only changes its new tasks. The Coordinator and Captains switch from their next turn: their old session belongs to the other CLI, so the next turn starts a new one with a recap of the conversation, the same way as when a session goes missing.
+Changing a project's Agent or Settings' default only changes new tasks. To switch existing work explicitly, use **Continue with…** on a resting task or `continue_task {task, agent: "codex"}` (choose `claude` or `cursor` as needed). This keeps the same task and workspace; see [continuing tasks](task-continuation.md). The Coordinator and Captains switch from their next turn: their old session belongs to the other CLI, so the next turn starts a new one with a recap of the conversation, the same way as when a session goes missing.
 
 ## Logging in
 
