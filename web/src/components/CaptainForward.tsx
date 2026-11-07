@@ -21,12 +21,12 @@ import type { Attachment, Project, Task, TaskMessage } from "../../../shared/typ
 
 /**
  * How many of the row's 44px buttons (and the gap after one) a chip takes with its label, at text-xs to a finger:
- * "Side question" 119px, "Captain" 85px, "To Captain" 104px. Without its label a chip (38px) counts as one.
+ * "Side question" 119px, "Captain" 85px, "To Captain" 104px. Without its label a chip counts as one 44px touch slot.
  */
 const LABELLED = { ask: 2.6, captain: 1.9, toCaptain: 2.25 }
 
 const CHIP =
-  "inline-flex h-8 shrink-0 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:px-3"
+  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3"
 
 const queuedLabel = (n: number) => (n === 1 ? "1 queued message" : `${n} queued messages`)
 

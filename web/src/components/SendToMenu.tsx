@@ -111,7 +111,8 @@ export function SendToNote({ picker }: { picker: Picker }) {
     <span className="min-w-0 flex-1 py-1 wrap-anywhere">
       {picker.chosen ? "Send to " : "Sent to "}
       <AppLink href={destination.href} className="text-yard-300 underline">{destination.label}</AppLink>
-      {picker.chosen && <span className="block text-zinc-400">Enter sends there · Clear returns to this chat{destination.detail.includes("reopens") ? " · Reopens this done task" : ""}</span>}
+      {picker.chosen && destination.kind === "task" && <span className="block text-zinc-400">{destination.detail}</span>}
+      {picker.chosen && <span className="block text-zinc-400">Enter sends there · Clear returns to this chat</span>}
     </span>
     {picker.chosen && <button type="button" aria-label="Clear destination" title="Clear destination" onClick={picker.clear} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg hover:bg-zinc-800"><X className="h-4 w-4" aria-hidden /></button>}
   </div>
