@@ -97,6 +97,45 @@ describe("server-owned task containment", () => {
     expect(() => yard.tasks.setRunsOn(task.id, "local")).toThrow(/containment/)
   })
 
+  it("refuses isolated worker messages to local/SSH recipients, including FYI, title refs and nested children", async () => {
+    const { yard, task, project } = fixture()
+    const child = yard.tasks.createTask({ projectId: project.id, title: "Child", prompt: "Example", runsOn: "docker", subtask: { parentId: task.id, rootId: task.id, depth: 1, withParent: false } })
+    for (const runner of ["local", "ssh"] as const) {
+      const host = yard.tasks.createTask({ projectId: project.id, title: `Host ${runner}`, prompt: "Example", runsOn: runner })
+      yard.store.updateTask(host.id, { status: "idle" })
+      const before = yard.store.listTaskMessages(host.id, 100)
+      for (const from of [task, child]) for (const to of [host.id, host.title]) for (const fyi of [false, true]) {
+        await yard.tasks.apply(from.id, { t: "message_agent", seq: 1, ts: 1, turnId: null, to, message: "Fixture: run an unauthorized host action", expectReply: !fyi, fyi, source: "cody", approved: true })
+      }
+      expect(yard.store.peekInputs(host.id)).toEqual([])
+      expect(yard.store.listTaskMessages(host.id, 100)).toEqual(before)
+      expect(yard.store.getTask(host.id)?.status).toBe("idle")
+      expect(() => yard.tasks.requireIsolatedTask(host.id)).toThrow(/Manager authority/)
+    }
+    await yard.tasks.apply(task.id, { t: "message_agent", seq: 1, ts: 1, turnId: null, to: child.id, message: "Ordinary contained collaboration" })
+    expect(yard.store.peekInputs(child.id)[0]?.content).toContain("Ordinary contained collaboration")
+  })
+
+  it("withholds isolated child report bodies from host parent queues, history and wait files", async () => {
+    const { yard, project, provider } = fixture()
+    const parent = yard.tasks.createTask({ projectId: project.id, title: "Host parent", prompt: "Example", runsOn: "local" })
+    yard.store.updateTask(parent.id, { status: "idle", boxId: LOCAL_BOX_ID })
+    const child = yard.tasks.createTask({ projectId: project.id, title: "Child", prompt: "Example", runsOn: "docker", subtask: { parentId: parent.id, rootId: parent.id, depth: 1, withParent: false } })
+    const internals = yard.tasks as unknown as { reportToParent(row: unknown, status: string, text: string, question: string): void; writeSubtasksFile(id: string): Promise<void> }
+    const before = yard.store.listTaskMessages(parent.id, 100)
+    const marker = "fixture-untrusted-report-command"
+    internals.reportToParent(yard.store.getTaskRow(child.id), "needs_input", marker, marker)
+    await internals.writeSubtasksFile(parent.id)
+    expect(yard.store.peekInputs(parent.id)).toEqual([])
+    expect(yard.store.listTaskMessages(parent.id, 100)).toEqual(before)
+    expect(yard.store.getTask(parent.id)?.status).toBe("idle")
+    expect(provider.writeFile).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining("subtasks.json"), expect.not.stringContaining(marker))
+    // A report saved before a later human elevation is checked again at delivery, not trusted from storage.
+    yard.store.setKv(`subtask_report:${child.id}`, JSON.stringify({ status: "idle", text: marker, at: 1, inputId: "old" }))
+    await internals.writeSubtasksFile(parent.id)
+    expect(provider.writeFile).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.not.stringContaining(marker))
+  })
+
   it("exposes elevation only to authenticated humans, with explicit confirmation and no active turn", async () => {
     for (const password of ["", "example-fixture-password"]) {
       const { yard, task } = fixture(password)

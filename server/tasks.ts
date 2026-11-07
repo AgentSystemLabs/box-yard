@@ -1192,6 +1192,21 @@ export class TaskManager {
     }
   }
 
+  /** Managers never acquire host execution authority from task/model content, even for an already-hosted task. */
+  requireIsolatedTask(taskId: string) {
+    const row = this.requireRow(taskId)
+    const runner = row.box_id ? this.physicalRunner(row.box_id) : this.store.taskRunner(row)
+    if (this.runnerCeiling(row) !== "isolated" || runner === "local" || runner === "ssh") {
+      throw new BadRequestError("Manager authority is limited to isolated tasks. Host task actions require a human to use the task page directly.")
+    }
+  }
+
+  /** Model-to-model messages cannot cross into a different host authority, including informational reports. */
+  private mayDeliverAgentInput(from: TaskRow, to: TaskRow): boolean {
+    const target = this.runnerCeiling(to)
+    return target === "isolated" || target === this.runnerCeiling(from)
+  }
+
   /** Called only for authenticated human approval (API confirmation or a trusted whole-message runner pick). */
   elevateRunner(taskId: string, runner: "local" | "ssh") {
     const row = this.requireRow(taskId)
@@ -7955,6 +7970,13 @@ mkdir -p ${q(dir + "/work")}`,
   private reportToParent(child: TaskRow, status: TaskStatus, text: string, question: string | null) {
     const parent = child.parent_task_id ? this.store.getTaskRow(child.parent_task_id) : null
     if (!parent || parent.status === "done") return
+    if (!this.mayDeliverAgentInput(child, parent)) {
+      // The child's own transcript remains available to the human. Neither the host parent's history nor its
+      // next-turn queue may receive the report/question; wait_for_subtasks receives only this fixed notice.
+      this.store.setKv(subtaskReportKey(child.id), JSON.stringify({ status, text: "Report withheld across the host authority boundary. A human can review the child's task page.", at: Date.now(), inputId: "" } satisfies SubtaskReport))
+      this.syncSubtasks(parent.id)
+      return
+    }
     const kids = this.store.subtaskRows(parent.id)
     const live = kids.filter((r) => r.id !== child.id && this.liveSubtask(r)).length
     const report = text.trim()
@@ -8036,6 +8058,8 @@ mkdir -p ${q(dir + "/work")}`,
 
   private async writeSubtasksFile(parentId: string) {
     if (this.stopped || !this.store.db.open) return
+    const parent = this.store.getTaskRow(parentId)
+    if (!parent) return
     const queued = new Set(this.store.peekInputs(parentId).map((i) => i.id))
     const children = this.store.subtaskRows(parentId).map((k) => {
       const raw = this.store.getKv(subtaskReportKey(k.id))
@@ -8043,6 +8067,8 @@ mkdir -p ${q(dir + "/work")}`,
       try {
         report = raw ? (JSON.parse(raw) as SubtaskReport) : null
       } catch {}
+      // Re-check old reports too: the parent may have been explicitly elevated after a report was saved.
+      if (!this.mayDeliverAgentInput(k, parent) && report) report = { ...report, text: "Report withheld across the host authority boundary. A human can review the child's task page.", inputId: "" }
       // One due to run again shows as queued, so the runner's wait and finish count it as running.
       const status = !isLiveSubtask(k.status) && this.wantsTurn(k) ? "queued" : k.status
       return { id: k.id, title: k.title, status, url: this.absoluteUrl(`/tasks/${k.id}`), report: report ? { ...report, delivered: !queued.has(report.inputId) } : null }
@@ -8087,6 +8113,10 @@ mkdir -p ${q(dir + "/work")}`,
       say(from.id, `Message to ${to} not delivered: no such agent.`, { to, failed: true })
       this.store.queueInput(from.id, "system", `Your message to "${to}" could not be delivered: there is no agent with that id. Use list_agents.`)
       this.schedule()
+      return
+    }
+    if (!this.mayDeliverAgentInput(from, target)) {
+      say(from.id, "Message not delivered: the recipient has a different host authority. Ask a human to review the task directly.", { to: target.id, blocked: true })
       return
     }
     // Coordinator sees: status only. A message across that line would leave one side's words where the Coordinator
