@@ -9,9 +9,12 @@ import { keys } from "./lib/queries"
 import { installPageGuards } from "./lib/resume"
 import { installTapDebug } from "./lib/tapDebug"
 import { LIVE_QUERY_DEFAULTS } from "./lib/liveQueries"
+import { installTheme } from "./lib/theme"
 import "@fontsource-variable/inter/wght.css"
 import "@fontsource-variable/inter/wght-italic.css"
 import "./styles.css"
+
+installTheme()
 
 const queryClient = new QueryClient({
   defaultOptions: {
