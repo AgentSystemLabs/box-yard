@@ -1,6 +1,6 @@
 // Sending a task-chat message to the project's Captain instead of the task's agent (POST /api/tasks/:id/captain).
-// A busy agent reads a queued message only when its turn ends, and can't split, reprioritise or start tasks anyway;
-// the Captain can, now. The composer offers it while the task is busy or has queued messages, and suggests it when a
+// The agent can't split, reprioritise or start tasks, and a busy one reads a queued message only when its turn ends;
+// the Captain can, now. The composer always offers it; while the task is busy or has queued messages, it suggests it if a
 // draft reads like task management. It never reroutes on its own: Cody taps to send there.
 import type { Task } from "../../../shared/types"
 
@@ -35,7 +35,10 @@ export function looksLikeTaskManagement(text: string): boolean {
   return TASK_MANAGEMENT.some((re) => re.test(t))
 }
 
-/** Whether the task chat offers "→ Captain": its agent is (about to be) busy, or messages are waiting for it. */
-export function offersCaptain(task: Pick<Task, "status">, queued: number): boolean {
+/**
+ * Whether a task-management draft gets the "Send to Captain" suggestion: the agent is (about to be) busy, or messages
+ * are waiting for it, so the Captain would act sooner than the agent. The Captain chip itself shows on every task.
+ */
+export function suggestsCaptain(task: Pick<Task, "status">, queued: number): boolean {
   return task.status === "working" || task.status === "starting" || task.status === "queued" || queued > 0
 }
