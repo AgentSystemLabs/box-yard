@@ -115,8 +115,8 @@ function render(path = APP_HOME, tasks: Task[] = TASKS) {
 const nav = () => document.querySelector<HTMLElement>("nav[aria-label='Projects and tasks']")!
 const project = () => sidebarGroup(nav(), YARD.name)!
 const node = (t: Task) => project().querySelector<HTMLElement>(`[data-tree-node=${t.id}]`)
-const chevron = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(":scope > div > button[aria-expanded]")!
-const open = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(`:scope > div > button[data-open-task=${t.id}]`)!
+const chevron = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(":scope > [role=treeitem] [data-tree-toggle]")!
+const open = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(`:scope > [role=treeitem] [data-open-task=${t.id}]`)!
 /** A task's row in the sidebar's tree: the treeitem around its open button. */
 const item = (t: Task) => open(t).closest<HTMLElement>("[role=treeitem]")!
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
