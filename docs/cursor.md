@@ -64,7 +64,7 @@ The server finds `cursor-agent` on `PATH`, else in `~/.local/bin` (`CURSOR_BIN` 
 | Subscription limits ([limits.md](limits.md)) | `rate_limit_event` | the rollout's `rate_limits` | not reported |
 | More logins ([logins.md](logins.md)) | rotation | rotation | one key (the project's or Settings') |
 | Compact | Box Yard runs `/compact` | Codex compacts on its own | Cursor summarizes on its own: the Compact button refuses |
-| Steer (a queued message into the running turn) | read at the agent's next step | waits for the turn's end, with a note | the same as Codex: `cursor-agent -p` reads its prompt once |
+| Steer (a queued message into the running turn) | open stream-json stdin | app-server `turn/steer`, scoped to the active turn | waits for the turn's end, with a note: `cursor-agent -p` reads its prompt once |
 
 ## Trying it without a Cursor account
 

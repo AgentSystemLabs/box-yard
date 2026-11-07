@@ -1,6 +1,6 @@
 # Codex
 
-Box Yard's agents can run on OpenAI's [Codex CLI](https://developers.openai.com/codex/cli) as well as Claude Code (task agents can also run on [Cursor's CLI](cursor.md)). Claude Code stays the default everywhere; pick Codex where you want it:
+Box Yard's agents can run on OpenAI's [Codex CLI](https://developers.openai.com/codex/cli) as well as Claude Code (task agents can also run on [Cursor's CLI](cursor.md)). Pick the harness here:
 
 | What | Where you pick it |
 | --- | --- |
@@ -59,12 +59,15 @@ Settings › Credentials › More Codex logins takes more ChatGPT logins: new se
 
 ## How a Codex agent runs
 
-**Task agents** run `codex exec --json` on their box through `runner/box-runner.mjs`, with:
+**Task agents** run `codex app-server --listen stdio://` on their worker through `runner/box-runner.mjs`. Each Box Yard turn owns a process and a native turn, with:
 
 - Box Yard's tools (ask_user, create_pull_request, finish…) as an MCP server, approved to run without asking.
-- `--dangerously-bypass-approvals-and-sandbox`, the same footing as Claude Code's `bypassPermissions`: the box is the sandbox. On This computer that means unsandboxed, as with Claude Code.
-- `--ignore-user-config`, so a `~/.codex/config.toml` on the box or this computer (its MCP servers, its model) doesn't leak in, and ChatGPT apps, plugins and computer use switched off.
-- The task's own Codex home in its folder (`<task>/codex`), so its sessions move with the task between boxes. Each turn resumes the thread Codex named on the first one.
+- `approvalPolicy: never` and `sandbox: danger-full-access`, the same footing as Claude Code's `bypassPermissions`: the box is the sandbox. On This computer that means unsandboxed, as with Claude Code. Unexpected interactive requests fail the turn; steering never grants approval.
+- A clean task-owned `CODEX_HOME` (app-server has no `--ignore-user-config`), with ChatGPT apps, plugins, memories and computer use switched off. Local-login tasks import only the login and, when resuming a legacy local session, its matching rollout. The owner's home configuration/MCP servers are not imported; repository instructions still apply.
+- Sessions in `<task>/codex/sessions`, so archives/moves retain the conversation. `thread/start` names a fresh session; later turns use `thread/resume` with that same thread ID. Stop uses `turn/interrupt` and a process kill fallback.
+- Model, effort, auto-compact threshold and Box Yard developer instructions passed explicitly. Attachments keep the existing task-file delivery path; Box Yard MCP uses the same stdio adapter.
+
+The adapter is verified with Codex CLI **0.166.0**. Workers need app-server's `turn/steer`, required `expectedTurnId`, and `clientUserMessageId`/`userMessage.clientId` correlation. Unsupported versions fail or hold uncertain input; Box Yard does not silently switch harnesses. See [delivery states, diagnosis and validation](codex-steering.md).
 
 Codex is installed the first time a Codex task lands on an Upstash box or RunPod pod (`npm install -g @openai/codex`); Box Yard's Docker image and server image already have it. On This computer and on SSH machines it's yours to install: a Codex task only goes to a machine whose connection test found `codex`.
 
@@ -86,13 +89,13 @@ Codex tasks also run on [SSH machines](machines.md#codex). Install the CLI as th
 | Compact (Coordinator, Captain) | summary, then `/compact` | summary, then the next turn starts a new session from it |
 | Cost | the CLI's `total_cost_usd` | not reported (tokens are) |
 | Streaming replies | word by word | a message at a time |
-| Steer (a queued message into the running turn) | read at the agent's next step, through the CLI's stream-json stdin | waits for the turn's end, with a note on the task: `codex exec` reads its prompt once. Codex's app server has `turn/steer`, which Box Yard doesn't drive yet |
+| Steer (a queued message into the running turn) | written to open stream-json stdin; a successful pipe write does not prove model processing | `turn/steer` scoped to the active native turn; queued → requested → accepted. Input stays locked through turn completion; ambiguous delivery is held for review, never automatically replayed. Acceptance does not prove model processing |
 
 Settings shows only the selected harness's model and effort controls, and keeps changes as drafts until Save. See the [verified catalog, supported reasoning values and discovery limits](codex-model-catalog.md). Existing explicit task effort settings are inherited for Codex until its separate effort is saved; existing custom model names remain visible with a warning.
 
 ## Trying it without an OpenAI account
 
-`scripts/fake-codex.mjs` speaks `codex exec --json` and does the work with `scripts/fake-claude.mjs`, so every fake-claude prompt marker works. Mock mode (`./yard demo`) uses it, and so do the tests (`test/codex*.test.ts`):
+`scripts/fake-codex.mjs` speaks app-server JSON-RPC for tasks and `codex exec --json` for managers, and does the work with `scripts/fake-claude.mjs`, so every fake-claude prompt marker works. Mock mode (`./yard demo`) uses it, and so do the tests (`test/codex*.test.ts`):
 
 ```sh
 CODEX_BIN="node scripts/fake-codex.mjs" npm run dev
