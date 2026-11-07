@@ -27,6 +27,7 @@ import type { DockerImageBuild, DockerStatus, ProjectDocker } from "../../../sha
 import type { MachineSettings, MachineStatus, MachinesStatus } from "../../../shared/machines"
 import type { DefaultProvider, Runner } from "../../../shared/runner"
 import { AGENT_CLI_LABEL, DEFAULT_AGENT_CLI, canSteer, type AgentCli, type CursorModelList } from "../../../shared/agentCli"
+import type { TaskContinuation } from "../../../shared/taskContinuation"
 import type { ProjectColor } from "../../../shared/projectColors"
 import { setTtsInfo } from "./tts"
 import { settleOptimistic } from "./queued"
@@ -1363,6 +1364,15 @@ export function useSetStayOpenOnMerge() {
 export const useStopTask = () => useTaskAction("stop", stoppedPatch, "stop the task")
 export const useCloseTask = () => useTaskAction("close", () => ({ status: "done" as TaskStatus, question: null }), "close the task")
 export const useRetryTask = () => useTaskAction("retry", () => ({ status: "queued" as TaskStatus, error: null }), "retry the task")
+
+export function useContinueTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ taskId, ...options }: TaskContinuation & { taskId: string }) => api<Task>(`/api/tasks/${taskId}/continue`, { method: "POST", body: JSON.stringify(options) }),
+    onSuccess: (task) => qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task)),
+    onError: fail("Couldn't continue the task"),
+  })
+}
 
 /**
  * "Mark done" for one task or several (the Cards view's selection, "Mark all idle as done"): the same close as the task
