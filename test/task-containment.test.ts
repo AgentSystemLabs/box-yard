@@ -8,6 +8,8 @@ import type { Server } from "node:http"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { buildMcpServer } from "../server/mcp.js"
+import { Scheduler } from "../server/scheduler.js"
+import type { Task } from "../shared/types.js"
 
 const yards: BoxYard[] = []
 afterEach(() => { for (const y of yards.splice(0)) { y.stop(); y.store.db.close() } })
@@ -95,6 +97,77 @@ describe("server-owned task containment", () => {
     expect(() => yard.tasks.setRunsOn(child.id, "local")).toThrow(/containment/)
     yard.tasks.setRunsOn(task.id, "docker")
     expect(() => yard.tasks.setRunsOn(task.id, "local")).toThrow(/containment/)
+  })
+
+  it("keeps task-derived hook work isolated when project defaults change, including recursive hooks", () => {
+    const { yard, task, project } = fixture()
+    const marker = "fixture-worker-controlled-instructions"
+    yard.store.updateProject(project.id, { runner: "local" })
+    const hook = yard.hooks.create({ name: "Review output", projectId: project.id, trigger: "task.failed", action: "create_task", taskTitle: "Review {task_title}", prompt: "Review: {summary}", enabled: true, allowSelfTrigger: true, createdBy: "Example operator" })
+    const fire = (id: string) => {
+      yard.store.updateTask(id, { status: "failed", summary: marker })
+      return yard.hooks.handle({ type: "task.failed", taskId: id, turnId: null, originHookIds: [], sawPr: false }).find(r => r.hookId === hook.id)!
+    }
+    const first = fire(task.id)
+    expect(first.status).toBe("fired")
+    const created = yard.store.getTask(first.targetTaskId!)!
+    expect(created.prompt).toContain(marker)
+    expect(created.runsOn).toBe("docker")
+    expect(created.parentTaskId).toBeNull()
+    expect(() => yard.tasks.setRunsOn(created.id, "local")).toThrow(/containment/)
+    const second = fire(created.id)
+    expect(second.status).toBe("fired")
+    expect(yard.store.getTask(second.targetTaskId!)?.runsOn).toBe("docker")
+    expect(() => yard.tasks.setRunsOn(second.targetTaskId!, "ssh")).toThrow(/containment/)
+  })
+
+  it("refuses task-derived hook work when its only remaining placement would exceed the saved ceiling", () => {
+    const { yard, task, project } = fixture()
+    yard.store.updateProject(project.id, { runner: "ssh" })
+    yard.store.updateTask(task.id, { runsOn: null, boxId: null, status: "failed" })
+    yard.hooks.create({ name: "Review output", projectId: project.id, trigger: "task.failed", action: "create_task", taskTitle: "Review output", prompt: "Review: {summary}", enabled: true, createdBy: "Example operator" })
+    const before = yard.store.listTaskRows().length
+    const [run] = yard.hooks.handle({ type: "task.failed", taskId: task.id, turnId: null, originHookIds: [], sawPr: false })
+    expect(run).toMatchObject({ status: "failed", targetTaskId: null })
+    expect(run?.result).toMatch(/containment/)
+    expect(yard.store.listTaskRows()).toHaveLength(before)
+  })
+
+  it("withholds previous worker titles and summaries from host schedule runs, including timed and catch-up dispatch", async () => {
+    for (const runner of ["local", "ssh"] as const) for (const mode of ["manual", "timed", "catch-up"] as const) {
+      const { yard, project, config } = fixture()
+      const clock = { now: Date.parse("2026-11-01T08:30:00Z") }
+      const scheduler = new Scheduler({ config, store: yard.store, tasks: yard.tasks, hub: yard.hub, now: () => clock.now })
+      const schedule = await scheduler.create({ projectId: project.id, name: "Example check", cron: "0 * * * *", timezone: "UTC", prompt: "Run the configured check" })
+      const previous = scheduler.runNow(schedule.id) as Task
+      const marker = "fixture-worker-controlled-host-command"
+      yard.store.updateTask(previous.id, { status: "idle", title: marker, summary: marker })
+      yard.store.updateProject(project.id, { runner })
+      if (mode === "manual") scheduler.runNow(schedule.id)
+      else {
+        clock.now = schedule.nextRunAt! + (mode === "catch-up" ? 3 * 60 * 60_000 : 1000)
+        scheduler.tick()
+      }
+      const next = yard.store.listTasks({ projectId: project.id }).find(t => t.scheduleId === schedule.id && t.id !== previous.id)!
+      expect(next, mode).toBeDefined()
+      expect(next.runsOn).toBe(runner)
+      expect(next.prompt).not.toContain(marker)
+      expect(next.prompt).toContain("text is withheld across the host authority boundary")
+      expect(next.prompt).toContain("Run the configured check")
+      scheduler.stop()
+    }
+  })
+
+  it("preserves previous schedule output within the same execution authority", async () => {
+    for (const runner of ["docker", "local", "ssh"] as const) {
+      const { yard, project } = fixture()
+      const schedule = await yard.scheduler.create({ projectId: project.id, runsOn: runner, name: "Example check", cron: "@daily", prompt: "Run the check" })
+      const previous = yard.scheduler.runNow(schedule.id) as Task
+      yard.store.updateTask(previous.id, { status: "idle", summary: "Ordinary previous result" })
+      const next = yard.scheduler.runNow(schedule.id) as Task
+      expect(next.prompt).toContain("Ordinary previous result")
+      expect(next.runsOn).toBe(runner)
+    }
   })
 
   it("refuses isolated worker messages to local/SSH recipients, including FYI, title refs and nested children", async () => {

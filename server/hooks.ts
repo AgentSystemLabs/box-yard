@@ -381,7 +381,7 @@ export class HookEngine {
       } else {
         // A title is status the Coordinator sees, so a status-only task's {summary} stays out of it (the prompt keeps it).
         const title = renderHookTemplate(hook.taskTitle ?? hook.name, this.statusOnly(task) ? { ...vars, summary: SUMMARY_WITHHELD } : vars).slice(0, 120).trim() || hook.name
-        const created = tasks.createTask({ projectId: task.projectId, title, prompt, source: `hook:${hook.id}` })
+        const created = tasks.createTaskFromTask(task.id, { projectId: task.projectId, title, prompt, source: `hook:${hook.id}` })
         target = created.id
         result = `Started task "${created.title}" (${created.id}).`
         this.transcript(task.id, `Hook "${hook.name}" (${TRIGGER_INFO[hook.trigger].label}) started [${created.title}](/tasks/${created.id}).`, hook, run)

@@ -1204,7 +1204,30 @@ export class TaskManager {
   /** Model-to-model messages cannot cross into a different host authority, including informational reports. */
   private mayDeliverAgentInput(from: TaskRow, to: TaskRow): boolean {
     const target = this.runnerCeiling(to)
-    return target === "isolated" || target === this.runnerCeiling(from)
+    const placed = to.box_id ? this.physicalRunner(to.box_id) : this.store.taskRunner(to)
+    return (target === "isolated" || target === this.runnerCeiling(from)) && this.mayDeliverTaskOutput(from.id, placed)
+  }
+
+  /** Output cannot acquire host authority merely because a later automation run has a different default. */
+  mayDeliverTaskOutput(taskId: string, runner: Runner): boolean {
+    if (runner !== "local" && runner !== "ssh") return true
+    const row = this.requireRow(taskId)
+    return this.runnerCeiling(row) === runner && (!row.box_id || this.physicalRunner(row.box_id) === runner)
+  }
+
+  /** A task-derived hook is a new top-level task, but its output must retain the source's containment. */
+  createTaskFromTask(sourceId: string, input: Pick<NewTask, "projectId" | "title" | "prompt" | "source">): Task {
+    const source = this.requireRow(sourceId)
+    if (input.projectId !== source.project_id) throw new BadRequestError("Task-derived work must remain in its source project")
+    const runner = source.box_id ? this.physicalRunner(source.box_id) : this.store.taskRunner(source)
+    this.requireContainment(source, runner)
+    return this.createTask({
+      ...input,
+      runsOn: runner,
+      machineLabel: runner === "ssh" ? source.machine_label : null,
+      gpu: runner === "gpu" ? taskGpuPick(source) : null,
+      boxSize: runner === "box" && isBoxSize(source.box_size) ? source.box_size : null,
+    })
   }
 
   /** Called only for authenticated human approval (API confirmation or a trusted whole-message runner pick). */
