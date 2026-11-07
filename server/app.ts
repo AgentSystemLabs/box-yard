@@ -267,7 +267,7 @@ const schemas = {
     runsOn: z.string().trim().min(1).max(200).optional(),
     /** The chat's "!" pick: an agent CLI from GET /api/harness-targets, checked against it. */
     agent: z.string().trim().min(1).max(400).optional(),
-    /** The Coordinator chat's "#" pick: the id of the project the message is for. A Captain's chat refuses it. */
+    /** The Coordinator chat's "%" pick: the id of the project the message is for. A Captain's chat refuses it. */
     project: z.string().trim().min(1).max(200).optional(),
     /**
      * Picks typed for only part of the message (shared/runTargets.ts scopePicks): the turn's prompt lists them, and
@@ -636,8 +636,8 @@ export function createBoxYard(
   }
   /** A chat send's "@" and "!" picks, checked against the lists the composer showed (a 400 when one isn't on them). */
   const chatPicks = async (body: Pick<z.infer<typeof schemas.chat>, "runsOn" | "agent" | "project" | "inline">, projectId: string | null) => {
-    // "#" is the Coordinator's: a Captain's chat is already its project's.
-    if (body.project && projectId) throw new BadRequestError("A Captain's chat is already its project's: # picks a project only in the Coordinator's chat.")
+    // "%" is the Coordinator's: a Captain's chat is already its project's.
+    if (body.project && projectId) throw new BadRequestError("A Captain's chat is already its project's: % picks a project only in the Coordinator's chat.")
     const project = body.project ? resolveProjectPick(store.getProject(body.project), body.project) : null
     const runsOn = body.runsOn ? await resolveRunTargetPick(runTargetDeps, body.runsOn, projectId) : null
     const agent = body.agent ? await resolveHarnessPick(runTargetDeps, body.agent, projectId, runsOn?.value ?? null) : null

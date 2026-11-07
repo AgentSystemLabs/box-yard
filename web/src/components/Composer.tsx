@@ -21,7 +21,7 @@ import { ConnectionLine } from "./ConnectionLine"
 import { ComposerTags } from "./ComposerTags"
 import { tagsIn, type TextTag } from "../../../shared/runTargets"
 
-/** What a send carries besides text and files: the "@" and "!" picks of where its tasks run and on which harness, and the Coordinator's "#" project (shared/runTargets.ts). */
+/** What a send carries besides text and files: the "@" and "!" picks of where its tasks run and on which harness, and the Coordinator's "%" project (shared/runTargets.ts). */
 export type ComposerExtra = ChatPicks
 
 /** Lets a parent put text in the box (an example prompt) without owning the draft. */
@@ -66,7 +66,7 @@ const NO_TAGS: TextTag[] = []
  * message's Cancel puts the message back in its draft (lib/takeBack.ts).
  * With `stop` (a turn is running), a Stop button before Send ends that turn.
  * With `runTargets` (the Coordinator's and Captains' chats), "@" and "!" open the lists of where tasks run and which
- * harness runs them, and in the Coordinator's "#" the list of projects; the Where, Harness and Project buttons in the
+ * harness runs them, and in the Coordinator's "%" the list of projects; the Where, Harness and Project buttons in the
  * row put that trigger in the text and open the shared picker (RunTargetMenu.tsx), with Where and Harness in a sheet.
  * The picks stay in the text and go to
  * `onSubmit` as `extra.runsOn`, `extra.agent` and `extra.project`, and while the draft names one its tag is drawn in colour
@@ -163,7 +163,7 @@ export function Composer({
   const maxMb = useSettings().data?.maxUploadMb ?? 20
   const boxRef = useRef<HTMLDivElement>(null)
   const picks = useChatPicks({ enabled: runTargets, projectId: runTargetsProject, value, setValue, input })
-  // The "#project", "@runner" and "!harness" words the lists name. While there's one, the textarea's text is
+  // The "%project", "@runner" and "!harness" words the lists name. While there's one, the textarea's text is
   // transparent and ComposerTags draws it under the textarea, tags in colour.
   const tags = useMemo(() => {
     if (!runTargets) return NO_TAGS
@@ -527,7 +527,7 @@ export function Composer({
             onKeyDown={(e) => {
               // Mid-composition (IME), Enter and the arrows belong to the input method.
               if (e.nativeEvent.isComposing || e.keyCode === 229) return
-              // The "@", "!" or "#" list, while open, takes ↑/↓, Enter, Tab and Esc: Enter picks instead of sending.
+              // The "@", "!" or "%" list, while open, takes ↑/↓, Enter, Tab and Esc: Enter picks instead of sending.
               if (picks.onKeyDown(e)) return
               if (e.key === "Escape" && more.open) {
                 e.preventDefault()

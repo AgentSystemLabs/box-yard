@@ -269,14 +269,14 @@ describe("what Default means in a Captain's chat", () => {
   })
 })
 
-describe('the Coordinator\'s "#" project picks', () => {
+describe('the Coordinator\'s "%" project picks', () => {
   const projects = buildProjectTargets([
     { id: "prj_1", name: "box-yard", repo: "acme/box-yard" },
     { id: "prj_2", name: "Mobile App" },
     { id: "prj_3", name: "Docs / Site" },
   ])
 
-  it("lists the projects as #tokens a word can hold, the id as the value", () => {
+  it("lists the projects as %tokens a word can hold, the id as the value", () => {
     expect(projects.map((t) => [t.token, t.value, t.kind, t.label, t.detail])).toEqual([
       ["box-yard", "prj_1", "project", "box-yard", "acme/box-yard"],
       ["mobile-app", "prj_2", "project", "Mobile App", null],
@@ -285,12 +285,12 @@ describe('the Coordinator\'s "#" project picks', () => {
     expect(projectToken("  !!! ")).toBe("project")
   })
 
-  it('"#" opens only at the start of a word: headings, "##" and "C#" stay text', () => {
-    expect(mentionAt("fix #bo", 7, "#")).toMatchObject({ start: 4, query: "bo" })
-    expect(mentionAt("#", 1, "#")).toMatchObject({ start: 0, query: "" })
-    expect(mentionAt("# Plan", 6, "#")).toBeNull()
-    expect(mentionAt("## Plan", 2, "#")).toBeNull()
-    expect(mentionAt("C#", 2, "#")).toBeNull()
+  it('"%" opens only at the start of a word: headings, "%%" and "C%" stay text', () => {
+    expect(mentionAt("fix %bo", 7, "%")).toMatchObject({ start: 4, query: "bo" })
+    expect(mentionAt("%", 1, "%")).toMatchObject({ start: 0, query: "" })
+    expect(mentionAt("% Plan", 6, "%")).toBeNull()
+    expect(mentionAt("%% Plan", 2, "%")).toBeNull()
+    expect(mentionAt("C%", 2, "%")).toBeNull()
   })
 
   it("matches loosely: prefix, then contains, then the letters in order, closest first", () => {
@@ -301,11 +301,11 @@ describe('the Coordinator\'s "#" project picks', () => {
     expect(filterRunTargets(projects, "bxyd").map((t) => t.token)).toEqual([])
   })
 
-  it("a draft's last #token that names a project is its pick, and it goes back into the text", () => {
-    expect(pickedRunTarget("for #mobile-app and #box-yard", projects, "#")?.value).toBe("prj_1")
-    expect(pickedRunTarget("see #123", projects, "#")).toBeNull()
-    const m = mentionAt("fix #mo", 7, "#")!
-    expect(insertRunTarget("fix #mo", m, "mobile-app", "#")).toEqual({ value: "fix #mobile-app ", caret: 16 })
+  it("a draft's last %token that names a project is its pick, and it goes back into the text", () => {
+    expect(pickedRunTarget("for %mobile-app and %box-yard", projects, "%")?.value).toBe("prj_1")
+    expect(pickedRunTarget("see %123", projects, "%")).toBeNull()
+    const m = mentionAt("fix %mo", 7, "%")!
+    expect(insertRunTarget("fix %mo", m, "mobile-app", "%")).toEqual({ value: "fix %mobile-app ", caret: 16 })
   })
 
   it("is checked on the server, and the Coordinator's prompt says to route the message to that Captain", () => {
@@ -313,7 +313,7 @@ describe('the Coordinator\'s "#" project picks', () => {
     const pick = resolveProjectPick({ id: "prj_2", name: "Mobile App" }, "prj_2")
     expect(pick).toEqual({ value: "prj_2", token: "mobile-app", label: "Mobile App" })
     const note = projectNote(pick, "Sam")
-    expect(note).toContain('[Sam picked the project for this message: #mobile-app, project "Mobile App" (prj_2).')
+    expect(note).toContain('[Sam picked the project for this message: %mobile-app, project "Mobile App" (prj_2).')
     expect(note).toContain('send_to_captain (project "prj_2")')
     expect(note).not.toContain("Cody")
     // Before the @ and ! lines, each on its own line.
@@ -335,7 +335,7 @@ describe("picks for only part of a message (scopePicks)", () => {
   const placed = (text: string): PlacedPick[] => [
     ...tokensIn(text, places, "@", true).map((p) => ({ ...p, kind: "runsOn" as const })),
     ...tokensIn(text, harnesses, "!", true).map((p) => ({ ...p, kind: "agent" as const })),
-    ...tokensIn(text, projects, "#").map((p) => ({ ...p, kind: "project" as const })),
+    ...tokensIn(text, projects, "%").map((p) => ({ ...p, kind: "project" as const })),
   ]
   const scope = (text: string) => scopePicks(text, placed(text))
   const wideTokens = (text: string) => {
@@ -427,14 +427,14 @@ describe("picks for only part of a message (scopePicks)", () => {
     expect(wideTokens("@box ship it, using Codex if you like").runsOn).toBe("box")
   })
 
-  it('scopes the Coordinator\'s "#" the same way: a project per item is a hint for that item', () => {
-    const text = "1. Fix the drawbridge #keep-the-castle\n2. Scope the picks #box-yard"
+  it('scopes the Coordinator\'s "%" the same way: a project per item is a hint for that item', () => {
+    const text = "1. Fix the drawbridge %keep-the-castle\n2. Scope the picks %box-yard"
     expect(wideTokens(text).project).toBeNull()
     expect(inlinePicksFrom(text, scope(text)).map((p) => [p.kind, p.value, p.where])).toEqual([
       ["project", "prj_castle", 'item 1 ("Fix the drawbridge")'],
       ["project", "prj_yard", 'item 2 ("Scope the picks")'],
     ])
-    expect(wideTokens("what's open? #box-yard").project).toBe("box-yard")
+    expect(wideTokens("what's open? %box-yard").project).toBe("box-yard")
   })
 
   it("tells a harness's models and efforts apart: one item's model is only that item's", () => {
@@ -472,7 +472,7 @@ describe("picks for only part of a message (scopePicks)", () => {
     expect(lines[1]).toMatch(/^\[Sam picked where tasks run for this message: @box/)
     expect(lines[2]).toBe(
       '[Sam typed picks for only part of this message, so Box Yard applies none of them to this turn: !claude (Claude Code, agent "claude") in item 9 ("Box Yard: inline picks apply to their part"). ' +
-        "Pass each yourself, on the create_task call or create_tasks item for the task it's written with (a \"#\" one: send that part to its project's Captain), and follow the message's own words for the rest: the agent, model, effort and runs_on you pass are what each task gets. " +
+        "Pass each yourself, on the create_task call or create_tasks item for the task it's written with (a \"%\" one: send that part to its project's Captain), and follow the message's own words for the rest: the agent, model, effort and runs_on you pass are what each task gets. " +
         "When you send such a part to a Captain, say its pick in your message: Box Yard doesn't carry these to Captains.]",
     )
     // A Captain's prompt has no relay sentence.
@@ -480,17 +480,17 @@ describe("picks for only part of a message (scopePicks)", () => {
     expect(pickNotes({ inlinePicks: [{ ...inline[0]!, where: null, reason: "words" }] }, "Sam", false)).toContain("outside any list item, though the message's words ask for another harness")
   })
 
-  it("a whole-message pick its own hints disagree with is listed with them, never as picked: a \"#\" one too", () => {
+  it("a whole-message pick its own hints disagree with is listed with them, never as picked: a \"%\" one too", () => {
     const mobile = { value: "prj_mobile", token: "mobile", label: "Mobile" }
     const web = { kind: "project" as const, value: "prj_web", token: "web", label: "Web", where: 'item 2 ("Tidy the header")', reason: "item" as const }
     const notes = pickNotes({ project: mobile, inlinePicks: [web] }, "Sam", true)
-    // The "#" line is all a project pick does: with an item's other project, no "route it all to #mobile's Captain".
+    // The "%" line is all a project pick does: with an item's other project, no "route it all to %mobile's Captain".
     expect(notes).not.toContain("[Sam picked the project")
     expect(notes).toContain(
-      '[Sam typed picks for only part of this message, so Box Yard applies none of them to this turn: #mobile (Mobile, project "prj_mobile") outside any list item, with another of its kind in the message; #web (Web, project "prj_web") in item 2 ("Tidy the header").',
+      '[Sam typed picks for only part of this message, so Box Yard applies none of them to this turn: %mobile (Mobile, project "prj_mobile") outside any list item, with another of its kind in the message; %web (Web, project "prj_web") in item 2 ("Tidy the header").',
     )
     // One that agrees stays the message's.
-    expect(pickNotes({ project: mobile, inlinePicks: [{ ...web, ...mobile }] }, "Sam", true)).toMatch(/^\n\[Sam picked the project for this message: #mobile/)
+    expect(pickNotes({ project: mobile, inlinePicks: [{ ...web, ...mobile }] }, "Sam", true)).toMatch(/^\n\[Sam picked the project for this message: %mobile/)
     // The same for "@": the line says what turnPick does.
     const where = pickNotes({ runsOn: { value: "box", token: "box", label: "Upstash box" }, inlinePicks: [{ ...web, kind: "runsOn", value: "local", token: "local", label: "This computer" }] }, "Sam", true)
     expect(where).not.toContain("[Sam picked where tasks run")

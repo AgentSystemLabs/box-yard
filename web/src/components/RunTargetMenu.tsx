@@ -1,7 +1,7 @@
 // The picks in the Coordinator and Captain composers (shared/runTargets.ts): where the message's tasks run ("@"), which
-// harness (agent CLI) runs them ("!") and, in the Coordinator's chat only, which project the message is for ("#").
-// The pick always lives in the text, as "@token" / "!token" / "#token", so the text and what's sent never disagree:
-// - typing: "@" opens the list of places, "!" the list of harnesses, "#" the list of projects, filtered as Cody types;
+// harness (agent CLI) runs them ("!") and, in the Coordinator's chat only, which project the message is for ("%").
+// The pick always lives in the text, as "@token" / "!token" / "%token", so the text and what's sent never disagree:
+// - typing: "@" opens the list of places, "!" the list of harnesses, "%" the list of projects, filtered as Cody types;
 //   ↑/↓ move, Enter or Tab picks, Esc backs out a level or closes, a tap picks.
 // - the Where, Harness and Project buttons in the composer's row of icons (the main way on a phone) put that trigger at
 //   the caret and open the same list, so using them teaches the typed shortcut. When the draft already names a pick of
@@ -92,7 +92,7 @@ const SETTING: Record<PickKind, string> = { runsOn: "Runs on", agent: "agent" }
 export interface ChatPicks {
   runsOn?: RunTargetPick
   agent?: RunTargetPick
-  /** The Coordinator's "#": the project's Captain should get it. */
+  /** The Coordinator's "%": the project's Captain should get it. */
   project?: RunTargetPick
   /** Picks typed for one item of a list of tasks (or that disagree): hints the turn's prompt lists, never applied. */
   inline?: InlinePick[]
@@ -134,7 +134,7 @@ export interface ChatPicksState {
     /** The list item the "@word" is typed in ("item 9"), when the draft is a list of tasks: the pick is only that item's. */
     item: string | null
   }
-  /** The whole message's picks now: the "@token" / "!token" / "#token" in the draft that's for all of it (scopePicks). */
+  /** The whole message's picks now: the "@token" / "!token" / "%token" in the draft that's for all of it (scopePicks). */
   picked: Record<ListKind, RunTarget | null>
   /** Every pick typed in the draft, with what it's for: the whole message, or only its part (scopePicks). */
   scoped: ScopedPick[]
@@ -161,7 +161,7 @@ const NO_LISTS: ChatPicksState["lists"] = {}
 const NONE: PlacedPick[] = []
 const NO_SCOPED: ScopedPick[] = []
 
-/** A draft's typed picks of one kind (a greyed-out one too, but not for "#"), for scopePicks. */
+/** A draft's typed picks of one kind (a greyed-out one too, but not for "%"), for scopePicks. */
 const placedIn = (text: string, targets: RunTarget[], trigger: PickTrigger, kind: ListKind, disabledToo = true): PlacedPick[] =>
   tokensIn(text, targets, trigger, disabledToo).map((p) => ({ ...p, kind }))
 
@@ -175,10 +175,10 @@ const CAPTAIN_KINDS: ListKind[] = ["runsOn", "agent"]
 const COORDINATOR_KINDS: ListKind[] = ["project", "runsOn", "agent"]
 
 /**
- * The picks' state for a composer's draft. `enabled` false: nothing (task chats, side threads). "#" is on only in the
+ * The picks' state for a composer's draft. `enabled` false: nothing (task chats, side threads). "%" is on only in the
  * Coordinator's chat (`projectId` null). A list is fetched on mount into the shared query cache. Focusing refreshes
  * stale lists in the background; the harness list is for where the tasks run. No network/availability check holds a
- * menu closed, except "#": it opens only once the projects are there and one matches, so "#123" and "# Heading" stay text.
+ * menu closed, except "%": it opens only once the projects are there and one matches, so ordinary percent signs stay text.
  */
 export function useChatPicks({
   enabled,
@@ -195,10 +195,10 @@ export function useChatPicks({
 }): ChatPicksState {
   const [focused, setFocused] = useState(false)
   const [panel, setPanel] = useState(false)
-  const hashOn = enabled && projectId === null
+  const projectOn = enabled && projectId === null
   const hasAt = enabled && value.includes("@")
   const hasBang = enabled && value.includes("!")
-  const hasHash = hashOn && value.includes("#")
+  const hasProject = projectOn && value.includes("%")
   const placesQuery = useRunTargets(projectId, enabled, focused ? "focus" : hasAt ? "mention" : null)
   const places = placesQuery.data
   // Each kind's typed picks; the whole message's "@" one says where the "!" list checks the harnesses.
@@ -223,14 +223,14 @@ export function useChatPicks({
     claude: claudeModels.data?.models,
     cursor: cursorModels.data?.models ?? CURSOR_FALLBACK_MODELS,
   }), [availableHarnesses, settings?.agentModel, settings?.agentEffort, settings?.agentCodexModel, settings?.agentCodexEffort, settings?.agentCursorModel, claudeModels.data?.models, cursorModels.data?.models])
-  const projects = useProjectTargets(hashOn)
+  const projects = useProjectTargets(projectOn)
   const refreshPicker = useRefreshPicker(projectId)
   const bangPlaced = useMemo(() => (hasBang && harnesses ? placedIn(value, harnesses, "!", "agent") : NONE), [hasBang, harnesses, value])
-  const hashPlaced = useMemo(() => (hasHash && projects ? placedIn(value, projects, "#", "project", false) : NONE), [hasHash, projects, value])
+  const projectPlaced = useMemo(() => (hasProject && projects ? placedIn(value, projects, "%", "project", false) : NONE), [hasProject, projects, value])
   // Which are the whole message's and which only one item's: one parse for the buttons, the send and the scope line.
   const scoped = useMemo(
-    () => (atPlaced.length || bangPlaced.length || hashPlaced.length ? scopePicks(value, [...atPlaced, ...bangPlaced, ...hashPlaced]) : null),
-    [atPlaced, bangPlaced, hashPlaced, value],
+    () => (atPlaced.length || bangPlaced.length || projectPlaced.length ? scopePicks(value, [...atPlaced, ...bangPlaced, ...projectPlaced]) : null),
+    [atPlaced, bangPlaced, projectPlaced, value],
   )
   const agent = enabled ? (scoped?.wide.agent ?? null) : null
   const project = scoped?.wide.project ?? null
@@ -245,23 +245,23 @@ export function useChatPicks({
 
   const [caret, setCaret] = useState(0)
   const [active, setActive] = useState(0)
-  // Esc closes the list for the "@word" it was on; a new "@" (or "!", "#") opens it again.
+  // Esc closes the list for the "@word" it was on; a new "@" (or "!", "%") opens it again.
   const [dismissed, setDismissed] = useState<number | null>(null)
   const id = useId()
 
   const at = Math.min(caret, value.length)
   const atMention = hasAt ? mentionAt(value, at, "@") : null
   const bangMention = !atMention && hasBang ? mentionAt(value, at, "!") : null
-  const hashMention = !atMention && !bangMention && hasHash ? mentionAt(value, at, "#") : null
-  const mention = atMention ?? bangMention ?? hashMention
-  const kind: ListKind = bangMention ? "agent" : hashMention ? "project" : "runsOn"
+  const projectMention = !atMention && !bangMention && hasProject ? mentionAt(value, at, "%") : null
+  const mention = atMention ?? bangMention ?? projectMention
+  const kind: ListKind = bangMention ? "agent" : projectMention ? "project" : "runsOn"
   const lists: Record<ListKind, RunTarget[] | undefined> = { runsOn: places, agent: harnesses, project: projects }
-  // A Captain's chat has no "#", though the projects may be in the cache.
-  const tagLists = useMemo(() => (enabled ? { runsOn: places, agent: harnesses, project: hashOn ? projects : undefined } : NO_LISTS), [enabled, hashOn, places, harnesses, projects])
+  // A Captain's chat has no "%", though the projects may be in the cache.
+  const tagLists = useMemo(() => (enabled ? { runsOn: places, agent: harnesses, project: projectOn ? projects : undefined } : NO_LISTS), [enabled, projectOn, places, harnesses, projects])
   const source = lists[kind]
   const parent = mention && source ? runTargetParent(source, mention.query) : undefined
   const options = useMemo(() => (mention && source ? filterRunTargets(source, mention.query, kind === "project") : []), [mention?.query, source, kind]) // eslint-disable-line react-hooks/exhaustive-deps
-  // "#" waits for a match: a heading ("# Plan") or an issue ("#123") never opens an empty or loading list.
+  // "%" waits for a match: a heading ("% Plan") or an issue ("%123") never opens an empty or loading list.
   const showable = kind === "project" ? options.length > 0 : !source || options.length > 0
   const open = Boolean(enabled && (panel || (focused && showable)) && mention && dismissed !== mention.start)
   const close = () => {
@@ -292,12 +292,12 @@ export function useChatPicks({
     (t: RunTarget) => {
       const el = input.current
       if (!el || t.disabled) return
-      const trigger = t.kind === "harness" ? "!" : t.kind === "project" ? "#" : "@"
+      const trigger = t.kind === "harness" ? "!" : t.kind === "project" ? "%" : "@"
       const m = mentionAt(el.value, el.selectionStart ?? el.value.length, trigger)
       if (!m) return
       // A GPU cloud with GPUs under it opens them first: picking it again (or "any GPU" on it) then picks it.
       const targets = trigger === "!" ? harnesses : places
-      const drill = trigger !== "#" && Boolean(targets) && drillsInto(t, targets!, m.query)
+      const drill = trigger !== "%" && Boolean(targets) && drillsInto(t, targets!, m.query)
       const next = insertRunTarget(el.value, m, t.token, trigger, drill)
       flushSync(() => setValue(next.value))
       if (!panel || !drill) el.focus()
@@ -445,7 +445,7 @@ export function useChatPicks({
     projectName,
     conflict,
     extra,
-    kinds: !enabled ? [] : hashOn ? COORDINATOR_KINDS : CAPTAIN_KINDS,
+    kinds: !enabled ? [] : projectOn ? COORDINATOR_KINDS : CAPTAIN_KINDS,
     insert,
     projectId,
   }
@@ -478,7 +478,7 @@ function TargetRow({ t, on, trigger, opens, panel = false }: { t: RunTarget; on:
   )
 }
 
-/** The typed list ("@", "!" or "#"), just over the composer's box. Its header says what Default is, since the buttons are only icons. */
+/** The typed list ("@", "!" or "%"), just over the composer's box. Its header says what Default is, since the buttons are only icons. */
 export function RunTargetList({ list, anchor }: { list: ChatPicksState["list"]; anchor: RefObject<HTMLElement | null> }) {
   const { id, kind, options, loading, error, active, pick, setActive, note, opens, parent, back } = list
   const at = useAbove(anchor)
@@ -819,8 +819,8 @@ export const PickChips = memo(function PickChips({ meta }: { meta: Record<string
   return (
     <div className="mt-1.5 flex flex-wrap gap-1">
       {project && (
-        <Chip testId="project-pick-chip" icon={FolderGit2} title={`Picked with #: this message is for ${project.label}, so its Captain gets it`}>
-          <span className="font-mono">#{project.token}</span>
+        <Chip testId="project-pick-chip" icon={FolderGit2} title={`Picked with %: this message is for ${project.label}, so its Captain gets it`}>
+          <span className="font-mono">%{project.token}</span>
           {project.label.toLowerCase() !== project.token ? ` · ${project.label}` : ""}
         </Chip>
       )}

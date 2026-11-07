@@ -788,7 +788,7 @@ export function useRefreshPicker(projectId: string | null) {
 }
 
 /**
- * The Coordinator chat's "#" list: Cody's projects as pick targets (shared/runTargets.ts buildProjectTargets). Re-renders
+ * The Coordinator chat's "%" list: Cody's projects as pick targets (shared/runTargets.ts buildProjectTargets). Re-renders
  * only when a project's name, repo or order changes, not on its other settings.
  */
 export function useProjectTargets(enabled: boolean): RunTarget[] | undefined {
@@ -1616,12 +1616,12 @@ export function useDeleteBox() {
 }
 
 /**
- * A chat send: the text, its files, and the "@" and "!" picks, and the Coordinator's "#" (shared/runTargets.ts), the
+ * A chat send: the text, its files, and the "@" and "!" picks, and the Coordinator's "%" (shared/runTargets.ts), the
  * whole message's; `inline`: picks typed for only part of it (scopePicks).
  */
 type ChatSend = { id: string; content: string; attachments?: Attachment[]; runsOn?: RunTargetPick | null; agent?: RunTargetPick | null; project?: RunTargetPick | null; inline?: InlinePick[] }
 
-/** A chat message as the server takes it: attachment ids, and the "@", "!" and "#" picks as their values. */
+/** A chat message as the server takes it: attachment ids, and the "@", "!" and "%" picks as their values. */
 function sendBody(input: ChatSend) {
   return {
     id: input.id,

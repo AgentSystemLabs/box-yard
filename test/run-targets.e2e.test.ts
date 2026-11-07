@@ -162,18 +162,18 @@ describe('chat "@" run targets', () => {
   })
 })
 
-describe('chat "#" project pick', () => {
-  it("refuses an unknown project and a Captain's chat, keeps the #token in the text, and tells the Coordinator to route it", async () => {
+describe('chat "%" project pick', () => {
+  it("refuses an unknown project and a Captain's chat, keeps the %token in the text, and tells the Coordinator to route it", async () => {
     const r = await start()
     const p = await call<Project>(r, "POST", "/api/projects", { name: "demo" })
-    expect(await status(r, "POST", "/api/chat", { content: "hi #nope", project: "prj_nope" })).toBe(400)
-    expect(await status(r, "POST", `/api/projects/${p.id}/captain/messages`, { content: "hi #demo", project: p.id })).toBe(400)
-    const sent = await call<ChatMessage>(r, "POST", "/api/chat", { content: "what's open? #demo", project: p.id })
-    expect(sent.content).toBe("what's open? #demo")
+    expect(await status(r, "POST", "/api/chat", { content: "hi %nope", project: "prj_nope" })).toBe(400)
+    expect(await status(r, "POST", `/api/projects/${p.id}/captain/messages`, { content: "hi %demo", project: p.id })).toBe(400)
+    const sent = await call<ChatMessage>(r, "POST", "/api/chat", { content: "what's open? %demo", project: p.id })
+    expect(sent.content).toBe("what's open? %demo")
     expect(sent.meta?.project).toEqual({ value: p.id, token: "demo", label: "demo" })
     await coordinatorIdle(r)
     const prompt = sessionPrompts(r, "orchestrator_session")[0]!
-    expect(prompt).toContain(`[Cody picked the project for this message: #demo, project "demo" (${p.id}).`)
+    expect(prompt).toContain(`[Cody picked the project for this message: %demo, project "demo" (${p.id}).`)
     expect(prompt).toContain(`send_to_captain (project "${p.id}")`)
   })
 })
@@ -353,7 +353,7 @@ describe("picks typed for only part of a message (inline)", () => {
     ])
     expect(sent.meta?.runsOn).toBeUndefined()
     expect(sent.meta?.agent).toBeUndefined()
-    // A harness hint keeps the model and effort typed after it (#405's "!codex:<model>:<effort>").
+    // A harness hint keeps the model and effort typed after it (%405's "!codex:<model>:<effort>").
     expect(await status(r, "POST", "/api/chat", { content: "hi", inline: [hint("agent", "codex:no-such-model")] })).toBe(400)
     const chosen = await call<ChatMessage>(r, "POST", "/api/chat", { content: "go", inline: [hint("agent", "codex:gpt-6.1-sol:xhigh")] })
     expect(chosen.meta?.inlinePicks).toEqual([expect.objectContaining({ kind: "agent", value: "codex", token: "codex:gpt-6.1-sol:xhigh", model: "gpt-6.1-sol", effort: "xhigh" })])
@@ -408,19 +408,19 @@ describe("picks typed for only part of a message (inline)", () => {
     await coordinatorIdle(r)
   })
 
-  it('an item\'s "#" is only that item\'s: the Coordinator isn\'t told the whole message is that project\'s', async () => {
+  it('an item\'s "%" is only that item\'s: the Coordinator isn\'t told the whole message is that project\'s', async () => {
     const r = await start()
     const demo = await call<Project>(r, "POST", "/api/projects", { name: "demo" })
     const web = await call<Project>(r, "POST", "/api/projects", { name: "web" })
     await call(r, "POST", "/api/chat", { content: "status of both", inline: [hint("project", web.id)] })
     await coordinatorIdle(r)
-    // A "#" over the list that an item's other "#" contradicts isn't the message's either.
+    // A "%" over the list that an item's other "%" contradicts isn't the message's either.
     await call(r, "POST", "/api/chat", { content: "status of both again", project: demo.id, inline: [hint("project", web.id)] })
     await coordinatorIdle(r)
     const prompts = sessionPrompts(r, "orchestrator_session").join("\n")
     expect(prompts).not.toContain("[Cody picked the project")
-    expect(prompts).toContain(`[Cody typed picks for only part of this message, so Box Yard applies none of them to this turn: #web (web, project "${web.id}") in item 2 ("Port the pickaxe").`)
-    expect(prompts).toContain(`#demo (demo, project "${demo.id}") outside any list item, with another of its kind in the message; #web (web, project "${web.id}") in item 2`)
+    expect(prompts).toContain(`[Cody typed picks for only part of this message, so Box Yard applies none of them to this turn: %web (web, project "${web.id}") in item 2 ("Port the pickaxe").`)
+    expect(prompts).toContain(`%demo (demo, project "${demo.id}") outside any list item, with another of its kind in the message; %web (web, project "${web.id}") in item 2`)
   })
 
   it("a Captain's message lists them too, without the relay sentence, and applies none", async () => {
