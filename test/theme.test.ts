@@ -21,7 +21,7 @@ const changeSystem = (value: boolean) => { dark = value; system.dispatchEvent(ne
 // Execute the actual head script without React or CSS: this runs before either loads in the browser.
 const firstPaint = () => {
   const html = readFileSync("web/index.html", "utf8")
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!
+  const script = html.match(/<script id="theme-init">([\s\S]*?)<\/script>/)![1]!
   new Function(script)()
 }
 
