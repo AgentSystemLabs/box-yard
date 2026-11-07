@@ -1,0 +1,14 @@
+Sidebar Delete validation — example fixtures only
+
+Stable commit: 3c3322a8f7437e8ac9c0fc65315d9f8866b17e3b
+
+PASS npm run typecheck
+PASS npm run build
+PASS npm run test:fast — 278 files, 3239 tests
+PASS npm run test:related — 52 files, 677 tests
+PASS npm run test:tiers — 418 full = 278 fast + 140 slow
+PASS Chromium browser proof — 20 cases, 320/400/560/800/1600 px, 100%/125% zoom, touch/mouse
+
+Every browser DELETE was intercepted with isolated example fixtures. No user data deleted.
+Native iOS/Safari hardware was not tested.
+Risk: Medium; destructive shortcut with explicit confirmation and live client eligibility rechecks.
