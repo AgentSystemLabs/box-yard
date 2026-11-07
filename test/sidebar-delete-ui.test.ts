@@ -12,6 +12,8 @@ import { captainKey, taskKey, setTreeFolds, unfoldSidebarGroup } from "../web/sr
 import { chatProjectFilter, setChatProjectFilter } from "../web/src/lib/projectBar"
 import { resetColumns } from "../web/src/lib/columns"
 import { currentToasts, dismiss } from "../web/src/lib/toast"
+import { undoClose } from "../web/src/lib/inbox"
+import { resetClosedTasks } from "../web/src/lib/closedTasks"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const project = { id: "prj_example", name: "Example project", repo: null, notes: [], color: null } as unknown as Project
@@ -84,6 +86,7 @@ afterEach(async () => {
   qc.clear()
   act(() => { setTreeFolds({}); unfoldSidebarGroup(project.id); unfoldSidebarGroup(other.id); setChatProjectFilter(null); resetColumns() })
   for (const t of currentToasts()) dismiss(t.id)
+  act(() => { for (const t of [parent, child, sibling]) undoClose(t.id); resetClosedTasks() })
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -118,15 +121,70 @@ describe("sidebar reveal gestures", () => {
     expect(action(el)).toBeNull()
   })
 
-  it("ignores small movements and right swipes on closed rows, and preserves normal navigation", () => {
+  it("ignores small movements and preserves normal navigation", () => {
     render()
     const el = taskRow(sibling)
     swipe(el, -8)
     expect(action(el)).toBeNull()
     click(openButton(el))
     expect(new URLSearchParams(location.search).get("session")).toBe(sibling.id)
-    swipe(taskRow(parent), 70)
-    expect(action(taskRow(parent))).toBeNull()
+  })
+
+  it.each([false, true])("a right swipe exposes a clickable Delete on a selected=%s failed row", async (selected) => {
+    const failed = { ...sibling, status: "failed" as const }
+    if (selected) history.replaceState(null, "", `/?session=${failed.id}`)
+    render([parent, child, failed])
+    const el = taskRow(failed)
+    expect(el.hasAttribute("aria-current")).toBe(selected)
+    const before = location.href
+    swipe(el, 70)
+    expect(el.firstElementChild?.getAttribute("style")).toContain("translateX(88px)")
+    // A real tap starts a new pointer sequence even when the swipe produced no compatibility click.
+    const del = action(el)
+    pointer(del, "pointerdown", 30, 100)
+    pointer(del, "pointerup", 30, 100)
+    expect(click(del).defaultPrevented).toBe(true)
+    expect(currentConfirm()?.title).toBe("Delete task?")
+    expect(location.href).toBe(before)
+    answer(false)
+    await flush()
+    expect(taskRow(failed)).not.toBeNull()
+    expect(action(el)).toBeNull()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
+  it("has a named touch Actions button and hint; tapping it exposes the same actions without navigating", () => {
+    render()
+    const el = taskRow(sibling)
+    const more = el.querySelector<HTMLButtonElement>("[data-row-actions]")!
+    expect(host.textContent).toContain("Swipe rows left or right for actions")
+    expect(more.getAttribute("aria-label")).toBe(`Actions for ${sibling.title}`)
+    expect(more.className).toContain("h-11 w-11")
+    expect(more.className).toContain("pointer-coarse:flex")
+    click(more)
+    expect(more.getAttribute("aria-expanded")).toBe("true")
+    expect(action(el)).not.toBeNull()
+    expect(location.search).toBe("")
+  })
+
+  it("Mark done in the swipe menu uses the existing optimistic close and Undo, without navigation", async () => {
+    render([sibling])
+    const el = taskRow(sibling)
+    swipe(el, 70)
+    const done = el.querySelector<HTMLButtonElement>("[data-sidebar-done]")!
+    expect(done.textContent).toBe("Mark done")
+    pointer(done, "pointerdown", 30, 100)
+    pointer(done, "pointerup", 30, 100)
+    click(done)
+    await flush()
+    expect(taskRow(sibling)).toBeNull()
+    const undo = currentToasts().find((t) => t.title === "Marked done")!
+    expect(undo.action?.label).toBe("Undo")
+    expect(location.search).toBe("")
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([])
+    act(() => undo.action!.onClick())
+    await flush()
+    expect(taskRow(sibling)).not.toBeNull()
   })
 
   it("supports reversing, cancellation, lost capture and a right swipe to close", () => {
@@ -372,7 +430,7 @@ describe("visible failed-task deletion", () => {
   const failed = { ...parent, status: "failed" as const }
   const direct = (el: HTMLElement) => el.querySelector<HTMLButtonElement>("[data-delete-task]")!
 
-  it("exposes a named, focusable, touch-sized action in project, nested and waiting rows only for failures", () => {
+  it("always shows a named desktop Delete aligned with Check; touch uses the row's action menu", () => {
     const failedChild = { ...child, status: "failed" as const }
     render([failed, failedChild, sibling])
     for (const t of [failed, failedChild]) {
@@ -382,7 +440,8 @@ describe("visible failed-task deletion", () => {
       expect(button.title).toContain("Delete task")
       expect(button.tabIndex).toBe(0)
       expect(button.className).not.toContain("opacity-0")
-      expect(button.className).toContain("pointer-coarse:h-11 pointer-coarse:w-11")
+      expect(button.className).toContain("h-8 w-8")
+      expect(button.className).toContain("pointer-coarse:hidden")
       expect(direct(row(taskKey(t.id, "waiting")))).not.toBeNull()
     }
     expect(direct(taskRow(sibling))).toBeNull()
