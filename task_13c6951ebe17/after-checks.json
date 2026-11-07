@@ -1,0 +1,72 @@
+[
+  {
+    "width": 320,
+    "zoom": 1,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 320,
+    "zoom": 1.25,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "zoom": 1,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "zoom": 1.25,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 560,
+    "zoom": 1,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 560,
+    "zoom": 1.25,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 800,
+    "zoom": 1,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 800,
+    "zoom": 1.25,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 1440,
+    "zoom": 1,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 1440,
+    "zoom": 1.25,
+    "confirmationCancelled": true,
+    "writes": 0,
+    "errors": 0
+  }
+]
