@@ -11,8 +11,8 @@ export function HistoryNavigation({ newer, onNewer, browsing, loading, onLatest,
   return <div aria-busy={loading || undefined}>
     {loading && <Loading kind="line" label="Loading history" />}
     {(newer || browsing) && <div className="flex flex-wrap justify-center gap-2 py-2">
-      {newer && <Button variant="ghost" disabled={loading} onClick={(e) => { releaseListBottom(e.currentTarget); onNewer() }}>Show newer messages</Button>}
-      {browsing && <Button variant="ghost" onClick={() => { onLatest(); handle.current?.scrollToEnd() }}>Return to latest</Button>}
+      {newer && <Button variant="ghost" className="min-h-11! min-w-11! transition-none" disabled={loading} onClick={(e) => { releaseListBottom(e.currentTarget); onNewer() }}>Show newer messages</Button>}
+      {browsing && <Button variant="ghost" className="min-h-11! min-w-11! transition-none" onClick={() => { onLatest(); handle.current?.scrollToEnd() }}>Return to latest</Button>}
     </div>}
   </div>
 }

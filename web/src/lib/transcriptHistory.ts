@@ -57,7 +57,7 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
       if (!answer.messages.length) setWindow({ path, page: { messages: items, before: query.before ? null : page?.before ?? null, after: query.after ? null : page?.after ?? null } })
       return true
     } catch {
-      if (token === serial.current) toast.error("Couldn't load earlier history", "Try the date or history button again.")
+      if (token === serial.current) toast.error("Couldn't load history", "Try the date or history button again.")
       return false
     } finally {
       if (token === serial.current) { inFlight.current = false; setLoading(false) }
@@ -81,7 +81,9 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
     setLoading(false)
     setWindow(null)
   }, [])
-  const moreBefore = page ? !!page.before : !!items.length && metadata.data?.[0]?.messageId !== items[0]?.id
+  const oldest = metadata.data?.[0]
+  const first = items[0]
+  const moreBefore = page ? !!page.before : !!first && (!oldest || oldest.at < first.createdAt || (oldest.at === first.createdAt && oldest.messageId !== first.id))
   const days = useMemo<ChatDay[] | undefined>(() => {
     if (!metadata.data) return undefined
     const byDay = new Map<string, ChatDay>()

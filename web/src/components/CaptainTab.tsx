@@ -221,6 +221,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
                 resetKey={project.id}
                 restoreKey={scrollKey ?? `captain:${project.id}`}
                 hidden={tail.hidden || (history.moreBefore ? 1 : 0)}
+                earlierLabel={tail.hidden ? undefined : "Show earlier messages"}
                 onJump={() => { history.toLatest(); tail.reset() }}
                 onLoadEarlier={tail.hidden ? tail.loadEarlier : history.earlier}
                 onTrim={tail.trim}

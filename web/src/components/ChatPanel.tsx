@@ -224,6 +224,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
                   count={(chat.data?.length ?? 0) + (talking ? 1 : 0)}
                   restoreKey="chat:centre"
                   hidden={tail.hidden || (history.moreBefore ? 1 : 0)}
+                  earlierLabel={tail.hidden ? undefined : "Show earlier messages"}
                   onJump={() => { history.toLatest(); tail.reset() }}
                   onLoadEarlier={tail.hidden ? tail.loadEarlier : history.earlier}
                   onTrim={tail.trim}

@@ -199,6 +199,7 @@ export const TaskThread = memo(function TaskThread({
           resetKey={id}
           restoreKey={scrollKey ?? `task:${id}`}
           hidden={tail.hidden || (history.moreBefore ? 1 : 0)}
+          earlierLabel={tail.hidden ? undefined : "Show earlier messages"}
           onJump={() => { history.toLatest(); tail.reset() }}
           onLoadEarlier={tail.hidden ? tail.loadEarlier : history.earlier}
           onTrim={tail.trim}
