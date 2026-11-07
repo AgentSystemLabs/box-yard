@@ -1,0 +1,122 @@
+[
+  {
+    "width": 320,
+    "zoom": 1,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 320,
+    "zoom": 1.25,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "zoom": 1,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "zoom": 1.25,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 560,
+    "zoom": 1,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 560,
+    "zoom": 1.25,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 800,
+    "zoom": 1,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 800,
+    "zoom": 1.25,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "passed",
+    "markDoneUndo": "passed",
+    "desktopDeleteVisibilityAndAlignment": "not applicable",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 1440,
+    "zoom": 1,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "not applicable",
+    "markDoneUndo": "not applicable",
+    "desktopDeleteVisibilityAndAlignment": "passed",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  },
+  {
+    "width": 1440,
+    "zoom": 1.25,
+    "headerDelete": "passed",
+    "headerHarnessRemoved": "passed",
+    "selectedAndUnselectedTouchDelete": "not applicable",
+    "markDoneUndo": "not applicable",
+    "desktopDeleteVisibilityAndAlignment": "passed",
+    "escapeFocusAndDraft": "passed",
+    "writes": 0,
+    "errors": 0
+  }
+]
