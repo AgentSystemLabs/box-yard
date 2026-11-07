@@ -74,13 +74,28 @@ describe("the task box's row", () => {
     expect(document.querySelector('button[type="submit"]')!.className).not.toMatch(/composer:hidden/)
   })
 
-  it("an idle task's lone Side question chip is labelled sooner, and folds only when Attach has to as well", () => {
+  it("an idle task keeps both chips: with no Stop they're labelled sooner, and fold later", () => {
     box(task())
-    expect(byTestId("captain-target")).toBeNull()
-    expect(label("task-ask-toggle").className).toBe("@max-[20.5rem]/composer:sr-only")
-    // Mic, Send, the chip and Attach fit down to 12.5rem; below it, More takes the chip and Attach together.
-    expect(chips().className).toContain("@max-[12.5rem]/composer:hidden")
+    expect(byTestId("captain-target")).not.toBeNull()
+    expect(label("task-ask-toggle").className).toBe("@max-[26rem]/composer:sr-only")
+    expect(label("captain-target").className).toBe("@max-[26rem]/composer:sr-only")
+    // Mic, Send, the two chips and Attach fit down to 15.5rem; below it the chips fold, then Attach below 12.5rem.
+    expect(chips().className).toContain("@max-[15.5rem]/composer:hidden")
+    expect(byTestId("composer-more")!.className).toContain("@min-[15.5rem]/composer:hidden")
     expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[12.5rem]/composer:hidden")
+  })
+
+  it("an idle task's folded Captain line says what it does, as a working task's does", async () => {
+    box(task())
+    await press(byTestId("composer-more")!)
+    expect(byTestId("more-captain-target")!.textContent).toContain("Send to the demo Captain")
+    expect(byTestId("more-captain-target")!.parentElement!.className).toContain("@min-[15.5rem]/composer:hidden")
+  })
+
+  it("with Side question on, the box has neither the Captain chip nor its More line", () => {
+    box(task({ status: "working", pendingCount: 1 }), { ...IDLE_ASK, on: true })
+    expect(byTestId("captain-target")).toBeNull()
+    expect(byTestId("more-captain-target")).toBeNull()
   })
 
   it("the chips' More lines say what they do, toggle like the chips, then close the menu with the caret in the text", async () => {
