@@ -163,7 +163,7 @@ describe("resuming after retention", () => {
     expect(r.yard.tasks.resumeMode(done.id)).toBe("archive")
 
     const sent = await sendToTask(r, done.id, "one more thing")
-    expect(sent.delivery).toMatch(/^resuming: the workspace and Claude session are restored from the archive/)
+    expect(sent.delivery).toMatch(/^resuming: the workspace and Claude Code session are restored from the archive/)
     const resumed = await archivedDone(r, done.id, 2)
     const turn = turnJson(r, resumed)
     expect(turn.resume).toBe(true)
