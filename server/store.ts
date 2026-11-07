@@ -949,7 +949,7 @@ export class Store {
   }
 
   /** Check live rows and reserve synchronously, before the first workspace/archive cleanup await. No status changes. */
-  reserveRestingDeletion(target: { taskId: string } | { projectId: string }): () => void {
+  reserveRestingDeletion(target: { taskId: string; discardQueued?: number } | { projectId: string }): () => void {
     const projectId = "projectId" in target ? target.projectId : undefined
     if (projectId && !this.getProject(projectId)) throw new NotFoundError(`Project ${projectId} not found`)
     const rows = this.listTaskRows(projectId ? { projectId } : {})
@@ -965,7 +965,13 @@ export class Store {
     if ((projectId && this.projectDeletionPending(projectId)) || rows.some((r) => ids.has(r.id) && this.taskDeletionPending(r.id, r.project_id))) {
       throw new ConflictError("Deletion is already in progress for this task or project.")
     }
-    if (rows.some((r) => ids.has(r.id) && (r.current_turn_id || ["queued", "starting", "working"].includes(r.status) || r.compacting || r.compact_pending || this.hasInputs(r.id) || this.hasUncertainCodexInput(r.id)))) {
+    const discardQueued = "taskId" in target ? target.discardQueued : undefined
+    const failedInputs = discardQueued === undefined ? [] : rows.filter((r) => ids.has(r.id) && r.status === "failed").flatMap((r) => this.listQueuedInputs(r.id))
+    // Consent covers only failed tasks' queued inputs, never a running turn or an input already being delivered.
+    if (discardQueued !== undefined && (rows.find((r) => r.id === ("taskId" in target ? target.taskId : ""))?.status !== "failed" || failedInputs.length !== discardQueued)) {
+      throw new ConflictError("Queued messages changed. Review them and confirm deletion again.")
+    }
+    if (rows.some((r) => ids.has(r.id) && (r.current_turn_id || ["queued", "starting", "working"].includes(r.status) || r.compacting || r.compact_pending || (this.hasInputs(r.id) && !(discardQueued !== undefined && r.status === "failed" && this.listQueuedInputs(r.id).every((i) => i.status === "queued"))) || this.hasUncertainCodexInput(r.id)))) {
       throw new ConflictError("Stop queued or running tasks before deleting.")
     }
     for (const id of ids) this.deletingTasks.add(id)
