@@ -30,6 +30,7 @@
   --color-yard-500: #f59e0b;
   --color-yard-600: #d97706;
   /* Filled primary actions stay gold with dark ink in either theme. */
+  --color-control: var(--color-zinc-800);
   --color-action: #f59e0b;
   --color-action-hover: #fbbf24;
   --color-on-action: #09090b;
@@ -45,6 +46,7 @@
 :root { color-scheme: dark; }
 :root:not(.dark) {
   color-scheme: light;
+  --color-control: #85858f;
   --color-zinc-950: #ffffff;
   --color-zinc-900: #f4f4f5;
   --color-zinc-800: #e4e4e7;
@@ -349,4 +351,8 @@ body.resizing iframe {
 }
 :root:not(.dark) .composer-tag {
   color: color-mix(in srgb, var(--tag) 38%, #18181b);
+}
+
+:root:not(.dark) .select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2362626f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
