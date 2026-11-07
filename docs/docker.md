@@ -1,8 +1,8 @@
 # Docker containers
 
-A project can run its agents in a Docker container on the computer running Box Yard, instead of straight on this computer (the default on a fresh install), on an Upstash box or on a RunPod pod: pick **Runs on: Docker container** on the project's page, or `runs_on: "docker"` for one task. Each Docker project gets one container of its own. Agents work inside it with only its workspace volume, and they can't see this computer's files, its other projects, or Docker itself.
+A project can run its agents in a Docker container on the computer running Box Yard, instead of straight on this computer (the default on a fresh install), on an Upstash box or on a RunPod pod: pick **Runs on: Docker container** on the project's page, or `runs_on: "docker"` for one task. Each Docker project gets one container of its own, with a project workspace volume and no requested host directory or Docker socket mount.
 
-Use it when you want the local runner's speed and price (free, no network hop) without an agent being able to touch the rest of the computer.
+**Security assessment:** Docker placement currently does not establish a boundary for hostile tasks. The [7 November 2026 isolation audit](security/container-runner-audit-2026-11-07.md) found a path to request an unsandboxed local child, unsafe restore/read boundaries and a known vulnerability in the inspected Docker Desktop version. Review its findings and remediation criteria before running untrusted code on a valuable host. Containers also retain network access to reachable host/LAN services and peers. No container setup can promise that escapes are impossible.
 
 ## Setup (once per Box Yard install)
 
@@ -32,7 +32,7 @@ A project can pick its own image in Project › Settings › Runs on:
 - **Its own image**: run as it is (it needs bash, node, git and claude).
 - **Its own Dockerfile**: built on this computer with `ARG BOXYARD_BASE` set to the image above, so it can start `FROM ${BOXYARD_BASE}` and add what the project needs (the editor prefills that template). A Dockerfile wins over an image.
 
-`update_project` sets the same thing with `docker: { image, dockerfile }`.
+The authenticated project settings API accepts `docker: { image, dockerfile }`; the current Captain `update_project` tool does not expose these fields.
 
 ## How it works
 
@@ -62,7 +62,7 @@ Box Yard runs every command with `docker exec -i <container> bash -c 'eval "$(ca
 
 ## Credentials and isolation
 
-- **In the container only, in memory only.** A turn's credentials (the Claude key, `GITHUB_TOKEN`, the project's env) reach the container in `task.json`, as on boxes. On Docker, `task.json` is written to a tmpfs (`/run/boxyard/<task>.json`, mode 0700, in the container's memory) and linked from the task folder. So is an identity's signing key (`/run/boxyard/<task>.signing.key`), which the runner keeps on the tmpfs while the turn signs and removes after (docs/identities.md).
+- **Credentials on a container tmpfs.** A turn's credentials (the Claude key, `GITHUB_TOKEN`, the project's env) reach the container in `task.json`, as on boxes. On Docker, `task.json` is written with restrictive permissions on a tmpfs (`/run/boxyard/<task>.json`) and linked from the task folder. So is an identity's signing key (`/run/boxyard/<task>.signing.key`), which the runner keeps on the tmpfs while the turn signs and removes after (docs/identities.md). Task code, same-user peers and container root can read these credentials. Docker notes that [tmpfs data may be persisted through swap](https://docs.docker.com/engine/storage/tmpfs/); this runner permits swap.
   - Credentials are never in the image or a layer: the build context is only the Dockerfile, and a Dockerfile holding something shaped like a key, or any credential value in effect (Settings › Credentials and every identity's), is refused. The build log never shows one.
   - They're never in `docker run -e`, `docker inspect` or a command line.
   - The tmpfs is gone when the container stops or is deleted.
@@ -70,7 +70,7 @@ Box Yard runs every command with `docker exec -i <container> bash -c 'eval "$(ca
   - `gh` reads `$GITHUB_TOKEN`.
   - git's credential helper (in the image's `/etc/gitconfig`, and in each repo's config) answers with the turn's `$GITHUB_TOKEN` and clears every other helper first, so no stored credential can answer before it.
   - Nothing writes a credential store or `~/.git-credentials`.
-- **Mounts.** The only mount is the project's own volume: no folder of this computer, and no Docker socket. A container can't start other containers or reach the Docker daemon.
+- **Mounts.** Box Yard requests the project's own workspace volume and the credential tmpfs: no folder of this computer and no Docker socket. This removes direct mounted access; it does not prove the daemon is unreachable over the network or through a runtime vulnerability. Keep Docker patched and its API protected.
 - **Inside the container.** Agents run as the image's user (`agent`, uid 1000, on Box Yard's image). It has passwordless sudo inside the container only, so agents can `apt-get` what a task needs. Limits: `--pids-limit 4096`, CPU and memory from Settings, and `/dev/shm` of 1 GB for Chromium.
 - **Network.** Docker's default bridge network, so git, npm and the Claude API work. The container can reach the internet and anything this computer's network can.
 
