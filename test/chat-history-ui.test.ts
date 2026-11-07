@@ -66,6 +66,8 @@ describe("chat day navigation", () => {
     const leaveBottom = vi.fn()
     host.querySelector("[data-scroller]")!.addEventListener("boxyard:leave-bottom", leaveBottom)
     click(railButtons()[0]!)
+    expect(leaveBottom).not.toHaveBeenCalled()
+    click(railButtons()[0]!)
     expect(leaveBottom).toHaveBeenCalled()
     await settle()
     expect(host.querySelectorAll('[data-day-start="message-0"]')).toHaveLength(1)
@@ -74,11 +76,11 @@ describe("chat day navigation", () => {
     expect(document.activeElement?.getAttribute("data-day-start")).toBe("message-0")
   })
 
-  it("previews on the first touch and jumps on the second, with a visible hint and explicit jump button", async () => {
+  it.each(["mouse", "touch", "pen"])("previews on the first %s activation and jumps on the second", async (pointerType) => {
     render()
     const button = railButtons()[0]!
     const tap = () => {
-      act(() => { button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" })) })
+      act(() => { button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType })) })
       act(() => button.focus())
       click(button)
     }
@@ -93,11 +95,17 @@ describe("chat day navigation", () => {
     expect(host.querySelector('[role="region"]')).toBeNull()
   })
 
-  it("previews on mouse hover and keyboard focus, and dismisses with Escape without reopening", () => {
+  it("ignores hover and focus, opens on activation, and restores focus without reopening on dismissal", () => {
     render()
     const button = railButtons()[0]!
     act(() => { button.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })) })
-    expect(host.querySelector('[role="region"]')).not.toBeNull()
+    act(() => button.focus())
+    expect(host.querySelector('[role="region"]')).toBeNull()
+    expect(button.getAttribute("aria-expanded")).toBe("false")
+    // Native keyboard activation dispatches click with detail 0 (Enter/Space are also checked in browsers).
+    act(() => { button.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })) })
+    expect(button.getAttribute("aria-expanded")).toBe("true")
+    expect(button.getAttribute("aria-controls")).toBe(host.querySelector('[role="region"]')?.id)
     const close = host.querySelector<HTMLButtonElement>('[aria-label="Close day summary"]')!
     act(() => close.focus())
     act(() => { close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })) })
@@ -105,14 +113,33 @@ describe("chat day navigation", () => {
     expect(document.activeElement).toBe(button)
     act(() => button.blur())
     act(() => button.focus())
-    expect(host.querySelector('[role="region"]')).not.toBeNull()
+    expect(host.querySelector('[role="region"]')).toBeNull()
+    click(button)
     click(host.querySelector('[aria-label="Close day summary"]')!)
+    expect(host.querySelector('[role="region"]')).toBeNull()
+    expect(document.activeElement).toBe(button)
+  })
+
+  it("keeps an open day unchanged while hovering or focusing another, switching only on click", () => {
+    render()
+    const [first, second] = railButtons()
+    click(first!)
+    const label = host.querySelector('[role="region"]')!.getAttribute("aria-label")
+    act(() => { second!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" })) })
+    act(() => second!.focus())
+    expect(host.querySelector('[role="region"]')!.getAttribute("aria-label")).toBe(label)
+    expect(first!.getAttribute("aria-expanded")).toBe("true")
+    click(second!)
+    expect(first!.getAttribute("aria-expanded")).toBe("false")
+    expect(second!.getAttribute("aria-expanded")).toBe("true")
+    expect(host.querySelector('[role="region"]')!.getAttribute("aria-label")).not.toBe(label)
+    act(() => { host.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })) })
     expect(host.querySelector('[role="region"]')).toBeNull()
   })
 
   it("updates recorded task milestones without rendering the transcript again", async () => {
     render()
-    act(() => railButtons()[0]!.focus())
+    click(railButtons()[0]!)
     const before = renders
     await act(async () => {
       qc.setQueryData(keys.tasks, [{ ...task(), prState: "merged", prMergedAt: at(1) }])
@@ -126,7 +153,8 @@ describe("chat day navigation", () => {
     qc.setQueryData(keys.tasks, [{ ...task(), title: "Fix #12 and other/repo#9; https://github.com/team/alpha/pull/42" }])
     const parentClick = vi.fn()
     render(h("div", { onClick: parentClick }, h(History)))
-    act(() => railButtons()[0]!.focus())
+    click(railButtons()[0]!)
+    parentClick.mockClear()
     const popup = host.querySelector('[role="region"]')!
     const links = [...popup.querySelectorAll<HTMLAnchorElement>("a")]
     expect(links.map((a) => a.href)).toEqual([
@@ -152,7 +180,7 @@ describe("chat day navigation", () => {
     qc.setQueryData(keys.tasks, [{ ...task(), title: "Fix #12" }])
     qc.setQueryData(keys.projects, [])
     render()
-    act(() => railButtons()[0]!.focus())
+    click(railButtons()[0]!)
     expect(host.querySelector('[role="region"] a')).toBeNull()
     const before = renders
     await act(async () => {
@@ -166,7 +194,7 @@ describe("chat day navigation", () => {
   it.each(["click", "Enter", " "])("jumps a summary body with %s to an unrendered source and marks it until the next interaction", async (action) => {
     const list = messages.map((m, i) => i === 10 ? { ...m, role: "notice" as const, content: "✅ **Fix login** is done: Fixed.", meta: { taskId: task().id } } : m)
     render(h(Fragment, null, h(History, { list }), h(History, { list })))
-    act(() => railButtons()[0]!.focus())
+    click(railButtons()[0]!)
     const bullet = host.querySelector<HTMLElement>("[data-summary-jump]")!
     expect(bullet.textContent).toContain("Jump to message")
     expect(bullet.className).toContain("min-h-11")
@@ -189,7 +217,7 @@ describe("chat day navigation", () => {
 
   it("falls back to the day's first message when the milestone has no source", async () => {
     render()
-    act(() => railButtons()[0]!.focus())
+    click(railButtons()[0]!)
     const bullet = host.querySelector<HTMLElement>("[data-summary-jump]")!
     expect(bullet.textContent).toContain("Jump to day")
     click(bullet)
@@ -200,7 +228,7 @@ describe("chat day navigation", () => {
   it("does not treat a nested GitHub link's keyboard event as a summary jump", async () => {
     qc.setQueryData(keys.tasks, [{ ...task(), title: "Fix #12" }])
     render()
-    act(() => railButtons()[0]!.focus())
+    click(railButtons()[0]!)
     const link = host.querySelector("[data-summary-jump] a")!
     act(() => { link.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })) })
     click(link)

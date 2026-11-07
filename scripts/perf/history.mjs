@@ -70,7 +70,13 @@ for (let run = 0; run < Number(count); run++) for (const view of ['chat', 'capta
     const dayLabel = at === null ? null : localDay(at) === localDay(+now) ? 'Today' : localDay(at) === localDay(+yesterday) ? 'Yesterday' : new Date(at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...(new Date(at).getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) })
     const first = dayLabel ? [...nav.querySelectorAll('button')].find((e) => e.getAttribute('aria-label').startsWith(dayLabel + ':')) : nav.querySelector('button')
     if (!first) throw new Error('Date is outside the benchmark rail window')
-    const label = first.getAttribute('aria-label'), t = performance.now()
+    const label = first.getAttribute('aria-label')
+    // Explicit activation opens the summary first. Time the subsequent jump, as on the old hover-preview UI.
+    if (label.includes('activate again')) {
+      first.click()
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    }
+    const t = performance.now()
     document.activeElement?.blur()
     first.click()
     for (let i = 0; i < 120; i++) {

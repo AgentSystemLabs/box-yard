@@ -163,9 +163,6 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
   const nav = useRef<HTMLElement>(null)
   const popup = useRef<HTMLDivElement>(null)
   const anchor = useRef<HTMLButtonElement | null>(null)
-  const touch = useRef(false)
-  const armed = useRef(false)
-  const returningFocus = useRef(false)
   const popupId = useId()
   const day = days.find((d) => d.key === open)
   const bullets = day ? summaries.get(day.key) ?? [] : []
@@ -176,9 +173,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
   const railEnd = Math.min(days.length, railStart + 80)
   const close = useCallback(() => {
     setOpen(null)
-    returningFocus.current = true
     anchor.current?.focus({ preventScroll: true })
-    returningFocus.current = false
   }, [])
 
   useLayoutEffect(() => {
@@ -217,7 +212,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
 
   return (
     <>
-      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label="Chat days: tap to preview, tap again to jump" className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
+      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label="Chat days: activate to preview, activate again to jump" className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
         <p aria-hidden className="py-1 text-center text-[10px] text-zinc-500">Days</p>
         {railStart > 0 && <div aria-hidden style={{ height: railStart * 44 }} />}
         {days.slice(railStart, railEnd).map((d, index) => (
@@ -236,28 +231,15 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
               setRailTop(top)
               requestAnimationFrame(() => nav.current?.querySelector<HTMLElement>(`[data-day-index="${next}"]`)?.focus({ preventScroll: true }))
             }}
-            aria-label={`${dayLabel(d.at, now)}: preview day summary; tap again to jump`}
+            aria-label={`${dayLabel(d.at, now)}: preview day summary; activate again to jump`}
             aria-expanded={d.key === open}
             aria-controls={d.key === open ? popupId : undefined}
-            onPointerEnter={(e) => {
-              if (e.pointerType !== "mouse") return
-              anchor.current = e.currentTarget
-              setOpen(d.key)
-            }}
-            onPointerDown={(e) => {
-              touch.current = e.pointerType === "touch" || e.pointerType === "pen"
-              armed.current = open === d.key
-              anchor.current = e.currentTarget
-            }}
-            onFocus={(e) => {
-              if (returningFocus.current) return
-              anchor.current = e.currentTarget
-              setOpen(d.key)
-            }}
             onClick={(e) => {
-              if (touch.current && !armed.current && e.detail !== 0) setOpen(d.key)
-              else jump(d)
-              touch.current = false
+              if (open === d.key) jump(d)
+              else {
+                anchor.current = e.currentTarget
+                setOpen(d.key)
+              }
             }}
             className={cx("flex h-11 min-h-11 w-11 flex-col items-center justify-center border-l-2 text-[10px] leading-tight focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400", d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300")}
           >

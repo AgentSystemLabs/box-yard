@@ -42,6 +42,8 @@ describe("bounded retained history", () => {
   it("loads a date older than the initial API cap, focuses it, and keeps the live cache separate", async () => {
     render(); await settle()
     const button = host.querySelector<HTMLButtonElement>('nav button')!
+    act(() => button.click())
+    expect(api).not.toHaveBeenCalledWith("/api/chat/history?around=m-0")
     act(() => button.click()); await settle(); await settle()
     expect(api).toHaveBeenCalledWith("/api/chat/history?around=m-0")
     expect(document.activeElement?.getAttribute("data-day-start")).toBe("m-0")
