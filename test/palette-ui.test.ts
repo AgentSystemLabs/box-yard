@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { CommandPalette, openPalette } from "../web/src/components/CommandPalette.js"
 import { keys } from "../web/src/lib/queries.js"
 import { paletteIndex, rankPalette } from "../web/src/lib/paletteRank.js"
-import { setChatProjectFilter } from "../web/src/lib/projectBar.js"
+import { readPins, setChatProjectFilter } from "../web/src/lib/projectBar.js"
 import type { Artifact, Project, SettingsInfo, Task } from "../shared/types"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -268,5 +268,21 @@ describe("command palette", () => {
     expect(groupRows("waiting").some((r) => r.startsWith("Late arrival"))).toBe(false)
     type("late")
     expect(groupRows("task")[0]).toContain("Late arrival")
+  })
+})
+
+describe("project pins", () => {
+  it("Pin and Unpin <project> pin and unpin it in the sidebar, the keyboard's way to the row's pin", () => {
+    render()
+    type(">pin box")
+    expect(groupRows("command")[0]).toContain("Pin box-yard")
+    press("Enter")
+    expect(document.querySelector("input[role=combobox]")).toBeNull()
+    expect(readPins()).toEqual({ prj_a: "pinned" })
+    act(() => openPalette())
+    type(">box-yard")
+    expect(groupRows("command")).toEqual([expect.stringContaining("Unpin box-yard")])
+    press("Enter")
+    expect(readPins()).toEqual({ prj_a: "unpinned" })
   })
 })
