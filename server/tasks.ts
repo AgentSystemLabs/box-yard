@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url"
 import type { Config } from "./config.js"
 import { harnessHandoffKey, type HarnessHandoff, type TaskContinuation } from "../shared/taskContinuation.js"
 import type { Hub } from "./hub.js"
-import type { BoxRow, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
+import type { BoxRow, PendingInput, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
 import { BadRequestError, ConflictError, NotFoundError, cloneUrl, githubSlug, boxRowCost, meterTick, normalizeBoxSize, sourceOf, taskAgentCli, taskGpuPick } from "./store.js"
 import type { BoxProvider, BoxUsageProbe, ExecResult } from "./providers/types.js"
 import { providerOf, q, tasksRootOf } from "./providers/types.js"
@@ -1208,6 +1208,17 @@ export class TaskManager {
     return (target === "isolated" || target === this.runnerCeiling(from)) && this.mayDeliverTaskOutput(from.id, placed)
   }
 
+  /** A queue claim is not authority: placement may have changed since a worker sent this input. */
+  private taskInputs(row: TaskRow, inputs: PendingInput[]): PendingInput[] {
+    return inputs.map(input => {
+      if (!input.source.startsWith("agent:")) return input
+      const from = this.store.getTaskRow(input.source.slice("agent:".length))
+      if (from && this.mayDeliverAgentInput(from, row)) return input
+      // Preserve the claim/id for ordinary delivery accounting, but send no source-controlled bytes or files.
+      return { ...input, source: "system", content: "Task output withheld across the host authority boundary. A human can review the source task page.", attachments: [] }
+    })
+  }
+
   /** Output cannot acquire host authority merely because a later automation run has a different default. */
   mayDeliverTaskOutput(taskId: string, runner: Runner): boolean {
     if (runner !== "local" && runner !== "ssh") return true
@@ -1710,7 +1721,7 @@ export class TaskManager {
       return result("after_turn", note)
     }
     const claim = steerClaim(turnId)
-    const claimed = this.store.claimSteer(taskId, claim)
+    const claimed = this.taskInputs(row, this.store.claimSteer(taskId, claim))
     if (!claimed.length) return result("already_delivered")
     const ids = claimed.map((i) => i.id)
     this.addEvent(row.id, `${who} requested steering ${them} into the running turn; delivery has not been acknowledged yet.`, { kind: "steer", queued })
@@ -6103,7 +6114,7 @@ export class TaskManager {
       const compact = Boolean(row.compact_pending) && Boolean(row.session_started)
       // A compaction is a turn of its own; queued messages wait for the next one. The rest are claimed for this
       // turn: locked against edits and cancels, delivered (deleted) once it starts, released if it can't.
-      const queued = compact ? [] : this.store.claimInputs(taskId, turnId)
+      const queued = compact ? [] : this.taskInputs(row, this.store.claimInputs(taskId, turnId))
       if (!compact) this.emitTask(taskId)
       // Cody cancelled every message this turn was for: don't run it on "Continue.".
       if (!compact && !queued.length && row.session_started && this.cancelledAll.has(taskId)) throw new StoppedBeforeStart(true)
@@ -8091,10 +8102,11 @@ mkdir -p ${q(dir + "/work")}`,
         report = raw ? (JSON.parse(raw) as SubtaskReport) : null
       } catch {}
       // Re-check old reports too: the parent may have been explicitly elevated after a report was saved.
-      if (!this.mayDeliverAgentInput(k, parent) && report) report = { ...report, text: "Report withheld across the host authority boundary. A human can review the child's task page.", inputId: "" }
+      const allowed = this.mayDeliverAgentInput(k, parent)
+      if (!allowed && report) report = { ...report, text: "Report withheld across the host authority boundary. A human can review the child's task page.", inputId: "" }
       // One due to run again shows as queued, so the runner's wait and finish count it as running.
       const status = !isLiveSubtask(k.status) && this.wantsTurn(k) ? "queued" : k.status
-      return { id: k.id, title: k.title, status, url: this.absoluteUrl(`/tasks/${k.id}`), report: report ? { ...report, delivered: !queued.has(report.inputId) } : null }
+      return { id: k.id, title: allowed ? k.title : "Contained task", status, url: this.absoluteUrl(`/tasks/${k.id}`), report: report ? { ...report, delivered: !queued.has(report.inputId) } : null }
     })
     await this.writeTaskFile(parentId, "subtasks.json", { updatedAt: Date.now(), children } satisfies SubtasksFile)
   }

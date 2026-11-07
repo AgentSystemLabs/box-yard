@@ -193,7 +193,7 @@ describe("server-owned task containment", () => {
     const { yard, project, provider } = fixture()
     const parent = yard.tasks.createTask({ projectId: project.id, title: "Host parent", prompt: "Example", runsOn: "local" })
     yard.store.updateTask(parent.id, { status: "idle", boxId: LOCAL_BOX_ID })
-    const child = yard.tasks.createTask({ projectId: project.id, title: "Child", prompt: "Example", runsOn: "docker", subtask: { parentId: parent.id, rootId: parent.id, depth: 1, withParent: false } })
+    const child = yard.tasks.createTask({ projectId: project.id, title: "fixture-untrusted-child-title", prompt: "Example", runsOn: "docker", subtask: { parentId: parent.id, rootId: parent.id, depth: 1, withParent: false } })
     const internals = yard.tasks as unknown as { reportToParent(row: unknown, status: string, text: string, question: string): void; writeSubtasksFile(id: string): Promise<void> }
     const before = yard.store.listTaskMessages(parent.id, 100)
     const marker = "fixture-untrusted-report-command"
@@ -203,10 +203,52 @@ describe("server-owned task containment", () => {
     expect(yard.store.listTaskMessages(parent.id, 100)).toEqual(before)
     expect(yard.store.getTask(parent.id)?.status).toBe("idle")
     expect(provider.writeFile).toHaveBeenLastCalledWith(expect.anything(), expect.stringContaining("subtasks.json"), expect.not.stringContaining(marker))
+    expect(provider.writeFile).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.not.stringContaining(child.title))
     // A report saved before a later human elevation is checked again at delivery, not trusted from storage.
     yard.store.setKv(`subtask_report:${child.id}`, JSON.stringify({ status: "idle", text: marker, at: 1, inputId: "old" }))
     await internals.writeSubtasksFile(parent.id)
     expect(provider.writeFile).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), expect.not.stringContaining(marker))
+  })
+
+  it("rechecks queued worker messages at steer and launch after human elevation, including recovered claims", async () => {
+    for (const mode of ["steer", "launch"] as const) for (const runner of ["local", "ssh"] as const) {
+      const { yard, task, project, provider, config } = fixture()
+      const child = yard.tasks.createTask({ projectId: project.id, title: "Contained sender", prompt: "Example", runsOn: "docker" })
+      const marker = "fixture-delayed-worker-command"
+      await yard.tasks.apply(child.id, { t: "message_agent", seq: 1, ts: 1, turnId: null, to: task.id, message: marker })
+      expect(yard.store.peekInputs(task.id)[0]?.content).toContain(marker)
+      // A pending legacy/recovered message must not copy any attachment either. Unknown senders fail closed.
+      yard.store.queueInput(task.id, "agent:task_missing000", marker, ["fixture-withheld-file"])
+      yard.store.queueInput(task.id, "cody", "fixture-human-message")
+      if (mode === "launch") yard.store.claimSteer(task.id, "steer:turn_previous")
+      yard.tasks.elevateRunner(task.id, runner)
+      yard.tasks.setRunsOn(task.id, runner)
+      const box = runner === "local" ? LOCAL_BOX_ID : "ssh-example"
+      vi.spyOn(yard.tasks, "taskDir").mockImplementation((_box, id) => path.join(config.dataDir, "fixture-tasks", id))
+      yard.store.updateTask(task.id, { boxId: box, status: mode === "steer" ? "working" : "starting", currentTurnId: "turn_example", agentCli: "codex" })
+      if (mode === "steer") {
+        const result = await yard.tasks.steerQueued(task.id, { by: "captain" })
+        expect(result.delivery, result.note).toBe("steering")
+        const call = vi.mocked(provider.writeFile).mock.calls.find(c => c[1].includes("/steer-"))!
+        expect(call).toBeDefined()
+        expect(call[2]).not.toContain(marker)
+        expect(call[2]).not.toContain("fixture-withheld-file")
+        expect(call[2]).toContain("withheld across the host authority boundary")
+        expect(call[2]).toContain("fixture-human-message")
+      } else {
+        vi.spyOn(provider, "wake").mockResolvedValue()
+        vi.spyOn(provider, "exec").mockResolvedValue({ exitCode: 0, stdout: "present", stderr: "" })
+        vi.spyOn(provider, "health").mockResolvedValue("running")
+        // Stop before agent installation/credentials. This observes the real launch's claimed delivery payload.
+        const delivery = vi.spyOn(yard.tasks, "deliverAttachments").mockRejectedValue(new Error("fixture stopped before agent installation"))
+        await (yard.tasks as unknown as { launch(id: string, box: string, turn: string): Promise<void> }).launch(task.id, box, "turn_example")
+        expect(delivery).toHaveBeenCalledOnce()
+        const inputs = delivery.mock.calls[0]![2]
+        expect(JSON.stringify(inputs)).not.toContain(marker)
+        expect(inputs.every(i => i.attachments.length === 0)).toBe(true)
+        expect(inputs.some(i => i.content === "fixture-human-message")).toBe(true)
+      }
+    }
   })
 
   it("exposes elevation only to authenticated humans, with explicit confirmation and no active turn", async () => {
