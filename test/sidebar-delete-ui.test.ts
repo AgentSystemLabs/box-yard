@@ -367,3 +367,83 @@ describe("sidebar deletion semantics", () => {
     expect(currentToasts().some((t) => t.title.includes("Couldn't delete"))).toBe(true)
   })
 })
+
+describe("visible failed-task deletion", () => {
+  const failed = { ...parent, status: "failed" as const }
+  const direct = (el: HTMLElement) => el.querySelector<HTMLButtonElement>("[data-delete-task]")!
+
+  it("exposes a named, focusable, touch-sized action in project, nested and waiting rows only for failures", () => {
+    const failedChild = { ...child, status: "failed" as const }
+    render([failed, failedChild, sibling])
+    for (const t of [failed, failedChild]) {
+      const button = direct(taskRow(t))
+      expect(button).not.toBeNull()
+      expect(button.getAttribute("aria-label")).toBe(`Delete ${t.title}`)
+      expect(button.title).toContain("Delete task")
+      expect(button.tabIndex).toBe(0)
+      expect(button.className).not.toContain("opacity-0")
+      expect(button.className).toContain("pointer-coarse:h-11 pointer-coarse:w-11")
+      expect(direct(row(taskKey(t.id, "waiting")))).not.toBeNull()
+    }
+    expect(direct(taskRow(sibling))).toBeNull()
+  })
+
+  it("opens confirmation without navigation or folding, and cancel leaves the task untouched", async () => {
+    render([failed, child, sibling])
+    const el = taskRow(failed)
+    const del = direct(el)
+    act(() => del.focus())
+    expect(document.activeElement).toBe(del)
+    // A keyboard activation (detail 0) uses the same action as a tap.
+    expect(click(del, 0).defaultPrevented).toBe(true)
+    expect(location.search).toBe("")
+    expect(el.getAttribute("aria-expanded")).toBe("true")
+    expect(currentConfirm()).toMatchObject({ title: "Delete task?", danger: true })
+    expect(currentConfirm()?.body).toContain("1 sub-task")
+    expect(del.disabled).toBe(true)
+    click(del)
+    answer(false)
+    await flush()
+    expect(currentConfirm()).toBeUndefined()
+    expect(taskRow(failed)).not.toBeNull()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
+  it("deletes through the resting API and preserves an unrelated open task", async () => {
+    render([failed, child, sibling])
+    history.replaceState(null, "", `/?session=${sibling.id}`)
+    fetchMock.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response('{"ok":true}', { status: 200 }) : new Promise(() => {}))
+    click(direct(taskRow(failed)))
+    answer(true)
+    await flush()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/tasks/${failed.id}?ifResting=1`, expect.objectContaining({ method: "DELETE" }))
+    expect(qc.getQueryData<Task[]>(keys.tasks)?.map((t) => t.id)).toEqual([sibling.id])
+    expect(new URLSearchParams(location.search).get("session")).toBe(sibling.id)
+  })
+
+  it("blocks running descendants and rechecks work started during confirmation", async () => {
+    render([failed, { ...child, status: "working" }, sibling])
+    click(direct(taskRow(failed)))
+    expect(currentConfirm()).toBeUndefined()
+    expect(currentToasts().some((t) => t.body?.includes("Stop"))).toBe(true)
+    render([failed, child, sibling])
+    click(direct(taskRow(failed)))
+    act(() => qc.setQueryData(keys.tasks, [failed, { ...child, status: "working" }, sibling]))
+    answer(true)
+    await flush()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
+  it("restores a failed task and its current panel when the API refuses deletion", async () => {
+    render([failed, child, sibling])
+    history.replaceState(null, "", `/?session=${failed.id}`)
+    fetchMock.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response('{"error":"Example refusal"}', { status: 409 }) : new Promise(() => {}))
+    click(direct(taskRow(failed)))
+    answer(true)
+    await flush()
+    expect(taskRow(failed)).not.toBeNull()
+    expect(taskRow(child)).not.toBeNull()
+    expect(new URLSearchParams(location.search).get("session")).toBe(failed.id)
+    expect(currentToasts().some((t) => t.title.includes("Couldn't delete"))).toBe(true)
+  })
+})

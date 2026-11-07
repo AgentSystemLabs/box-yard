@@ -23,7 +23,11 @@ export function useRestingDelete(target: SidebarDeleteTarget, close?: () => void
     const tasks = qc.getQueryData<Task[]>(keys.tasks)
     const projects = qc.getQueryData<Project[]>(keys.projects)
     const captain = qc.getQueryData<CaptainState>(keys.captain(target.projectId))
-    const blocked = !tasks || !projects || (target.kind === "project" && !captain) ? "Checking running work…" : sidebarDeleteBlocked(target, tasks, Boolean(captain?.busy || captain?.compacting || captain?.compactQueued))
+    if (!tasks || !projects || (target.kind === "project" && !captain)) {
+      toast.info("Delete cancelled", "Checking running work…")
+      return
+    }
+    const blocked = sidebarDeleteBlocked(target, tasks, Boolean(captain?.busy || captain?.compacting || captain?.compactQueued))
     if (blocked) { toast.info("Delete cancelled", blocked); return }
     busy.current = true
     setPending(true)

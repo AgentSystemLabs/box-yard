@@ -22,7 +22,8 @@ import { ContinueTask } from "./ContinueTask"
 import { api } from "../lib/api"
 import { primaryAction, readyForReview } from "../lib/taskActions"
 import { toast } from "../lib/toast"
-import { AgentCliChip, Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, StatusDot, TimeAgo, cx, timeAgo } from "./ui"
+import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, StatusDot, TimeAgo, cx, timeAgo } from "./ui"
+import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
 import { TaskStatusIcon } from "./TaskIcon"
 import { FilesChip } from "./TaskFiles"
 import { MergePrMenuItem } from "./MergePr"
@@ -49,10 +50,10 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
  * The task's header, in the task panel (`onBack`: an h2 with a back button before it) and the task page (an h1
  * under the breadcrumb). One row, like a phone's navigation bar: back, the task's icon and its title (one line; a tap
  * opens the details), then what to act on (its PR, previews and files, and Mark done once it's ready for review, or
- * Reopen once it's done) and ⓘ (its details) last. The icon is the header's status (TaskStatusIcon): it pulses while
+ * Reopen once it's done, or Delete if it failed) and ⓘ (its details) last. The icon is the header's status (TaskStatusIcon): it pulses while
  * the task works and has a still dot when it asks or failed, and its name says the state to screen readers; the details
- * say it in words. A narrow header (a slim panel) folds the chips to their icons; the agent shows from 48rem, and is
- * always in the details. Where it runs is only in the details. Too narrow even for that, the icons wrap under the
+ * say it in words. A narrow header (a slim panel) folds the chips to their icons. The agent and where it runs are
+ * only in the details. Too narrow even for that, the icons wrap under the
  * title. It sticks to the top while the transcript scrolls.
  *
  * In a panel its crumbs' row is the Captain's header's (CaptainTab.tsx CentreCaptainHeader): as tall, the Captain's
@@ -104,7 +105,6 @@ export function TaskHeader({
       <TaskStateMore task={task} />
       {task.prUrl && <PrStatusChip task={task} />}
       {task.previews.map((p) => <PreviewChip key={p.port} preview={p} port={task.previews.length > 1} />)}
-      <AgentCliChip cli={task.agentCli} className="px-0.5 text-xs text-zinc-500 @max-[48rem]/head:hidden" />
       {files.length > 0 && <FilesChip taskId={task.id} projectId={task.projectId} files={files} quiet fold />}
     </div>
   )
@@ -118,6 +118,7 @@ export function TaskHeader({
             {tree ? <TaskCrumbs task={task} project={project} /> : <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-1", backClassName)} />}
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {ready ? <MarkDoneButton task={task} crowded={false} /> : task.status === "done" && <ReopenButton task={task} crowded={false} />}
+              {task.status === "failed" && <DeleteFailedTaskButton task={task} header />}
               {tools}
               {menu}
               {controls}
@@ -149,6 +150,7 @@ export function TaskHeader({
         {chips}
         {ready && <MarkDoneButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
         {task.status === "done" && <ReopenButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
+        {task.status === "failed" && <DeleteFailedTaskButton task={task} header />}
         {tools}
         {menu}
         {controls}

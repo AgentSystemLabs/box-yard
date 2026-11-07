@@ -172,9 +172,9 @@ describe("TaskHeader", () => {
     expect(files.querySelector('[data-testid="files-new-dot"]')).not.toBeNull()
     // Each folded chip is an icon button: 32px drawn, 44px to a finger, like back and ⓘ.
     for (const chip of [pr, preview, files]) expect(chip.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
-    // The agent waits for a 48rem header; the details always have it.
+    // The harness is absent even on wide headers; the details still have it.
     renderInPanel(task({ agentCli: "codex" }))
-    expect(document.querySelector('[data-testid="agent-cli-chip"]')!.className).toContain("@max-[48rem]/head:hidden")
+    expect(document.querySelector('[data-testid="agent-cli-chip"]')).toBeNull()
   })
 
   it("opens the details from the title: the state in words, the full title and where it runs; Esc returns to the title", async () => {
@@ -310,6 +310,45 @@ describe("TaskHeader", () => {
     render(task({ contextTokens: 810_000 }))
     expect(metaText()).not.toContain("81%")
     expect(metaText()).not.toContain("Compact")
+  })
+
+  it.each([false, true])("confirms failed-task deletion directly from the header (phone: %s)", async (phone) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: !phone, media: query, addEventListener() {}, removeEventListener() {} }))
+    const t = task({ status: "failed", prUrl: null, previews: [] })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    qc.setQueryData(keys.tasks, [t])
+    qc.setQueryData(keys.projects, [project])
+    const calls: string[] = []
+    vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        calls.push(url)
+        return Promise.resolve(new Response('{"ok":true}', { status: 200 }))
+      }
+      return new Promise(() => {})
+    })
+    act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(TaskHeader, { task: t, project, schedule: null, files: [], onBack: () => {} }))))
+    const del = document.querySelector<HTMLButtonElement>("header [data-delete-task]")!
+    expect(del).not.toBeNull()
+    expect(del.getAttribute("aria-label")).toBe(`Delete ${t.title}`)
+    expect(del.getAttribute("aria-haspopup")).toBe("dialog")
+    expect(del.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
+    if (phone) expect(document.querySelector('[data-testid="task-nav"]')!.contains(del)).toBe(true)
+    act(() => del.click())
+    expect(currentConfirm()).toMatchObject({ title: "Delete task?", body: "Delete this task, its workspace and its archive?", danger: true })
+    expect(calls).toEqual([])
+    await act(async () => settleConfirm(currentConfirm()!.id, false))
+    expect(qc.getQueryData(keys.tasks)).toEqual([t])
+    expect(calls).toEqual([])
+    act(() => del.click())
+    await act(async () => settleConfirm(currentConfirm()!.id, true))
+    expect(calls).toEqual([`/api/tasks/${t.id}?ifResting=1`])
+    expect(qc.getQueryData(keys.tasks)).toEqual([])
+    qc.clear()
+  })
+
+  it.each(["working", "starting", "queued", "idle", "pr_ready", "needs_input", "done"] as const)("keeps direct Delete out of the %s header", (status) => {
+    render(task({ status }))
+    expect(document.querySelector("header [data-delete-task]")).toBeNull()
   })
 
   it("puts the full title, model, route, times, box, branch, id and task link in details", async () => {

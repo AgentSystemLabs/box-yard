@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Codex in the web UI: the Agent and Codex model settings (Coordinator, Captains, Box agents), the two Codex logins
-// in Settings › Credentials, a project's Agent, the New task dialog's agent, and the "Codex" chip on tasks.
+// in Settings › Credentials, a project's Agent, the New task dialog's agent, and the task's agent details.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -448,12 +448,11 @@ describe("New project › Agent", () => {
   })
 })
 
-describe("the Codex chip", () => {
-  it("is on a Codex task's header, and never on a Claude task's", () => {
-    show(createElement(TaskHeader, { task: task({ agentCli: "codex" }), project: project(), schedule: null, files: [] }))
-    const chip = $("task-meta")!.querySelector("[data-testid=agent-cli-chip]")!
-    expect(chip.textContent).toBe("Codex")
-    show(createElement(TaskHeader, { task: task(), project: project(), schedule: null, files: [] }))
+describe("the task header's harness", () => {
+  it.each(["codex", "claude", "cursor"] as const)("keeps %s out of the header and available in details", async (agentCli) => {
+    show(createElement(TaskHeader, { task: task({ agentCli }), project: project(), schedule: null, files: [] }))
     expect($("agent-cli-chip")).toBeNull()
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Task details and more actions"]')!.click())
+    expect($("task-agent-cli")!.textContent).toBe({ codex: "Codex", claude: "Claude Code", cursor: "Cursor" }[agentCli])
   })
 })

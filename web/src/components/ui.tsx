@@ -40,7 +40,6 @@ import { toast } from "../lib/toast"
 import { prLabel, prNumber, prStateOf, prTooltip, type BadgeStatus, type PrTask } from "../lib/prState"
 import { absoluteTime, elapsedLabel, isoTime, timeAgo } from "../lib/time"
 import type { BoxSize, PrState, Task, TaskStatus } from "../../../shared/types"
-import { AGENT_CLI_LABEL, AGENT_CLI_SHORT, type AgentCli } from "../../../shared/agentCli"
 import type { ProjectColor } from "../../../shared/projectColors"
 import { thumbUrl } from "../../../shared/thumbs"
 import { withoutFormerHome } from "../../../shared/formerHome"
@@ -150,16 +149,6 @@ export const HEADER_FOLD = {
   label: "@max-[36rem]/head:sr-only",
   icon: "@max-[36rem]/head:h-4 @max-[36rem]/head:w-4",
 } as const
-
-/** "Codex" or "Cursor" on a task whose agent runs on it. Claude Code is the default, so it gets no chip. */
-export function AgentCliChip({ cli, className }: { cli: AgentCli | undefined; className?: string }) {
-  if (cli !== "codex" && cli !== "cursor") return null
-  return (
-    <span data-testid="agent-cli-chip" title={`Runs on ${AGENT_CLI_LABEL[cli]}, fixed when the task started`} className={className}>
-      {AGENT_CLI_SHORT[cli]}
-    </span>
-  )
-}
 
 /** The quiet form of StatusBadge for header meta rows: a colored dot and the label, no pill. */
 export function StatusDot({ status, title, children, className, labelClassName }: { status: BadgeStatus; title?: string; children?: ReactNode; className?: string; labelClassName?: string }) {

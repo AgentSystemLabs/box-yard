@@ -130,7 +130,7 @@ export function SidebarDeleteRow({ target, enabled = true, children, className, 
           e.stopPropagation()
           return
         }
-        if (open && !(e.target as Element).closest("[data-sidebar-delete]")) {
+        if (open && !(e.target as Element).closest("[data-sidebar-delete], [data-delete-task]")) {
           e.preventDefault()
           e.stopPropagation()
           reveal(null)
