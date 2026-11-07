@@ -727,7 +727,7 @@ export function StickyScroll({
     <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       {/* relative z-0: the list is its own stacking context, so what's inside it (the cards' sticky z-20 headers, their
           menus) stays under the overlay, whatever its z-index. */}
-      <div ref={scroller} data-scroller onScroll={onScroll} className={cx("scroll-thin relative z-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [overflow-anchor:none]", className)}>
+      <div ref={scroller} data-scroller tabIndex={-1} onScroll={onScroll} className={cx("scroll-thin relative z-0 min-h-0 flex-1 overflow-x-hidden overflow-y-auto [overflow-anchor:none]", className)}>
         <div ref={content} className={cx("flow-root", contentClassName)}>
           {hidden > 0 && (
             <button

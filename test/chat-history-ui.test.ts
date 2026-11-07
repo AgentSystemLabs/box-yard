@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ChatHistory, DayBoundary } from "../web/src/components/ChatHistory"
 import { chatDays } from "../web/src/lib/chatDays"
 import { useTail } from "../web/src/lib/tail"
+import type { StickyScrollHandle } from "../web/src/components/StickyScroll"
 import { keys } from "../web/src/lib/queries"
 import type { ChatMessage, Task } from "../shared/types"
 
@@ -21,6 +22,8 @@ let root: Root
 let host: HTMLElement
 let qc: QueryClient
 let renders = 0
+const scrollToEnd = vi.fn()
+const scrollHandle = { current: { scrollToEnd } as StickyScrollHandle }
 const Transcript = memo(function Transcript({ visible }: { visible: ChatMessage[] }) {
   renders++
   return h("div", { "data-scroller": true }, visible.map((m, i) => h(Fragment, { key: m.id },
@@ -31,14 +34,16 @@ const Transcript = memo(function Transcript({ visible }: { visible: ChatMessage[
 function History({ projectId = "project-a", list = messages }: { projectId?: string; list?: ChatMessage[] }) {
   const days = useMemo(() => chatDays(list), [list])
   const tail = useTail(list, projectId, { initial: 5 })
-  return h(ChatHistory, { days, messages: list, reveal: tail.reveal, projectId, children: h(Transcript, { visible: tail.visible }) })
+  return h(ChatHistory, { days, messages: list, reveal: tail.reveal, scrollHandle, projectId, children: h(Transcript, { visible: tail.visible }) })
 }
 const click = (button: Element) => act(() => { button.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })) })
+const action = (label: string) => [...host.querySelectorAll("button")].find((b) => b.textContent === label)!
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)) })
 const railButtons = (index = 0) => host.querySelectorAll<HTMLElement>("nav")[index]!.querySelectorAll<HTMLButtonElement>("button")
 
 beforeEach(() => {
   renders = 0
+  scrollToEnd.mockClear()
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   qc.setQueryData(keys.tasks, [task(), task("project-b", "Other project's secret task")])
   qc.setQueryData(keys.projects, [{ id: "project-a", repo: "team/alpha" }, { id: "project-b", repo: "team/beta" }])
@@ -67,7 +72,7 @@ describe("chat day navigation", () => {
     host.querySelector("[data-scroller]")!.addEventListener("boxyard:leave-bottom", leaveBottom)
     click(railButtons()[0]!)
     expect(leaveBottom).not.toHaveBeenCalled()
-    click(railButtons()[0]!)
+    click(action("Jump to day"))
     expect(leaveBottom).toHaveBeenCalled()
     await settle()
     expect(host.querySelectorAll('[data-day-start="message-0"]')).toHaveLength(1)
@@ -76,7 +81,7 @@ describe("chat day navigation", () => {
     expect(document.activeElement?.getAttribute("data-day-start")).toBe("message-0")
   })
 
-  it.each(["mouse", "touch", "pen"])("previews on the first %s activation and jumps on the second", async (pointerType) => {
+  it.each(["mouse", "touch", "pen"])("repeated %s activations only preview; an explicit day jump navigates", async (pointerType) => {
     render()
     const button = railButtons()[0]!
     const tap = () => {
@@ -88,10 +93,47 @@ describe("chat day navigation", () => {
     expect(host.querySelector('[data-day-start="message-0"]')).toBeNull()
     expect(host.querySelector('[role="region"]')?.textContent).toContain("Started: Fix login")
     expect(host.querySelector('[role="region"]')?.textContent).not.toContain("Other project's secret task")
-    expect(host.textContent).toContain("Tap this day again to jump")
     tap()
     await settle()
+    expect(host.querySelector('[data-day-start="message-0"]')).toBeNull()
+    expect(host.querySelector('[role="region"]')).not.toBeNull()
+    click(action("Jump to day"))
+    await settle()
     expect(host.querySelector('[data-day-start="message-0"]')).not.toBeNull()
+    expect(host.querySelector('[role="region"]')).toBeNull()
+  })
+
+
+  it.each([0, 2])("keeps the preview open without jumping on a repeated click with detail %s", async (detail) => {
+    render()
+    const leaveBottom = vi.fn()
+    host.querySelector("[data-scroller]")!.addEventListener("boxyard:leave-bottom", leaveBottom)
+    const button = railButtons()[0]!
+    click(button)
+    act(() => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true, detail }))
+      button.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, detail: 2 }))
+    })
+    await settle()
+    expect(host.querySelector('[role="region"]')).not.toBeNull()
+    expect(host.querySelector('[data-day-start="message-0"]')).toBeNull()
+    expect(leaveBottom).not.toHaveBeenCalled()
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled()
+    expect(scrollToEnd).not.toHaveBeenCalled()
+    expect(host.querySelector("nav")?.getAttribute("aria-label")).not.toContain("again")
+  })
+
+  it("jumps to the oldest day from any day's preview and delegates end navigation to StickyScroll", async () => {
+    render()
+    click(railButtons()[2]!)
+    const group = host.querySelector('[role="group"][aria-label="Transcript navigation"]')!
+    expect([...group.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Jump to start", "Jump to end"])
+    click(action("Jump to start"))
+    await settle()
+    expect(document.activeElement?.getAttribute("data-day-start")).toBe("message-0")
+    click(railButtons()[0]!)
+    click(action("Jump to end"))
+    expect(scrollToEnd).toHaveBeenCalledOnce()
     expect(host.querySelector('[role="region"]')).toBeNull()
   })
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Deterministic day-history checks/screenshots against a mock server. Browser jobs run sequentially.
+// Start the mock server with BOXYARD_MOCK_HEAVY=1 to provide project/task schemas.
 // PLAYWRIGHT_MODULE=/tmp/browser/node_modules/playwright-core/index.mjs node scripts/perf/chat-days.mjs http://localhost:4000 /tmp/chat-days
 import assert from "node:assert/strict"
 import { mkdir } from "node:fs/promises"
@@ -10,6 +11,7 @@ const output = process.argv[3] ?? "/tmp/chat-days"
 await mkdir(output, { recursive: true })
 const get = async (path) => (await fetch(base + path)).json()
 const [projects, originalTasks] = await Promise.all([get("/api/projects"), get("/api/tasks")])
+assert.ok(projects[0] && originalTasks.length >= 4, "Use a mock yard seeded with BOXYARD_MOCK_HEAVY=1")
 const project = { ...projects[0], name: "Studio", repo: "example/studio" }
 const at = (ago, minute = 0) => {
   const d = new Date()
@@ -44,12 +46,18 @@ for (const ago of [3, 2, 1, 0]) {
     add("notice", `✅ **${titles[1]}** is done: Published the guide.`, { taskId: tasks[1].id })
   }
 }
-const captain = messages.map((m) => ({ ...m, projectId: project.id }))
-const taskMessages = messages.map((m) => m.role === "notice" ? {
-  ...m, taskId: tasks[0].id, role: "event", content: "Turn 1 finished. · Keyboard navigation checked.", meta: null,
-} : { ...m, taskId: tasks[0].id })
-
-async function fixture(context) {
+// Additional retained rows live outside the initial API response as well as outside useTail's DOM window.
+const retained = Array.from({ length: 600 }, (_, i) => ({
+  id: `chat_retained-${i}`, role: i % 3 === 0 ? "user" : "assistant", meta: null,
+  content: `Earlier conversation ${i}. Keep the navigation clear on phones and desktops.`,
+  createdAt: at(10 - Math.floor(i / 150), i % 150),
+}))
+async function fixture(context, long = false) {
+  const full = long ? [...retained, ...messages] : messages
+  const fullCaptain = full.map((m) => ({ ...m, projectId: project.id }))
+  const fullTask = full.map((m) => m.role === "notice" ? {
+    ...m, taskId: tasks[0].id, role: "event", content: "Turn 1 finished. · Keyboard navigation checked.", meta: null,
+  } : { ...m, taskId: tasks[0].id })
   // Link checks open a local stand-in page; the fixture never asks GitHub for data or state.
   await context.route("https://github.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>GitHub reference</title>" }))
   await context.addInitScript(() => {
@@ -66,25 +74,53 @@ async function fixture(context) {
     const path = new URL(route.request().url()).pathname
     if (path === "/api/boot" || path === "/api/stream") return route.abort()
     let body
-    if (path === "/api/chat") body = messages
+    if (path.endsWith("/history")) {
+      const list = path.startsWith("/api/tasks/") ? fullTask : path.includes("/captain/") ? fullCaptain : full
+      const query = new URL(route.request().url()).searchParams
+      if (query.has("days")) {
+        const days = [...new Set(list.map((m) => new Date(m.createdAt).toDateString()))].map((key) => {
+          const m = list.find((m) => new Date(m.createdAt).toDateString() === key)
+          return { at: m.createdAt, messageId: m.id }
+        })
+        return route.fulfill({ json: { days, oldestId: list[0].id } })
+      }
+      const id = query.get("around") ?? query.get("before") ?? query.get("after")
+      const index = list.findIndex((m) => m.id === id)
+      assert.ok(index >= 0, "history request uses a known cursor")
+      const start = query.has("before") ? Math.max(0, index - 100) : query.has("after") ? index + 1 : Math.max(0, index - 10)
+      const page = list.slice(start, start + (query.has("before") || query.has("after") ? 100 : 180))
+      return route.fulfill({ json: { messages: page, before: start ? page[0].id : null,
+        after: start + page.length < list.length ? page.at(-1).id : null } })
+    }
+    if (path === "/api/chat") body = full.slice(-messages.length)
     else if (path === "/api/tasks") body = tasks
     else if (path === "/api/projects") body = [project]
     else if (path === `/api/projects/${project.id}`) body = project
-    else if (path === `/api/projects/${project.id}/captain/messages`) body = captain
-    else if (path === `/api/tasks/${tasks[0].id}/messages`) body = taskMessages
+    else if (path === `/api/projects/${project.id}/captain/messages`) body = fullCaptain.slice(-messages.length)
+    else if (path === `/api/tasks/${tasks[0].id}/messages`) body = fullTask.slice(-messages.length)
     else if (path === `/api/tasks/${tasks[0].id}`) body = tasks[0]
     else return route.continue()
     return route.fulfill({ json: body })
   })
 }
-const history = (page, kind) => page.locator(`${kind === "captain" ? "[data-testid=captain-chat]" : kind === "task" ? "[data-testid=side-thread]" : "[data-testid=chat-panel]"} [data-chat-history]`).filter({ visible: true }).last()
+const historySelector = (kind) => `${kind === "captain" ? "[data-testid=captain-chat]" : kind === "task" ? "[data-testid=side-thread]" : "[data-testid=chat-panel]"} [data-chat-history]`
+const history = (page, kind) => page.locator(historySelector(kind)).filter({ visible: true }).last()
 const wait = (page) => page.waitForTimeout(350)
 async function open(page, kind) {
   await page.goto(base + (kind === "captain" ? `/?project=${project.id}` : kind === "task" ? `/?session=${tasks[0].id}` : "/"))
   const box = history(page, kind)
   await box.locator("nav button").last().waitFor()
-  await page.waitForFunction((el) => el.firstElementChild.childElementCount >= 60 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2,
-    await box.locator("[data-scroller]").elementHandle())
+  try {
+    // Opening can replace the chat's first pre-render. Poll the current scroller, not a detached ElementHandle.
+    await page.waitForFunction((selector) => {
+      const el = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length).at(-1)
+      return el && el.firstElementChild.childElementCount >= 60 && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2
+    }, `${historySelector(kind)} [data-scroller]`)
+  } catch (error) {
+    await page.screenshot({ path: `${output}/${kind}-open-failure.png` })
+    console.error(kind, await box.locator("[data-scroller]").evaluate((el) => ({ top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, rows: el.firstElementChild.childElementCount })))
+    throw error
+  }
   await wait(page)
   return box
 }
@@ -132,8 +168,12 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
       await box.locator('[data-chat-highlight]').waitFor()
       await page.keyboard.press("Tab")
     }
+    const beforeRepeat = await box.locator("[data-scroller]").evaluate((el) => el.scrollTop)
     await first.tap()
     await first.tap()
+    assert.equal(await box.locator('[role="region"]').count(), 1, "repeated day taps keep the preview open")
+    assert.equal(await box.locator("[data-scroller]").evaluate((el) => el.scrollTop), beforeRepeat, "repeated day taps do not jump")
+    await box.getByRole("button", { name: "Jump to day", exact: true }).tap()
     const divider = box.locator(`[data-day-start="${firstId}"]`)
     await divider.waitFor()
     await page.waitForFunction((el) => Math.abs(el.getBoundingClientRect().top - el.closest("[data-scroller]").getBoundingClientRect().top - 12) < 3,
@@ -187,6 +227,72 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
     console.log(`${engine} ${kind}: touch preview, hidden-day jump, alignment${kind === "coordinator" ? ", SSE and reflow anchoring" : ""}, reference links, isolated new-tab taps, grouped-source jump and static highlight passed`)
     await context.close()
   }
+  for (const kind of ["coordinator", "captain", "task"]) {
+    if (process.env.CHAT_DAYS_KIND && process.env.CHAT_DAYS_KIND !== kind) continue
+    for (const mobile of [false, true]) {
+      const context = await browser.newContext({ viewport: { width: mobile ? 400 : 1280, height: mobile ? 844 : 900 }, isMobile: mobile, hasTouch: mobile })
+      await fixture(context, true)
+      const page = await context.newPage()
+      const errors = []
+      page.on("pageerror", (e) => errors.push(String(e)))
+      const box = await open(page, kind)
+      const list = box.locator("[data-scroller]")
+      const lastDay = box.locator("nav button").last()
+      const before = await list.evaluate((el) => el.scrollTop)
+      await lastDay.dblclick()
+      const popup = box.getByRole("region")
+      await popup.waitFor()
+      await wait(page)
+      assert.equal(await list.evaluate((el) => el.scrollTop), before, "double click only opens the summary")
+      const bounds = await box.boundingBox()
+      const panel = await popup.boundingBox()
+      assert.ok(Math.abs(panel.y - bounds.y - 8) < 2, "navigation opens at the top regardless of the selected day")
+      if (!process.env.CHAT_DAYS_CHECKS_ONLY) await page.screenshot({ path: `${output}/${engine}-${kind}-${mobile ? "mobile" : "desktop"}-navigation.png` })
+      const actions = popup.getByRole("group", { name: "Transcript navigation" })
+      const start = actions.getByRole("button", { name: "Jump to start", exact: true })
+      const end = actions.getByRole("button", { name: "Jump to end", exact: true })
+      for (const button of [start, end]) {
+        const rect = await button.boundingBox()
+        assert.ok(rect.height >= 44, "explicit navigation has 44px touch targets")
+      }
+      assert.ok((await actions.boundingBox()).y < (await popup.getByRole("button", { name: "Jump to day", exact: true }).boundingBox()).y, "start/end precede day selection")
+      assert.equal(await box.locator(`[data-day-start="${retained[0].id}"]`).count(), 0, "oldest content is outside the API tail and rendered tail")
+      // Native Tab/Enter and Tab/Space activation exercise the actual browser focus path.
+      await lastDay.focus()
+      await page.keyboard.press("Tab") // Close summary
+      await page.keyboard.press("Tab") // Jump to start
+      assert.equal(await start.evaluate((el) => el === document.activeElement), true)
+      await page.keyboard.press("Enter")
+      const oldest = box.locator(`[data-day-start="${retained[0].id}"]`)
+      await oldest.waitFor()
+      await page.waitForFunction((el) => el === document.activeElement, await oldest.elementHandle())
+      await wait(page)
+      assert.ok(await list.evaluate((el) => el.scrollTop < 40), "start reveals and aligns the oldest content")
+      const rendered = await list.getByText(/^Earlier conversation \d+\. Keep the navigation clear on phones and desktops\.$/).count()
+      assert.ok(rendered > 0 && rendered <= 200, `retained history keeps a bounded DOM (${rendered} messages)`)
+      const y = await oldest.evaluate((el) => el.getBoundingClientRect().top)
+      await wait(page)
+      assert.ok(Math.abs(await oldest.evaluate((el) => el.getBoundingClientRect().top) - y) < 2, "oldest content stays put after layout")
+      await lastDay.click()
+      await lastDay.focus()
+      await page.keyboard.press("Tab")
+      await page.keyboard.press("Tab")
+      await page.keyboard.press("Tab")
+      assert.equal(await end.evaluate((el) => el === document.activeElement), true)
+      await page.keyboard.press("Space")
+      await page.waitForFunction((el) => el === document.activeElement && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2, await list.elementHandle())
+      assert.equal(await oldest.count(), 0, "end returns to the live tail")
+      const late = { id: `chat_end-${kind}-${mobile}`, role: "assistant", content: "A new reply after returning to the end. ".repeat(12), meta: null, createdAt: Date.now(),
+        ...(kind === "task" ? { taskId: tasks[0].id } : kind === "captain" ? { projectId: project.id } : {}) }
+      const type = kind === "task" ? "task.message" : kind === "captain" ? "captain.message" : "chat.message"
+      await page.evaluate((event) => window.__streams.forEach((s) => s.onmessage?.({ data: JSON.stringify(event) })), { type, message: late })
+      await page.waitForFunction((el) => el.textContent.includes("A new reply after returning") && Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) < 2, await list.elementHandle())
+      assert.equal(await box.getByRole("region").count(), 0)
+      assert.deepEqual(errors, [])
+      console.log(`${engine} ${kind} ${mobile ? "mobile" : "desktop"}: double click, top placement, retained start, keyboard start/end, bounded DOM and live end pin passed`)
+      await context.close()
+    }
+  }
   if (engine === "chromium" && !process.env.CHAT_DAYS_CHECKS_ONLY) {
     for (const width of [320, 400, 560, 800]) {
       for (const zoom of [1, 1.25]) {
@@ -195,7 +301,7 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
         const context = await browser.newContext({ viewport: { width: Math.round(width / zoom), height: Math.round(900 / zoom) }, deviceScaleFactor: zoom, hasTouch: true, isMobile: true })
         await fixture(context)
         const page = await context.newPage()
-        for (const kind of ["coordinator", "captain"]) {
+        for (const kind of ["coordinator", "captain", "task"]) {
           const box = await open(page, kind)
           const yesterday = box.getByRole("button", { name: /^Yesterday: preview/ })
           await yesterday.tap()
@@ -227,6 +333,7 @@ for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]
           assert.ok(bounds.y >= view.y - 2 && bounds.y < view.y + view.height, "destination is visible")
           await page.screenshot({ path: `${output}/${kind}-jump-after-${suffix}.png` })
         }
+        console.log(`${engine} ${width}px at ${zoom}: all chat panels fit; explicit day and source navigation passed`)
         await context.close()
       }
     }
