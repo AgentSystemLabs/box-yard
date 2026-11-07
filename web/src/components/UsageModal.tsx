@@ -42,6 +42,7 @@ const TABLE_ROWS = 20
 const usd = (n: number, estimate = false) => `${estimate && n > 0 ? "≈ " : ""}${money(n)}`
 
 export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeDays; onDays: (d: UsageRangeDays) => void; onClose: () => void }) {
+  const spendingId = useId()
   const now = useMinuteClock()
   const today = new Date(now).setHours(0, 0, 0, 0)
   const days = useMemo(() => localDayStarts(range, today), [range, today])
@@ -74,10 +75,10 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
       <div className="@container min-w-0 space-y-8" data-testid="usage-modal">
         <SubscriptionLimits />
 
-        <section aria-labelledby="usage-spending-title" className="min-w-0 space-y-4 border-t border-zinc-800 pt-6" data-testid="usage-spending">
+        <section aria-labelledby={spendingId} className="min-w-0 space-y-4 border-t border-zinc-800 pt-6" data-testid="usage-spending">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 id="usage-spending-title" className="text-base font-semibold text-zinc-100">Cost &amp; tokens</h3>
+              <h3 id={spendingId} className="text-base font-semibold text-zinc-100">Cost &amp; tokens</h3>
               <p className="mt-1 text-xs text-zinc-500">{ledger ? `${dayLabel(ledger.days[0]!)} – ${dayLabel(ledger.to - 1)} · ` : ""}US dollars · ≈ means estimated</p>
             </div>
             <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
@@ -88,14 +89,14 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
             q.isError ? (
               <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-zinc-400">
                 Couldn't load usage.
-                <Button type="button" onClick={() => void q.refetch()}>Retry costs</Button>
+                <Button type="button" className="min-h-11 sm:min-h-11" onClick={() => void q.refetch()}>Retry costs</Button>
               </div>
             ) : (
               <Loading kind="rows" label="Loading usage" />
             )
           ) : (
             <div aria-busy={q.isPlaceholderData} className={cx("space-y-4", q.isPlaceholderData && "opacity-60")}>
-              {view.totals.turns === 0 && view.totals.computeHours === 0 && view.totals.costUsd === 0 && (
+              {view.totals.turns === 0 && view.totals.computeHours === 0 && view.totals.costUsd === 0 && view.totals.tokens.total === 0 && (
                 <p className="text-sm text-zinc-400" data-testid="usage-empty">No recorded usage in this range{Object.keys(filter).length ? " for these filters" : ""}.</p>
               )}
               <Totals view={view} />
@@ -116,7 +117,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
 
 function RangePicker({ value, onChange, onPrefetch }: { value: UsageRangeDays; onChange: (d: UsageRangeDays) => void; onPrefetch: (d: UsageRangeDays) => void }) {
   return (
-    <div role="group" aria-label="Range" className="grid w-full grid-cols-4 @sm:w-auto rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5">
+    <div role="group" aria-label="Range" className="grid w-full grid-cols-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-0.5 @sm:w-auto">
       {USAGE_RANGES.map((d) => (
         <button
           key={d}
@@ -233,7 +234,7 @@ function ChartCard({ title, sub, testId, children }: { title: string; sub: strin
   const id = useId()
   return (
     <section aria-labelledby={id} data-testid={testId} className="@container/chart min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
-      <h3 id={id} className="text-sm font-semibold text-zinc-100">{title}</h3>
+      <h4 id={id} className="text-sm font-semibold text-zinc-100">{title}</h4>
       <p className="text-xs text-zinc-500">{sub}</p>
       {children}
     </section>
@@ -441,10 +442,10 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
   return (
     <section aria-labelledby={id} data-testid="usage-breakdown" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 id={id} className="text-sm font-semibold text-zinc-100">Breakdown</h3>
+        <h4 id={id} className="text-sm font-semibold text-zinc-100">Breakdown</h4>
         <label className="flex items-center gap-2 text-xs text-zinc-400">
           By
-          <Select size="sm" value={group} onChange={(e) => { onGroup(e.target.value as UsageGroup); setAll(false) }} aria-label="Break down by" className="min-h-11 rounded-md">
+          <Select size="sm" value={group} onChange={(e) => { onGroup(e.target.value as UsageGroup); setAll(false) }} aria-label="Break down by" className="min-h-11 rounded-md sm:min-h-11">
             {GROUPS.map((g) => (
               <option key={g} value={g}>{USAGE_GROUP_LABEL[g]}</option>
             ))}
@@ -462,7 +463,7 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
         {rows.map((r) => (
           <li key={r.key}>
             {r.filter ? (
-              <button type="button" onClick={() => onDrill(r)} title={`Narrow to ${r.label}`} className={cx("block w-full rounded-md text-left hover:bg-zinc-800/40", FOCUS)} data-testid="usage-row">
+              <button type="button" onClick={() => onDrill(r)} title={`Narrow to ${r.label}`} className={cx("block min-h-11 w-full rounded-md text-left hover:bg-zinc-800/40", FOCUS)} data-testid="usage-row">
                 <RowBody r={r} total={t.costUsd} />
               </button>
             ) : (
@@ -546,17 +547,17 @@ function CloudLimits() {
     <section className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:px-4" aria-label="Boxes against your cloud limits">
       <h3 className="text-base font-semibold text-zinc-100">Box spending limits</h3>
       <p className="mt-1 mb-2 text-xs text-zinc-500">Current box spending only. Model costs and subscription allowances do not count toward these limits.</p>
-      {!budget ? q.isError ? (
+      {budget ? (
+        <ul className="divide-y divide-zinc-800/60">
+          <LimitRow label="Daily cloud limit" phrase="today" state={budget.daily} />
+          <LimitRow label="Monthly cloud limit" phrase="in the last 30 days" state={budget.monthly} />
+        </ul>
+      ) : q.isError ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-400">
           Box spending limits are unavailable.
-          <Button type="button" onClick={() => void q.refetch()}>Retry box limits</Button>
+          <Button type="button" className="min-h-11 sm:min-h-11" onClick={() => void q.refetch()}>Retry box limits</Button>
         </div>
-      ) : <Loading kind="rows" label="Loading box spending limits" /> : (
-      <ul className="divide-y divide-zinc-800/60">
-        <LimitRow label="Daily cloud limit" phrase="today" state={budget.daily} />
-        <LimitRow label="Monthly cloud limit" phrase="in the last 30 days" state={budget.monthly} />
-      </ul>
-      )}
+      ) : <Loading kind="rows" label="Loading box spending limits" />}
     </section>
   )
 }

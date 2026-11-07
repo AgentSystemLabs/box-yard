@@ -77,10 +77,10 @@ export function SubscriptionLimits() {
       </div>
       {limits.isLoading ? (
         <Loading kind="rows" count={2} label="Loading subscription limits" />
-      ) : limits.isError ? (
+      ) : limits.isError && !limits.data ? (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 p-4 text-sm text-zinc-400">
           <p>Subscription readings are unavailable.</p>
-          <Button type="button" onClick={() => void limits.refetch()}>Retry allowances</Button>
+          <Button type="button" className="min-h-11 sm:min-h-11" onClick={() => void limits.refetch()}>Retry allowances</Button>
         </div>
       ) : !logins.length ? (
         <p className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-4 text-sm text-zinc-400" data-testid="limits-empty">
@@ -103,7 +103,7 @@ const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; 
   return (
     <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4" data-testid="limits-login" data-login={login.loginId}>
       <div className="space-y-0.5">
-        <span className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</span>
+        <h4 className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</h4>
         <span className="block min-w-0 text-sm text-zinc-300 wrap-anywhere">{login.source}</span>
       </div>
       <div className="mt-1 text-xs text-zinc-500 wrap-anywhere">
