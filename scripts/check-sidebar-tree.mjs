@@ -33,11 +33,13 @@ let checks = 0
 const check = (name, test) => { checks++; try { assert.ok(test, name) } catch { failures.push(name) } }
 const results = []
 try {
-  for (const width of [320, 400, 560, 800]) for (const zoom of [1, 1.25]) for (const touch of [false, true]) {
+  for (const width of [320, 400, 560, 800, 1600]) for (const zoom of [1, 1.25]) for (const touch of [false, true]) {
     // Browser zoom reduces CSS viewport, unlike deviceScaleFactor alone. Restore physical pixels in the PNG.
     const tag = `${width}-${zoom === 1 ? "100" : "125"}-${touch ? "touch" : "mouse"}`
     if (process.env.SIDEBAR_CASE && tag !== process.env.SIDEBAR_CASE) continue
     const context = await browser.newContext({ viewport: { width: Math.floor(width / zoom), height: 800 }, deviceScaleFactor: zoom, hasTouch: touch })
+    // Also exercise the actual persisted minimum column width, rather than only phone drawers.
+    if (width === 1600) await context.addInitScript(() => localStorage.setItem("box-yard:sidebar-width", "200"))
     const page = await context.newPage()
     page.setDefaultTimeout(10_000)
     page.on("pageerror", (e) => { failures.push(`${tag}: ${e.message}`); console.error(`${tag}: ${e.stack}`) })
@@ -90,6 +92,7 @@ try {
       const nav = row.closest("nav").getBoundingClientRect()
       return { level: +row.getAttribute("aria-level"), left: box.left, right: box.right, titleWidth: title.width, actionWidth: action.width, actionHeight: action.height, actionLeft: action.left, actionRight: action.right, titleRight: title.right, navRight: nav.right, toggleWidth: toggle?.getBoundingClientRect().width, toggleHeight: toggle?.getBoundingClientRect().height, overflow: row.scrollWidth - row.clientWidth }
     }))
+    if (width === 1600) check(`${tag}: actual 200px minimum column`, geometry[0].navRight >= 198 && geometry[0].navRight <= 200)
     for (const g of geometry) {
       check(`${tag}: level ${g.level} fits`, g.overflow <= 1 && g.actionRight <= g.navRight - 2 && g.actionLeft >= g.left && g.titleRight <= g.actionLeft + 1)
       check(`${tag}: level ${g.level} title readable`, g.titleWidth >= 48)
@@ -102,6 +105,11 @@ try {
     check(`${tag}: left reaches actual parent`, await page.evaluate(() => document.activeElement?.getAttribute("aria-level")) === String(tasks.length))
     await page.keyboard.press("ArrowLeft")
     check(`${tag}: parent folds`, await rows.count() === tasks.length - 1)
+    const foldedFits = await page.evaluate(() => {
+      const row = document.activeElement
+      return row.scrollWidth <= row.clientWidth + 1 && row.querySelector("[data-open-task] .truncate").getBoundingClientRect().width >= 48
+    })
+    check(`${tag}: folded count fits`, foldedFits)
     await page.keyboard.press("ArrowRight")
     await page.keyboard.press("ArrowRight")
     check(`${tag}: right restores deepest focus`, await page.evaluate(() => document.activeElement?.getAttribute("aria-level")) === String(tasks.length + 1))
@@ -111,6 +119,7 @@ try {
     const hit = await done.evaluate((el) => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) })
     check(`${tag}: deepest action can be hit`, hit)
     await page.screenshot({ path: `${out}/sidebar-${tag}.png` })
+    if (width === 1600) await page.locator('nav[aria-label="Projects and tasks"]').screenshot({ path: `${out}/minimum-column-${tag}.png` })
 
     // The rail popover reuses TreeNode but exists only with the desktop inline sidebar (768 CSS px).
     if (Math.floor(width / zoom) < 768) {
