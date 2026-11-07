@@ -77,6 +77,7 @@ export function archiveScript(o: ArchiveScript): string {
   const excludes = o.excludes.map((e) => `--exclude=${q(e)}`).join(" ")
   const lines = [
     "set -o pipefail",
+    "export COPYFILE_DISABLE=1",
     // Errors go to a temp file on /tmp; if even that can't be made they're dropped rather than mixed into the data.
     `err=$(mktemp /tmp/boxyard-archive-err.XXXXXX 2>/dev/null) || err=/dev/null`,
     `stage=; wip=-; st="2 0 0 0"`,

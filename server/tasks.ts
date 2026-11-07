@@ -1,3 +1,4 @@
+import { validateTaskArchive } from "./safeArchive.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -6661,17 +6662,33 @@ export class TaskManager {
     const root = this.provider.root(boxId)
     const tasks = tasksRootOf(this.provider, boxId)
     const remote = `${root}/.boxyard/restore-${row.id}.tgz`
+    const validated = await validateTaskArchive(row.archive_path!, row.id)
+    let extracted = false
     let from: "git" | "partial" | null = null
     try {
       // In parts when it's over the box's upload limit (Upstash: 100 MB per file). Each failure names its step.
-      await putFile(this.provider, boxId, row.archive_path!, remote).catch((err) => {
-        throw failedStep(`restoring workspace failed: uploading its ${uploadSize(fs.statSync(row.archive_path!).size)} archive to the box`, err)
+      await putFile(this.provider, boxId, validated.file, remote).catch((err) => {
+        throw failedStep(`restoring workspace failed: uploading its ${uploadSize(fs.statSync(validated.file).size)} archive to the box`, err)
       })
       const res = await this.provider.exec(
         boxId,
-        `mkdir -p ${q(tasks)} && tar xzf ${q(remote)} -C ${q(tasks)} && rm -f ${q(remote)} && mkdir -p ${q(dir + "/work")} && rm -f ${q(dir + "/turn.pid")} ${q(dir + "/run.json")}`,
+        `set -e
+mkdir -p ${q(tasks)}
+[ ! -e ${q(dir)} ] && [ ! -L ${q(dir)} ] || exit 1
+stage=$(mktemp -d ${q(tasks + "/.restore-XXXXXX")})
+trap 'rm -rf "$stage"' EXIT
+tar xzf ${q(remote)} -C "$stage"
+mv "$stage/${row.id}" ${q(dir)}
+rm -f ${q(remote)}
+mkdir -p ${q(dir + "/work")}`,
       )
       if (res.exitCode !== 0) throw new Error(`restoring workspace failed: unpacking its archive on the box failed: ${(res.stderr || res.stdout).trim().slice(-500) || `exit code ${res.exitCode}`}`)
+      extracted = true
+      // Only a server-selected origin reaches sanitized Git state, before any reconstruction commands.
+      if (mirror) {
+        const origin = await this.provider.exec(boxId, `[ ! -d ${q(dir + "/work/.git")} ] || git --git-dir=${q(dir + "/work/.git")} config remote.origin.url ${q(mirror.spec.url)}`)
+        if (origin.exitCode !== 0) throw new Error("restoring workspace failed: setting its trusted origin")
+      }
       // A thin archive (git-thin/) gets its repo back from the mirror or GitHub plus its bundle of unpushed commits.
       if (mirror) await this.restoreThinGit(boxId, dir, mirror)
       if (mirror) await this.relinkSharedObjects(boxId, dir, mirror)
@@ -6681,9 +6698,9 @@ export class TaskManager {
       await this.restoreExcludedTrackedFiles(boxId, `${dir}/work`, mirror?.env ?? "")
     } catch (err) {
       // Leave no half-built folder: the next try starts from the archive again (it stays as it was).
-      await this.provider.exec(boxId, `rm -rf ${q(dir)} ${q(remote)} ${q(`${dir}/.boxyard-clone`)}`).catch(() => {})
+      await this.provider.exec(boxId, `rm -f ${q(remote)}${extracted ? `; rm -rf ${q(dir)}` : ""}`).catch(() => {})
       throw err
-    }
+    } finally { validated.cleanup() }
     // The restored events log keeps its own seq numbers; restart the byte offset.
     const cursor = parseCursor(row.event_cursor)
     const size = await this.provider.exec(boxId, `wc -c < ${q(dir + "/events.jsonl")} 2>/dev/null || echo 0`)
