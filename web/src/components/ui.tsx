@@ -37,7 +37,7 @@ import { previewKind } from "../lib/filePreview"
 import { fetchTasks, keys } from "../lib/queries"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
-import { prLabel, prStateOf, prTooltip, type BadgeStatus, type PrTask } from "../lib/prState"
+import { prLabel, prNumber, prStateOf, prTooltip, type BadgeStatus, type PrTask } from "../lib/prState"
 import { absoluteTime, elapsedLabel, isoTime, timeAgo } from "../lib/time"
 import type { BoxSize, PrState, Task, TaskStatus } from "../../../shared/types"
 import { AGENT_CLI_LABEL, AGENT_CLI_SHORT, type AgentCli } from "../../../shared/agentCli"
@@ -227,7 +227,8 @@ export const PR_STYLE: Record<PrState, { icon: LucideIcon; chip: string; link: s
 
 /**
  * A task's pull request: "PR #23", "Draft #23", "Merged #23" or "Closed #23" in GitHub's colors. `chip` is the
- * bordered pill (task header), `link` the plain inline link (card footers). Renders nothing without a PR.
+ * bordered pill (task header), `link` the plain inline link (card footers), `number` just the number and ↗ (compact
+ * task rows), with the state in its accessible name. Renders nothing without a PR.
  * `activity` folds a running action into the chip ("PR #23 · merging…" with a spinner) instead of a second pill.
  * `fold`: in the task header, it folds to its glyph when the header is narrow (HEADER_FOLD). `verb` leads the label as
  * an action ("Review PR #23").
@@ -241,7 +242,7 @@ export function PrChip({
   verb,
 }: {
   task: PrTask
-  variant?: "chip" | "link"
+  variant?: "chip" | "link" | "number"
   className?: string
   activity?: { icon: ReactNode; label: string; title: string } | null
   fold?: boolean
@@ -252,12 +253,14 @@ export function PrChip({
   const s = PR_STYLE[state]
   const Icon = s.icon
   const tooltip = prTooltip(task)
+  const number = prNumber(task.prUrl)
   return (
     <NewTabLink
       href={task.prUrl}
       mark="end"
       markClassName={fold ? HEADER_FOLD.label : undefined}
       title={(activity ? `${activity.title}\n${tooltip}` : tooltip) ?? undefined}
+      aria-label={variant === "number" ? `${prLabel(task)} on GitHub (opens in a new tab)` : undefined}
       data-pr-state={state}
       className={cx(
         "inline-flex shrink-0 items-center gap-1 whitespace-nowrap",
@@ -266,8 +269,8 @@ export function PrChip({
         fold && HEADER_FOLD.chip,
       )}
     >
-      {activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}
-      <span className={cx(fold && HEADER_FOLD.label)}>{verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
+      {variant !== "number" && <>{activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}</>}
+      <span className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
       {activity && <span className={cx("font-normal opacity-80", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
     </NewTabLink>
   )
