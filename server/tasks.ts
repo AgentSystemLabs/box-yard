@@ -1180,6 +1180,11 @@ export class TaskManager {
     return ceiling
   }
 
+  private physicalRunner(boxId: string): Runner {
+    if (!this.c.mock && providerOf(this.provider, boxId).name === "local") return "local"
+    return boxRunner(boxId)
+  }
+
   private requireContainment(row: TaskRow, runner: Runner) {
     const ceiling = this.runnerCeiling(row)
     if ((runner === "local" || runner === "ssh") && ceiling !== runner) {
@@ -1187,9 +1192,10 @@ export class TaskManager {
     }
   }
 
-  /** Called only by the authenticated browser API, never a worker event or a model tool. */
+  /** Called only for authenticated human approval (API confirmation or a trusted whole-message runner pick). */
   elevateRunner(taskId: string, runner: "local" | "ssh") {
     const row = this.requireRow(taskId)
+    if (this.runnerCeiling(row) === runner) return
     if (row.current_turn_id) throw new BadRequestError("Stop the task before elevating its runner")
     this.store.setKv(`runner_ceiling:${taskId}`, runner)
     this.addEvent(taskId, `An authenticated human approved ${runner} execution for this task. Existing descendants retain their containment.`)
@@ -1256,9 +1262,9 @@ export class TaskManager {
           gpu: input.runsOn === "gpu" && input.gpu ? this.gpuPickOf(input.gpu) : null,
           branch: projects[i]!.repo ? branchName({ title: input.title, prompt: input.prompt, occupied: this.taskBranches(projects[i]!.repo!) }) : null,
         })
-        // Pin the effective runner at creation; project edits cannot elevate a queued task.
+        // Persist authority separately from the runner setting; defaults may move between isolated providers.
         const effective = input.runsOn ?? (input.subtask ? this.store.taskRunner(this.requireRow(input.subtask.parentId)) : this.store.projectRunner(input.projectId))
-        this.store.updateTask(task.id, { runsOn: effective })
+        if (input.subtask) this.store.updateTask(task.id, { runsOn: effective })
         this.store.setKv(`runner_ceiling:${task.id}`, effective === "local" || effective === "ssh" ? effective : "isolated")
         // Only these newly created tasks may resolve a convention before their first checkout. Existing tasks,
         // including legacy boxyard/* branches and archive/recap restores, never enter the naming path.
@@ -3878,7 +3884,7 @@ export class TaskManager {
     }
     const withParent = this.parentBox(row)
     if (withParent) {
-      this.requireContainment(row, boxRunner(withParent))
+      this.requireContainment(row, this.physicalRunner(withParent))
       if (row.box_id === withParent) return withParent
       if (!row.box_id) return this.assign(row.id, withParent)
     }
@@ -5823,7 +5829,10 @@ export class TaskManager {
 
   /** Give a task a home on a box, with its own block of preview ports. */
   private assign(taskId: string, boxId: string, opts: { touch?: boolean } = {}): string {
-    this.requireContainment(this.requireRow(taskId), boxRunner(boxId))
+    const row = this.requireRow(taskId)
+    const actual = this.physicalRunner(boxId)
+    this.requireContainment(row, actual)
+    if (actual !== "local" && actual !== "ssh") this.store.setKv(`runner_ceiling:${taskId}`, "isolated")
     const used = new Set(
       this.store
         .listTaskRows({ boxId })
@@ -6030,8 +6039,9 @@ export class TaskManager {
     /** And codex-auth.json, the Codex login for this turn. */
     let codexWaiting = false
     try {
-      this.requireContainment(row, boxRunner(boxId))
+      this.requireContainment(row, this.physicalRunner(boxId))
       this.requireContainment(row, this.store.taskRunner(row))
+      if (this.physicalRunner(boxId) !== "local" && this.physicalRunner(boxId) !== "ssh") this.store.setKv(`runner_ceiling:${row.id}`, "isolated")
       await this.provider.wake(boxId)
       const project = this.store.getProject(row.project_id)
       if (!project) throw new Error("Project was deleted")

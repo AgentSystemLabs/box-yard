@@ -916,7 +916,7 @@ export function createBoxYard(
   app.all(
     "/mcp",
     mcpHandler(
-      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
+      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, connectors: connectors.store, machines: machineActions, authenticatedHumanPicks: auth.enabled, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
       mcpToken,
       handshakes,
     ),
@@ -1388,6 +1388,7 @@ export function createBoxYard(
     const row = store.getTaskRow(req.params.id!)
     await tasks.requireRunner(body.runsOn, row?.project_id, row ? store.taskEnv(row.id) : {}, { ...(row ? { agentCli: taskAgentCli(row) } : {}), machineLabel: body.machineLabel, gpu: body.gpu })
     const files = withAttachments(body.content, body.attachments)
+    if ((body.runsOn === "local" || body.runsOn === "ssh") && auth.enabled && auth.isAuthed(req)) tasks.elevateRunner(req.params.id!, body.runsOn)
     if (body.runsOn) tasks.setRunsOn(req.params.id!, body.runsOn, body.machineLabel, body.gpu, body.boxSize)
     const task = tasks.sendInput(req.params.id!, body.content, "cody", files)
     orchestrator.directMessages.record({ taskId: task.id }, body.content)

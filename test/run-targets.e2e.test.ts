@@ -19,11 +19,12 @@ interface Running {
   keyHome: string
 }
 const running: Running[] = []
+const FIXTURE_PASSWORD = "example-run-target-password"
 
 async function start(): Promise<Running> {
   const port = await freePort()
   const keyHome = tmpDir("run-target-home-")
-  const yard = createBoxYard(testConfig({ port }), { webDir: "/nonexistent", machines: { keys: { home: keyHome } } })
+  const yard = createBoxYard(testConfig({ port, password: FIXTURE_PASSWORD }), { webDir: "/nonexistent", machines: { keys: { home: keyHome } } })
   const server = await new Promise<Server>((resolve) => {
     const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
   })
@@ -43,7 +44,7 @@ afterEach(async () => {
 async function call<T>(r: Running, method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(r.base + url, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: { Authorization: `Bearer ${FIXTURE_PASSWORD}`, ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
   const data = await res.json()
@@ -52,7 +53,7 @@ async function call<T>(r: Running, method: string, url: string, body?: unknown):
 }
 
 const status = async (r: Running, method: string, url: string, body?: unknown) =>
-  (await fetch(r.base + url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).status
+  (await fetch(r.base + url, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${FIXTURE_PASSWORD}` }, body: JSON.stringify(body) })).status
 
 function sessionPrompts(r: Running, kvKey: string): string[] {
   const id = r.yard.store.getKv(kvKey)
@@ -196,6 +197,7 @@ describe('chat "@" pick on the task tools', () => {
       settings: r.yard.settings,
       uploads: null as never,
       turnPicks: () => ({ runsOn: pick, agent }),
+      authenticatedHumanPicks: true,
     })
     const [a, b] = InMemoryTransport.createLinkedPair()
     await server.connect(a)
@@ -220,7 +222,9 @@ describe('chat "@" pick on the task tools', () => {
     expect(r.yard.store.getTask(batch.tasks[1].id)).toMatchObject({ runsOn: "gpu", gpu: { provider: "daytona", type: "CPU", size: "cpu-small" } })
     await tool("send_to_task", { task: one.id, message: "continue", runs_on: "daytona-large" })
     expect(r.yard.store.getTask(one.id)).toMatchObject({ runsOn: "gpu", boxSize: null, gpu: { provider: "daytona", type: "CPU", size: "cpu-large" } })
-    await tool("send_to_task", { task: one.id, message: "continue", runs_on: "local" })
+    await expect(tool("send_to_task", { task: one.id, message: "continue", runs_on: "local" })).rejects.toThrow(/containment/)
+    // A real authenticated human pick authorizes the move; a model argument alone cannot.
+    await (await tools(r, { value: "local", token: "local", label: "This computer" }))("send_to_task", { task: one.id, message: "continue" })
     expect(r.yard.store.getTask(one.id)).toMatchObject({ runsOn: "local", boxSize: null, gpu: null })
     await expect(tool("create_task", { project: "demo", title: "Invalid", prompt: "x", runs_on: "box:giant" })).rejects.toThrow(/Unknown box size/)
   })
