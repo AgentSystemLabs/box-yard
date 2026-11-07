@@ -785,7 +785,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("acli")}
                     label="Agent"
-                    help="The coding agent new tasks run on: a project can pick its own, a task keeps the agent it started on, a task given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
+                    help="The coding agent new tasks run on: a project can pick its own. Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
                     hint={hint("agentCli")}
                   >
                     <AgentCliSelect id={fid("acli")} clis={AGENT_CLIS} value={s.agentCli} onChange={(v) => set("agentCli", v)} testId="agent-cli" />

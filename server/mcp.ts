@@ -201,7 +201,7 @@ const machineLabelBase = z.string().max(MACHINE_LIMITS.labelLength).optional()
 const machineLabelSchema = machineLabelBase.describe('An SSH machine label or name, e.g. "gpu" (list_machines lists them); alone it means runs_on "ssh" (Task options)')
 const envSchema = z.record(z.string(), z.string()).optional().describe("Env vars as NAME: value")
 const agentBase = z.enum(AGENT_CLIS).optional()
-const agentSchema = agentBase.describe('"claude", "codex" or "cursor", for good; omit it to follow the project\'s Agent (Task options)')
+const agentSchema = agentBase.describe('"claude", "codex" or "cursor"; omit it to follow the project\'s Agent (Task options)')
 const iconSchema = z
   .enum(TASK_ICONS)
   .optional()
@@ -510,7 +510,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     runsOn: t.runsOn ?? undefined,
     priority: t.priority === "high" ? t.priority : undefined,
     turns: t.turnCount,
-    // The CLI it runs on for good, fixed when it was created (an asked-for agent, its model's CLI, its project's
+    // The saved CLI (explicit idle continuation can change it), selected when it was created (an asked-for agent, its model's CLI, its project's
     // Agent, else Settings › Box agents). Not content, so status-only briefs keep it.
     agent: t.agentCli,
     model: t.model ?? undefined,
@@ -589,10 +589,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       return "queued: the agent is mid-turn; the message is delivered (with any others) as soon as this turn ends, in the same session"
     if (t.status === "queued") return "queued: the task is waiting for a box slot; the message goes out with its next turn"
     const mode = tasks.resumeMode(t.id)
-    if (mode === "box") return `resuming: the agent's Claude session resumes now on box ${t.boxId} with full context`
-    if (mode === "archive") return "resuming: the workspace and Claude session are restored from the archive onto a box, then the session resumes with full context"
+    if (mode === "handoff") return "continuing on the selected harness: its existing workspace must be available or restored successfully, then a new CLI session starts with a bounded recap and the queued messages"
+    if (mode === "box") return `resuming: the agent's ${AGENT_CLI_LABEL[t.agentCli]} session resumes now on box ${t.boxId} with full context`
+    if (mode === "archive") return `resuming: the workspace and ${AGENT_CLI_LABEL[t.agentCli]} session are restored from the archive onto a box, then the session resumes with full context`
     if (mode === "recap")
-      return `resuming from a recap: this task's workspace archive has expired, so its old Claude session and uncommitted work are gone. A new session starts on a fresh checkout of ${t.branch ? `branch ${t.branch} (or the base branch if it was deleted)` : "the project"} with a recap of the task's summary, PR and recent messages. ${owner("Tell Cody if that matters")}`
+      return `resuming from a recap: this task's workspace archive has expired, so its old CLI session and uncommitted work are gone. A new session starts on a fresh checkout of ${t.branch ? `branch ${t.branch} (or the base branch if it was deleted)` : "the project"} with a recap of the task's summary, PR and recent messages. ${owner("Tell Cody if that matters")}`
     return "starting: the agent's first turn starts as soon as a box slot is free"
   }
   const notes =
@@ -750,7 +751,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     repo: p.repo,
     baseBranch: p.baseBranch,
     envKeys: p.envKeys,
-    // The CLI its new tasks run on (its own, else Settings › Box agents'); each task keeps the one it started on.
+    // The CLI its new tasks run on (its own, else Settings › Box agents'); existing tasks keep their saved choice unless explicitly continued on another harness.
     agent: p.agentCli ?? `${(deps.settings?.get() ?? DEFAULT_SETTINGS).agentCli} (Settings)`,
     boxSettings: tasks.projectBoxSettings(p),
     // Its GPU cloud, pods and $/hr caps, when it runs on GPU.

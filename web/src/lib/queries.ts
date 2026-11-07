@@ -1368,7 +1368,7 @@ export const useRetryTask = () => useTaskAction("retry", () => ({ status: "queue
 export function useContinueTask() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ taskId, ...options }: TaskContinuation & { taskId: string }) => api<Task>(`/api/tasks/${taskId}/continue`, { method: "POST", body: JSON.stringify(options) }),
+    mutationFn: ({ taskId, ...options }: TaskContinuation & { taskId: string }) => api<Task>(`/api/tasks/${taskId}/continue`, { method: "POST", body: options }),
     onSuccess: (task) => qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task)),
     onError: fail("Couldn't continue the task"),
   })

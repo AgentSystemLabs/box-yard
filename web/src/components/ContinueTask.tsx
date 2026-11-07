@@ -19,7 +19,7 @@ export function ContinueTask({ task, className }: { task: Pick<Task, "id" | "age
       title="Continue this task"
       size="sm"
       onClose={() => setOpen(false)}
-      onSubmit={() => continuation.mutate({ taskId: task.id, agent }, { onSuccess: () => setOpen(false) })}
+      onSubmit={(event) => { event.preventDefault(); if (!continuation.isPending) continuation.mutate({ taskId: task.id, agent }, { onSuccess: () => setOpen(false) }) }}
       footer={<Button type="submit" loading={continuation.isPending}>Continue task</Button>}
     >
       <div className="space-y-4 p-5 text-sm">
