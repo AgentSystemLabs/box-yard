@@ -144,11 +144,8 @@ describe("the sidebar", () => {
       "box-yard, Captain, working",
       "box-yard project settings",
       "Pin box-yard",
-      "Actions for box-yard",
       "Check SSH into the bench Needs you asks",
-      "Actions for Check SSH into the bench",
       "Three-pane layout Working",
-      "Actions for Three-pane layout",
     ])
     // No status dots: each task leads with its own icon, which pulses while it works and has a still dot when it asks.
     const icons = [...yard.querySelectorAll<HTMLElement>('[data-testid="task-status-icon"]')]
@@ -836,7 +833,7 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     resetClosedTasks()
   })
 
-  it("idle and PR-ready rows end with a desktop ✓; touch actions live in the swipe menu", () => {
+  it("idle and PR-ready rows end with a visible ✓ and a 44px touch target", () => {
     render(APP_HOME, [ASK, RUN, PR, IDLE, LOGO, kid(1), kid(2)])
     expect(labels(section("box-yard")!)).toEqual(["Mark Write the changelog done"])
     // A tree's row names what it closes with it.
@@ -849,7 +846,8 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     expect(labels(section("Waiting on you")!)).toEqual(["Mark Refresh the portfolio done"])
     for (const b of checks(nav()!)) {
       expect(b.className).not.toContain("opacity-0")
-      expect(b.className).toContain("pointer-coarse:hidden")
+      expect(b.className).not.toContain("pointer-coarse:hidden")
+      expect(b.className).toContain("pointer-coarse:h-11 pointer-coarse:w-11")
       expect(b.className).toContain("h-8 w-8")
       expect(b.closest("[role=menu], [role=dialog]")).toBeNull()
     }
@@ -863,6 +861,49 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     expect(posts()).toEqual([])
     act(() => currentToasts()[0]!.action!.onClick())
     expect(section("box-yard")!.textContent).toContain("Write the changelog")
+  })
+
+  it.each([1440, 400].flatMap((width) => [false, true].map((selected) => ({ width, selected }))))(
+    "the direct check works at $width px on a selected=$selected row without navigating",
+    async ({ width, selected }) => {
+      viewport(width)
+      render(`/?session=${selected ? IDLE.id : RUN.id}`, [RUN, IDLE])
+      if (width === 400) click(document.querySelector('[data-testid="task-header"] button[aria-label^="Projects and tasks"]')!)
+      const row = section("box-yard")!.querySelector(`[data-open-task="${IDLE.id}"]`)!.closest<HTMLElement>('[role="treeitem"]')!
+      expect(row.getAttribute("aria-current") === "page").toBe(selected)
+      const before = location.href
+      click(checks(row)[0]!)
+      expect(location.href).toBe(before)
+      expect(currentToasts().find((t) => t.title === "Marked done")?.body).toBe(IDLE.title)
+      expect(posts()).toEqual([])
+      act(() => currentToasts().find((t) => t.title === "Marked done")!.action!.onClick())
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)) })
+      expect(section("box-yard")!.textContent).toContain(IDLE.title)
+      expect(location.href).toBe(before)
+    },
+  )
+
+  it("failed rows open the task and have no delete controls, action menus or swipe capture", () => {
+    const failed = { ...IDLE, status: "failed" as const }
+    render(APP_HOME, [RUN, failed])
+    const row = section("box-yard")!.querySelector(`[data-open-task="${failed.id}"]`)!.closest<HTMLElement>('[role="treeitem"]')!
+    expect(row.querySelector('[data-delete-task], [data-sidebar-delete], [data-row-actions]')).toBeNull()
+    expect(row.getAttribute("aria-keyshortcuts")).toBeNull()
+    expect(checks(row)).toEqual([])
+    const open = row.querySelector<HTMLButtonElement>('[data-open-task]')!
+    const capture = vi.fn()
+    row.setPointerCapture = capture
+    for (const [type, x] of [["pointerdown", 100], ["pointermove", 180], ["pointerup", 180]] as const) {
+      const event = new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: "touch", pointerId: 1, clientX: x, clientY: 100 })
+      act(() => { open.dispatchEvent(event) })
+      expect(event.defaultPrevented).toBe(false)
+    }
+    expect(capture).not.toHaveBeenCalled()
+    expect(row.querySelector('[data-sidebar-delete]')).toBeNull()
+    expect(nav()!.textContent).not.toContain("Swipe rows")
+    click(open)
+    expect(new URLSearchParams(location.search).get("session")).toBe(failed.id)
+    expect(document.querySelector('header [data-delete-task]')).not.toBeNull()
   })
 
   it("a tree's ✓ closes the whole tree, which leaves together; while a sub-task runs or asks, the tree has none", () => {

@@ -277,9 +277,8 @@ describe("the sidebar's sub-task tree", () => {
     await settle()
     const tree = document.querySelector<HTMLElement>("[data-testid=rail-tree]")!
     const french = tree.querySelector<HTMLElement>(`[data-open-task=${FRENCH.id}]`)!
-    // The outer row's box moves in, so its fill and selected bar start at its level;
-    // its inner swipe surface moves independently to reveal actions.
-    const row = french.closest<HTMLElement>("[aria-keyshortcuts='Shift+F10']")!
+    // The row's box moves in, so its fill and selected bar start at its level.
+    const row = french.closest<HTMLElement>("[data-tree-node]")!.firstElementChild as HTMLElement
     expect(row.style.getPropertyValue("--rail-indent")).toBe("calc(2 * var(--tree-step))")
     expect(row.className).toContain("ml-[min(var(--rail-indent,0rem),max(0rem,calc(100cqw-12rem)))]")
     expect(french.className).not.toContain("--nest")
