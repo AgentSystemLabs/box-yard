@@ -115,8 +115,8 @@ function render(path = APP_HOME, tasks: Task[] = TASKS) {
 const nav = () => document.querySelector<HTMLElement>("nav[aria-label='Projects and tasks']")!
 const project = () => sidebarGroup(nav(), YARD.name)!
 const node = (t: Task) => project().querySelector<HTMLElement>(`[data-tree-node=${t.id}]`)
-const chevron = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(":scope > div > button[aria-expanded]")!
-const open = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(`:scope > div > button[data-open-task=${t.id}]`)!
+const chevron = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(":scope > [role=treeitem] [data-tree-toggle]")!
+const open = (t: Task) => node(t)!.querySelector<HTMLButtonElement>(`:scope > [role=treeitem] [data-open-task=${t.id}]`)!
 /** A task's row in the sidebar's tree: the treeitem around its open button. */
 const item = (t: Task) => open(t).closest<HTMLElement>("[role=treeitem]")!
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
@@ -248,9 +248,9 @@ describe("the sidebar's sub-task tree", () => {
     for (const button of [open(OMELETTE), open(FRENCH)]) {
       expect(button.className).toContain("pl-[2.75rem]")
       expect(button.className).toContain("pointer-coarse:pl-[4rem]")
-      expect(button.parentElement!.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
-      expect(button.parentElement!.style.paddingLeft).toBe("")
-      expect(button.parentElement!.style.marginLeft).toBe("")
+      expect(button.closest<HTMLElement>("[role=treeitem]")!.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
+      expect(button.closest<HTMLElement>("[role=treeitem]")!.style.paddingLeft).toBe("")
+      expect(button.closest<HTMLElement>("[role=treeitem]")!.style.marginLeft).toBe("")
     }
     // A plain task keeps its status on the right; a title still truncates.
     expect(plain.querySelector(".col-start-3")!.textContent).toBe("working")
@@ -294,7 +294,7 @@ describe("the sidebar's sub-task tree", () => {
     click(chevron(OMELETTE))
     expect(nav().querySelector("[aria-current=page]")).toBeNull()
     // The folded top row gets the faint bar instead.
-    expect(open(OMELETTE).parentElement!.className).toContain("color-mix(in_oklab,var(--color-yard-400)_40%")
+    expect(item(OMELETTE).className).toContain("color-mix(in_oklab,var(--color-yard-400)_40%")
   })
 
   it("a plain task's row still opens just its panel", async () => {
@@ -328,7 +328,7 @@ describe("a sub-task tree five and more levels deep", () => {
         expect(group.className).toContain("before:-top-3")
       }
       // The row's box, so its fill and selected bar, starts one step left of its icon; the title has the rest.
-      expect(open(t).parentElement!.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
+      expect(item(t).className).toContain("ml-[calc(var(--nest)-1.25rem)]")
       expect(open(t).className).toContain("min-w-0")
       expect(open(t).querySelector(".col-start-2.row-start-1")!.className).toContain("truncate")
       // A chevron on its parent's guide for every row with sub-tasks, at every level.
@@ -386,12 +386,12 @@ describe("a sub-task tree five and more levels deep", () => {
     expect(item(L5).getAttribute("aria-current")).toBe("page")
     expect(nav().querySelectorAll("[aria-current=page]")).toHaveLength(1)
     // The fill and the bar are on the row's box, which starts at its level (its group's `--nest`).
-    const box = open(L5).parentElement!
+    const box = item(L5)
     expect(box.className).toContain("shadow-[inset_3px_0_0_var(--color-yard-400)]")
     expect(box.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
     expect(nest(L5)).toBe(nestAt(5))
     click(chevron(L3))
-    expect(open(L3).parentElement!.className).toContain("color-mix(in_oklab,var(--color-yard-400)_40%")
+    expect(item(L3).className).toContain("color-mix(in_oklab,var(--color-yard-400)_40%")
   })
 })
 
@@ -416,7 +416,7 @@ describe("a double click on a tree row with sub-tasks folds or unfolds its tree"
     return at("dblclick", el, time + 150)
   }
   const expanded = (t: Task, within: ParentNode = nav()) =>
-    within.querySelector(`[data-tree-node=${t.id}] > div > button[aria-expanded]`)!.getAttribute("aria-expanded")
+    within.querySelector(`[data-tree-node=${t.id}] > [role=treeitem] [data-tree-toggle]`)!.getAttribute("aria-expanded")
   const drawer = () => document.querySelector<HTMLElement>("[role=dialog][aria-label='Projects and tasks']")
   /** The rects that matter, the rest as they are: the panels' row (`panels` wide), the drawer's list, and a tree node. */
   function layout(panels: number, node?: { id: string; top: number; bottom: number }) {

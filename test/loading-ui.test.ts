@@ -112,6 +112,8 @@ describe("a task transcript loading", () => {
   const reply: TaskMessage = { id: "m1", taskId, role: "assistant", content: "All done.", meta: null, createdAt: 1 }
   beforeEach(() => {
     qc.setQueryData(keys.taskQueue(taskId), [])
+    // This fixture isolates transcript loading; date-index loading has its own independent state/tests.
+    qc.setQueryData(["history-days", `/api/tasks/${taskId}/history`, Intl.DateTimeFormat().resolvedOptions().timeZone], { days: [], oldestId: null })
     render(createElement(TaskThread, { id: taskId, handle: null, working: null, selectionSource: null, onStartFromSelection: () => {}, onFollowUp: () => {} }))
   })
 

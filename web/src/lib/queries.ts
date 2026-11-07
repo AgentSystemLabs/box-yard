@@ -1105,11 +1105,16 @@ export function useSetProjectIcon() {
   })
 }
 
+type DeleteInput = string | { id: string; ifResting: true }
+const deleteId = (input: DeleteInput) => typeof input === "string" ? input : input.id
+const deleteQuery = (input: DeleteInput) => typeof input === "string" ? "" : "?ifResting=1"
+
 export function useDeleteProject() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => api(`/api/projects/${id}`, { method: "DELETE" }),
-    onMutate: async (id) => {
+    mutationFn: (input: DeleteInput) => api(`/api/projects/${deleteId(input)}${deleteQuery(input)}`, { method: "DELETE" }),
+    onMutate: async (input) => {
+      const id = deleteId(input)
       const undoP = snapshot<Project[]>(qc, keys.projects)
       const undoT = snapshot<Task[]>(qc, keys.tasks)
       qc.setQueryData<Project[]>(keys.projects, (list) => list?.filter((p) => p.id !== id))
@@ -1455,8 +1460,9 @@ export function useReopenTask(): (taskId: string) => Promise<boolean> {
 export function useDeleteTask() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (taskId: string) => api(`/api/tasks/${taskId}`, { method: "DELETE" }),
-    onMutate: async (taskId) => {
+    mutationFn: (input: DeleteInput) => api(`/api/tasks/${deleteId(input)}${deleteQuery(input)}`, { method: "DELETE" }),
+    onMutate: async (input) => {
+      const taskId = deleteId(input)
       const undo = snapshot<Task[]>(qc, keys.tasks)
       qc.setQueryData<Task[]>(keys.tasks, (list) => list?.filter((t) => t.id !== taskId))
       return { undo }

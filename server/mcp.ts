@@ -48,7 +48,8 @@ import type { TaskContinuation } from "../shared/taskContinuation.js"
 import { TASK_PRIORITIES, byQueueOrder, type TaskPriority } from "../shared/priority.js"
 import fs from "node:fs"
 import type { Artifact, CompactionTaskSnapshot, OrchestratorCompactionRecord } from "../shared/types.js"
-import { compactionTime } from "./compactions.js"
+import { compactionTime, findCompactionRecord } from "./compactions.js"
+import { CompactionIndex, FULL_CHUNK_MAX } from "./compactionIndex.js"
 import type { Identities } from "./identity/identities.js"
 import { IdentityDetector } from "./identity/detect.js"
 import { applyRefs, assignChecked, createWithRefs, detectFor, importDetected, testRepos, type IdentityRefs } from "./identity/setup.js"
@@ -359,6 +360,10 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const unsealed = (projectId: string | null | undefined, what: string) => {
     if (statusOnly(projectId)) throw statusOnlyError(projectId!, what)
   }
+  const coordinatorHistoryAllowed = () => !store.listProjects().some(p => statusOnly(p.id))
+  const unsealedCoordinatorHistory = () => {
+    if (!coordinatorHistoryAllowed()) throw new Error("Status only: Coordinator compaction history is withheld while any project is status only; historical mixed-project prose cannot be safely redacted. Ask its Captain, or select an unsealed project/task history.")
+  }
   /** A hosted artifact by id or URL. A Captain only reaches its own project's (or its tasks'); nobody a status-only one's. */
   const artifactRef = (ref: string): Artifact => {
     const id = ARTIFACT_REF.exec(ref)?.[1] ?? ref.trim()
@@ -532,7 +537,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     return now && now !== t.status ? now : undefined
   }
   /** One compaction in full: its markdown and every linked task snapshot. */
-  const compactionView = (c: OrchestratorCompactionRecord) => ({
+  const compactionView = (c: OrchestratorCompactionRecord, tasksOffset = 0, summaryOffset = 0) => ({
     id: c.id,
     at: new Date(c.at).toISOString(),
     trigger: c.trigger,
@@ -540,9 +545,9 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     tokensAfter: c.tokensAfter,
     markdownFile: c.file,
     jsonFile: c.jsonFile,
-    tasks: c.tasks.map((t) => ({
+    tasks: c.tasks.slice(tasksOffset, tasksOffset + 20).map((t) => ({
       id: t.taskId,
-      title: t.title,
+      title: clip(t.title, 200),
       status: t.status,
       statusNow: statusNow(t),
       project: t.projectName,
@@ -550,9 +555,13 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       pr: t.prUrl ?? undefined,
       sessionId: t.sessionId,
       // A snapshot written before Cody sealed the project still holds its content.
-      summary: statusOnly(t.projectId) ? STATUS_ONLY_SNAPSHOT : t.summary,
+      summary: statusOnly(t.projectId) ? STATUS_ONLY_SNAPSHOT : t.summary.slice(summaryOffset, summaryOffset + 4000),
+      summaryNextOffset: !statusOnly(t.projectId) && t.summary.length > summaryOffset + 4000 ? summaryOffset + 4000 : null,
     })),
-    markdown: c.markdown ?? "",
+    moreTasks: Math.max(0, c.tasks.length - tasksOffset - 20),
+    nextTasksOffset: c.tasks.length > tasksOffset + 20 ? tasksOffset + 20 : null,
+    markdown: (c.markdown ?? "").slice(0, FULL_CHUNK_MAX),
+    fullText: "Use read_compaction level=full and nextOffset for bounded complete saved text.",
   })
   /**
    * A compaction in a list: when it was and which tasks it covers, not their snapshots (read_compaction has
@@ -1039,6 +1048,33 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     return at
   }
 
+  // Resolve and authorize the collection before discovery, counts, dates or id lookup.
+  const historyIndex = (a: { project?: string; task?: string }) => {
+    const projectId = projectFilter(a.project)
+    if (a.task) {
+      const t = task(a.task)
+      if (projectId && t.projectId !== projectId) throw new Error("Task does not belong to the selected project.")
+      unsealed(t.projectId, "its task compaction history is its content")
+      return new CompactionIndex(store, `task:${t.id}`)
+    }
+    if (projectId) {
+      unsealed(projectId, "its Captain compaction history is its content")
+      if (!deps.captains) throw new Error(noCaptains)
+      return deps.captains.compactionIndex(projectId)
+    }
+    unsealedCoordinatorHistory()
+    return new CompactionIndex(store, "coordinator", deps.coordinatorCompactionsDir)
+  }
+  server.registerTool("compaction_history", {
+    description: "Browse retained compactions as a bounded dated table of contents: actual topics, terse descriptions, total, UTC coverage and nextBefore. Default: your own chat; project selects a Captain, task selects that task's saved recaps. Read a chosen id with read_compaction level=summary, then level=full only as needed. Dates are save times, not inferred covered ranges.",
+    inputSchema: {
+      project: z.string().optional(), task: z.string().optional(),
+      since: z.string().optional().describe("Inclusive ISO date/time"), until: z.string().optional().describe("Inclusive ISO date/time"),
+      before: z.string().optional().describe("nextBefore from the previous page, or an exclusive ISO date/time"),
+      limit: z.number().int().min(1).max(20).optional().describe("Default 10; initial context shows 5"),
+    },
+  }, safe(async (a: { project?: string; task?: string; since?: string; until?: string; before?: string; limit?: number }) => okCompact(historyIndex(a).page(a))))
+
   server.registerTool(
     "list_compactions",
     {
@@ -1046,7 +1082,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         (scopeId
           ? "List your own Captain compaction records, newest first: when, and which tasks each covers (with their status then and now)."
           : "List compaction records, newest first: the Coordinator's own, or a project Captain's when you pass project. Each says when, and which tasks it covers (with their status then and now).") +
-        " Open one with read_compaction. To find something specific in them, search_history is faster. To page, pass before = the last id you got.",
+        " For dated topics, coverage and stable paging use compaction_history. Open one with read_compaction level=summary, then level=full. search_history finds keywords.",
       inputSchema: {
         task: z.string().optional().describe("Optional task id or title to filter linked compactions"),
         project: z
@@ -1058,10 +1094,15 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       },
     },
     safe(async (a: { task?: string; project?: string; before?: string; limit?: number }) => {
-      const taskId = a.task ? task(a.task).id : undefined
+      const linkedTask = a.task ? task(a.task) : undefined
+      if (linkedTask) unsealed(linkedTask.projectId, "its compaction links are its content")
+      const taskId = linkedTask?.id
       const projectId = projectFilter(a.project)
       const filter = { taskId, limit: a.limit ?? 10, before: beforeOf(a.before) }
-      if (!projectId) return okCompact(store.listOrchestratorCompactions(filter).map(compactionDigest))
+      if (!projectId) {
+        unsealedCoordinatorHistory()
+        return okCompact(store.listOrchestratorCompactions(filter).map(compactionDigest))
+      }
       unsealed(projectId, "its Captain's compactions are its content")
       const list = captainCompactions(projectId, filter)
       return list ? okCompact(list) : fail(noCaptains)
@@ -1071,26 +1112,34 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   server.registerTool(
     "read_compaction",
     {
-      description: scopeId
+      description: "Choose level=summary for a cached excerpt, level=full for chunked saved text. Without level, returns legacy markdown and paged snapshots. " + (scopeId
         ? "Read one of your Captain compactions: its markdown summary and linked task snapshots (statusNow says where a task's status has moved on since)."
-        : "Read one compaction's markdown summary and linked task snapshots (statusNow says where a task's status has moved on since): the Coordinator's, or a project Captain's when you pass project.",
+        : "Read one compaction's markdown summary and linked task snapshots (statusNow says where a task's status has moved on since): the Coordinator's, or a project Captain's when you pass project."),
       inputSchema: {
-        compaction: z.string().describe("Compaction id, e.g. 2026-10-22T03-40-05Z"),
+        compaction: z.string().describe("Stable id from compaction_history or list_compactions"),
+        tasks_offset: z.number().int().nonnegative().optional().describe("Legacy snapshot page: pass nextTasksOffset; omit level"),
+        summary_offset: z.number().int().nonnegative().optional().describe("Legacy snapshot text: pass summaryNextOffset; omit level"),
+        task: z.string().optional().describe("Select this task's own saved recap (same task as compaction_history)"),
+        level: z.enum(["summary", "full"]).optional().describe("summary: cached extractive excerpt; full: bounded saved text with nextOffset. Omit for legacy markdown/snapshots."),
+        offset: z.number().int().nonnegative().optional().describe("Use nextOffset verbatim to continue a full read"),
+        limit: z.number().int().min(1).max(FULL_CHUNK_MAX).optional(),
         project: z.string().optional().describe(scopeId ? "Leave out: your own project." : "Project id or name, for one of that project's Captain compactions."),
       },
     },
-    safe(async (a: { compaction: string; project?: string }) => {
+    safe(async (a: { compaction: string; project?: string; task?: string; level?: "summary" | "full"; offset?: number; limit?: number; tasks_offset?: number; summary_offset?: number }) => {
+      if (a.level || a.task) return okCompact(historyIndex(a).read(a.compaction, a.level ?? "full", a.offset, a.limit))
       const projectId = projectFilter(a.project)
       if (!projectId) {
-        const c = store.getOrchestratorCompaction(a.compaction, true)
+        unsealedCoordinatorHistory()
+        const c = store.getOrchestratorCompaction(a.compaction, true) ?? (deps.coordinatorCompactionsDir ? findCompactionRecord(deps.coordinatorCompactionsDir, a.compaction) : null)
         if (!c) throw new Error(`No Coordinator compaction "${a.compaction}". Use list_compactions, and pass project for a Captain compaction.`)
-        return ok(compactionView(c))
+        return ok(compactionView(c, a.tasks_offset, a.summary_offset))
       }
       unsealed(projectId, "its Captain's compactions are its content")
       if (!deps.captains) return fail(noCaptains)
       const c = deps.captains.compactionRecord(projectId, a.compaction)
       if (!c) throw new Error(`No Captain compaction "${a.compaction}" in this project. Use list_compactions.`)
-      return ok({ ...compactionView(c), captain: projectId })
+      return ok({ ...compactionView(c, a.tasks_offset, a.summary_offset), captain: projectId })
     }),
   )
 
@@ -1105,13 +1154,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     safe(async (a: { task: string; limit?: number }) => {
       const t = task(a.task)
       const limit = a.limit ?? 10
-      if (statusOnly(t.projectId)) {
-        return okCompact({ task: brief(t), orchestratorCompactions: store.listOrchestratorCompactions({ taskId: t.id, limit }).map(compactionDigest), statusOnly: STATUS_ONLY_PROJECT })
-      }
+      unsealed(t.projectId, "its compaction links are its content")
       return okCompact({
         task: brief(t),
         // Coordinator compactions span every project, so Captains only get their own and the task's.
-        orchestratorCompactions: scopeId ? undefined : store.listOrchestratorCompactions({ taskId: t.id, limit }).map(compactionDigest),
+        orchestratorCompactions: scopeId || !coordinatorHistoryAllowed() ? undefined : store.listOrchestratorCompactions({ taskId: t.id, limit }).map(compactionDigest),
         // task() keeps a Captain inside its own project, so this is never another project's Captain.
         captainCompactions: captainCompactions(t.projectId, { taskId: t.id, limit }) ?? undefined,
         taskCompactions: store
@@ -1131,7 +1178,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           : h.kind === "coordinator_chat" || h.kind === "captain_chat"
             ? `search_history {"around":"${h.id}"}`
             : h.kind === "task_summary"
-              ? `find_compactions_by_task {"task":"${h.taskIds?.[0]}"}`
+              ? `read_compaction ${JSON.stringify({ compaction: h.id, task: h.taskIds?.[0], level: "summary" })}`
               : `get_task {"task":"${h.taskIds?.[0] ?? h.id}"}`
     return {
       kind: h.kind,
@@ -1194,8 +1241,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       const { hits, perSource } = searchHistory(
         {
           store,
-          coordinatorCompactionsDir: scopeId ? undefined : deps.coordinatorCompactionsDir,
-          captainCompactions: deps.captains ? (id) => deps.captains!.compactionRecords(id) : undefined,
+          coordinatorCompactionsDir: scopeId || !coordinatorHistoryAllowed() ? undefined : deps.coordinatorCompactionsDir,
+          captainCompactions: deps.captains ? (id) => statusOnly(id) ? [] : deps.captains!.compactionRecords(id) : undefined,
         },
         scope,
         { terms, sources: a.sources?.length ? a.sources : DEFAULT_HISTORY_SOURCES, since: time(a.since, "since"), until: time(a.until, "until"), limit },
