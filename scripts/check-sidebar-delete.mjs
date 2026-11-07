@@ -34,6 +34,7 @@ try {
       const p = new URL(route.request().url()).pathname
       if (p === "/api/boot" || p === "/api/stream") return route.abort()
       if (route.request().method() === "DELETE") {
+        assert.equal(new URL(route.request().url()).searchParams.get("ifResting"), "1")
         assert.equal(p, `/api/tasks/${tasks[12].id}`)
         deletes++
         return route.fulfill({ json: { ok: true } })

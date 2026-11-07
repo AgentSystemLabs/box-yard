@@ -160,7 +160,7 @@ function DeleteAction({ target, close }: { target: SidebarDeleteTarget; close: (
   const deleteTask = useDeleteTask()
   const deleteProject = useDeleteProject()
   const [confirming, setConfirming] = useState(false)
-  const blocked = !tasks.data || !projects.data || (target.kind === "project" && !captain.data) ? "Checking running work…" : sidebarDeleteBlocked(target, tasks.data, Boolean(captain.data?.busy))
+  const blocked = !tasks.data || !projects.data || (target.kind === "project" && !captain.data) ? "Checking running work…" : sidebarDeleteBlocked(target, tasks.data, Boolean(captain.data?.busy || captain.data?.compacting || captain.data?.compactQueued))
   const pending = confirming || deleteTask.isPending || deleteProject.isPending
   return (
     <button
@@ -184,12 +184,12 @@ function DeleteAction({ target, close }: { target: SidebarDeleteTarget; close: (
         const owner = qc.getQueryData<CaptainState>(keys.captain(target.projectId))
         if (!latest || (project && !owner)) return
         if (project ? !qc.getQueryData<Project[]>(keys.projects)?.some((p) => p.id === target.id) : !latest.some((t) => t.id === target.id)) { close(); return }
-        const reason = sidebarDeleteBlocked(target, latest, Boolean(owner?.busy))
+        const reason = sidebarDeleteBlocked(target, latest, Boolean(owner?.busy || owner?.compacting || owner?.compactQueued))
         if (reason) { toast.info("Delete cancelled", reason); return }
         const removed = new Set(sidebarDeleteTasks(target, latest).map((t) => t.id))
         // Wait for success before moving the current view; mutation hooks restore optimistic rows and toast errors.
         try {
-          await (project ? deleteProject : deleteTask).mutateAsync(target.id)
+          await (project ? deleteProject : deleteTask).mutateAsync({ id: target.id, ifResting: true })
           qc.setQueryData<Task[]>(keys.tasks, (list) => list?.filter((t) => !removed.has(t.id)))
           const href = location.pathname + location.search + location.hash
           const panels = panelsAt(href)
