@@ -115,7 +115,8 @@ describe("GPU picks: @gpu, @gpu:<cloud> and @gpu:<cloud>:<gpu>", () => {
     const list = gpu()
     const tokens = (q: string) => filterRunTargets(list, q).map((t) => t.token)
     expect(tokens("")).toEqual(["local", "box", "docker", "gpu", "gpu:runpod", "gpu:daytona", "daytona"])
-    expect(tokens("gpu")).toEqual(["gpu", "gpu:runpod", "gpu:daytona"])
+    expect(tokens("gpu")).toEqual(expect.arrayContaining(["gpu", "gpu:runpod", "gpu:daytona"]))
+    expect(tokens("gpu").every((t) => t === "gpu" || t.startsWith("gpu:"))).toBe(true)
     expect(tokens("gpu:daytona")).toEqual(expect.arrayContaining(["gpu:daytona", "gpu:daytona:rtx-4090", "gpu:daytona:h100", "gpu:daytona:cpu"]))
     expect(tokens("gpu:daytona")[0]).toBe("gpu:daytona")
     expect(tokens("gpu:daytona:h")).toEqual(["gpu:daytona:h100", "gpu:daytona:h200"])
@@ -132,8 +133,8 @@ describe("GPU picks: @gpu, @gpu:<cloud> and @gpu:<cloud>:<gpu>", () => {
     expect(drillsInto(daytona, list, "gpu:daytona")).toBe(false)
     expect(drillsInto(list.find((t) => t.token === "gpu")!, list, "")).toBe(false)
     expect(drillsInto(list.find((t) => t.token === "gpu:daytona:h100")!, list, "gpu:daytona")).toBe(false)
-    // Drilling leaves the caret right after the token, with no space, so the list stays open on its GPUs.
-    expect(insertRunTarget("run it @gp", { start: 7, end: 10 }, "gpu:daytona", "@", true)).toEqual({ value: "run it @gpu:daytona", caret: 19 })
+    // Drilling leaves the caret right after `token:`, so the next letters filter its GPUs.
+    expect(insertRunTarget("run it @gp", { start: 7, end: 10 }, "gpu:daytona", "@", true)).toEqual({ value: "run it @gpu:daytona:", caret: 20 })
     expect(pickedRunTarget("train @gpu:daytona:h100 please", list)?.value).toBe("gpu:daytona:h100")
   })
 })
@@ -152,7 +153,7 @@ describe("typing @", () => {
   it("filters by token or label, prefix matches first", () => {
     expect(filterRunTargets(targets, "").length).toBe(targets.filter((t) => !t.under).length)
     expect(filterRunTargets(targets, "lap").map((t) => t.token)).toEqual(["label:laptops"])
-    expect(filterRunTargets(targets, "studio").map((t) => t.token)).toEqual(["studio-mac"])
+    expect(filterRunTargets(targets, "studio").map((t) => t.token)[0]).toBe("studio-mac")
     expect(filterRunTargets(targets, "l")[0]!.token).toBe("local")
   })
 
@@ -294,11 +295,11 @@ describe('the Coordinator\'s "%" project picks', () => {
   })
 
   it("matches loosely: prefix, then contains, then the letters in order, closest first", () => {
-    expect(filterRunTargets(projects, "mob", true).map((t) => t.token)).toEqual(["mobile-app"])
-    expect(filterRunTargets(projects, "site", true).map((t) => t.token)).toEqual(["docs-site"])
-    expect(filterRunTargets(projects, "bxyd", true).map((t) => t.token)).toEqual(["box-yard"])
-    // The @ and ! lists stay exact.
-    expect(filterRunTargets(projects, "bxyd").map((t) => t.token)).toEqual([])
+    expect(filterRunTargets(projects, "mob").map((t) => t.token)).toEqual(["mobile-app"])
+    expect(filterRunTargets(projects, "site").map((t) => t.token)).toEqual(["docs-site"])
+    expect(filterRunTargets(projects, "bxyd").map((t) => t.token)).toEqual(["box-yard"])
+    // Strict mode (allowFuzzy false) keeps letter-gap queries empty.
+    expect(filterRunTargets(projects, "bxyd", false).map((t) => t.token)).toEqual([])
   })
 
   it("a draft's last %token that names a project is its pick, and it goes back into the text", () => {
@@ -503,7 +504,7 @@ describe("named runner sizes", () => {
   const targets = buildRunTargets({ ...base, gpu: { default: "runpod", problems: { runpod: null, vast: null, daytona: null }, types: { runpod: [], vast: [], daytona: [] } } })
   it("drills into Upstash sizes and accepts colon and hyphen spellings as the same complete token", () => {
     expect(filterRunTargets(targets, "box").map((t) => t.token)).toEqual(["box", "box:small", "box:medium", "box:large"])
-    expect(filterRunTargets(targets, "box-").map((t) => t.token)).toEqual(["box:small", "box:medium", "box:large"])
+    expect(filterRunTargets(targets, "box-").map((t) => t.token).sort()).toEqual(["box:large", "box:medium", "box:small"])
     expect(drillsInto(targets.find((t) => t.token === "box")!, targets, "bo")).toBe(true)
     for (const size of ["small", "medium", "large"]) {
       const pick = pickedRunTarget(`use @box-${size}`, targets)

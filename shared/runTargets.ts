@@ -20,6 +20,7 @@ import { gpuChoices, gpuTypesWords } from "./gpuCatalog.js"
 import { BOX_SIZE_ORDER, BOX_SIZE_SPECS, sizeSpecLine } from "./boxSizes.js"
 import { DAYTONA_SIZES } from "./daytona.js"
 import { DAYTONA_SIZE_ALIASES } from "./runnerSizes.js"
+import { rankPickerOptions, type PickerField } from "./pickerRank.js"
 import type { Effort } from "./types.js"
 
 /** "gpu" is one GPU cloud ("@gpu:daytona") or one GPU on it ("@gpu:daytona:h100"). */
@@ -504,62 +505,60 @@ export function mentionAt(text: string, caret: number, trigger: PickTrigger = "@
   return { start: at, end, query: text.slice(i, caret).toLowerCase() }
 }
 
+/** Searchable fields for one run-target row (token, labels, aliases). Detail is omitted so a machine listed in another row's blurb doesn't steal the match. */
+export function runTargetFields(t: RunTarget): PickerField[] {
+  const fields: PickerField[] = [
+    { text: t.token, kind: "token" },
+    { text: t.menuLabel ?? "", kind: "label" },
+    { text: t.label, kind: "label" },
+  ]
+  for (const alias of t.aliases ?? []) fields.push({ text: alias, kind: "alias" })
+  return fields
+}
+
 /**
- * The list filtered by what's typed after "@": tokens that start with it first, then any that contain it. `fuzzy`
- * (the "%" list of projects) then adds names that hold its letters in order ("bxy" finds box-yard), closest first.
- * A GPU's row (`under` its cloud's) shows once its cloud's token is typed ("@gpu:daytona"), or its GPU's own name
- * ("@h100", "@rtx").
+ * The list filtered by what's typed after "@" / "!" / "%": ranked by shared/pickerRank.ts (exact > prefix > word >
+ * substring > fuzzy). A GPU's row (`under` its cloud's) shows once its cloud's token is typed ("@gpu:daytona"), or
+ * its GPU's own name ("@h100", "@rtx"). Nested levels (harness → model → effort, box sizes) filter the same way on
+ * the text after the parent's token. `fuzzy` defaults on; pass false only for strict callers (legacy tests).
  */
-export function filterRunTargets(all: RunTarget[], query: string, fuzzy = false): RunTarget[] {
+export function filterRunTargets(all: RunTarget[], query: string, fuzzy = true): RunTarget[] {
   const q = query.trim().toLowerCase()
   const parent = runTargetParent(all, q)
   if (parent) {
     const term = q.slice(parent.token.length).replace(/^:/, "")
-    const children = all.filter((t) => t.under === parent.token && (!term || t.token.slice(parent.token.length + 1).toLowerCase().startsWith(term) || t.label.toLowerCase().includes(term)))
-    return [...(!term ? [{ ...parent, menuLabel: parent.defaultLabel! }] : []), ...children]
+    const children = all.filter((t) => t.under === parent.token)
+    const ranked = term
+      ? rankPickerOptions(children, term, (t) => {
+          const suffix = t.token.slice(parent.token.length + 1)
+          return [{ text: suffix, kind: "token" }, ...runTargetFields(t)]
+        }, fuzzy)
+      : children
+    return [...(!term ? [{ ...parent, menuLabel: parent.defaultLabel! }] : []), ...ranked]
   }
   // A GPU's name: any word of its slug ("4090" finds rtx-4090).
   const named = (t: RunTarget) => q.length >= 2 && `-${t.token.slice(t.under!.length + 1).replace(/^(cpu|gpu)-/, "")}`.includes(`-${q}`)
   const targets = all.filter((t) => !t.under || (t.kind !== "harness" && (q.startsWith(t.under) || (t.aliases?.some((a) => a.startsWith(q)) && q.length > t.under.length) || named(t))))
   if (!q) return targets
-  const starts = targets.filter((t) => t.token.startsWith(q) || t.aliases?.some((a) => a.startsWith(q)) || t.label.toLowerCase().startsWith(q))
-  const contains = targets.filter((t) => !starts.includes(t) && (t.token.includes(q) || t.aliases?.some((a) => a.includes(q)) || t.label.toLowerCase().includes(q)))
-  if (!fuzzy) return [...starts, ...contains]
-  const spread = targets
-    .filter((t) => !starts.includes(t) && !contains.includes(t))
-    .map((t) => ({ t, gap: Math.min(subsequenceGap(t.token, q), subsequenceGap(t.label.toLowerCase(), q)) }))
-    .filter((x) => x.gap < Infinity)
-    .sort((a, b) => a.gap - b.gap)
-    .map((x) => x.t)
-  return [...starts, ...contains, ...spread]
+  return rankPickerOptions(targets, q, runTargetFields, fuzzy)
 }
 
 /** The deepest open drill-down, shared by filtering and the composer's Back/Esc behavior. */
 export const runTargetParent = (all: RunTarget[], query: string): RunTarget | undefined =>
   all.filter((t) => t.defaultLabel && (query === t.token || query.startsWith(`${t.token}:`)) && all.some((x) => x.under === t.token)).sort((a, b) => b.token.length - a.token.length)[0]
 
-/** How far apart `q`'s letters sit in `word`, in order (fewer skipped letters: a closer match), or Infinity when they don't. */
-function subsequenceGap(word: string, q: string): number {
-  let at = word.indexOf(q[0]!)
-  if (at < 0) return Infinity
-  let gap = 0
-  for (let i = 1; i < q.length; i++) {
-    const next = word.indexOf(q[i]!, at + 1)
-    if (next < 0) return Infinity
-    gap += next - at - 1
-    at = next
-  }
-  return gap
-}
-
 /**
  * `text` with the "@word" at `m` replaced by `@token ` ("!token " for `trigger` "!"), and where the caret goes.
- * `drill` leaves the caret right after the token, with no space, so the list stays open on what's under it (a GPU
- * cloud's GPUs, `drillsInto`).
+ * `drill` leaves the caret right after `token:` (trailing colon, no space) so typing continues as the nested filter
+ * ("!cursor:" then "deep" finds DeepSeek) without discovering the colon by hand (`drillsInto`, `advancesInto`).
  */
 export function insertRunTarget(text: string, m: { start: number; end: number }, token: string, trigger: PickTrigger = "@", drill = false): { value: string; caret: number } {
   const after = text.slice(m.end)
-  if (drill) return { value: text.slice(0, m.start) + trigger + token + after, caret: m.start + 1 + token.length }
+  if (drill) {
+    // A nested level keeps a trailing ":" so the next letters filter children; Back to the root is just the trigger.
+    const insert = token ? `${trigger}${token}:` : trigger
+    return { value: text.slice(0, m.start) + insert + after, caret: m.start + insert.length }
+  }
   const insert = `${trigger}${token}${after.startsWith(" ") ? "" : " "}`
   return { value: text.slice(0, m.start) + insert + after, caret: m.start + insert.length + (after.startsWith(" ") ? 1 : 0) }
 }
@@ -567,10 +566,20 @@ export function insertRunTarget(text: string, m: { start: number; end: number },
 /**
  * Whether picking `t` while `query` is typed opens what's under it rather than picking it: a GPU cloud's row with GPUs
  * under it, until its token is typed in full. Then the list shows "any GPU on it" first and each GPU after.
+ * An exact token (`!cursor`) does not drill on Enter (that picks the Settings default); Tab/Space use `advancesInto`.
  */
 export const drillsInto = (t: RunTarget, all: RunTarget[], query: string) => {
   const q = query.trim().toLowerCase()
   return q !== t.token && !q.startsWith(`${t.token}:`) && all.some((x) => x.under === t.token)
+}
+
+/**
+ * Tab/Space on an exact parent token (`!cursor`, `@box`) advances into its children (inserts `token:`) so the next
+ * letters filter the nested list. Enter still picks the Settings/default row via `drillsInto` being false.
+ */
+export const advancesInto = (t: RunTarget, all: RunTarget[], query: string) => {
+  const q = query.trim().toLowerCase()
+  return q === t.token && all.some((x) => x.under === t.token)
 }
 
 /** Every "@word" ("!word", "%word") in `text` that names a target of `targets`, in order, where it is. */
