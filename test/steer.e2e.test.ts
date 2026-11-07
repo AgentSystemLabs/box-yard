@@ -1,7 +1,7 @@
 // Steer for a task's queued messages: POST /api/tasks/:id/queue/steer, deliver_queued_now and send_to_task steer.
 // The messages go into the running turn without stopping it: the server writes a steer file to the task's folder,
 // the runner writes it into Claude's open stream-json stdin, and the (fake) CLI reads it at its next step. A steer
-// that misses the turn goes in as the next turn, and an agent that can't take one (Codex) waits with a note.
+// that misses the turn goes in as the next turn. Codex uses app-server; Cursor waits with a note.
 import { afterEach, describe, expect, it } from "vitest"
 import fs from "node:fs"
 import os from "node:os"
@@ -43,7 +43,8 @@ afterEach(async () => {
   for (const r of running.splice(0)) {
     // Stop hanging turns so the database isn't closed under them.
     for (const t of r.yard.store.listTasks()) if (t.status === "working" || t.status === "starting") await r.yard.tasks.stopTask(t.id).catch(() => {})
-    await waitFor(() => r.yard.store.listTasks().every((t) => !["starting", "working"].includes(t.status)), "agents idle", 30_000).catch(() => {})
+    await waitFor(() => r.yard.store.listTasks().every((t) => !["starting", "working"].includes(t.status) && !r.yard.store.getTaskRow(t.id)?.current_turn_id), "agents idle", 30_000)
+    await waitFor(() => !(r.yard.tasks as unknown as { archiving: Set<string> }).archiving.size, "turn-end archives finished", 30_000)
     r.yard.stop()
     await new Promise((res) => r.server.close(() => res(null)))
   }
@@ -99,6 +100,69 @@ const ranTurn = (r: Running, id: string, n: number) =>
   }, `turn ${n} done`, 30_000)
 
 describe("Steer", () => {
+  it("steers a Codex task in the same session through app-server once", async () => {
+    const r = await start()
+    const { t, before } = await busyTask(r, "now polish it [hang]", { agentCli: "codex" })
+    await send(r, t.id, "also add a title")
+    expect(await steer(r, t.id)).toMatchObject({ delivery: "steering", queued: 1 })
+    const done = await ranTurn(r, t.id, 2)
+    expect(done.sessionId).toBe(before.sessionId)
+    expect(turns(r, t.id)).toEqual(["idle", "idle"])
+    const mine = lines(r, t.id).filter((m) => m.role === "user" && m.content === "also add a title")
+    expect(mine).toHaveLength(1)
+    expect(mine[0]!.meta).toMatchObject({ steered: true, steerAccepted: true })
+    expect(said(r, t.id, "assistant").join("\n")).toContain("Steered mid-turn")
+  })
+
+  it("recovers lost Codex acknowledgment events from the completed worker journal", async () => {
+    const r = await start()
+    const apply = r.yard.tasks.apply.bind(r.yard.tasks)
+    r.yard.tasks.apply = async (id, ev) => { if (ev.t !== "codex_delivery") await apply(id, ev) }
+    const { t } = await busyTask(r, "now polish it [hang]", { agentCli: "codex" })
+    await send(r, t.id, "recover my follow up")
+    await steer(r, t.id)
+    await ranTurn(r, t.id, 2)
+    expect(lines(r, t.id).filter((m) => m.content === "recover my follow up")).toMatchObject([{ meta: { steerAccepted: true } }])
+    expect(r.yard.tasks.listQueue(t.id)).toEqual([])
+    expect(turns(r, t.id)).toEqual(["idle", "idle"])
+  })
+
+  it("carries a stale-turn rejection into exactly one new Codex turn", async () => {
+    const r = await start()
+    const { t } = await busyTask(r, "now polish it [hang]", { agentCli: "codex", env: { FAKE_CODEX_STEER: "stale" } })
+    await send(r, t.id, "run this after the completed turn")
+    await steer(r, t.id)
+    await ranTurn(r, t.id, 3)
+    expect(turns(r, t.id)).toEqual(["idle", "queued", "idle"])
+    expect(lines(r, t.id).filter((m) => m.content === "run this after the completed turn")).toHaveLength(1)
+    expect(said(r, t.id, "assistant").join("\n")).not.toContain("Steered mid-turn")
+  })
+
+  it("holds an uncertain Codex submission instead of retrying or declaring it ready", async () => {
+    const r = await start()
+    const { t } = await busyTask(r, "now polish it [hang]", { agentCli: "codex", env: { FAKE_CODEX_STEER: "disconnect" } })
+    const events: string[] = []
+    r.yard.tasks.subscribe((event) => { if (event.taskId === t.id) events.push(event.type) })
+    r.yard.store.updateTask(t.id, { prUrl: "https://github.com/acme/example/pull/12", prState: "open" })
+    await send(r, t.id, "also add a title")
+    await r.yard.tasks.apply(t.id, { t: "finish", turnId: turnJson(r, t).turnId, summary: "Premature finish" })
+    expect(r.yard.store.turnFlags(r.yard.store.getTaskRow(t.id)!).finished).toBeUndefined()
+    await steer(r, t.id)
+    await waitFor(() => !r.yard.store.getTaskRow(t.id)?.current_turn_id, "disconnected turn ends")
+    expect(r.yard.store.getTask(t.id)).toMatchObject({ status: "needs_input", pendingCount: 1, turnCount: 2 })
+    const held = r.yard.tasks.listQueue(t.id)[0]!
+    expect(held.status).toBe("uncertain")
+    expect(events).not.toContain("task.pr_ready")
+    expect(events).not.toContain("task.finished")
+    // Startup recovery and ordinary claiming must not silently replay a possibly accepted message.
+    r.yard.store.releaseInputs()
+    expect(r.yard.store.claimInputs(t.id, "turn_unused")).toEqual([])
+    expect((await raw(r, "PATCH", `/api/tasks/${t.id}/queue/${held.id}`, { text: "changed" })).status).toBe(409)
+    expect((await raw(r, "DELETE", `/api/tasks/${t.id}/queue/${held.id}`)).status).toBe(200)
+    expect((await raw(r, "POST", `/api/tasks/${t.id}/queue/${held.id}/restore`)).status).toBe(409)
+    expect(r.yard.tasks.listQueue(t.id)).toEqual([])
+  })
+
   it("hands every queued message to the running turn at its next step, without stopping it", async () => {
     const r = await start()
     const { t, before } = await busyTask(r)
@@ -127,7 +191,7 @@ describe("Steer", () => {
     expect(users.map((m) => m.content)).toEqual(["first: use blue", "second: add a footer"])
     for (const m of users) expect(m.meta).toMatchObject({ steered: true })
     const events = said(r, t.id, "event")
-    expect(events.some((e) => /^Cody steered all 2 queued messages into the running turn: the agent reads them at its next step, without stopping/.test(e))).toBe(true)
+    expect(events.some((e) => /^Cody requested steering all 2 queued messages into the running turn; delivery has not been acknowledged yet/.test(e))).toBe(true)
     expect(events.some((e) => /Stopped by Cody|didn't reach the agent/.test(e))).toBe(false)
     expect(steerFiles(r, done)).toEqual([])
   }, 60_000)
@@ -155,7 +219,7 @@ describe("Steer", () => {
     expect(landed).toBe(true)
     const done = await ranTurn(r, t.id, 3)
     // Nothing was lost: it ran as one more turn, once, and isn't marked steered.
-    expect(turns(r, t.id)).toEqual(["idle", "idle", "idle"])
+    expect(turns(r, t.id)).toEqual(["idle", "queued", "idle"])
     expect(turnJson(r, done).prompt).toContain("also add a title")
     const mine = lines(r, t.id).filter((m) => m.role === "user" && m.content === "also add a title [pr]")
     expect(mine).toHaveLength(1)
@@ -182,14 +246,14 @@ describe("Steer", () => {
     expect(steerFiles(r, done)).toEqual([])
   }, 60_000)
 
-  it("waits for the turn's end with a note on a Codex agent, which can't take a message mid-turn", async () => {
+  it("waits for the turn's end with a note on a Cursor agent, which can't take a message mid-turn", async () => {
     const r = await start()
-    const { t } = await busyTask(r, "now polish it [hang]", { agentCli: "codex", env: { CODEX_API_KEY: "sk-proj-steer-0000000000000000" } })
+    const { t } = await busyTask(r, "now polish it [hang]", { agentCli: "cursor", env: { CURSOR_API_KEY: "sk-proj-steer-0000000000000000" } })
     await send(r, t.id, "also add a title")
     const res = await steer(r, t.id)
     expect(res).toMatchObject({ delivery: "after_turn", queued: 1 })
-    expect(res.note).toMatch(/Codex can't take a message in the middle of a turn/)
-    expect(said(r, t.id, "event").some((e) => /^Cody asked to steer the queued message into the running turn, but Codex can't/.test(e))).toBe(true)
+    expect(res.note).toMatch(/Cursor can't take a message in the middle of a turn/)
+    expect(said(r, t.id, "event").some((e) => /^Cody asked to steer the queued message into the running turn, but Cursor can't/.test(e))).toBe(true)
     // Never a silent stop: the turn still runs, and the message is still queued (and editable).
     expect(await getTask(r, t.id)).toMatchObject({ status: "working", pendingCount: 1 })
     expect(r.yard.tasks.listQueue(t.id).map((m) => m.status)).toEqual(["queued"])
@@ -295,13 +359,13 @@ describe("Steer over MCP", () => {
     const tool = await mcpAs(r, { kind: "coordinator" })
     const res = await tool("send_to_task", { task: t.id, message: "from the Coordinator: rename it", steer: true })
     expect(res.isError).toBeFalsy()
-    expect(JSON.parse(res.content[0]!.text).delivery).toMatch(/^steering: the agent reads all 2 queued messages, in order, at its next step/)
+    expect(JSON.parse(res.content[0]!.text).delivery).toMatch(/^steering: delivery requested for all 2 queued messages, in order/)
 
     await ranTurn(r, t.id, 2)
     expect(turns(r, t.id)).toEqual(["idle", "idle"])
     const text = session(before.sessionId).turns.at(-1)!.steers![0]!
     expect(text.indexOf("keep it short")).toBeLessThan(text.indexOf("rename it"))
-    expect(said(r, t.id, "event").some((e) => /^The Coordinator steered all 2 queued messages into the running turn/.test(e))).toBe(true)
+    expect(said(r, t.id, "event").some((e) => /^The Coordinator requested steering all 2 queued messages into the running turn/.test(e))).toBe(true)
   }, 60_000)
 
   it("deliver_queued_now and send_to_task interrupt steer, Captain-scoped, a merge turn included", async () => {
@@ -326,7 +390,7 @@ describe("Steer over MCP", () => {
     expect(JSON.parse(res.content[0]!.text)).toMatchObject({ queuedMessages: 1, delivery: expect.stringMatching(/^steering:/) })
     await ranTurn(r, t.id, 2)
     expect(lines(r, t.id).find((m) => m.content === "rename the file")?.meta).toMatchObject({ steered: true })
-    expect(said(r, t.id, "event").some((e) => /^The project's Captain steered the queued message into the running turn/.test(e))).toBe(true)
+    expect(said(r, t.id, "event").some((e) => /^The project's Captain requested steering the queued message into the running turn/.test(e))).toBe(true)
 
     // interrupt, the old name for steer, does the same: it no longer stops the turn.
     await send(r, t.id, "now the README [hang]")

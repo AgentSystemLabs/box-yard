@@ -888,6 +888,7 @@ export interface QueuedInputRow {
   status: "queued" | "delivering" | "cancelled"
   /** Delivering as a steer into the running turn (claimSteer), not with a turn's start. */
   steering: boolean
+  codexDelivery?: "submitted" | "accepted" | "uncertain"
   version: number
   /** The transcript line's meta (who sent it); null for agent and system messages. */
   message: Record<string, unknown> | null
@@ -896,7 +897,7 @@ export interface QueuedInputRow {
 }
 
 /** A compare-and-set on a queued input: ok, or the input as it is now (null: gone, i.e. delivered or cleared). */
-export type InputChange = { ok: true; row: QueuedInputRow } | { ok: false; row: QueuedInputRow | null }
+export type InputChange = { ok: true; row: QueuedInputRow; message?: TaskMessage } | { ok: false; row: QueuedInputRow | null }
 
 /** A queued Coordinator chat or Captain message (meta.queued: sent mid-turn, waiting for the next one). */
 export type QueuedChatTable = "chat_messages" | "captain_messages"
@@ -918,7 +919,8 @@ const queuedInputRow = (r: InputRow): QueuedInputRow => ({
   content: r.content,
   attachments: inputAttachments(r),
   status: r.status,
-  steering: r.status === "delivering" && Boolean(r.claim?.startsWith("steer:")),
+  steering: r.status === "delivering" && Boolean(r.claim?.startsWith("steer:") || r.claim?.startsWith("codex-")),
+  codexDelivery: r.claim?.startsWith("codex-") ? r.claim.split(":")[0]!.slice(6) as QueuedInputRow["codexDelivery"] : undefined,
   version: r.version,
   message: r.message_json ? (JSON.parse(r.message_json) as Record<string, unknown>) : null,
   createdAt: r.created_at,
@@ -2256,7 +2258,7 @@ export class Store {
    */
   releaseInputs(turnId?: string) {
     if (turnId) this.db.prepare("UPDATE task_inputs SET status = 'queued', claim = NULL WHERE claim = ? AND status = 'delivering'").run(turnId)
-    else this.db.prepare("UPDATE task_inputs SET status = 'queued', claim = NULL WHERE status = 'delivering' AND (claim IS NULL OR claim NOT LIKE 'steer:%')").run()
+    else this.db.prepare("UPDATE task_inputs SET status = 'queued', claim = NULL WHERE status = 'delivering' AND (claim IS NULL OR (claim NOT LIKE 'steer:%' AND claim NOT LIKE 'codex-%'))").run()
   }
 
   /**
@@ -2271,6 +2273,12 @@ export class Store {
       for (const r of rows) lock.run(claim, r.id)
       return rows.map(pendingInput)
     })()
+  }
+
+  /** Persistent publication order, including batches queued in the same millisecond and across restarts. */
+  nextSteerSequence(): number {
+    const row = this.db.prepare("INSERT INTO kv (key, value) VALUES ('steer_sequence', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1 RETURNING value").get() as { value: string }
+    return Number(row.value)
   }
 
   /**
@@ -2300,6 +2308,34 @@ export class Store {
     return n
   }
 
+  /** Durable Codex states survive startup claim release. Acceptance records a transcript line once. */
+  codexDelivery(taskId: string, turnId: string, ids: string[], delivery: "submitted" | "accepted" | "uncertain" | "settled" | "rejected"): TaskMessage[] {
+    return this.db.transaction(() => {
+      const rows = (this.db.prepare(`SELECT * FROM task_inputs WHERE task_id = ? AND status = 'delivering' ${INPUT_ORDER}`).all(taskId) as InputRow[])
+        .filter((r) => ids.includes(r.id) && (r.claim === `steer:${turnId}` || r.claim?.match(/^codex-(submitted|accepted|uncertain):/) && r.claim.endsWith(`:${turnId}`)))
+      const messages: TaskMessage[] = []
+      for (const r of rows) {
+        const accepted = r.claim === `codex-accepted:${turnId}` || Boolean(r.message_json && JSON.parse(r.message_json).steerAccepted)
+        if ((delivery === "accepted" || delivery === "settled") && !accepted && r.message_json) {
+          const meta = { ...JSON.parse(r.message_json), queuedAt: r.created_at, steered: true, steerAccepted: true }
+          messages.push(this.addTaskMessage(taskId, "user", r.content, meta))
+          r.message_json = JSON.stringify(meta)
+        }
+        // Out-of-order/lost event replay must never downgrade a confirmed acceptance.
+        if (delivery === "submitted" && (accepted || r.claim?.startsWith("codex-uncertain:"))) continue
+        if (delivery === "rejected" && !accepted) this.db.prepare("UPDATE task_inputs SET status = 'queued', claim = NULL WHERE id = ?").run(r.id)
+        else if (delivery === "rejected") continue
+        else if (delivery === "settled") this.db.prepare("DELETE FROM task_inputs WHERE id = ?").run(r.id)
+        else this.db.prepare("UPDATE task_inputs SET claim = ?, message_json = ? WHERE id = ?").run(`codex-${delivery}:${turnId}`, r.message_json, r.id)
+      }
+      return messages
+    })()
+  }
+
+  hasUncertainCodexInput(taskId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM task_inputs WHERE task_id = ? AND status = 'delivering' AND claim LIKE 'codex-uncertain:%' LIMIT 1").get(taskId))
+  }
+
   /** What the task page shows: queued and delivering inputs, in send order. */
   listQueuedInputs(taskId: string): QueuedInputRow[] {
     return (this.db.prepare(`SELECT * FROM task_inputs WHERE task_id = ? AND status IN ('queued', 'delivering') ${INPUT_ORDER}`).all(taskId) as InputRow[]).map(queuedInputRow)
@@ -2323,16 +2359,25 @@ export class Store {
 
   /** Cancel a queued input (kept a while for Undo). Compare-and-set like editInput. */
   cancelInput(taskId: string, id: string): InputChange {
-    const res = this.db
-      .prepare("UPDATE task_inputs SET status = 'cancelled', version = version + 1, updated_at = ? WHERE id = ? AND task_id = ? AND status = 'queued'")
-      .run(Date.now(), id, taskId)
-    return this.inputChange(taskId, id, res.changes > 0)
+    return this.db.transaction(() => {
+      const before = this.getQueuedInput(taskId, id)
+      const res = this.db
+        .prepare("UPDATE task_inputs SET status = 'cancelled', version = version + 1, updated_at = ? WHERE id = ? AND task_id = ? AND (status = 'queued' OR (status = 'delivering' AND claim LIKE 'codex-uncertain:%'))")
+        .run(Date.now(), id, taskId)
+      const change = this.inputChange(taskId, id, res.changes > 0)
+      // Removing an ambiguous hold is not an unsend. Keep the original text and its actual delivery status.
+      if (change.ok && before?.codexDelivery === "uncertain" && before.message && !before.message.steerAccepted) {
+        const message = this.addTaskMessage(taskId, "user", before.content, { ...before.message, queuedAt: before.createdAt, deliveryUncertain: true })
+        return { ...change, message }
+      }
+      return change
+    })()
   }
 
   /** Undo a cancel: the input is queued again, in its old place. */
   restoreInput(taskId: string, id: string): InputChange {
     const res = this.db
-      .prepare("UPDATE task_inputs SET status = 'queued', version = version + 1, updated_at = ? WHERE id = ? AND task_id = ? AND status = 'cancelled'")
+      .prepare("UPDATE task_inputs SET status = 'queued', version = version + 1, updated_at = ? WHERE id = ? AND task_id = ? AND status = 'cancelled' AND (claim IS NULL OR claim NOT LIKE 'codex-%')")
       .run(Date.now(), id, taskId)
     return this.inputChange(taskId, id, res.changes > 0)
   }
@@ -2351,7 +2396,7 @@ export class Store {
       const rows = this.db.prepare(`SELECT * FROM task_inputs WHERE task_id = ? AND status != 'cancelled' ${INPUT_ORDER}`).all(taskId) as InputRow[]
       this.db.prepare("DELETE FROM task_inputs WHERE task_id = ?").run(taskId)
       return rows.flatMap((r) =>
-        r.message_json ? [this.addTaskMessage(taskId, "user", r.content, { ...(JSON.parse(r.message_json) as Record<string, unknown>), undelivered: true })] : [],
+        r.message_json && !JSON.parse(r.message_json).steerAccepted ? [this.addTaskMessage(taskId, "user", r.content, { ...(JSON.parse(r.message_json) as Record<string, unknown>), undelivered: !r.claim?.startsWith("codex-"), ...(r.claim?.startsWith("codex-") ? { deliveryUncertain: true } : {}) })] : [],
       )
     })()
   }

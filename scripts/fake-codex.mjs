@@ -52,6 +52,11 @@ if (argv[0] === "login" && argv[1] === "status") {
   process.exit(0)
 }
 
+if (argv[0] === "app-server") {
+  await import("./fake-codex-app-server.mjs")
+  await new Promise(() => {})
+}
+
 if (argv[0] !== "exec") {
   console.error(`fake codex: only \`exec\`, \`login status\` and --version are supported (got: ${argv.join(" ")})`)
   process.exit(2)
@@ -84,6 +89,7 @@ for (let i = 1; i < argv.length; i++) {
   else if (a === "resume") resume = argv[++i]
 }
 
+sandbox ??= config.sandbox_mode ?? null
 const login = (() => {
   const auth = readAuth()
   if (auth?.tokens?.refresh_token) return { kind: "chatgpt", secret: auth.tokens.refresh_token, account: auth.tokens.account_id ?? null }
@@ -91,7 +97,7 @@ const login = (() => {
   return null
 })()
 
-const thread = resume ?? randomUUID()
+const thread = resume ?? (argv.includes("--fake-thread") ? argv[argv.indexOf("--fake-thread") + 1] : randomUUID())
 if (process.env.FAKE_CODEX_LOG) {
   fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ args: argv, home: process.env.CODEX_HOME ?? null, login: login?.kind ?? null, account: login?.account ?? null, secret: login?.secret ?? null, thread, model, resume, sandbox, images, config }) + "\n")
 }
@@ -131,6 +137,7 @@ if (process.env.FAKE_CODEX_REFRESH === "1" && login?.kind === "chatgpt") {
 
 const fakeClaude = path.join(path.dirname(fileURLToPath(import.meta.url)), "fake-claude.mjs")
 const claudeArgs = ["-p", "--output-format", "stream-json", "--verbose", ...(resume ? ["--resume", resume] : ["--session-id", thread])]
+if (argv.includes("--fake-stream")) claudeArgs.push("--input-format", "stream-json")
 if (typeof config.developer_instructions === "string") claudeArgs.push("--append-system-prompt", config.developer_instructions)
 if (model) claudeArgs.push("--model", model)
 if (config["mcp_servers.boxyard.url"] || config["mcp_servers.boxyard.command"]) {

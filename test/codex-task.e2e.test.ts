@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto"
 import type { Server } from "node:http"
 import { createBoxYard, type BoxYard } from "../server/app.js"
 import type { Project, Task, TaskMessage } from "../shared/types.js"
-import { codexExecArgs } from "../server/codex.js"
 import { freePort, testConfig, tmpDir, waitFor } from "./helpers.js"
 
 // Task agents on Codex (docs/codex.md), through runner/box-runner.mjs and scripts/fake-codex.mjs: the CLI a task keeps,
@@ -96,7 +95,7 @@ describe("task agents on Codex", () => {
     expect(runs()[2]).toMatchObject({ model: "gpt-6.1-terra", config: { model_reasoning_effort: "ultra" }, resume: runs()[0].thread })
   })
 
-  it("run codex exec with Box Yard's tools, and the next turn resumes the thread Codex named", async () => {
+  it("runs Codex app-server with Box Yard's tools, and the next turn resumes the thread Codex named", async () => {
     const r = await start()
     const p = await r.call<Project>("POST", "/api/projects", { name: "cx", agentCli: "codex" })
     expect(p.agentCli).toBe("codex")
@@ -114,9 +113,8 @@ describe("task agents on Codex", () => {
     expect(first.config["mcp_servers.boxyard.args"]).toEqual([expect.stringMatching(/box-runner\.mjs$/), "mcp", expect.stringContaining(created.id)])
     expect(first.config["mcp_servers.boxyard.default_tools_approval_mode"]).toBe("approve")
     expect(first.config.developer_instructions).toBeTruthy()
-    // The runner keeps its own copy of codexExecArgs (it runs on boxes with plain Node): the two stay the same.
-    const mcp = { command: first.config["mcp_servers.boxyard.command"], args: first.config["mcp_servers.boxyard.args"] }
-    expect(first.args).toEqual(codexExecArgs({ resume: null, model: first.model, effort: first.config.model_reasoning_effort ?? null, instructions: first.config.developer_instructions, mcp, manager: false }))
+    expect(first.args).toContain("--fake-stream")
+    expect(first.config.approval_policy).toBe("never")
     // The task's own Codex home, in its folder, so its sessions move with it.
     const dir = r.yard.tasks.taskDir(done.boxId!, done.id)
     expect(first.home).toBe(path.join(dir, "codex"))

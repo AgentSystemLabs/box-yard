@@ -91,7 +91,7 @@ describe("the model a Cursor run gets", () => {
 
   it("can't be steered, and doesn't run the Coordinator or Captains", () => {
     expect(canSteer("cursor")).toBe(false)
-    expect(canSteer("codex")).toBe(false)
+    expect(canSteer("codex")).toBe(true)
     expect(canSteer("claude")).toBe(true)
     expect(canSteer(null)).toBe(true)
     expect(isManagerCli("cursor")).toBe(false)
