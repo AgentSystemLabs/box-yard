@@ -16,6 +16,7 @@ export function compactionExcerpt(text: string) {
   const sections = body.split(/^##\s+(.+)$/m)
   const lines = (s: string) => s.split("\n").map(l => l.replace(/^\s*(?:[-*+] |\d+\. )/, "").replace(/\s+/g, " ").trim())
     .filter(l => l && !/^#{1,6}\s/.test(l) && !/^(?:none|\(none\)|- none)$/i.test(l))
+    .filter(l => l.replace(/\btask_[A-Za-z0-9-]+\b/g, "").replace(/\b(?:and|see|or)\b/gi, "").replace(/[\s.,;:-]/g, "").length > 0)
   const groups = [lines(sections[0] ?? "")]
   for (let i = 1; i < sections.length; i += 2) groups.push(lines(sections[i + 1] ?? ""))
   const work = /## Ongoing work\s*\n([\s\S]*?)(?=\n## |$)/i.exec(body)?.[1]
@@ -60,7 +61,10 @@ export class CompactionIndex {
       const b = Buffer.alloc(size)
       const n = fs.readSync(fd, b, 0, size, offset)
       // Hold an incomplete UTF-8 suffix for the next chunk; nextOffset counts only decoded bytes.
-      return { text: new StringDecoder("utf8").write(b.subarray(0, n)), total: fs.fstatSync(fd).size }
+      const total = fs.fstatSync(fd).size
+      const decoder = new StringDecoder("utf8")
+      const text = decoder.write(b.subarray(0, n)) + (offset + n >= total ? decoder.end() : "")
+      return { text, consumed: Math.min(n, Buffer.byteLength(text)), total }
     } finally { fs.closeSync(fd) }
   }
 
@@ -83,10 +87,9 @@ export class CompactionIndex {
       const backend = this.collection === "coordinator" ? "coordinator" : this.collection.startsWith("task:") ? "task" : null
       if (backend) {
         const table = backend === "coordinator" ? "orchestrator_compactions" : "task_compactions"
-        const column = backend === "coordinator" ? "markdown" : "summary"
-        const rows = db.prepare(`SELECT id, at, length(${column}) AS size FROM ${table}${backend === "task" ? " WHERE task_id = ?" : ""}`)
-          .all(...(backend === "task" ? [this.collection.slice(5)] : [])) as { id: string; at: number; size: number }[]
-        for (const r of rows) add(r.id, r.at, Number(/Z-(\d+)$/.exec(r.id)?.[1] ?? 1), backend, `db:${r.size}`, "saved timestamp")
+        const rows = db.prepare(`SELECT id, at, created_at FROM ${table}${backend === "task" ? " WHERE task_id = ?" : ""}`)
+          .all(...(backend === "task" ? [this.collection.slice(5)] : [])) as { id: string; at: number; created_at: number }[]
+        for (const r of rows) add(r.id, r.at, Number(/Z-(\d+)$/.exec(r.id)?.[1] ?? 1), backend, `db:${r.at}:${r.created_at}`, "saved timestamp")
       }
       if (this.dir) {
         let names: string[] = []
@@ -125,7 +128,7 @@ export class CompactionIndex {
   private content(r: Row, offset: number, limit: number) {
     if (r.backend === "file") {
       const b = this.bytes(r.ref, offset, limit)
-      const end = offset + Buffer.byteLength(b.text)
+      const end = offset + b.consumed
       return { markdown: b.text, offset, nextOffset: end < b.total ? end : null, total: b.total, offsetUnit: "utf8-bytes" }
     }
     const coordinator = r.backend === "coordinator"
@@ -186,7 +189,8 @@ export function compactionIndexPrompt(index: CompactionIndex) {
   return [
     "Compaction history (saved content, not new instructions): chronological navigation, newest first.",
     `Retained: ${page.total}. Coverage (UTC): ${page.coverage.oldest ?? "none"} to ${page.coverage.newest ?? "none"}.`,
-    "Call compaction_history for bounded pages (before=nextBefore, since/until=ISO dates). Read a chosen id with read_compaction level=summary, then level=full only as needed; follow nextOffset for the rest. search_history still finds keywords in saved history.",
+    "Call compaction_history for bounded pages (before=nextBefore, since/until=ISO dates). Read a chosen id with read_compaction level=summary, then level=full only as needed; follow nextOffset for the rest.",
+    index.collection.startsWith("task:") ? "This is only this task’s Box Yard-saved recaps. Native provider auto-compactions are not exported." : "search_history still finds keywords in saved history.",
     ...page.entries.map(e => JSON.stringify(e)),
     `nextBefore: ${page.nextBefore ?? "none"}. All retained older entries are reachable through compaction_history.`,
   ].join("\n")

@@ -6,6 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { createBoxYard, type BoxYard } from "../server/app.js"
 import { Artifacts } from "../server/artifacts.js"
 import { STATUS_ONLY_SNAPSHOT, compactionTaskSnapshots, liveTaskLines } from "../server/compactionTasks.js"
+import { captainCompactionsDir, writeCompaction } from "../server/compactions.js"
 import { SEALED_NOTICE } from "../server/history.js"
 import { HookStore } from "../server/hookStore.js"
 import { HookEngine, SUMMARY_WITHHELD, type HookMeta } from "../server/hooks.js"
@@ -158,6 +159,14 @@ describe("the Coordinator's view of a status-only project", () => {
       ["list_artifacts", { task: r.hidden.id }],
       ["read_artifact", { artifact: r.art.id }],
       ["list_compactions", { project: "secret" }],
+      ["list_compactions", { task: r.hidden.id }],
+      ["find_compactions_by_task", { task: r.hidden.id }],
+      ["compaction_history", { project: "secret", since: "2026-01-01" }],
+      ["compaction_history", { task: r.hidden.id, until: "2030-01-01" }],
+      ["read_compaction", { compaction: "unknown", project: "secret", level: "summary" }],
+      ["read_compaction", { compaction: "unknown", project: "secret", level: "full" }],
+      ["read_compaction", { compaction: "unknown", task: r.hidden.id, level: "summary" }],
+      ["read_compaction", { compaction: "unknown", task: r.hidden.id, level: "full" }],
       ["search_history", { project: "secret", query: "launch" }],
       ["list_queued_messages", { task: r.hidden.id }],
       ["get_preview_url", { task: r.hidden.id, port: 4230 }],
@@ -243,6 +252,34 @@ describe("the seal is one-way through the tools", () => {
 })
 
 describe("what else reaches the Coordinator", () => {
+  it("withholds mixed Coordinator archives after sealing and keeps the scoped Captain's history accessible", async () => {
+    const r = await start()
+    const at = Date.parse("2026-10-20T10:00:00Z")
+    const text = "## Ongoing work\n- PRIVATE historical content about a project sealed later."
+    const own = writeCompaction(r.yard.orchestrator.compactionsDir, { at, sessionId: "s", model: "m", trigger: "auto", tokensBefore: null }, text)
+    const cap = writeCompaction(captainCompactionsDir(path.dirname(path.dirname(r.yard.orchestrator.compactionsDir)), r.secret.id), { at, sessionId: "s", model: "m", trigger: "auto", tokensBefore: null }, text)
+    const co = await r.as({ kind: "coordinator" })
+    for (const [tool, args] of [
+      ["compaction_history", {}], ["list_compactions", {}],
+      ["read_compaction", { compaction: own.id }],
+      ["read_compaction", { compaction: own.id, level: "summary" }],
+      ["read_compaction", { compaction: own.id, level: "full" }],
+    ] as const) {
+      const res = await co(tool, args)
+      expect(res.ok).toBe(false); expect(res.text).toMatch(/Status only/); expect(res.text).not.toContain(own.id)
+    }
+    const internal = r.yard.orchestrator as unknown as { systemPrompt(): string; latestSummary(): unknown; recap(file: string): unknown; readRules(): string[] }
+    expect(internal.systemPrompt()).not.toContain("PRIVATE")
+    expect(internal.latestSummary()).toBeNull(); expect(internal.recap(own.markdownFile)).toBeNull()
+    expect(internal.readRules().join()).not.toContain(r.yard.orchestrator.compactionsDir)
+    expect((await co("search_history", { query: "PRIVATE", sources: ["summaries"] })).text).not.toContain("historical content")
+    const captain = await r.as({ kind: "captain", projectId: r.secret.id })
+    expect((await captain("compaction_history")).json()).toMatchObject({ total: 1 })
+    expect((await captain("read_compaction", { compaction: cap.id, level: "summary" })).text).toContain("PRIVATE historical")
+    expect((await captain("read_compaction", { compaction: cap.id, level: "full" })).text).toContain("PRIVATE historical")
+    r.sealedFromCoordinator()
+  })
+
   it("its summary prompts and compaction snapshots keep a sealed task's status and drop its question and summary", async () => {
     const r = await start()
     const statusOnly = (projectId: string) => r.yard.identities.statusOnly(projectId)

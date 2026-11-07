@@ -32,6 +32,8 @@ export function workerSystemPrompt(input: {
   agent?: AgentCli
   /** Where the task sits in its sub-task tree (server/subtasks.ts); omitted: a top-level task with the default limits. */
   subtasks?: SubtaskPromptInfo
+  /** Bounded table of contents, kept separate from owner-transformed Box Yard instructions. */
+  compactionHistory?: string
 }): string {
   const { project, task, branch, port } = input
   const cli = AGENT_CLI_LABEL[input.agent ?? "claude"]
@@ -116,7 +118,7 @@ export function workerSystemPrompt(input: {
     `-->`,
   )
   // Only Box Yard's own lines get the owner name; the task title and project description are left as written.
-  return [...header, ...lines.map((l) => withOwner(l, input.ownerName))].filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n")
+  return [...header, ...lines.map((l) => withOwner(l, input.ownerName)), input.compactionHistory ?? ""].filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n")
 }
 
 export interface SubtaskPromptInfo {

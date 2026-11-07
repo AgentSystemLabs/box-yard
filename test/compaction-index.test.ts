@@ -123,7 +123,7 @@ describe("dated compaction catalog", () => {
     expect(page.entries).toHaveLength(20)
     expect(JSON.stringify(page).length).toBeLessThan(10_000)
     expect(read.mock.calls.length).toBe(15)
-    console.log(JSON.stringify({ fixture: "500 entries, ~28MB originals", initialChars: initial.length, pageChars: JSON.stringify(page).length, coldMs: Math.round(coldMs), warmMs: Math.round(warmMs), warmContentReads: 0 }))
+    process.stdout.write(JSON.stringify({ fixture: "500 entries, ~28MB originals", initialChars: initial.length, pageChars: JSON.stringify(page).length, coldMs: Math.round(coldMs), warmMs: Math.round(warmMs), warmContentReads: 0 }) + "\n")
   })
 
   it("derives excerpts from prose and handles empty/legacy headings without invented topics", () => {
