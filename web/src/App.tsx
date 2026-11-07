@@ -33,8 +33,9 @@ import { toast } from "./lib/toast"
 import { useChatHistory } from "./lib/treeNav"
 import { Sidebar, useStrayTreeClicks } from "./components/Sidebar"
 import { SidebarPane } from "./components/SidebarPane"
-import { Modal } from "./components/Modal"
+import { Modal, isDialogOpen } from "./components/Modal"
 import { SIDEBAR_INLINE, SIDEBAR_WIDE, closeSidebarDrawer, openSidebarDrawer, setSidebarCollapsed, useMinWidth, useSidebarCollapsed, useSidebarDrawer } from "./lib/sidebar"
+import { FOCUS_SIDEBAR, focusSidebar, isChatComposer } from "./lib/sidebarFocus"
 
 export function App() {
   const me = useMe()
@@ -103,6 +104,31 @@ export function App() {
     if (collapsed) setSidebarCollapsed(false)
     if (crowded) openSidebarDrawer()
   }
+
+  useEffect(() => {
+    if (!authed) return
+    // Phones unmount the sidebar until its drawer opens. Accept focus requests here too, including those from
+    // inline task panels, then let the mounted tree focus its current row on the next frame.
+    const take = (e: Event) => {
+      if (inlineSidebar || drawer || e.defaultPrevented || isDialogOpen() || !(e as CustomEvent<{ expand: boolean }>).detail.expand) return
+      e.preventDefault()
+      openSidebarDrawer()
+      requestAnimationFrame(() => focusSidebar(false))
+    }
+    // Window runs after document-level composer pickers and popovers. Panels handle their own Escape after
+    // modal steps; covering dialogs keep it. Returning focus never opens a different conversation.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isDialogOpen() || !isChatComposer(e.target)) return
+      if ((e.target as Element).closest("[role=dialog]")) return
+      if (focusSidebar()) e.preventDefault()
+    }
+    window.addEventListener(FOCUS_SIDEBAR, take)
+    window.addEventListener("keydown", escape)
+    return () => {
+      window.removeEventListener(FOCUS_SIDEBAR, take)
+      window.removeEventListener("keydown", escape)
+    }
+  }, [authed, inlineSidebar, drawer])
 
   useEffect(() => {
     const onUnauthorized = () => void qc.invalidateQueries({ queryKey: keys.me })

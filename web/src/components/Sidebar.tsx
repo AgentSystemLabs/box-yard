@@ -55,7 +55,7 @@ import {
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
-import { FOCUS_SIDEBAR, focusSidebar, isChatComposer } from "../lib/sidebarFocus"
+import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { SidebarDeleteRow } from "./SidebarDeleteRow"
 import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
@@ -396,18 +396,9 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         requestAnimationFrame(() => focusSidebar(false))
       }
     }
-    // Window runs after the composer's pickers and document-level popovers. Inline panels handle their own Escape
-    // after modal steps; covering dialogs always keep it. Returning focus never opens a different conversation.
-    const escape = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isDialogOpen() || !isChatComposer(e.target)) return
-      if ((e.target as Element).closest("[role=dialog]")) return
-      if (focusSidebar()) e.preventDefault()
-    }
     window.addEventListener(FOCUS_SIDEBAR, take)
-    window.addEventListener("keydown", escape)
     return () => {
       window.removeEventListener(FOCUS_SIDEBAR, take)
-      window.removeEventListener("keydown", escape)
     }
   }, [focusCurrent, rail, drawer, onExpand])
 
