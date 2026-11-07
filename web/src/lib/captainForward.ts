@@ -1,7 +1,7 @@
 // Sending a task-chat message to the project's Captain instead of the task's agent (POST /api/tasks/:id/captain).
 // The agent can't split, reprioritise or start tasks, and a busy one reads a queued message only when its turn ends;
-// the Captain can, now. The composer offers it on every task, and while the task is busy or has queued messages it
-// suggests it when a draft reads like task management. It never reroutes on its own: Cody taps to send there.
+// the Captain can, now. The composer always offers it; while the task is busy or has queued messages, it suggests it if a
+// draft reads like task management. It never reroutes on its own: Cody taps to send there.
 import type { Task } from "../../../shared/types"
 
 /**
