@@ -3804,7 +3804,7 @@ export class TaskManager {
 
   /** A task that waits for a turn: queued, or resting with queued messages or a compaction to run. */
   private wantsTurn(r: TaskRow): boolean {
-    if (r.current_turn_id || r.status === "starting" || r.status === "working" || this.store.hasUncertainCodexInput(r.id)) return false
+    if (this.store.taskDeletionPending(r.id, r.project_id) || r.current_turn_id || r.status === "starting" || r.status === "working" || this.store.hasUncertainCodexInput(r.id)) return false
     // Waiting on its sub-tasks: their reports queue up until the last one (or one that fails or asks) wakes it.
     if (r.status === "waiting" && this.liveSubtasks(r.id).length) return false
     return r.status === "queued" || (r.status !== "failed" && (Boolean(r.compact_pending) || this.store.hasInputs(r.id)))
