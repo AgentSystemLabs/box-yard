@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { useAgentSettings, useDeleteTask, useIdentities, useReopenTask, useRetryTask, useSetStayOpenOnMerge, useStopTask } from "../lib/queries"
+import { ContinueTask } from "./ContinueTask"
 import { api } from "../lib/api"
 import { primaryAction, readyForReview } from "../lib/taskActions"
 import { toast } from "../lib/toast"
@@ -587,6 +588,7 @@ function TaskMenu({
               {primary === "retry" && <button type="button" className={menuItem} onClick={() => { retry.mutate(task.id); setOpen(false) }}>
                 <RefreshCcw className="h-3.5 w-3.5 text-zinc-500" /> Retry task
               </button>}
+              <ContinueTask task={task} className="justify-start" />
               {task.status !== "done" && (
                 <button
                   type="button"

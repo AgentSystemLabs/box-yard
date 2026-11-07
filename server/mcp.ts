@@ -44,6 +44,7 @@ import { NO_PICKS, type RunTargetPick, type TurnPicks } from "../shared/runTarge
 import { KEY_REF_HELP, labelPhrase, MACHINE_LIMITS, resolveRunsOn, THIS_COMPUTER, type MachineKeyRef, type MachineStatus } from "../shared/machines.js"
 import type { MachineActions } from "./machines/actions.js"
 import { AGENT_CLI_LABEL, AGENT_CLIS, cliForModel, type AgentCli } from "../shared/agentCli.js"
+import type { TaskContinuation } from "../shared/taskContinuation.js"
 import { TASK_PRIORITIES, byQueueOrder, type TaskPriority } from "../shared/priority.js"
 import fs from "node:fs"
 import type { Artifact, CompactionTaskSnapshot, OrchestratorCompactionRecord } from "../shared/types.js"
@@ -200,7 +201,7 @@ const machineLabelBase = z.string().max(MACHINE_LIMITS.labelLength).optional()
 const machineLabelSchema = machineLabelBase.describe('An SSH machine label or name, e.g. "gpu" (list_machines lists them); alone it means runs_on "ssh" (Task options)')
 const envSchema = z.record(z.string(), z.string()).optional().describe("Env vars as NAME: value")
 const agentBase = z.enum(AGENT_CLIS).optional()
-const agentSchema = agentBase.describe('"claude", "codex" or "cursor", for good; omit it to follow the project\'s Agent (Task options)')
+const agentSchema = agentBase.describe('"claude", "codex" or "cursor"; omit it to follow the project\'s Agent (Task options)')
 const iconSchema = z
   .enum(TASK_ICONS)
   .optional()
@@ -509,7 +510,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     runsOn: t.runsOn ?? undefined,
     priority: t.priority === "high" ? t.priority : undefined,
     turns: t.turnCount,
-    // The CLI it runs on for good, fixed when it was created (an asked-for agent, its model's CLI, its project's
+    // The saved CLI (explicit idle continuation can change it), selected when it was created (an asked-for agent, its model's CLI, its project's
     // Agent, else Settings › Box agents). Not content, so status-only briefs keep it.
     agent: t.agentCli,
     model: t.model ?? undefined,
@@ -588,10 +589,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       return "queued: the agent is mid-turn; the message is delivered (with any others) as soon as this turn ends, in the same session"
     if (t.status === "queued") return "queued: the task is waiting for a box slot; the message goes out with its next turn"
     const mode = tasks.resumeMode(t.id)
-    if (mode === "box") return `resuming: the agent's Claude session resumes now on box ${t.boxId} with full context`
-    if (mode === "archive") return "resuming: the workspace and Claude session are restored from the archive onto a box, then the session resumes with full context"
+    if (mode === "handoff") return "continuing on the selected harness: its existing workspace must be available or restored successfully, then a new CLI session starts with a bounded recap and the queued messages"
+    if (mode === "box") return `resuming: the agent's ${AGENT_CLI_LABEL[t.agentCli]} session resumes now on box ${t.boxId} with full context`
+    if (mode === "archive") return `resuming: the workspace and ${AGENT_CLI_LABEL[t.agentCli]} session are restored from the archive onto a box, then the session resumes with full context`
     if (mode === "recap")
-      return `resuming from a recap: this task's workspace archive has expired, so its old Claude session and uncommitted work are gone. A new session starts on a fresh checkout of ${t.branch ? `branch ${t.branch} (or the base branch if it was deleted)` : "the project"} with a recap of the task's summary, PR and recent messages. ${owner("Tell Cody if that matters")}`
+      return `resuming from a recap: this task's workspace archive has expired, so its old CLI session and uncommitted work are gone. A new session starts on a fresh checkout of ${t.branch ? `branch ${t.branch} (or the base branch if it was deleted)` : "the project"} with a recap of the task's summary, PR and recent messages. ${owner("Tell Cody if that matters")}`
     return "starting: the agent's first turn starts as soon as a box slot is free"
   }
   const notes =
@@ -749,7 +751,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     repo: p.repo,
     baseBranch: p.baseBranch,
     envKeys: p.envKeys,
-    // The CLI its new tasks run on (its own, else Settings › Box agents'); each task keeps the one it started on.
+    // The CLI its new tasks run on (its own, else Settings › Box agents'); existing tasks keep their saved choice unless explicitly continued on another harness.
     agent: p.agentCli ?? `${(deps.settings?.get() ?? DEFAULT_SETTINGS).agentCli} (Settings)`,
     boxSettings: tasks.projectBoxSettings(p),
     // Its GPU cloud, pods and $/hr caps, when it runs on GPU.
@@ -1481,13 +1483,13 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       const before = task(a.task)
       const pin = picked(a.runs_on, a.machine_label)
       const where = placementOf(pin.runsOn, pin.machineLabel)
-      // A task keeps its agent for good: Cody's "!" pick for this prompt doesn't switch it, and the reply says so.
+      // Sending/steering cannot replace the CLI of a live task. Continuation is an explicit idle operation.
       const agentPick = picksNow().agent
       const keeps =
         agentPick && agentPick.value !== before.agentCli
           ? {
               agent_pick: owner(
-                `This task runs on ${AGENT_CLI_LABEL[before.agentCli]} and keeps it for good, so Cody's !${agentPick.token} pick for this prompt doesn't switch it. If this work must run on ${agentPick.label}, create a new task for it.`,
+                `This task runs on ${AGENT_CLI_LABEL[before.agentCli]}; send_to_task does not change its harness. To continue this same work on Cody's !${agentPick.token} choice, wait for it to stop, then use continue_task with agent \"${agentPick.value}\". Do not create a replacement task.`,
               ),
             }
           : {}
@@ -1754,8 +1756,23 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   )
 
   server.registerTool(
+    "continue_task",
+    {
+      description: "Continue an idle, failed or PR-ready task, optionally on another harness after a usage/token limit. Keeps the SAME task id, runner, branch/PR, workspace/archive, attachments, transcript and queued messages. Busy tasks must stop and finish saving first. A harness change starts a new CLI session with a bounded recap and clears old model/effort/routing pins. Omit agent to retain its harness; agent default resolves the project's current default then Settings once and resets pins. Defaults changes alone never migrate existing tasks. Do not create replacements for harness limits. Picks on this chat do not implicitly switch this task: pass agent explicitly.",
+      inputSchema: {
+        task: z.string(),
+        agent: z.enum([...AGENT_CLIS, "default"]).optional(),
+        model: z.string().trim().min(1).max(100).nullable().optional().describe("Compatible model for subsequent turns; null clears the pin. Omit on a harness switch to use its defaults/routing."),
+        effort: z.enum([...EFFORTS, "ultra"]).nullable().optional().describe("Effort pin for subsequent turns; null clears it. Cursor carries effort in its model id."),
+        message: z.string().trim().min(1).max(50_000).optional().describe("Optional continuation instructions; existing queued messages are kept too."),
+      },
+    },
+    safe(async (a: TaskContinuation & { task: string }) => ok(brief(await tasks.continueTask(task(a.task).id, a, inputSource)))),
+  )
+
+  server.registerTool(
     "retry_task",
-    { description: "Retry a failed task.", inputSchema: { task: z.string() } },
+    { description: "Retry a failed task on its saved harness. Use continue_task with agent to continue this same task on another harness after a limit; changing defaults does not switch it.", inputSchema: { task: z.string() } },
     safe(async (a: { task: string }) => ok(brief(tasks.retryTask(task(a.task).id)))),
   )
 

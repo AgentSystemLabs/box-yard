@@ -7,7 +7,7 @@ Box Yard's task agents can run on [Cursor's CLI](https://cursor.com/docs/cli/ove
 | A project's task agents | Project › Settings › Agent (or Settings › Box agents › Agent for every project that doesn't pick one) |
 | One task | `agent: "cursor"` on `create_task` / `create_tasks`, `!cursor` in the composer, or a model only Cursor runs (`auto`, `composer-…`, `gemini-…`, `grok-…`, `kimi-…`, `glm-…`, `deepseek-…`), which picks Cursor on its own |
 
-A task keeps the agent it started on, so changing a project's Agent only changes its new tasks.
+Changing a project's Agent or Settings' default only changes new tasks. To switch existing work explicitly, use **Continue with…** on a resting task or `continue_task {task, agent: "codex"}` (choose `claude` or `cursor` as needed). This keeps the same task and workspace; see [continuing tasks](task-continuation.md).
 
 The Coordinator and the Captains don't run on Cursor. A manager acts only through Box Yard's tools: it has no shell and no file reads, so it can't read a status-only project's data. `cursor-agent` has no way to turn its built-in tools off. Settings › Coordinator still offers only Claude Code and Codex.
 

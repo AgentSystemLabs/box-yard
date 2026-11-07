@@ -8,6 +8,7 @@ import { useIdentities, useRetryTask } from "../lib/queries"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
 import { useOpenSettings } from "./SettingsHost"
+import { ContinueTask } from "./ContinueTask"
 import { Button, COPIED_MS, LineIcon, LinkedText, cx, useMinuteClock } from "./ui"
 
 const ICON: Record<FailureKind, LucideIcon> = {
@@ -66,6 +67,7 @@ function FailureBanner({ task, error, identityId, className }: { task: FailedTas
             <Button size="sm" variant={f.fixFirst || f.waitFirst ? "subtle" : "primary"} loading={retry.isPending} onClick={() => retry.mutate(task.id)} data-testid="failure-retry">
               {!retry.isPending && <RefreshCcw className="h-3.5 w-3.5" aria-hidden />} {f.waitFirst ? "Retry now" : "Retry"}
             </Button>
+            <ContinueTask task={task} />
             {!f.fixFirst && settings}
             {more && (
               <Button size="sm" variant="ghost" aria-expanded={open} aria-controls={rawId} onClick={() => setOpen((o) => !o)} className="text-red-200/70 hover:text-red-100" data-testid="failure-details">

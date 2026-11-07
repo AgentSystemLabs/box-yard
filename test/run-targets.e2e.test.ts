@@ -267,7 +267,7 @@ describe('chat "@" pick on the task tools', () => {
     expect(r.yard.store.getTask(claudeTask.id)?.agentCli).toBe("claude")
     const sent = await tool("send_to_task", { task: claudeTask.id, message: "carry on" })
     expect(r.yard.store.getTask(claudeTask.id)?.agentCli).toBe("claude")
-    expect(sent.agent_pick).toMatch(/runs on Claude Code and keeps it for good.*create a new task/)
+    expect(sent.agent_pick).toMatch(/runs on Claude Code.*continue_task.*Do not create a replacement task/)
   })
 
   it("writes explicit model/effort picks into individual and batched tasks, while plain picks retain Settings defaults", async () => {

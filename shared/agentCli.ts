@@ -1,6 +1,6 @@
 // Which coding agent CLI runs a Box Yard agent: Claude Code (the default), OpenAI's Codex or Cursor's CLI. The
 // Coordinator and the Captains pick Claude Code or Codex (Settings › Coordinator); each project's task agents pick any
-// of the three (Settings › Box agents, a project's Agent setting); a task keeps the one it started on (docs/codex.md,
+// of the three (Settings › Box agents, a project's Agent setting); explicit idle continuation can change it (docs/codex.md,
 // docs/cursor.md).
 import { EFFORTS } from "./types.js"
 
@@ -59,7 +59,7 @@ export function cliForModel(model: string | null | undefined): AgentCli | null {
  * else the Codex model setting. An explicitly saved empty setting keeps the CLI's own default.
  */
 export function codexModel(chosen: string | null | undefined, setting: string | null | undefined): string | null {
-  if (chosen && !isClaudeModel(chosen)) return chosen.trim()
+  if (chosen && !isClaudeModel(chosen) && !isCursorOnlyModel(chosen)) return chosen.trim()
   return setting == null ? DEFAULT_CODEX_MODEL : setting.trim() || null
 }
 

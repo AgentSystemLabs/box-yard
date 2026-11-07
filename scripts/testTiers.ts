@@ -127,6 +127,8 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/slot-limit.e2e.test.ts": "End-to-end runner/server integration",
   "test/steer.e2e.test.ts": "End-to-end runner/server integration",
   "test/subtasks.e2e.test.ts": "End-to-end runner/server integration",
+  "test/task-continuation.test.ts": "Full Box Yard server/task-manager/MCP fixture",
+  "test/task-continuation.e2e.test.ts": "Real CLI/workspace/archive continuation integration",
   "test/task-shutdown.test.ts": "Full Box Yard server/task-manager fixture",
   "test/teardown.e2e.test.ts": "End-to-end runner/server integration",
   "test/test-related.test.ts": "Real Git repositories/configuration or archive/bundle operations",
