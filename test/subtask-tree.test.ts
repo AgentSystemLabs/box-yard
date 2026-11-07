@@ -170,7 +170,7 @@ describe("the sidebar's sub-task tree", () => {
     // Each node has a status dot, the title over its status, and leaves have no chevron.
     expect(open(PANS).textContent).toContain("Pans and heat")
     expect(open(PANS).querySelector(".rounded-full")).not.toBeNull()
-    expect(node(PANS)!.querySelector("button[aria-expanded]")).toBeNull()
+    expect(chevron(PANS)).toBeNull()
 
     const top = chevron(OMELETTE)
     expect(top.getAttribute("aria-expanded")).toBe("true")
@@ -276,8 +276,11 @@ describe("the sidebar's sub-task tree", () => {
     await settle()
     const tree = document.querySelector<HTMLElement>("[data-testid=rail-tree]")!
     const french = tree.querySelector<HTMLElement>(`[data-open-task=${FRENCH.id}]`)!
-    // The row's box moves in, so its fill and selected bar start at its level.
-    expect(french.parentElement!.style.getPropertyValue("--rail-indent")).toBe("calc(2 * var(--tree-step))")
+    // The outer row's box moves in, so its fill and selected bar start at its level;
+    // its inner swipe surface moves independently to reveal actions.
+    const row = french.closest<HTMLElement>("[aria-keyshortcuts='Shift+F10']")!
+    expect(row.style.getPropertyValue("--rail-indent")).toBe("calc(2 * var(--tree-step))")
+    expect(row.className).toContain("ml-[min(var(--rail-indent,0rem),max(0rem,calc(100cqw-12rem)))]")
     expect(french.className).not.toContain("--nest")
     expect(tree.querySelector("[class*='[--nest:'], [style*='--nest']")).toBeNull()
   })
@@ -334,7 +337,7 @@ describe("a sub-task tree five and more levels deep", () => {
       // A chevron on its parent's guide for every row with sub-tasks, at every level.
       if (t !== L6) expect(chevron(t).className).toContain("left-[17px]")
     })
-    expect(node(L6)!.querySelector("button[aria-expanded]")).toBeNull()
+    expect(chevron(L6)).toBeNull()
     expect(node(L3B)!.parentElement).toBe(node(L3)!.parentElement)
     expect(nestAt(1)).toContain("min(1, var(--tree-full))")
     // The steps the sidebar's width sets on its project's list (container queries).
@@ -477,10 +480,10 @@ describe("a double click on a tree row with sub-tasks folds or unfolds its tree"
     doubleClick(open(PANS), 1000)
     await settle()
     expect(location.search).toBe(`?session=${PANS.id}`)
-    expect(node(PANS)!.querySelector("button[aria-expanded]")).toBeNull()
+    expect(chevron(PANS)).toBeNull()
     const plain = project().querySelector(`[data-open-task=${OTHER.id}]`)!
     doubleClick(plain, 2000)
-    expect(project().querySelectorAll("button[aria-expanded=false]")).toHaveLength(0)
+    expect(project().querySelectorAll("[data-tree-toggle][aria-expanded=false]")).toHaveLength(0)
     expect(node(FRENCH)).not.toBeNull()
     // Once a sub-task starts under it, its tree shows open: the double click didn't fold it ahead of time.
     act(() => void qc.setQueryData(keys.tasks, [...TASKS, task("task_wokpan", "Carbon steel or nonstick", "working", PANS)]))
