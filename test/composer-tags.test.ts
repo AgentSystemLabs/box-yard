@@ -36,8 +36,8 @@ const tagged = (text: string, lists: Parameters<typeof tagsIn>[1] = LISTS) => ta
 
 describe("tagsIn", () => {
   it("finds each kind's tags in order, without the punctuation after them", () => {
-    expect(tagged("ship #box-yard on @box with !codex.")).toEqual([
-      ["project", "#box-yard"],
+    expect(tagged("ship %box-yard on @box with !codex.")).toEqual([
+      ["project", "%box-yard"],
       ["runsOn", "@box"],
       ["agent", "!codex"],
     ])
@@ -62,9 +62,9 @@ describe("tagsIn", () => {
     expect(tagged("mail me@box, great!codex, try @nowhere or !gpt, # Plan, see #123, C#")).toEqual([])
   })
 
-  it("has no tags of a kind without a list: a Captain's #, or a list still loading", () => {
-    expect(tagged("#box-yard on @box", { runsOn: PLACES })).toEqual([["runsOn", "@box"]])
-    expect(tagged("#box-yard on @box !codex", {})).toEqual([])
+  it("has no tags of a kind without a list: a Captain's %, or a list still loading", () => {
+    expect(tagged("%box-yard on @box", { runsOn: PLACES })).toEqual([["runsOn", "@box"]])
+    expect(tagged("%box-yard on @box !codex", {})).toEqual([])
   })
 
   it("counts a greyed-out target: the composer warns about it rather than dropping it", () => {
@@ -122,16 +122,16 @@ describe("tagParts and tagLines", () => {
   })
 
   it("draws a tag whose colour isn't known yet as plain text", () => {
-    const el = draw("for #box-yard on @box")
+    const el = draw("for %box-yard on @box")
     expect([...el.querySelectorAll("span")].map((s) => s.textContent)).toEqual(["@box"])
-    expect(el.textContent).toBe("for #box-yard on @box")
+    expect(el.textContent).toBe("for %box-yard on @box")
   })
 
   it("splits the text into lines, each tag counted from its line's start", () => {
-    const text = "#box-yard\n\non @box with !codex\n"
+    const text = "%box-yard\n\non @box with !codex\n"
     const lines = tagLines(text, tagsIn(text, LISTS))
     expect(lines.map((l) => [l.text, l.tags.map((t) => [t.kind, l.text.slice(t.start, t.end)])])).toEqual([
-      ["#box-yard", [["project", "#box-yard"]]],
+      ["%box-yard", [["project", "%box-yard"]]],
       ["", []],
       ["on @box with !codex", [["runsOn", "@box"], ["agent", "!codex"]]],
       ["", []],
@@ -209,13 +209,13 @@ describe("Composer tags", () => {
   const lines = () => [...layer()!.children].map((l) => l.textContent)
   const linesOf = (text: string) => text.split("\n").map((l) => l || "\u200b")
 
-  it("in the Coordinator's chat: #project in its project's colour, @runner and !harness in theirs, unknown words plain", async () => {
+  it("in the Coordinator's chat: %project in its project's colour, @runner and !harness in theirs, unknown words plain", async () => {
     await mount(true)
-    await type("ship #box-yard and #mobile on @box with !codex, not @nowhere")
+    await type("ship %box-yard and %mobile on @box with !codex, not @nowhere")
     const mobile = PROJECT_COLOR_HEX[projectColors(PROJECTS).get("prj_mobile")!]
     expect(tags()).toEqual([
-      ["project", "#box-yard", PROJECT_COLOR_HEX.rose],
-      ["project", "#mobile", mobile],
+      ["project", "%box-yard", PROJECT_COLOR_HEX.rose],
+      ["project", "%mobile", mobile],
       ["runsOn", "@box", TAG_COLOR.runsOn],
       ["agent", "!codex", TAG_COLOR.agent],
     ])
@@ -242,16 +242,16 @@ describe("Composer tags", () => {
     expect(transparent()).toBe(false)
   })
 
-  it("in a Captain's chat, # is plain text: it isn't a pick there", async () => {
+  it("in a Captain's chat, % is plain text: it isn't a pick there", async () => {
     await mount(true, "prj_mobile")
-    await type("#box-yard on @box")
+    await type("%box-yard on @box")
     expect(tags()).toEqual([["runsOn", "@box", TAG_COLOR.runsOn]])
-    expect(lines()).toEqual(["#box-yard on @box"])
+    expect(lines()).toEqual(["%box-yard on @box"])
   })
 
   it("does nothing in a task's chat", async () => {
     await mount(false)
-    await type("#box-yard on @box with !codex")
+    await type("%box-yard on @box with !codex")
     expect(layer()).toBeNull()
     expect(transparent()).toBe(false)
   })

@@ -6,7 +6,7 @@
 // pick from the same lists. A pick goes with the message as meta.runsOn / meta.agent (a RunTargetPick), the turn's
 // prompt says so, and the task tools take it as their runs_on / agent for that turn (server/mcp.ts). A runs_on pick's
 // `value` is a runs_on as the task tools take it (resolveRunsOn); an agent pick's is "claude", "codex" or "cursor".
-// In the Coordinator's chat only, "#" picks the project the message is about (`#box-yard`): it goes as meta.project and
+// In the Coordinator's chat only, "%" picks the project the message is about (`%box-yard`): it goes as meta.project and
 // the turn's prompt tells the Coordinator to route the message to that project's Captain (server/runTargets.ts).
 // Only the whole message's picks go that way. One typed for part of it (inside one item of a list of tasks, or one
 // that disagrees with another) goes as meta.inlinePicks: the prompt lists it with where it is, and nothing applies it
@@ -30,10 +30,10 @@ export type PickKind = "runsOn" | "agent"
 export const PICK_KINDS: readonly PickKind[] = ["runsOn", "agent"]
 /** What starts a pick in the text. Only at the start of a word, so "great!" and "me@host" never open a list. */
 export const PICK_TRIGGER: Record<PickKind, "@" | "!"> = { runsOn: "@", agent: "!" }
-/** The Coordinator chat's project pick ("#box-yard"). Same rule: only at the start of a word, so "##" and "a#b" never open it. */
-export const PROJECT_TRIGGER = "#"
+/** The Coordinator chat's project pick ("%box-yard"). Same rule: only at the start of a word, so "%%" and "a%b" never open it. */
+export const PROJECT_TRIGGER = "%"
 /** Any of the chat's pick triggers. */
-export type PickTrigger = "@" | "!" | "#"
+export type PickTrigger = "@" | "!" | "%"
 /** A tag a chat's draft can hold: where its tasks run, their harness, or (the Coordinator's) the project it's for. */
 export type TagKind = PickKind | "project"
 /** What starts each kind of tag. */
@@ -240,14 +240,14 @@ export const findRunTarget = (targets: RunTarget[], value: string): RunTarget | 
 
 export const pickOf = (t: RunTarget): RunTargetPick => ({ value: t.value, token: t.token, label: t.label, ...(t.model !== undefined ? { model: t.model } : {}), ...(t.effort ? { effort: t.effort } : {}) })
 
-/** A project's "#" token: its name in lowercase, with anything a token can't hold (spaces, slashes) as "-". */
+/** A project's "%" token: its name in lowercase, with anything a token can't hold (spaces, slashes) as "-". */
 export const projectToken = (name: string) =>
   name
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "project"
 
-/** The Coordinator chat's "#" list: Cody's projects in their saved order. Its `value` is the project id. */
+/** The Coordinator chat's "%" list: Cody's projects in their saved order. Its `value` is the project id. */
 export function buildProjectTargets(projects: { id: string; name: string; repo?: string | null }[]): RunTarget[] {
   return projects.map((p) => ({ token: projectToken(p.name), value: p.id, kind: "project", label: p.name, detail: p.repo || null, disabled: null }))
 }
@@ -287,7 +287,7 @@ export const turnPicks = (metas: (Record<string, unknown> | null | undefined)[])
 
 // ---- inline picks: ones typed for one part of a message, which Box Yard passes on as hints and never applies
 
-/** Any pick a message can name: where ("@"), which harness ("!"), and the Coordinator's project ("#"). */
+/** Any pick a message can name: where ("@"), which harness ("!"), and the Coordinator's project ("%"). */
 export type MessagePickKind = PickKind | "project"
 
 /**
@@ -466,7 +466,7 @@ export function scopePicks(text: string, placed: PlacedPick[]): MessagePicks {
 export function itemExcerpt(text: string, item: ListItem, max = 48): string {
   const first = text.slice(item.start, item.end).split("\n")[0]!.replace(ITEM_MARK, "")
   const words = first
-    .replace(/(^|\s)[@!#](?:[A-Za-z0-9._:%-]|\[[A-Za-z0-9]+\])+/g, "$1")
+    .replace(/(^|\s)[@!%](?:[A-Za-z0-9._:%-]|\[[A-Za-z0-9]+\])+/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/ ([,.;:!?])/g, "$1")
     .trim()
@@ -490,12 +490,12 @@ export function inlinePicksFrom(text: string, scoped: MessagePicks): InlinePick[
 const TOKEN_CHARS = /[A-Za-z0-9._:%\[\]-]/
 
 /**
- * The "@word" ("!word", "#word") the caret is in or right after, when it starts a word: what the list filters by.
- * A word starts at the start of the text, after whitespace or after ( [ " '; so "great!", "me@host", "##" and "a#b" don't.
+ * The "@word" ("!word", "%word") the caret is in or right after, when it starts a word: what the list filters by.
+ * A word starts at the start of the text, after whitespace or after ( [ " '; so "great!", "me@host", "%%" and "a%b" don't.
  */
 export function mentionAt(text: string, caret: number, trigger: PickTrigger = "@"): { start: number; end: number; query: string } | null {
   let i = caret
-  while (i > 0 && TOKEN_CHARS.test(text[i - 1]!)) i--
+  while (i > 0 && text[i - 1] !== trigger && TOKEN_CHARS.test(text[i - 1]!)) i--
   if (i === 0 || text[i - 1] !== trigger) return null
   const at = i - 1
   if (at > 0 && !/[\s(["']/.test(text[at - 1]!)) return null
@@ -506,7 +506,7 @@ export function mentionAt(text: string, caret: number, trigger: PickTrigger = "@
 
 /**
  * The list filtered by what's typed after "@": tokens that start with it first, then any that contain it. `fuzzy`
- * (the "#" list of projects) then adds names that hold its letters in order ("bxy" finds box-yard), closest first.
+ * (the "%" list of projects) then adds names that hold its letters in order ("bxy" finds box-yard), closest first.
  * A GPU's row (`under` its cloud's) shows once its cloud's token is typed ("@gpu:daytona"), or its GPU's own name
  * ("@h100", "@rtx").
  */
@@ -573,7 +573,7 @@ export const drillsInto = (t: RunTarget, all: RunTarget[], query: string) => {
   return q !== t.token && !q.startsWith(`${t.token}:`) && all.some((x) => x.under === t.token)
 }
 
-/** Every "@word" ("!word", "#word") in `text` that names a target of `targets`, in order, where it is. */
+/** Every "@word" ("!word", "%word") in `text` that names a target of `targets`, in order, where it is. */
 export function tokensIn(text: string, targets: RunTarget[], trigger: PickTrigger, disabledToo = false): { target: RunTarget; start: number; end: number }[] {
   const byToken = new Map(targets.filter((t) => disabledToo || !t.disabled).flatMap((t) => [t.token, ...(t.aliases ?? [])].map((token) => [token, t] as const)))
   const out: { target: RunTarget; start: number; end: number }[] = []
@@ -589,7 +589,7 @@ export function tokensIn(text: string, targets: RunTarget[], trigger: PickTrigge
   return out
 }
 
-/** A tag in a draft: a "#project", "@runner" or "!harness" word that names a target of its kind's list, and where it is. */
+/** A tag in a draft: a "%project", "@runner" or "!harness" word that names a target of its kind's list, and where it is. */
 export interface TextTag {
   kind: TagKind
   target: RunTarget
@@ -600,7 +600,7 @@ export interface TextTag {
 }
 
 /**
- * Every tag in `text`, in order: the composer colours them (ComposerTags.tsx). A kind without a list (a Captain's "#",
+ * Every tag in `text`, in order: the composer colours them (ComposerTags.tsx). A kind without a list (a Captain's "%",
  * a list still loading) has none, so its words stay plain, as does a word no list names. Greyed-out targets count:
  * the composer warns about them rather than dropping them. Words are read by tokensIn, as the picks and the send read
  * them, so a new form (a new row in a list, or a new way tokensIn reads a word) is coloured once it can be picked.

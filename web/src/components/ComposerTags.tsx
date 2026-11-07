@@ -1,4 +1,4 @@
-// The tags in a chat's draft in colour: a "#project" in its project's colour, an "@runner" and a "!harness" each in
+// The tags in a chat's draft in colour: a "%project" in its project's colour, an "@runner" and a "!harness" each in
 // their own (which words are tags: shared/runTargets.ts tagsIn). The textarea stays the real input, so the caret,
 // selection, IME, undo, autocorrect and scrolling are all its own: while the draft holds a tag, the Composer makes its
 // text transparent and this layer under it draws the same text in the same box, tags tinted. Nothing here may change
