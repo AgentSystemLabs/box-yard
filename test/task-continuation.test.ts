@@ -48,6 +48,13 @@ describe("same-task harness continuation", () => {
     expect(y.store.listTaskRows()).toHaveLength(1)
   })
 
+  it("can switch a task whose first turn never started without pretending it had a workspace to recover", async () => {
+    const { y, task } = setup()
+    y.store.updateTask(task.id, { turnCount: 0, sessionStarted: false, archivePath: null, boxId: "example-box" })
+    await y.tasks.continueTask(task.id, { agent: "codex" })
+    expect(JSON.parse(y.store.getKv(harnessHandoffKey(task.id))!)).toMatchObject({ needsWorkspace: false })
+  })
+
   it("keeps saved choices on ordinary retry/continuation and resolves an explicit default once", async () => {
     const { y, project, task } = setup()
     y.settings.update({ agentCli: "codex" })

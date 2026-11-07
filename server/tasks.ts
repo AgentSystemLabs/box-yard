@@ -1896,7 +1896,7 @@ export class TaskManager {
     this.store.db.transaction(() => {
       if (switched) {
         const pending = this.handoff(row.id)
-        this.store.setKv(harnessHandoffKey(row.id), JSON.stringify({ from: pending?.from ?? taskAgentCli(row), to: agent, needsWorkspace: Boolean(row.session_started || row.turn_count || row.box_id || row.archive_path || pending?.needsWorkspace) } satisfies HarnessHandoff))
+        this.store.setKv(harnessHandoffKey(row.id), JSON.stringify({ from: pending?.from ?? taskAgentCli(row), to: agent, needsWorkspace: Boolean(row.session_started || row.turn_count || row.archive_path || pending?.needsWorkspace) } satisfies HarnessHandoff))
       }
       this.store.updateTask(row.id, {
         agentCli: agent,
