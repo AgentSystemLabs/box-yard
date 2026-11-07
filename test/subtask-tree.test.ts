@@ -136,8 +136,12 @@ beforeEach(() => {
   root = createRoot(host)
 })
 
-afterEach(() => {
-  act(() => root.unmount())
+afterEach(async () => {
+  await act(async () => {
+    root.unmount()
+    // Deferred availability queries must reach the stub before fetch is restored.
+    await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)))
+  })
   host.remove()
   document.body.innerHTML = ""
   for (const t of currentToasts()) dismiss(t.id)
@@ -261,7 +265,7 @@ describe("the sidebar's sub-task tree", () => {
     expect(open(FRENCH).className).toContain("pointer-coarse:min-h-11")
   })
 
-  it("leaves the rail's tree as it was: no guides, and each level moves in by its own step", async () => {
+  it("keeps the rail's own steps and bounds their indent to reserve room for content and actions", async () => {
     render()
     act(() => setSidebarCollapsed(true))
     act(() => openChat(YARD.id))
@@ -273,7 +277,7 @@ describe("the sidebar's sub-task tree", () => {
     const tree = document.querySelector<HTMLElement>("[data-testid=rail-tree]")!
     const french = tree.querySelector<HTMLElement>(`[data-open-task=${FRENCH.id}]`)!
     // The row's box moves in, so its fill and selected bar start at its level.
-    expect(french.parentElement!.style.marginLeft).toBe("calc(2 * var(--tree-step))")
+    expect(french.parentElement!.style.getPropertyValue("--rail-indent")).toBe("calc(2 * var(--tree-step))")
     expect(french.className).not.toContain("--nest")
     expect(tree.querySelector("[class*='[--nest:'], [style*='--nest']")).toBeNull()
   })
@@ -308,7 +312,7 @@ describe("a sub-task tree five and more levels deep", () => {
   const nest = (t: Task) => (t === L1 ? "1.25rem" : node(t)!.parentElement!.style.getPropertyValue("--nest"))
   /** A `--nest` in px, given the steps the sidebar's width sets: the first `full` levels 20px each, deeper ones `deep`px. */
   const px = (css: string, full: number, deep: number) =>
-    Function(`return ${css.replace(/var\(--tree-full\)/g, String(full)).replace(/var\(--tree-deep\)/g, String(deep)).replace(/calc\(/g, "(").replace(/\b(min|max)\(/g, "Math.$1(").replace(/([\d.]+)rem/g, "($1 * 16)")}`)() as number
+    Function(`return ${css.replace(/var\(--tree-full\)/g, String(full)).replace(/var\(--tree-deep\)/g, String(deep)).replace(/100cqw/g, "1024").replace(/calc\(/g, "(").replace(/\b(min|max)\(/g, "Math.$1(").replace(/([\d.]+)rem/g, "($1 * 16)")}`)() as number
   const steps = (full: number, deep: number) => LEVELS.map((t) => px(nest(t), full, deep))
 
   it("nests each level one step in from its parent by its true depth, beside its own guide, deep steps shorter in a narrow sidebar", () => {
@@ -469,7 +473,7 @@ describe("a double click on a tree row with sub-tasks folds or unfolds its tree"
 
   it("a row with no sub-tasks folds nothing, nor does a plain task's row", async () => {
     const qc = render()
-    expect(open(PANS).title).toBe(`${PANS.title} · Working`)
+    expect(open(PANS).title).toBe(`${PANS.title} · Working · Task level 2`)
     doubleClick(open(PANS), 1000)
     await settle()
     expect(location.search).toBe(`?session=${PANS.id}`)
@@ -563,7 +567,7 @@ describe("sub-task panels", () => {
     await settle()
     const parent = panel(OMELETTE).querySelector('[role="dialog"]')!
     // The transcript lists the sub-tasks it started, with their live status, and a report.
-    const listed = [...parent.querySelectorAll("[data-testid=subtasks-line] a")].map((a) => [a.querySelector(".truncate")!.textContent, a.querySelector(".ml-auto")?.textContent])
+    const listed = [...parent.querySelectorAll("[data-testid=subtasks-line] a")].map((a) => [a.querySelector(".truncate")!.textContent, a.querySelector(".row-start-2")?.textContent])
     expect(listed).toEqual([CLASSIC, RATIOS, PANS, CHEFS].map((t) => [t.title, expect.any(String)]))
     expect(new Set(listed.map(([, status]) => status)).size).toBe(4)
     expect(parent.querySelector("[data-testid=subtask-report]")!.textContent).toContain("Report from")

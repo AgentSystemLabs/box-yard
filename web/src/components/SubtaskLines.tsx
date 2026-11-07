@@ -27,10 +27,10 @@ export function SubtasksLine({ m }: { m: TaskMessage }) {
   const items = useMemo(() => listed(m), [m])
   const byId = useMemo(() => new Map((tasks.data ?? []).map((t) => [t.id, t])), [tasks.data])
   return (
-    <div data-testid="subtasks-line" className="flex items-start gap-1.5 text-xs text-zinc-500">
+    <div data-testid="subtasks-line" className="@container/subtasks flex items-start gap-1.5 text-xs text-zinc-500">
       <LineIcon icon={GitFork} className="h-3.5 w-3.5 text-zinc-500" />
       <div className="min-w-0 flex-1">
-        <div>
+        <div className="wrap-anywhere">
           {m.content}
           <span className="ml-2 text-[10px] text-zinc-600">
             <TimeAgo ts={m.createdAt} />
@@ -44,11 +44,11 @@ export function SubtasksLine({ m }: { m: TaskMessage }) {
               <li key={s.id} className="min-w-0">
                 <AppLink
                   href={`/tasks/${s.id}`}
-                  className="flex min-h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm text-yard-300 hover:bg-zinc-900 hover:text-yard-200 pointer-coarse:min-h-11"
+                  className="grid min-h-8 min-w-0 grid-cols-[0.5rem_minmax(0,1fr)] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm text-yard-300 hover:bg-zinc-900 hover:text-yard-200 @min-[20rem]/subtasks:grid-cols-[0.5rem_minmax(0,1fr)_auto] pointer-coarse:min-h-11"
                 >
                   <span aria-hidden className={cx("h-2 w-2 shrink-0 rounded-full", status ? STATUS[status].dot : "bg-zinc-700")} />
-                  <span className="min-w-0 truncate">{task?.title ?? s.title}</span>
-                  {status && <span className="ml-auto shrink-0 text-[11px] text-zinc-500">{STATUS[status].label}</span>}
+                  <span className="col-start-2 min-w-0 truncate">{task?.title ?? s.title}</span>
+                  {status && <span className="col-start-2 row-start-2 text-[11px] text-zinc-500 @min-[20rem]/subtasks:col-start-3 @min-[20rem]/subtasks:row-start-1">{STATUS[status].label}</span>}
                 </AppLink>
               </li>
             )
@@ -71,7 +71,7 @@ export function SubtaskReportLine({ m }: { m: TaskMessage }) {
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[11px] leading-5 font-semibold text-violet-400">
           <span>Report from</span>
-          <AppLink href={`/tasks/${from}`} className="min-w-0 text-yard-300 hover:underline">
+          <AppLink href={`/tasks/${from}`} className="min-w-0 wrap-anywhere text-yard-300 hover:underline">
             {String(m.meta?.fromTitle ?? from)}
           </AppLink>
           <span className={cx("font-normal", status === "failed" ? "text-red-300" : status === "needs_input" ? "text-amber-300" : "text-violet-300/80")}>{REPORT_WORD[status] ?? status}</span>
