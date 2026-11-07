@@ -1,0 +1,22 @@
+{
+  "cases": 1,
+  "results": [
+    {
+      "tag": "1440-100-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 16,
+        "hitLink": true,
+        "beneathTitle": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    }
+  ],
+  "errors": []
+}

@@ -1,6 +1,6 @@
 # Failed task actions and chat focus
 
-Source commit: 36c4d42 (failed-task-actions-and-chat-focus).
+Source commit: d587331 (failed-task-actions-and-chat-focus).
 
 ## Reproduction
 
@@ -15,8 +15,10 @@ A running browser with a failed task containing five queued messages reproduced 
 - Real right-swipe then touchscreen tap covered selected/unselected phone rows.
 - Separate held-delivery and late-input browser cases received HTTP 409, displayed actionable shared dialogs and preserved every row/input.
 - Layout/focus checks: 320/400/560/800/1440px at 100%/125%, restrained touch hint, menu-only phone Mark done, Undo, visible aligned desktop Delete, no harness header chip, runner/harness details retained, actual current-row focus on Escape, immediate arrow navigation, draft/route retained, dialog priority, no overflow or page errors.
+- Combined-main row/tree regression rerun: four files, 141 tests passed.
+- Native PR link pointer/keyboard activation, folded rows and title navigation passed at 1440px mouse and 400px touch, with no page errors. The browser checker measures visible trailing controls because touch Mark done now lives in its menu.
 - Production tasks and queued messages were untouched. Only isolated example fixtures were deleted.
 
 ## Stable-HEAD gate
 
-On committed HEAD `36c4d4246e42a7b0ff83a7347d2375b60e4357ae`, `npm run typecheck`, `npm run build` and `npm run test:fast` all passed; fast coverage: 284 files, 3,349 tests. HEAD remained stable and the source worktree was clean throughout the gate.
+On committed HEAD `d587331bd7fb4b8bef4f90df4e3984d185c8d7dd`, `npm run typecheck`, `npm run build` and `npm run test:fast` all passed; fast coverage: 284 files, 3,352 tests. HEAD remained stable and the source worktree was clean throughout the gate.

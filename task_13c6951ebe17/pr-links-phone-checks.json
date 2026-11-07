@@ -1,0 +1,22 @@
+{
+  "cases": 1,
+  "results": [
+    {
+      "tag": "400-100-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "beneathTitle": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    }
+  ],
+  "errors": []
+}
