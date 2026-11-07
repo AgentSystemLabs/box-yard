@@ -96,7 +96,8 @@ const ROW_TOOL = cx("grid h-8 w-8 shrink-0 place-items-center rounded-md text-zi
  * mouse or a finger uses as before: the one its Enter clicks (it names the row), its chevron, and its tools (pin,
  * settings, Mark done), which the keyboard reaches elsewhere (the palette's Pin and Unpin, the Captain's and the task's
  * headers). A group's children follow it in a role="group" beside it, not inside it, so the row's name and its focus
- * ring are its own. The rail's tree (Rails.tsx) draws the same rows as plain buttons.
+ * ring are its own. Between the tree and a row there are only plain divs: Chromium shows a treeitem under anything else
+ * (a section, say) as a generic. The rail's tree (Rails.tsx) draws the same rows as plain buttons.
  */
 const InTree = createContext(false)
 
@@ -728,7 +729,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
   const tasksId = `sidebar-tasks-${project.id}`
   const nameId = useId()
   return (
-    <section data-sidebar-group={project.id} className="pt-1">
+    <div data-sidebar-group={project.id} className="pt-1">
       <div
         {...treeItem(captainKey(project.id), 1, nameId, { expanded: rows.length ? !folded : null, current: state === "selected" })}
         className={cx("group/head flex items-center rounded-lg transition", FOCUS, state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}
@@ -781,7 +782,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
           )}
         </div>
       )}
-    </section>
+    </div>
   )
 })
 
@@ -1129,7 +1130,7 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, asks, fol
   if (!total) return null
   const inside = selection.inside === WAITING_FOLD
   return (
-    <section data-sidebar-group={WAITING_FOLD} className="mt-1 mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.03]">
+    <div data-sidebar-group={WAITING_FOLD} className="mt-1 mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.03]">
       <div {...treeItem(WAITING_HEAD, 1, headId, { expanded: !folded })} className={cx("rounded-lg", FOCUS)}>
         <button
           type="button"
@@ -1167,7 +1168,7 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, asks, fol
           )}
         </div>
       )}
-    </section>
+    </div>
   )
 })
 
@@ -1197,7 +1198,7 @@ const MoreProjects = memo(function MoreProjects({ groups, selection, onPick }: {
   const headId = useId()
   if (!groups.length) return null
   return (
-    <section className="pt-4">
+    <div className="pt-4">
       <div {...treeItem(MORE_HEAD, 1, headId, { expanded: open })} className={cx("rounded-md", FOCUS)}>
         <button
           type="button"
@@ -1219,7 +1220,7 @@ const MoreProjects = memo(function MoreProjects({ groups, selection, onPick }: {
           ))}
         </div>
       )}
-    </section>
+    </div>
   )
 })
 

@@ -11,14 +11,11 @@ export function itemName(item: Element): string {
 export const treeItems = (within: ParentNode) => [...within.querySelectorAll<HTMLElement>("[role=treeitem]")]
 
 /**
- * A group of the sidebar (a project, "Waiting on you", More projects) by its name: its section, holding the head row
- * and its rows. A project's head says "<name>, Captain", the others their count after the name.
+ * A group of the sidebar (a project, "Waiting on you", More projects) by its name: the box around its head row and its
+ * rows. A project's head says "<name>, Captain", the others their count after the name.
  */
 export function sidebarGroup(within: ParentNode, name: string): HTMLElement | null {
   const named = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(,|\\d|$)`)
-  for (const group of within.querySelectorAll<HTMLElement>("section")) {
-    const head = group.querySelector("[role=treeitem]")
-    if (head && named.test(itemName(head))) return group
-  }
-  return null
+  const head = treeItems(within).find((i) => i.getAttribute("aria-level") === "1" && named.test(itemName(i)))
+  return head?.parentElement ?? null
 }

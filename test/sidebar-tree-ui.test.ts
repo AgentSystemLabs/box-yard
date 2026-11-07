@@ -170,7 +170,7 @@ describe("the sidebar's tree: roles and attributes", () => {
       "    Write the launch postworking ▾ (1/2)",
       "      Draft the pricing sectionworking (1/1)",
       "    Pick the imagesworking (2/2)",
-      "marketing-site, Captain ▾ (3/5)".replace("3/5", "4/5"),
+      "marketing-site, Captain ▾ (4/5)",
       "  Refresh the portfolio#19 (1/1)",
       "More projects1 ▸ (5/5)",
     ])
@@ -183,6 +183,9 @@ describe("the sidebar's tree: roles and attributes", () => {
       ["Write the launch post sub-tasks", true],
       ["marketing-site tasks", true],
     ])
+    // Nothing but plain divs and groups between the tree and an item: Chromium shows a treeitem under a section, say, as
+    // a generic, so the groups' heads would drop out of the tree.
+    for (const i of items()) for (let up = i.parentElement; up && up !== tree(); up = up.parentElement) expect(up.getAttribute("role") ?? up.tagName, i.dataset.treeKey).toMatch(/^(group|DIV)$/)
     for (const i of items()) {
       // Named by its own open button, which holds no other row.
       const name = document.getElementById(i.getAttribute("aria-labelledby")!)!
