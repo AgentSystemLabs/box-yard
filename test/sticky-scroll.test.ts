@@ -48,6 +48,7 @@ let host: HTMLElement
 let scroller: HTMLElement
 let content: HTMLElement
 let top = 0
+let floorScrollTop = false
 let dispatched = 0
 
 const rows = () => [...content.children] as HTMLElement[]
@@ -75,7 +76,7 @@ function installLayout() {
     scrollTop: {
       get: () => top,
       set: (v: number) => {
-        top = Math.min(max(), Math.max(0, v))
+        top = Math.min(max(), Math.max(0, floorScrollTop ? Math.floor(v) : v))
       },
     },
   })
@@ -171,6 +172,7 @@ beforeEach(() => {
   document.body.append(host)
   root = createRoot(host)
   top = 0
+  floorScrollTop = false
   dispatched = 0
   view = VIEW
   heights = Array.from({ length: 20 }, () => 100)
@@ -248,6 +250,17 @@ describe("StickyScroll", () => {
     streamDelta()
     expect(top).toBe(before - 1)
     expect(jumpButton()).toBeDefined()
+  })
+
+  it("compensates to the nearest pixel when the browser floors fractional scrollTop", () => {
+    userScroll(-500)
+    flush()
+    const before = top
+    floorScrollTop = true
+    heights[0]! += 30.75
+    render()
+    frame()
+    expect(top - before).toBe(31)
   })
 
   it("scrollIntoList converts zoomed rectangles into the scroller's CSS pixels", () => {

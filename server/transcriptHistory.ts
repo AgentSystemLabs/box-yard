@@ -44,18 +44,32 @@ export class TranscriptHistory {
     }
   }
 
-  /** Only timestamps and ids cross this scan; no transcript bodies are read or returned. The reader's IANA
-   * timezone handles midnight and DST independently of the server's timezone. */
+  /** Seek the first visible row of each local day through the timestamp index. Midnight is found in the
+   * reader's IANA timezone (including DST), without scanning or transferring every message in a busy day. */
   days(scope: HistoryScope, timeZone: string): HistoryDay[] {
     let format: Intl.DateTimeFormat
     try { format = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }) }
     catch { throw new BadRequestError("Invalid history timezone") }
     const { table, where, args } = this.source(scope)
+    const select = `SELECT id, created_at FROM ${table} WHERE ${where} AND role <> 'tool'`
+    const first = this.db.prepare(`${select} ORDER BY created_at, rowid LIMIT 1`)
+    const next = this.db.prepare(`${select} AND created_at >= ? ORDER BY created_at, rowid LIMIT 1`)
+    type DayRow = Pick<Row, "id" | "created_at">
+    let row = first.get(...args) as DayRow | undefined
     const days: HistoryDay[] = []
-    let previous = ""
-    for (const r of this.db.prepare(`SELECT id, created_at FROM ${table} WHERE ${where} AND role <> 'tool' ORDER BY created_at, rowid`).iterate(...args) as Iterable<Pick<Row, "id" | "created_at">>) {
-      const key = format.format(r.created_at)
-      if (key !== previous) { days.push({ at: r.created_at, messageId: r.id }); previous = key }
+    while (row) {
+      days.push({ at: row.created_at, messageId: row.id })
+      const key = format.format(row.created_at)
+      let lo = row.created_at
+      let hi = lo + 36 * 3600_000
+      while (format.format(hi) === key) hi += 36 * 3600_000
+      // No 24-hour assumption: even a skipped/repeated midnight must start the next retained date correctly.
+      while (hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2)
+        if (format.format(mid) === key) lo = mid
+        else hi = mid
+      }
+      row = next.get(...args, hi) as DayRow | undefined
     }
     return days
   }

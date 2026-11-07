@@ -72,7 +72,19 @@ describe("retained transcript cursors", () => {
       ["next", "2026-03-09T04:00:00Z", "assistant"],
     ]) insert.run(id, role, "Example body never in the date index", Date.parse(at!))
     expect(history.days({ kind: "chat" }, "America/New_York").map((d) => d.messageId)).toEqual(["before", "midnight", "next"])
+    expect(history.days({ kind: "chat" }, "Asia/Kathmandu").map((d) => d.messageId)).toEqual(["before", "next"])
     expect(JSON.stringify(history.days({ kind: "chat" }, "Asia/Kathmandu"))).not.toContain("Example body")
     expect(() => history.days({ kind: "chat" }, "invalid")).toThrow("timezone")
   })
+  it("finds the next date after a 25-hour local day", () => {
+    const { history } = setup()
+    const insert = db.prepare("INSERT INTO chat_messages (id, role, content, created_at) VALUES (?, 'assistant', 'Example', ?)")
+    for (const [id, at] of [
+      ["previous", "2026-11-01T03:59:59Z"], ["midnight", "2026-11-01T04:00:00Z"],
+      ["first-hour", "2026-11-01T05:30:00Z"], ["repeated-hour", "2026-11-01T06:30:00Z"],
+      ["last-hour", "2026-11-02T04:59:59Z"], ["next", "2026-11-02T05:00:00Z"],
+    ]) insert.run(id, Date.parse(at!))
+    expect(history.days({ kind: "chat" }, "America/New_York").map((d) => d.messageId)).toEqual(["previous", "midnight", "next"])
+  })
+
 })

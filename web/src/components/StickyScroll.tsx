@@ -161,6 +161,7 @@ export function StickyScroll({
   resetKey,
   restoreKey,
   hidden = 0,
+  earlierLabel,
   onLoadEarlier,
   onTrim,
   onJump,
@@ -178,6 +179,7 @@ export function StickyScroll({
   resetKey?: string
   restoreKey?: string
   hidden?: number
+  earlierLabel?: string
   onLoadEarlier?: () => void
   onTrim?: () => void
   onJump?: () => void
@@ -256,7 +258,16 @@ export function StickyScroll({
   // Write scrollTop ourselves, remembering where it landed so the scroll event it fires is ignored.
   const setTop = (el: HTMLElement, top: number) => {
     const target = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight))
-    if (el.scrollTop !== target) el.scrollTop = target
+    if (el.scrollTop !== target) {
+      el.scrollTop = target
+      // WebKit floors scrollTop to whole CSS pixels. Pick the nearest representable position, so zoomed
+      // prepends do not accumulate a full pixel of drift on each compensation. Chromium keeps fractions.
+      const landed = el.scrollTop
+      if (Math.abs(landed - target) > 0.5) {
+        el.scrollTop = landed < target ? Math.ceil(target) : Math.floor(target)
+        if (Math.abs(el.scrollTop - target) > Math.abs(landed - target)) el.scrollTop = landed
+      }
+    }
     lastTop.current = el.scrollTop
     seeBottom(Math.max(0, el.scrollHeight - el.clientHeight))
   }
@@ -725,7 +736,7 @@ export function StickyScroll({
               onClick={loadEarlier}
               className="block min-h-11 w-full py-1 text-center text-xs text-zinc-500 hover:text-zinc-300"
             >
-              Show {hidden} earlier message{hidden === 1 ? "" : "s"}
+              {earlierLabel ?? `Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`}
             </button>
           )}
           {children}
