@@ -304,6 +304,7 @@ describe('the Coordinator\'s "%" project picks', () => {
   it("a draft's last %token that names a project is its pick, and it goes back into the text", () => {
     expect(pickedRunTarget("for %mobile-app and %box-yard", projects, "%")?.value).toBe("prj_1")
     expect(pickedRunTarget("see %123", projects, "%")).toBeNull()
+    expect(pickedRunTarget("#mobile-app #123", projects, "%")).toBeNull()
     const m = mentionAt("fix %mo", 7, "%")!
     expect(insertRunTarget("fix %mo", m, "mobile-app", "%")).toEqual({ value: "fix %mobile-app ", caret: 16 })
   })

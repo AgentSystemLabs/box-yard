@@ -20,6 +20,7 @@ import { connectionState, useConnectionLive } from "../lib/connection"
 import { ConnectionLine } from "./ConnectionLine"
 import { ComposerTags } from "./ComposerTags"
 import { tagsIn, type TextTag } from "../../../shared/runTargets"
+import { GithubReferenceMenu, useGithubReferences } from "./GithubReferenceMenu"
 
 /** What a send carries besides text and files: the "@" and "!" picks of where its tasks run and on which harness, and the Coordinator's "%" project (shared/runTargets.ts). */
 export type ComposerExtra = ChatPicks
@@ -95,6 +96,7 @@ export function Composer({
   hint,
   runTargets = false,
   runTargetsProject = null,
+  githubProject = runTargetsProject,
   stop = null,
 }: {
   onSubmit: (text: string, attachments: Attachment[], extra?: ComposerExtra) => void | Promise<unknown>
@@ -139,6 +141,8 @@ export function Composer({
   runTargets?: boolean
   /** Whose lists: a project's Captain (its identity may rule runners out), or null for the Coordinator. */
   runTargetsProject?: string | null
+  /** Current task/thread's project; the Coordinator uses its % project pick. */
+  githubProject?: string | null
   /** While a turn runs: Stop, before Send, ends it (the task's agent, the Coordinator or a Captain). `label` says whose. */
   stop?: { label: string; onStop: () => void } | null
 }) {
@@ -163,6 +167,7 @@ export function Composer({
   const maxMb = useSettings().data?.maxUploadMb ?? 20
   const boxRef = useRef<HTMLDivElement>(null)
   const picks = useChatPicks({ enabled: runTargets, projectId: runTargetsProject, value, setValue, input })
+  const github = useGithubReferences({ projectId: githubProject ?? picks.picked.project?.value ?? null, draftKey: key, value, setValue, input, blocked: picks.open })
   // The "%project", "@runner" and "!harness" words the lists name. While there's one, the textarea's text is
   // transparent and ComposerTags draws it under the textarea, tags in colour.
   const tags = useMemo(() => {
@@ -482,6 +487,7 @@ export function Composer({
       <ConnectionLine held={held} onSendNow={() => submit(true)} onCancel={() => setHeld(false)} />
       {/* Like the Claude and ChatGPT composers: attachments, then the text at full width, then a row of buttons. */}
       {picks.open && (picks.panel ? <RunTargetPanel picks={picks} returnFocus={() => input.current} /> : <RunTargetList list={picks.list} anchor={boxRef} />)}
+      {github.open && <GithubReferenceMenu picker={github} anchor={boxRef} />}
       <div
         ref={boxRef}
         className="@container/composer rounded-xl border border-zinc-800 bg-zinc-900 focus-within:border-yard-500/50"
@@ -515,18 +521,22 @@ export function Composer({
             onChange={(e) => {
               setValue(e.target.value)
               picks.onCaret()
+              github.onCaret()
             }}
-            onSelect={picks.onCaret}
+            onSelect={() => { picks.onCaret(); github.onCaret() }}
             onPaste={onPaste}
-            onFocus={() => picks.onFocus(true)}
+            onFocus={() => { picks.onFocus(true); github.onFocus(true) }}
             onBlur={() => {
               setBrowse(null)
               picks.onFocus(false)
+              github.onFocus(false)
             }}
             {...picks.inputProps}
+            {...github.inputProps}
             onKeyDown={(e) => {
               // Mid-composition (IME), Enter and the arrows belong to the input method.
               if (e.nativeEvent.isComposing || e.keyCode === 229) return
+              if (github.onKeyDown(e)) return
               // The "@", "!" or "%" list, while open, takes ↑/↓, Enter, Tab and Esc: Enter picks instead of sending.
               if (picks.onKeyDown(e)) return
               if (e.key === "Escape" && more.open) {

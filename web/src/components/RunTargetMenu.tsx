@@ -22,6 +22,7 @@ import { ComposerMenuItem } from "./ComposerMenu"
 import { Loading } from "./Loading"
 import { DismissButton, Modal, ModalStep } from "./Modal"
 import { useAbove } from "../lib/useAbove"
+import { pickerKeyDown } from "../lib/pickerKeys"
 import { useAgentSettings, useCursorModels, useHarnessTargets, useModelCatalog, useProjectRunDefaults, useProjectTargets, useRefreshPicker, useRunTargets } from "../lib/queries"
 import { CURSOR_FALLBACK_MODELS } from "../../../shared/agentCli"
 import { harnessDefaults } from "../../../shared/harnessDefaults"
@@ -363,40 +364,11 @@ export function useChatPicks({
     [input, setValue, moveCaret, places, harnesses, projects, refreshPicker, runsOn?.value],
   )
 
-  const step = (from: number, dir: 1 | -1) => {
-    for (let i = 1; i <= options.length; i++) {
-      const to = (from + dir * i + options.length) % options.length
-      if (!options[to]!.disabled) return to
-    }
-    return from
-  }
-
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (panel) return false
     if (!open || !mention) return false
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault()
-      setActive((i) => step(i, e.key === "ArrowDown" ? 1 : -1))
-      return true
-    }
-    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
-      if (!source) {
-        e.preventDefault()
-        return true
-      }
-      const t = options[active]
-      e.preventDefault()
-      if (t && !t.disabled) pick(t)
-      return true
-    }
-    if (e.key === "Escape") {
-      e.preventDefault()
-      e.stopPropagation()
-      if (parent) back()
-      else setDismissed(mention.start)
-      return true
-    }
-    return false
+    return pickerKeyDown(e, { options, active, setActive, disabled: (t) => Boolean(t.disabled), pick,
+      escape: () => parent ? back() : setDismissed(mention.start) })
   }
 
   const extra = (): ChatPicks => {

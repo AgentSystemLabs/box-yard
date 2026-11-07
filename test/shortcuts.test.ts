@@ -42,6 +42,8 @@ describe("shortcutGroups", () => {
     expect(row(pc, "voice")!.keys).toEqual([["Alt", "Shift", "V"]])
     expect(row(mac, "new-tab")!.keys).toEqual([["⌘", "Enter"]])
     expect(row(pc, "newline")!.keys).toEqual([["Shift", "Enter"]])
+    expect(row(pc, "github")!.keys).toEqual([["#"]])
+    expect(row(pc, "project")!.keys).toEqual([["%"]])
   })
 
   it("lists dictation with the chord from Settings, held, and leaves it out when there's none", () => {
