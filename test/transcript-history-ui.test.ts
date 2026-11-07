@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement as h } from "react"
+import { act, createElement as h, useRef } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -7,6 +7,7 @@ import { useTranscriptHistory } from "../web/src/lib/transcriptHistory"
 import { chatDays } from "../web/src/lib/chatDays"
 import { useTail } from "../web/src/lib/tail"
 import { api, ApiError } from "../web/src/lib/api"
+import type { StickyScrollHandle } from "../web/src/components/StickyScroll"
 import { ChatHistory, DayBoundary } from "../web/src/components/ChatHistory"
 
 vi.mock("../web/src/lib/api", async (original) => ({ ...await original<typeof import("../web/src/lib/api")>(), api: vi.fn() }))
@@ -19,10 +20,13 @@ let root: Root, host: HTMLElement, qc: QueryClient
 function History({ path = "/api/chat/history", list = live }) {
   state = useTranscriptHistory(path, list)
   tail = useTail(state.items, path, { max: 200 })
-  return h(ChatHistory, { index: state.index, days: state.days ?? chatDays(list), messages: state.items, ensure: state.ensure, reveal: tail.reveal,
-    children: h("div", { "data-scroller": true }, tail.visible.map((m) => h("div", { key: m.id, "data-chat-id": m.id }, h(DayBoundary, { at: m.createdAt, messageId: m.id }), m.content))) })
+  const scrollHandle = useRef<StickyScrollHandle>(null)
+  scrollHandle.current = { scrollToEnd: () => { state.toLatest(); tail.reset() } }
+  return h(ChatHistory, { scrollHandle, index: state.index, days: state.days ?? chatDays(list), messages: state.items, ensure: state.ensure, reveal: tail.reveal,
+    children: h("div", { "data-scroller": true, tabIndex: -1 }, tail.visible.map((m) => h("div", { key: m.id, "data-chat-id": m.id }, h(DayBoundary, { at: m.createdAt, messageId: m.id }), m.content))) })
 }
 const render = (path?: string, list = live) => act(() => root.render(h(QueryClientProvider, { client: qc }, h(History, { path, list }))))
+const jump = (label: string) => act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === label)!.click())
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)) })
 beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host)
@@ -52,6 +56,9 @@ describe("bounded retained history", () => {
     expect(host.querySelector("nav")?.getAttribute("aria-label")).toContain("older dates may be missing")
     expect(host.querySelectorAll("nav button")).toHaveLength(2)
     expect(state.items).toBe(recent)
+    act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
+    expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Jump to start")!.disabled).toBe(true)
+    expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Jump to end")!.disabled).toBe(false)
     act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Retry dates")!.click())
     await settle()
     expect(state.index.status).toBe("ready")
@@ -59,7 +66,7 @@ describe("bounded retained history", () => {
     expect(host.querySelector("nav")?.getAttribute("aria-label")).toMatch(/^Chat days:/)
     expect(host.querySelectorAll("nav button")).toHaveLength(3)
     act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
-    act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
+    jump("Jump to day")
     await settle(); await settle()
     expect(document.activeElement?.getAttribute("data-day-start")).toBe("m-0")
     expect(state.items.length).toBeLessThanOrEqual(200)
@@ -88,15 +95,36 @@ describe("bounded retained history", () => {
     const button = host.querySelector<HTMLButtonElement>('nav button')!
     act(() => button.click())
     expect(api).not.toHaveBeenCalledWith("/api/chat/history?around=m-0")
-    act(() => button.click()); await settle(); await settle()
+    jump("Jump to start"); await settle(); await settle()
     expect(api).toHaveBeenCalledWith("/api/chat/history?around=m-0")
     expect(document.activeElement?.getAttribute("data-day-start")).toBe("m-0")
     expect(state.items[0]?.id).toBe("m-0")
     expect(state.moreBefore).toBe(false)
     expect(state.moreAfter).toBe(true)
     expect(live[0]?.id).toBe("m-1000")
-    act(() => state.toLatest())
+    act(() => button.click())
+    jump("Jump to end")
     expect(state.items).toBe(live)
+    expect(tail.visible.at(-1)?.id).toBe("m-1499")
+    expect(tail.later).toBe(0)
+    expect(document.activeElement?.hasAttribute("data-scroller")).toBe(true)
+  })
+
+  it("cancels a pending start jump when end is requested before its history arrives", async () => {
+    render(); await settle()
+    let resolve!: (page: unknown) => void
+    vi.mocked(api).mockImplementationOnce(() => new Promise((r) => { resolve = r }))
+    act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
+    jump("Jump to start")
+    act(() => host.querySelector<HTMLButtonElement>("nav button")!.click())
+    jump("Jump to end")
+    vi.mocked(HTMLElement.prototype.scrollTo).mockClear()
+    await act(async () => resolve({ messages: [item(0)], before: null, after: "m-0" }))
+    await settle(); await settle()
+    expect(state.items).toBe(live)
+    expect(host.querySelector('[data-day-start="m-0"]')).toBeNull()
+    expect(document.activeElement?.hasAttribute("data-scroller")).toBe(true)
+    expect(HTMLElement.prototype.scrollTo).not.toHaveBeenCalled()
   })
 
   it("keeps pages ordered and bounded while moving backward and forward", async () => {

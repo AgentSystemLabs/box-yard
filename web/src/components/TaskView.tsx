@@ -192,7 +192,7 @@ export const TaskThread = memo(function TaskThread({
 
   return (
     <SelectionToTask source={selectionSource} onPrompt={onStartFromSelection}>
-      <ChatHistory index={history.index} days={history.days ?? days} messages={shown} reveal={reveal} ensure={history.ensure} taskId={id}>
+      <ChatHistory index={history.index} days={history.days ?? days} messages={shown} reveal={reveal} ensure={history.ensure} scrollHandle={historyHandle} taskId={id}>
         <StickyScroll
           handle={setHistoryHandle}
           count={messages.data?.length ?? 0}
