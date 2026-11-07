@@ -1221,15 +1221,23 @@ export function createBoxYard(
   })
   api.delete("/projects/:id", async (req, res) => {
     const id = req.params.id!
-    for (const s of store.listSchedules({ projectId: id })) await scheduler.remove(s.id)
-    for (const t of store.listTasks({ projectId: id })) await tasks.deleteTask(t.id)
-    await tasks.projectDeleted(id)
-    await captains.projectDeleted(id)
-    store.deleteProject(id)
-    projectIcons.prune(id)
-    connectors.store.projectDeleted(id)
-    hub.broadcast({ type: "project.deleted", projectId: id })
-    res.json({ ok: true })
+    if (req.query.ifResting !== undefined && req.query.ifResting !== "1") throw new BadRequestError("ifResting must be 1")
+    const release = req.query.ifResting === "1" ? captains.reserveRestingDeletion(id) : null
+    try {
+      for (const s of store.listSchedules({ projectId: id })) await scheduler.remove(s.id)
+      for (const t of store.listTasks({ projectId: id })) {
+        // A parent's existing deletion cascade may already have removed this child.
+        if (release && !store.getTaskRow(t.id)) continue
+        await tasks.deleteTask(t.id)
+      }
+      await tasks.projectDeleted(id)
+      await captains.projectDeleted(id)
+      store.deleteProject(id)
+      projectIcons.prune(id)
+      connectors.store.projectDeleted(id)
+      hub.broadcast({ type: "project.deleted", projectId: id })
+      res.json({ ok: true })
+    } finally { release?.() }
   })
   /** The box size auto-sizing picks for the project from its measured runs (shared/autoSize.ts), for its settings. */
   api.get("/projects/:id/auto-size", (req, res) => {
@@ -1448,8 +1456,12 @@ export function createBoxYard(
     res.json(await tasks.previewUrl(req.params.id!, port))
   })
   api.delete("/tasks/:id", async (req, res) => {
-    await tasks.deleteTask(req.params.id!)
-    res.json({ ok: true })
+    if (req.query.ifResting !== undefined && req.query.ifResting !== "1") throw new BadRequestError("ifResting must be 1")
+    const release = req.query.ifResting === "1" ? store.reserveRestingDeletion({ taskId: req.params.id! }) : null
+    try {
+      await tasks.deleteTask(req.params.id!)
+      res.json({ ok: true })
+    } finally { release?.() }
   })
 
   // ---- schedules

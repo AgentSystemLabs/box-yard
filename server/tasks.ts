@@ -1,6 +1,8 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { CompactionIndex, compactionIndexPrompt } from "./compactionIndex.js"
+import { taskCompactionHistory } from "./taskCompactionHistory.js"
 import { createHash, randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import type { Config } from "./config.js"
@@ -3802,7 +3804,7 @@ export class TaskManager {
 
   /** A task that waits for a turn: queued, or resting with queued messages or a compaction to run. */
   private wantsTurn(r: TaskRow): boolean {
-    if (r.current_turn_id || r.status === "starting" || r.status === "working" || this.store.hasUncertainCodexInput(r.id)) return false
+    if (this.store.taskDeletionPending(r.id, r.project_id) || r.current_turn_id || r.status === "starting" || r.status === "working" || this.store.hasUncertainCodexInput(r.id)) return false
     // Waiting on its sub-tasks: their reports queue up until the last one (or one that fails or asks) wakes it.
     if (r.status === "waiting" && this.liveSubtasks(r.id).length) return false
     return r.status === "queued" || (r.status !== "failed" && (Boolean(r.compact_pending) || this.store.hasInputs(r.id)))
@@ -6072,7 +6074,7 @@ export class TaskManager {
           resume: !firstTurn && !recapped && !handoff,
           compact,
           ...agent,
-          systemPrompt: workerSystemPrompt({ project, task: row, branch: row.branch, port: row.port_base ?? PORT_BASE, ownerName, pushAtTurnEnd: this.pushAtTurnEnd(project), box: this.boxPromptInfo(boxId, project), agent: taskAgentCli(row), subtasks: this.subtaskPromptInfo(row) }),
+          systemPrompt: workerSystemPrompt({ project, task: row, branch: row.branch, port: row.port_base ?? PORT_BASE, ownerName, pushAtTurnEnd: this.pushAtTurnEnd(project), box: this.boxPromptInfo(boxId, project), agent: taskAgentCli(row), subtasks: this.subtaskPromptInfo(row), compactionHistory: compactionIndexPrompt(new CompactionIndex(this.store, `task:${row.id}`)) }),
           directory,
           notes: notes.map((n) => ({ author: n.author, content: n.content })),
           recap: recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { handoff: handoff ?? undefined }),
@@ -7151,6 +7153,16 @@ export class TaskManager {
       }
       case "message_agent":
         return this.deliverAgentMessage(row, String(ev.to), String(ev.message ?? ""), Boolean(ev.expectReply), ev.fyi === true)
+      case "compaction_history": {
+        // The request travels on this task's existing event channel. Reject replay from another turn, and
+        // never let a ref, task argument or response id choose a collection or filesystem destination.
+        if (!row.box_id || !row.current_turn_id || ev.turnId !== row.current_turn_id || typeof ev.id !== "string" || !/^hist_[a-f0-9]{24}$/.test(ev.id)) return
+        let response: { data?: unknown; error?: string }
+        try { response = { data: taskCompactionHistory(this.store, row.id, ev.request) } }
+        catch { response = { error: "Invalid compaction request or no saved compaction in this task's history. Use compaction_history with dates or its nextBefore cursor." } }
+        await this.provider.writeFile(row.box_id, `${this.taskDir(row.box_id, row.id)}/history-reply-${ev.id}.json`, JSON.stringify({ turnId: row.current_turn_id, ...response }))
+        return
+      }
       case "message_captain":
         return this.deliverCaptainMessage(row, ev)
       case "captain_reply_taken": {

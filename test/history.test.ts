@@ -83,11 +83,11 @@ describe("compaction summaries carry forward", () => {
     const files = writeCompaction(tmpDir(), meta(Date.parse("2026-10-20T10:00:00Z")), SUMMARY)
     const block = afterCompactBlock(files.markdownFile, files.markdown, ['- task_aaaaaaaaaaaa "Runner" [demo] done'])
     expect(block).toBe(
-      `[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (2026-10-20T10:00:00.000Z, ${files.markdownFile}). Task states under "Live now" are current and beat both. For anything older, use search_history.]\n\nLive now, tasks it names:\n- task_aaaaaaaaaaaa "Runner" [demo] done`,
+      `[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (2026-10-20T10:00:00.000Z, ${files.markdownFile}). Task states under "Live now" are current and beat both. For anything older, use compaction_history or search_history.]\n\nLive now, tasks it names:\n- task_aaaaaaaaaaaa "Runner" [demo] done`,
     )
     expect(block).not.toContain("## Decisions and preferences")
     expect(afterCompactBlock("f.md", "## Decisions and preferences\n- none", [])).toBe(
-      "[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (f.md). For anything older, use search_history.]",
+      "[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (f.md). For anything older, use compaction_history or search_history.]",
     )
   })
 
@@ -95,13 +95,13 @@ describe("compaction summaries carry forward", () => {
     const files = writeCompaction(tmpDir(), meta(Date.parse("2026-10-20T10:00:00Z")), SUMMARY)
     const block = recapBlock(files.markdownFile, files.markdown, ['- task_aaaaaaaaaaaa "Runner" [demo] done'])
     expect(block.split("\n")[0]).toBe(
-      `[Box Yard: Your context was just compacted. This is the summary you wrote right before it (2026-10-20T10:00:00.000Z, saved as ${files.markdownFile}). Task states under "Live now" are current and beat the summary. For anything older, use search_history.]`,
+      `[Box Yard: Your context was just compacted. This is the summary you wrote right before it (2026-10-20T10:00:00.000Z, saved as ${files.markdownFile}). Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]`,
     )
     expect(block).toContain("## Open threads and next steps\n- Ask Cody about the local runner brief.")
     expect(block).not.toContain("tokens_before")
     expect(block.endsWith('Live now, tasks it names:\n- task_aaaaaaaaaaaa "Runner" [demo] done')).toBe(true)
     expect(recapBlock("f.md", "## Decisions and preferences\n- none", [], "Your session was reset")).toBe(
-      '[Box Yard: Your session was reset (saved as f.md). Task states under "Live now" are current and beat the summary. For anything older, use search_history.]\n## Decisions and preferences\n- none',
+      '[Box Yard: Your session was reset (saved as f.md). Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]\n## Decisions and preferences\n- none',
     )
   })
 
@@ -472,5 +472,17 @@ describe("compaction lists stay small", () => {
     const doneThen = full.tasks.find((t: { id: string }) => t.id === tasks[0]!.id)
     expect(doneThen).toMatchObject({ status: "working", statusNow: "done" })
     expect(doneThen.summary).toHaveLength(4000)
+    // Legacy snapshots also have complete bounded continuation, independently of the saved markdown.
+    const id = "2026-10-01T10-00-00.000Z"
+    const cached = store.getOrchestratorCompaction(id, true)!
+    const extra = Array.from({ length: 25 }, (_, i) => ({ ...snap(tasks[0]!), taskId: `task_snapshot${String(i).padStart(3, "0")}`, summary: "s".repeat(9000) }))
+    store.addOrchestratorCompaction({ id, at: cached.at, sessionId: "s", model: "m", trigger: "auto", tokensBefore: null, markdownPath: cached.file, jsonPath: cached.jsonFile, markdown: cached.markdown!, tasks: extra })
+    const first = await coordinator.json("read_compaction", { compaction: id })
+    expect(first.tasks).toHaveLength(20); expect(first.nextTasksOffset).toBe(20)
+    expect(first.tasks[0].summaryNextOffset).toBe(4000)
+    const tail = await coordinator.json("read_compaction", { compaction: id, tasks_offset: first.nextTasksOffset, summary_offset: 8000 })
+    expect(tail.tasks).toHaveLength(5); expect(tail.nextTasksOffset).toBeNull()
+    expect(tail.tasks[0].summary).toHaveLength(1000)
+    expect(tail.tasks[0].summaryNextOffset).toBeNull()
   })
 })
