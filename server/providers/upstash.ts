@@ -1,3 +1,4 @@
+import { boundedWorkerExec, readWorkerFile, type WorkerReadOptions } from "../workerFiles.js"
 import { Box, type BoxData, type Snapshot } from "@upstash/box"
 import fs from "node:fs"
 import type { Config } from "../config.js"
@@ -9,7 +10,6 @@ import { q, type BoxHealth, type BoxProvider, type BoxSnapshotInfo, type BoxUsag
 import { GITHUB_HELPER } from "../gitShare.js"
 
 const ROOT = "/workspace/home"
-const READ_CHUNK = 8 * 1024 * 1024 // server limit for one ranged read
 /** How long a snapshot of a big disk may take. The SDK gives up after 5 minutes; we keep waiting this long by name. */
 const SNAPSHOT_WAIT_MS = 30 * 60_000
 /** How long one Box.list answers usage probes for (each box is probed every minute or so; one list serves them all). */
@@ -181,14 +181,7 @@ export class UpstashProvider implements BoxProvider {
   }
 
   async exec(boxId: string, command: string): Promise<ExecResult> {
-    const box = await this.box(boxId)
-    // `bash -c` so every command gets the same shell, whatever the box default is.
-    const run = await retry(() => box.exec.command(`bash -c ${q(command)}`))
-    return {
-      exitCode: run.exitCode ?? (run.status === "completed" ? 0 : 1),
-      stdout: run.stdout || (run.status === "completed" ? run.result : ""),
-      stderr: run.stderr || (run.status !== "completed" ? run.result : ""),
-    }
+    return boundedWorkerExec(this, boxId, command)
   }
 
   async execStream(boxId: string, command: string, onOutput: (chunk: string) => void): Promise<{ exitCode: number }> {
@@ -196,10 +189,15 @@ export class UpstashProvider implements BoxProvider {
     // Not retried: output may already have been handed over. A caller that fails tries again later.
     const run = await box.exec.stream(`bash -c ${q(command)}`)
     let exitCode: number | null = null
-    for await (const chunk of run) {
-      if (chunk.type === "output") onOutput(chunk.data)
-      else if (chunk.type === "exit") exitCode = chunk.exitCode
-    }
+    let completed = false
+    try {
+      for await (const chunk of run) {
+        if (chunk.type === "output") onOutput(chunk.data)
+        else if (chunk.type === "exit") exitCode = chunk.exitCode
+      }
+      completed = true
+    } finally { if (!completed) await run.cancel().catch(() => {}) }
+
     return { exitCode: exitCode ?? (run.status === "completed" ? 0 : 1) }
   }
 
@@ -210,7 +208,11 @@ export class UpstashProvider implements BoxProvider {
       const onAbort = () => void run.cancel().catch(() => {})
       signal.addEventListener("abort", onAbort, { once: true })
       try {
-        for await (const _chunk of run) {
+        // The SDK retains stream output even when the caller discards it. A hold normally prints nothing.
+        let outputBytes = 0
+        for await (const chunk of run) {
+          if (chunk.type === "output") outputBytes += Buffer.byteLength(chunk.data)
+          if (outputBytes > 8 * 1024 * 1024) { await run.cancel().catch(() => {}); break }
           if (signal.aborted) break
         }
       } finally {
@@ -227,16 +229,8 @@ export class UpstashProvider implements BoxProvider {
     await retry(() => box.files.write({ path: filePath, content: data.toString("base64"), encoding: "base64" }))
   }
 
-  async readFile(boxId: string, filePath: string): Promise<Buffer> {
-    const box = await this.box(boxId)
-    const stat = await retry(() => box.files.stat(filePath, { follow: true }))
-    const parts: Buffer[] = []
-    for (let offset = 0; offset < stat.size; offset += READ_CHUNK) {
-      const length = Math.min(READ_CHUNK, stat.size - offset)
-      const b64 = await retry(() => box.files.read(filePath, { encoding: "base64", offset, length }))
-      parts.push(Buffer.from(b64, "base64"))
-    }
-    return Buffer.concat(parts)
+  async readFile(boxId: string, filePath: string, opts?: WorkerReadOptions): Promise<Buffer> {
+    return readWorkerFile(this, boxId, filePath, opts)
   }
 
   async uploadFile(boxId: string, localPath: string, destination: string) {

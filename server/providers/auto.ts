@@ -1,3 +1,4 @@
+import { type WorkerReadOptions } from "../workerFiles.js"
 import type { WorkerSize } from "../../shared/types.js"
 import type { BoxHealth, BoxProvider, BoxSnapshotInfo, BoxUsageProbe, ExecResult } from "./types.js"
 
@@ -78,8 +79,8 @@ export class AutoProvider implements BoxProvider {
   writeFile(boxId: string, filePath: string, content: string | Buffer) {
     return this.of(boxId).writeFile(boxId, filePath, content)
   }
-  readFile(boxId: string, filePath: string) {
-    return this.of(boxId).readFile(boxId, filePath)
+  readFile(boxId: string, filePath: string, opts?: WorkerReadOptions) {
+    return this.of(boxId).readFile(boxId, filePath, opts)
   }
   uploadFile(boxId: string, localPath: string, destination: string) {
     return this.of(boxId).uploadFile(boxId, localPath, destination)

@@ -1,3 +1,4 @@
+import { readWorkerFile, type WorkerReadOptions } from "../workerFiles.js"
 import { daytonaSize } from "../../shared/runnerSizes.js"
 import fs from "node:fs"
 import path from "node:path"
@@ -271,8 +272,8 @@ export class DaytonaProvider implements BoxProvider {
     await this.put(boxId, filePath, Buffer.isBuffer(content) ? content : Buffer.from(content), 10 * 60_000)
   }
 
-  async readFile(boxId: string, filePath: string): Promise<Buffer> {
-    return this.d.api.download((await this.running(boxId)).sandbox, filePath)
+  async readFile(boxId: string, filePath: string, opts?: WorkerReadOptions): Promise<Buffer> {
+    return readWorkerFile(this, boxId, filePath, opts)
   }
 
   async uploadFile(boxId: string, localPath: string, destination: string): Promise<void> {

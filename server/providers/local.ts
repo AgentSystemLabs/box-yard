@@ -1,3 +1,4 @@
+import { readWorkerFile, type WorkerReadOptions } from "../workerFiles.js"
 import { spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
@@ -89,10 +90,17 @@ export class LocalProvider implements BoxProvider {
       const child = spawn("bash", ["-c", command], { cwd: this.root(boxId), env: this.env(boxId), detached: this.detached })
       let stdout = ""
       let stderr = ""
-      child.stdout.on("data", (d) => (stdout += d))
-      child.stderr.on("data", (d) => (stderr += d))
+      let exceeded = false
+      let outputBytes = 0
+      child.stdout.on("data", (d) => {
+        if (exceeded) return
+        outputBytes += d.length
+        if (outputBytes > 8 * 1024 * 1024) { exceeded = true; stdout = ""; child.kill("SIGKILL"); return }
+        stdout += d
+      })
+      child.stderr.on("data", (d) => { stderr = (stderr + d).slice(-64_000) })
       child.on("error", (err) => resolve({ exitCode: 127, stdout, stderr: stderr + err.message }))
-      child.on("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }))
+      child.on("close", (code) => resolve({ exitCode: exceeded ? 153 : code ?? 1, stdout, stderr: exceeded ? "Command output exceeds its byte limit" : stderr }))
     })
   }
 
@@ -100,10 +108,15 @@ export class LocalProvider implements BoxProvider {
     return new Promise((resolve, reject) => {
       const child = spawn("bash", ["-c", command], { cwd: this.root(boxId), env: this.env(boxId), detached: this.detached })
       // Merged like Upstash's exec stream.
-      child.stdout.setEncoding("utf8").on("data", onOutput)
-      child.stderr.setEncoding("utf8").on("data", onOutput)
+      let failure: Error | null = null
+      const deliver = (chunk: string) => {
+        if (failure) return
+        try { onOutput(chunk) } catch (e) { failure = e as Error; child.kill("SIGKILL") }
+      }
+      child.stdout.setEncoding("utf8").on("data", deliver)
+      child.stderr.setEncoding("utf8").on("data", deliver)
       child.on("error", reject)
-      child.on("close", (code) => resolve({ exitCode: code ?? 1 }))
+      child.on("close", (code) => failure ? reject(failure) : resolve({ exitCode: code ?? 1 }))
     })
   }
 
@@ -125,8 +138,8 @@ export class LocalProvider implements BoxProvider {
     fs.writeFileSync(filePath, content)
   }
 
-  async readFile(_boxId: string, filePath: string) {
-    return fs.readFileSync(filePath)
+  async readFile(_boxId: string, filePath: string, opts?: WorkerReadOptions): Promise<Buffer> {
+    return readWorkerFile(this, _boxId, filePath, opts)
   }
 
   async uploadFile(_boxId: string, localPath: string, destination: string) {
@@ -370,8 +383,8 @@ export class LocalRunnerRouter implements BoxProvider {
   writeFile(boxId: string, filePath: string, content: string | Buffer) {
     return this.of(boxId).writeFile(boxId, filePath, content)
   }
-  readFile(boxId: string, filePath: string) {
-    return this.of(boxId).readFile(boxId, filePath)
+  readFile(boxId: string, filePath: string, opts?: WorkerReadOptions) {
+    return this.of(boxId).readFile(boxId, filePath, opts)
   }
   uploadFile(boxId: string, localPath: string, destination: string) {
     return this.of(boxId).uploadFile(boxId, localPath, destination)

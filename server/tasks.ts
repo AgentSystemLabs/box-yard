@@ -7300,7 +7300,7 @@ export class TaskManager {
         const size = Number(ev.size ?? 0)
         if (size > MAX_ARTIFACT_BYTES) return say("event", `Artifact ${ev.path} is over 25 MB and was skipped.`)
         try {
-          const data = await this.provider.readFile(row.box_id, String(ev.path))
+          const data = await this.provider.readFile(row.box_id, String(ev.path), { maxBytes: MAX_ARTIFACT_BYTES, root: `${this.taskDir(row.box_id, row.id)}/work` })
           if (!this.store.db.open) return
           const artifact = this.artifacts.save({
             id: typeof ev.id === "string" ? ev.id : undefined,

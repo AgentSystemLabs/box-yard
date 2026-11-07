@@ -136,7 +136,15 @@ switch (cmd) {
     if (!c) fail(`Error response from daemon: No such container: ${name}`)
     if (!c.running) fail(`Error response from daemon: container ${c.id} is not running`)
     if (command.join(" ").includes("id -u; id -g")) out("1000\n1000\n")
-    else if (command[0] === "cat") {
+    else if (stdin.includes("/* boxyard-bounded-read */")) {
+      const encoded = stdin.match(/-- '([A-Za-z0-9+/=]+)'$/)?.[1]
+      if (!encoded) fail("fake docker: invalid file read")
+      const [file, , max] = JSON.parse(Buffer.from(encoded, "base64").toString())
+      if (!(file in state.files)) fail("missing file", 44)
+      const bytes = Buffer.from(state.files[file])
+      if (bytes.length > max) fail("file exceeds limit")
+      out(bytes.toString("base64"))
+    } else if (command[0] === "cat") {
       const file = command.at(-1)
       if (!(file in state.files)) fail(`cat: ${file}: No such file or directory`)
       out(state.files[file])

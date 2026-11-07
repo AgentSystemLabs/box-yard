@@ -31,6 +31,7 @@ export function docker(
     /** Output as it arrives, instead of in the result (archives stream off a container this way). */
     onStdout?: (chunk: Buffer) => void
     onStderr?: (chunk: string) => void
+    maxOutputBytes?: number
     signal?: AbortSignal
   } = {},
 ): Promise<DockerResult> {
@@ -45,6 +46,8 @@ export function docker(
     const out: Buffer[] = []
     let err = ""
     let done = false
+    let outputBytes = 0
+    let failure = ""
     const finish = (r: DockerResult) => {
       if (done) return
       done = true
@@ -56,16 +59,23 @@ export function docker(
     const onAbort = () => child.kill("SIGTERM")
     opts.signal?.addEventListener("abort", onAbort, { once: true })
     child.stdout!.on("data", (d: Buffer) => {
-      if (opts.onStdout) opts.onStdout(d)
-      else out.push(d)
+      if (failure) return
+      try {
+        if (opts.onStdout) opts.onStdout(d)
+        else {
+          outputBytes += d.length
+          if (outputBytes > (opts.maxOutputBytes ?? 8 * 1024 * 1024)) throw new Error("Docker output exceeds its byte limit")
+          out.push(d)
+        }
+      } catch (e) { failure = (e as Error).message; out.length = 0; child.kill("SIGKILL") }
     })
     child.stderr!.on("data", (d: Buffer) => {
       const s = d.toString("utf8")
-      opts.onStderr?.(s)
+      try { if (!failure) opts.onStderr?.(s) } catch (e) { failure = (e as Error).message; child.kill("SIGKILL") }
       err = (err + s).slice(-64_000)
     })
     child.on("error", (e) => finish({ code: 127, stdout: Buffer.alloc(0), stderr: e.message }))
-    child.on("close", (code, sig) => finish({ code: code ?? (sig ? 137 : 1), stdout: Buffer.concat(out), stderr: err }))
+    child.on("close", (code, sig) => finish({ code: failure ? 153 : code ?? (sig ? 137 : 1), stdout: Buffer.concat(out), stderr: failure || err }))
     // A command that exits before reading all its input closes the pipe: that's its answer, not ours to throw.
     child.stdin!.on("error", () => {})
     const input = opts.input

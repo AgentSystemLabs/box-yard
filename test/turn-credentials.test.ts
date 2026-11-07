@@ -83,7 +83,10 @@ describe("UpstashProvider.create (F1, F2)", () => {
 
   it("gives a new box no Claude login, GitHub token or git credential, and sets up Box Yard's helper", async () => {
     const commands: string[] = []
-    const fake = { id: "box_new", exec: { command: async (c: string) => (commands.push(c), { exitCode: 0, status: "completed", stdout: "", stderr: "", result: "" }) } }
+    const fake = { id: "box_new", exec: { stream: async (c: string) => {
+      commands.push(c)
+      return { status: "completed", async *[Symbol.asyncIterator]() { yield { type: "exit", exitCode: 0 } }, cancel: async () => {} }
+    } } }
     const create = vi.spyOn(Box, "create").mockResolvedValue(fake as unknown as Box)
     const config = testConfig({ provider: "upstash", upstashBoxApiKey: "box-key", claudeOauthToken: "global-oauth", anthropicApiKey: "global-key", githubToken: "global-gh", workerSnapshotId: "" })
     const creds = { get: (k: string) => ({ upstashBoxApiKey: "box-key", githubToken: "global-gh", claudeOauthToken: "global-oauth", anthropicApiKey: "global-key" })[k] ?? "" }
