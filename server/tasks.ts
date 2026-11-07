@@ -1642,7 +1642,7 @@ export class TaskManager {
       }
       const id = randomUUID()
       mailboxAttempted = true
-      await this.provider.writeFile(boxId, `${dir}/steer-${id}.json`, JSON.stringify({ id, turnId, text, inputIds: ids, at: claimed[0]!.createdAt }))
+      await this.provider.writeFile(boxId, `${dir}/steer-${id}.json`, JSON.stringify({ id, turnId, text, inputIds: ids, at: claimed[0]!.createdAt, sequence: this.store.nextSteerSequence() }))
     } catch (err) {
       if (mailboxAttempted && taskAgentCli(row) === "codex") {
         this.codexDelivery(this.requireRow(row.id), ids, "uncertain")

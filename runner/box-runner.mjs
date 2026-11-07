@@ -1241,7 +1241,8 @@ async function runCodex({ turn, sessionId, resume, prompt }) {
     polling = true
     try {
       const mail = fs.readdirSync(taskDir).filter((f) => STEER_FILE.test(f)).map((f) => ({ f, value: readJson(path.join(taskDir, f), null) }))
-        .filter(({ value }) => value?.turnId === turn.turnId).sort((a, b) => a.value.at - b.value.at || a.f.localeCompare(b.f))
+        .filter(({ value }) => value?.turnId === turn.turnId).sort((a, b) =>
+          (Number.isSafeInteger(a.value.sequence) && Number.isSafeInteger(b.value.sequence) ? a.value.sequence - b.value.sequence : a.value.at - b.value.at) || a.f.localeCompare(b.f))
       for (const { f, value } of mail) {
         if (!accepting) break
         if (state.entries.some((e) => e.id === value.id)) continue

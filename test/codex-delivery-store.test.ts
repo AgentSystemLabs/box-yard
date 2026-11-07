@@ -16,6 +16,14 @@ function fixture() {
 }
 
 describe("durable Codex delivery claims", () => {
+  it("keeps steer publication order across database restarts", () => {
+    const f = fixture()
+    expect(f.store.nextSteerSequence()).toBe(1)
+    expect(f.store.nextSteerSequence()).toBe(2)
+    f.store.db.close()
+    expect(open(f.dir).nextSteerSequence()).toBe(3)
+  })
+
   it("keeps accepted inputs locked across restart and deduplicates acknowledgment/terminal replay", () => {
     const f = fixture()
     expect(f.store.codexDelivery(f.task.id, "turn-1", [f.id], "submitted")).toEqual([])

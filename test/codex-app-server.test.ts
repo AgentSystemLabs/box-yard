@@ -40,6 +40,15 @@ describe("Codex app-server task transport", () => {
     expect(f.journal().entries[0].state).toBe("rejected")
     expect(f.calls().filter((c) => c.method === "turn/steer")).toHaveLength(1)
   })
+  it("delivers simultaneous batches in publication order rather than random filename order", async () => {
+    const f = await fixture()
+    for (const [id, sequence] of [["z-first", 1], ["a-second", 2]] as const) {
+      fs.writeFileSync(path.join(f.dir, `steer-${id}.json`), JSON.stringify({ id, sequence, turnId: "turn_protocol", inputIds: [id], text: id, at: 1 }))
+    }
+    await f.exit
+    expect(f.calls().filter((c) => c.method === "turn/steer").map((c) => c.params.clientUserMessageId)).toEqual(["z-first", "a-second"])
+    expect(f.journal().entries.map((e: { state: string }) => e.state)).toEqual(["settled", "settled"])
+  })
   it("retains uncertain submission after the peer disconnects without an acknowledgment", async () => {
     const f = await fixture("disconnect"); f.steer(); await f.exit
     expect(f.journal()).toMatchObject({ entries: [{ state: "uncertain", incorporated: false }] })

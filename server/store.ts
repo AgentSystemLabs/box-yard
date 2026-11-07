@@ -2275,6 +2275,12 @@ export class Store {
     })()
   }
 
+  /** Persistent publication order, including batches queued in the same millisecond and across restarts. */
+  nextSteerSequence(): number {
+    const row = this.db.prepare("INSERT INTO kv (key, value) VALUES ('steer_sequence', '1') ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1 RETURNING value").get() as { value: string }
+    return Number(row.value)
+  }
+
   /**
    * The agent got these steered inputs mid-turn: remove the ones still under `claim` and write their transcript
    * lines, as deliverInputs would, marked steered.

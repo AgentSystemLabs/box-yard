@@ -12,7 +12,7 @@ Coordinator, Captain and side-thread Codex chats retain `server/codex.ts`'s read
 
 ## Queue and lifecycle guarantees
 
-- `TaskManager.writeSteer` serializes mailbox publication per task, prepares attachments, then checks the Box Yard turn again. Messages stay locked in SQLite while delivery is requested. A native `expectedTurnId` prevents a stale request targeting a new turn.
+- `TaskManager.writeSteer` serializes mailbox publication per task, prepares attachments, then checks the Box Yard turn again. A persistent publication sequence preserves batch order even when timestamps tie. Messages stay locked in SQLite while delivery is requested. A native `expectedTurnId` prevents a stale request targeting a new turn.
 - `runCodex` journals input IDs before sending the RPC, then journals acceptance. Journals use a temporary file, fsync and atomic rename. The native client message ID is matched against `userMessage.clientId`; completion waits for an in-flight steer response even if the completion notification arrived first.
 - `Store.codexDelivery` records the accepted transcript once and keeps claims across server restarts. `TaskManager.reconcileCodexDelivery` recovers from the worker journal even when acceptance events were lost. Successful native completion with client-ID correlation settles the claim; this is session correlation, not proof of model processing.
 - An explicit stale/validation rejection, or a readable journal establishing no submission, permits next-turn delivery. A timeout, disconnect, internal server error, interrupted accepted turn, unreadable journal or missing correlation is held as **Delivery uncertain**. Automatic replay and automatic turn retry pause. This deliberately avoids claiming exactly-once delivery across a crash.
