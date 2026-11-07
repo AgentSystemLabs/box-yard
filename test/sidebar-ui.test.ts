@@ -144,8 +144,11 @@ describe("the sidebar", () => {
       "box-yard, Captain, working",
       "box-yard project settings",
       "Pin box-yard",
+      "Actions for box-yard",
       "Check SSH into the bench Needs you asks",
+      "Actions for Check SSH into the bench",
       "Three-pane layout Working",
+      "Actions for Three-pane layout",
     ])
     // No status dots: each task leads with its own icon, which pulses while it works and has a still dot when it asks.
     const icons = [...yard.querySelectorAll<HTMLElement>('[data-testid="task-status-icon"]')]
@@ -833,7 +836,7 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     resetClosedTasks()
   })
 
-  it("idle and PR-ready rows end with a ✓ that is always drawn, 44px to a finger; running and asking rows have none", () => {
+  it("idle and PR-ready rows end with a desktop ✓; touch actions live in the swipe menu", () => {
     render(APP_HOME, [ASK, RUN, PR, IDLE, LOGO, kid(1), kid(2)])
     expect(labels(section("box-yard")!)).toEqual(["Mark Write the changelog done"])
     // A tree's row names what it closes with it.
@@ -845,9 +848,9 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     ])
     expect(labels(section("Waiting on you")!)).toEqual(["Mark Refresh the portfolio done"])
     for (const b of checks(nav()!)) {
-      // Not a hover reveal and not in a menu: there to press.
-      expect(b.className).not.toMatch(/opacity-0|hidden/)
-      expect(b.className).toContain("pointer-coarse:h-11")
+      expect(b.className).not.toContain("opacity-0")
+      expect(b.className).toContain("pointer-coarse:hidden")
+      expect(b.className).toContain("h-8 w-8")
       expect(b.closest("[role=menu], [role=dialog]")).toBeNull()
     }
   })
