@@ -20,6 +20,32 @@ const seed = (table: string, scopeColumn?: string, scopeId?: string, count = 125
 }
 
 describe("retained transcript cursors", () => {
+  it("indexes every original Captain activity day when the latest 500 cover only two days", () => {
+    const { store, history } = setup()
+    const project = store.createProject({ name: "Example", repo: "acme/example" })
+    const other = store.createProject({ name: "Other example" })
+    const insert = db.prepare("INSERT INTO captain_messages (id, project_id, role, content, created_at) VALUES (?, ?, 'assistant', 'Example original reply', ?)")
+    db.transaction(() => {
+      for (let day = 0; day < 15; day++) for (let i = 0; i < (day === 14 ? 250 : 500); i++) {
+        insert.run(`original-${day}-${i}`, project.id, Date.UTC(2026, 9, 22 + day, 16) + i)
+      }
+      insert.run("other-original", other.id, Date.UTC(2026, 8, 1))
+    })()
+    const live = store.listCaptainMessages(project.id, 500)
+    const format = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" })
+    expect(new Set(live.map((m) => format.format(m.createdAt))).size).toBe(2)
+    const scope = { kind: "captain", id: project.id } as const
+    const days = history.days(scope, "America/New_York")
+    expect(days).toHaveLength(15)
+    expect(days[0]?.messageId).toBe("original-0-0")
+    const oldest = history.page(scope, { around: days[0]!.messageId })
+    expect(oldest.messages[0]?.content).toBe("Example original reply")
+    expect(oldest.messages).toHaveLength(80)
+    expect(oldest.before).toBeNull()
+    expect(oldest.after).not.toBeNull()
+    expect(history.days({ kind: "captain", id: other.id }, "America/New_York")).toHaveLength(1)
+  })
+
   for (const kind of ["chat", "captain", "task"] as const) it(`pages all ${kind} history without gaps or duplicates at equal timestamps`, () => {
     const { store, history } = setup()
     const project = store.createProject({ name: "Example", repo: "acme/example" })

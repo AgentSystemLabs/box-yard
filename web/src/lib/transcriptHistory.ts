@@ -1,12 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { HISTORY_WINDOW_SIZE, type HistoryDates, type HistoryPage } from "../../../shared/transcriptHistory"
-import { api } from "./api"
+import { api, ApiError } from "./api"
 import { dayKey } from "./calendarDay"
 import type { ChatDay } from "./chatDays"
 import { toast } from "./toast"
 
 type Message = { id: string; createdAt: number; role?: string; meta?: Record<string, unknown> | null }
+
+export type HistoryIndexState = { status: "loading" | "ready" | "error" | "unsupported"; retry: () => void }
+class HistoryUnavailable extends Error {}
+
+/** A missing route or incompatible response is not an empty, complete index: the live message cache
+ * only covers the newest part of the conversation. Validate before presenting its dates as complete. */
+async function historyDates(path: string): Promise<HistoryDates> {
+  let data: HistoryDates
+  try { data = await api<HistoryDates>(path) }
+  catch (error) {
+    if (error instanceof ApiError && error.status === 404) throw new HistoryUnavailable()
+    throw error
+  }
+  if (!data || !Array.isArray(data.days) || !data.days.every((d) => d && Number.isSafeInteger(d.at) && typeof d.messageId === "string")
+    || (data.oldestId !== null && typeof data.oldestId !== "string")) throw new HistoryUnavailable()
+  return data
+}
 
 /** An independent, bounded reading window. SSE keeps the latest query current while the reader browses old
  * pages. Returning to latest is immediate; sparse date jumps never splice gaps into the live conversation. */
@@ -18,9 +35,14 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const metadata = useQuery({
     queryKey: ["history-days", path, timeZone],
-    queryFn: () => api<HistoryDates>(`${path}?days=1&tz=${encodeURIComponent(timeZone)}`),
+    queryFn: () => historyDates(`${path}?days=1&tz=${encodeURIComponent(timeZone)}`),
     staleTime: 60_000,
+    retry: false,
   })
+  const retryDates = useCallback(() => { void metadata.refetch() }, [metadata.refetch])
+  const indexStatus = metadata.isPending || (metadata.isFetching && !metadata.data) ? "loading" : metadata.error instanceof HistoryUnavailable ? "unsupported"
+    : metadata.isError ? "error" : "ready"
+  const index = useMemo<HistoryIndexState>(() => ({ status: indexStatus, retry: retryDates }), [indexStatus, retryDates])
   const page = window?.path === path ? window.page : null
   const items = useMemo(() => {
     if (!page) return live
@@ -109,5 +131,5 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
     }
     return [...byDay.values()].sort((a, b) => a.at - b.at)
   }, [metadata.data, live])
-  return { items, days, ensure, earlier, later, toLatest, loading, browsing: page !== null, moreBefore, moreAfter: !!page?.after }
+  return { items, days, index, ensure, earlier, later, toLatest, loading, browsing: page !== null, moreBefore, moreAfter: !!page?.after }
 }

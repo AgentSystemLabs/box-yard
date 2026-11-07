@@ -9,6 +9,8 @@ import { splitGithubRefs } from "../lib/linkify"
 import type { NoticeLike } from "../lib/publishedNotices"
 import { fetchTasks, keys } from "../lib/queries"
 import { REVEAL_CHAT_EVENT, revealChatMessage, type ChatReveal } from "../lib/reveal"
+import type { HistoryIndexState } from "../lib/transcriptHistory"
+import { Loading } from "./Loading"
 import { DismissButton } from "./Modal"
 import { releaseListBottom, scrollIntoList } from "./StickyScroll"
 import { cx, NewTabLink } from "./ui"
@@ -49,11 +51,12 @@ const DayDivider = memo(function DayDivider({ at, messageId }: { at: number; mes
 })
 
 /** A rail beside, rather than on top of, the list. Only this rail subscribes to task milestones. */
-export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, ensure, projectId, taskId, children }: {
+export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, ensure, index, projectId, taskId, children }: {
   days: ChatDay[]
   messages: readonly NoticeLike[]
   reveal: (id: string) => boolean
   ensure?: (id: string) => Promise<boolean>
+  index?: HistoryIndexState
   projectId?: string
   taskId?: string
   children: ReactNode
@@ -135,19 +138,30 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
     }
   }, [scope, reveal, ensure, projectId, taskId])
   return (
-    <div ref={root} data-chat-history className="@container/history relative flex min-h-0 min-w-0 flex-1">
-      {days.length > 0 && <DayRail days={days} messages={messages} scope={scope} projectId={projectId} taskId={taskId} />}
-      {children}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {index && index.status !== "ready" && <div className="shrink-0 border-b border-zinc-900 px-3 py-2 text-xs text-zinc-400" aria-live="polite">
+        {index.status === "loading" ? <Loading kind="line" label="Loading all chat dates" /> : <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <p className="min-w-0 flex-1 basis-48 wrap-anywhere">{index.status === "unsupported"
+            ? "Older dates need a newer Box Yard server. Update Box Yard, then retry."
+            : "Couldn't load all chat dates. Some older days may be missing."}</p>
+          <button type="button" onClick={index.retry} className="min-h-11 shrink-0 rounded px-2 font-medium text-yard-300 hover:bg-zinc-900">Retry dates</button>
+        </div>}
+      </div>}
+      <div ref={root} data-chat-history className="@container/history relative flex min-h-0 min-w-0 flex-1">
+        {days.length > 0 && <DayRail days={days} messages={messages} scope={scope} projectId={projectId} taskId={taskId} complete={!index || index.status === "ready"} />}
+        {children}
+      </div>
     </div>
   )
 })
 
-const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId }: {
+const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId, complete }: {
   days: ChatDay[]
   messages: readonly NoticeLike[]
   scope: string
   projectId?: string
   taskId?: string
+  complete: boolean
 }) {
   // The app already loads tasks. Observe only milestone fields in that cache, so status/context SSE updates don't
   // rebuild summaries and opening a rail never starts another request.
@@ -212,8 +226,8 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
 
   return (
     <>
-      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label="Chat days: activate to preview, activate again to jump" className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
-        <p aria-hidden className="py-1 text-center text-[10px] text-zinc-500">Days</p>
+      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label={`Chat days${complete ? "" : " (recent only; older dates may be missing)"}: activate to preview, activate again to jump`} className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
+        <p aria-hidden className="py-1 text-center text-[10px] text-zinc-500">{complete ? "Days" : "Recent"}</p>
         {railStart > 0 && <div aria-hidden style={{ height: railStart * 44 }} />}
         {days.slice(railStart, railEnd).map((d, index) => (
           <button
