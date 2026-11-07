@@ -1,0 +1,870 @@
+[
+  {
+    "width": 320,
+    "zoom": 1,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 320,
+    "zoom": 1,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 320,
+    "zoom": 1.25,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 320,
+    "zoom": 1.25,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 393,
+    "zoom": 1,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 393,
+    "zoom": 1,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks, now rather than after this turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 393,
+    "zoom": 1.25,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 393,
+    "zoom": 1.25,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 400,
+    "zoom": 1,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 400,
+    "zoom": 1,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks, now rather than after this turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 400,
+    "zoom": 1.25,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 400,
+    "zoom": 1.25,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 560,
+    "zoom": 1,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 119.21875,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 85.578125,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 560,
+    "zoom": 1,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 119.21875,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks, now rather than after this turn",
+        "width": 85.578125,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 560,
+    "zoom": 1.25,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 560,
+    "zoom": 1.25,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks, now rather than after this turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 800,
+    "zoom": 1,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 119.21875,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 85.578125,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 800,
+    "zoom": 1,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "Attach files",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send to…",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 119.21875,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks, now rather than after this turn",
+        "width": 85.578125,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 800,
+    "zoom": 1.25,
+    "status": "idle",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Ask the Coordinator about this task in a side thread. The agent doesn't see it and keeps working",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send this to the Example Captain instead of the agent: it can split, reprioritise or start tasks",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  },
+  {
+    "width": 800,
+    "zoom": 1.25,
+    "status": "working",
+    "geometry": [
+      {
+        "label": "More",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Dictate: hold to talk, click to toggle (hold Option+Space)",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Stop the agent's turn",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      },
+      {
+        "label": "Send",
+        "width": 44,
+        "height": 44,
+        "inside": true
+      }
+    ],
+    "touchPicker": true,
+    "typedPicker": true,
+    "sendCount": 1,
+    "stayedInSource": true
+  }
+]

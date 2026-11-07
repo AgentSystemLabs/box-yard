@@ -1,0 +1,7 @@
+Commit: 6f68fa54a5e56978361f652bf31795bb86886c91
+Production build, isolated mock yard, example data; every browser write intercepted.
+Typecheck and build passed.
+Fast gate: 279 files, 3240 tests passed, execution 199.090s.
+Focused: 13 files, 178 tests passed.
+Browser: 20 idle/working cases at 320, 393, 400, 560, 800px; 100% and emulated 125% zoom.
+Checks: 44px touch controls, fold thresholds, overflow, touch/typed picker, clear, one destination POST, stay in source.
