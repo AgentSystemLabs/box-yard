@@ -1,0 +1,326 @@
+{
+  "cases": 20,
+  "results": [
+    {
+      "tag": "320-100-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "320-100-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "320-125-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "320-125-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "400-100-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "400-100-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "400-125-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "400-125-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "560-100-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "560-100-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "560-125-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "560-125-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "800-100-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "800-100-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "800-125-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "800-125-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "1440-100-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "1440-100-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "1440-125-mouse",
+      "geometry": {
+        "width": 33.6875,
+        "height": 15.703125,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    },
+    {
+      "tag": "1440-125-touch",
+      "geometry": {
+        "width": 33.6875,
+        "height": 44,
+        "hitLink": true,
+        "inline": true,
+        "fits": true,
+        "nested": false,
+        "overflow": 0
+      },
+      "pointer": "passed",
+      "keyboard": "passed",
+      "folded": "passed",
+      "title": "passed"
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,130 @@
+{
+  "layout": [
+    {
+      "side": 200,
+      "zoom": 1,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 44.671875
+    },
+    {
+      "side": 200,
+      "zoom": 1.25,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 256,
+      "zoom": 1,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 256,
+      "zoom": 1.25,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 320,
+      "zoom": 1,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 320,
+      "zoom": 1.25,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 400,
+      "zoom": 1,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 400,
+      "zoom": 1.25,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    },
+    {
+      "side": 480,
+      "zoom": 1,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 63.25
+    },
+    {
+      "side": 480,
+      "zoom": 1.25,
+      "rows": 18,
+      "oneLine": true,
+      "inlinePr": true,
+      "noOverflow": true,
+      "minTitleWidth": 52.25
+    }
+  ],
+  "performance": [
+    {
+      "motion": "reduce",
+      "workingRows": 200,
+      "style": {
+        "animation": "none",
+        "color": "oklch(0.746 0.16 232.661)",
+        "backgroundClip": "border-box",
+        "textNodes": 1,
+        "children": 0
+      },
+      "seconds": 8.037739000050351,
+      "mainThreadMs": 11.026,
+      "scriptMs": 1.441,
+      "paints": 11,
+      "paintMs": 0.5020000000000001,
+      "layouts": 1
+    },
+    {
+      "motion": "no-preference",
+      "workingRows": 200,
+      "style": {
+        "animation": "task-title-sweep",
+        "color": "rgba(0, 0, 0, 0)",
+        "backgroundClip": "text",
+        "textNodes": 1,
+        "children": 0
+      },
+      "seconds": 8.066886000102386,
+      "mainThreadMs": 1380.445,
+      "scriptMs": 3.718,
+      "paints": 61,
+      "paintMs": 49.382000000000005,
+      "layouts": 1
+    }
+  ]
+}
