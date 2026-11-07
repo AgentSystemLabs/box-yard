@@ -1465,7 +1465,9 @@ export function createBoxYard(
   })
   api.delete("/tasks/:id", async (req, res) => {
     if (req.query.ifResting !== undefined && req.query.ifResting !== "1") throw new BadRequestError("ifResting must be 1")
-    const release = req.query.ifResting === "1" ? store.reserveRestingDeletion({ taskId: req.params.id! }) : null
+    const queued = req.query.discardQueued
+    if (queued !== undefined && (req.query.ifResting !== "1" || typeof queued !== "string" || !/^[1-9]\d*$/.test(queued) || !Number.isSafeInteger(Number(queued)))) throw new BadRequestError("discardQueued must be a positive message count with ifResting=1")
+    const release = req.query.ifResting === "1" ? store.reserveRestingDeletion({ taskId: req.params.id!, ...(queued !== undefined ? { discardQueued: Number(queued) } : {}) }) : null
     try {
       await tasks.deleteTask(req.params.id!)
       res.json({ ok: true })

@@ -524,6 +524,7 @@ export function Composer({
           )}
           {tinted && <ComposerTags text={value} tags={tags} className={textMetrics} scrolls={overflowing} source={input} />}
           <textarea
+            data-chat-composer
             ref={setTextarea}
             rows={1}
             aria-label={label}

@@ -55,10 +55,11 @@ import {
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
+import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { SidebarDeleteRow } from "./SidebarDeleteRow"
 import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
-import { DismissButton } from "./Modal"
+import { DismissButton, isDialogOpen } from "./Modal"
 import { ChatIcon } from "./ChatIcons"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
 import { focusComposer, keepFocusForPick, pickFocusesComposer } from "../lib/chatSwitch"
@@ -382,7 +383,24 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     return chatHidden ? { ...selection, behind: null } : selection
   }, [current, overlay, picked, rail, waiting.shown, groups.shown, folds, treeFolds, chatHidden])
   const selection = useKept(computed, keepSelection)
-  const tree = useTreeView(currentTreeKey(selection))
+  const { focusCurrent, ...tree } = useTreeView(currentTreeKey(selection))
+  const navigation = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const take = (e: Event) => {
+      const nav = navigation.current
+      if (e.defaultPrevented || !nav || !nav.checkVisibility() || (isDialogOpen() && !drawer)) return
+      if (focusCurrent()) e.preventDefault()
+      else if (rail && onExpand && (e as CustomEvent<{ expand: boolean }>).detail.expand) {
+        e.preventDefault()
+        onExpand()
+        requestAnimationFrame(() => focusSidebar(false))
+      }
+    }
+    window.addEventListener(FOCUS_SIDEBAR, take)
+    return () => {
+      window.removeEventListener(FOCUS_SIDEBAR, take)
+    }
+  }, [focusCurrent, rail, drawer, onExpand])
 
   // A double click on a project's rail icon opens its Captain (the first click does that at once, never waiting to see
   // if a second follows) and expands the sidebar, that project's tasks unfolded and in view.
@@ -432,7 +450,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
 
   if (rail)
     return (
-      <nav aria-label="Projects and tasks" className="flex h-full w-14 flex-col items-center gap-1 bg-zinc-950 py-2">
+      <nav ref={navigation} aria-label="Projects and tasks" className="flex h-full w-14 flex-col items-center gap-1 bg-zinc-950 py-2">
         <button type="button" onClick={onExpand} title="Show the sidebar" aria-label="Show the sidebar" className={ICON_BUTTON}>
           <PanelLeftOpen className="h-4 w-4" />
         </button>
@@ -470,6 +488,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   const empty = groups.shown.length || !projects.data ? null : projects.data.length ? "unpinned" : "none"
   return (
     <nav
+      ref={navigation}
       aria-label="Projects and tasks"
       className={cx("@container/side flex h-full w-full flex-col bg-zinc-950", drawer && "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]")}
       onMouseDownCapture={(e) => {
@@ -539,6 +558,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
           </div>
 
           <div ref={list} className={cx("scroll-thin min-h-0 flex-1 overflow-y-auto px-2", empty !== "none" && "pb-3")}>
+            {empty !== "none" && <p className="hidden px-2 pt-2 text-[11px] text-zinc-500 pointer-coarse:block">Swipe rows left or right for actions</p>}
             <WaitingOnYou
               rows={waiting.shown}
               total={waitingAll.length}
@@ -822,7 +842,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
   const tree = useContext(InTree)
   const id = useId()
   return (
-    <SidebarDeleteRow enabled={tree} target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }}
+    <SidebarDeleteRow target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }} doneTask={readyForReview(task.status) ? task : undefined}
       {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected }) : undefined)}
       className={cx("flex items-center rounded-lg transition", tree && FOCUS, selected ? SELECTED : dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900")}
     >
@@ -1024,7 +1044,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
     </span>
   )
   return (
-    <SidebarDeleteRow enabled={inTree} target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }}
+    <SidebarDeleteRow target={{ kind: "task", id: task.id, name: task.title, projectId: task.projectId }} doneTask={readyForReview(task.status) && !tree?.running && !tree?.asks ? task : undefined} subtasks={tree?.total}
       // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
       {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected }) : undefined)}
       // The rail popover has a narrower chevron column and no sidebar guide padding. Reserve its content/actions too.
@@ -1079,8 +1099,8 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
 
 /**
  * ✓ at the end of a row ready for Cody's review (lib/taskActions.ts readyForReview): Mark done without opening the
- * task, done at once with an Undo toast (lib/markDone.ts). Always drawn, not on hover, since only Cody marks a task
- * done and this is how the list clears. On a tree's row it closes the whole tree (`subtasks`), so a tree with a
+ * task, done at once with an Undo toast (lib/markDone.ts). Always drawn on desktop; touch puts it in the swipe menu.
+ * On a tree's row it closes the whole tree (`subtasks`), so a tree with a
  * sub-task running or asking has none. Search results have none: they list finished work, and the task's header has it.
  */
 function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
@@ -1095,7 +1115,7 @@ function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
       aria-label={`Mark ${task.title}${kids} done`}
       title={`Mark done${kids ? `, with its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""}. Messaging it picks it back up.`}
       data-testid="sidebar-mark-done"
-      className={cx("mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)}
+      className={cx("mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:hidden", FOCUS)}
     >
       <Check className="h-3.5 w-3.5" aria-hidden />
     </button>

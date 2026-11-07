@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { Modal } from "../web/src/components/Modal.js"
+import { Modal, ModalStep } from "../web/src/components/Modal.js"
+import { FOCUS_SIDEBAR } from "../web/src/lib/sidebarFocus.js"
 import { ConfirmHost } from "../web/src/components/ConfirmDialog.js"
 import { confirmDialog, currentConfirm } from "../web/src/lib/confirm.js"
 
@@ -159,6 +160,22 @@ describe("Modal", () => {
     const input = document.querySelector<HTMLElement>("[data-testid=first]")!
     act(() => void input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })))
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("an inline modal step takes Escape before a chat composer can return to the sidebar", () => {
+    const onClose = vi.fn(), back = vi.fn(), focus = vi.fn((e: Event) => e.preventDefault())
+    window.addEventListener(FOCUS_SIDEBAR, focus)
+    try {
+      render(createElement(Modal, { placement: "panel", title: "Example conversation", onClose },
+        createElement(ModalStep, { active: true, back }),
+        createElement("textarea", { "data-chat-composer": true })))
+      const box = document.querySelector("textarea")!
+      box.focus()
+      act(() => { box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })) })
+      expect(back).toHaveBeenCalledOnce()
+      expect(focus).not.toHaveBeenCalled()
+      expect(onClose).not.toHaveBeenCalled()
+    } finally { window.removeEventListener(FOCUS_SIDEBAR, focus) }
   })
 })
 

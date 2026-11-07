@@ -1105,9 +1105,9 @@ export function useSetProjectIcon() {
   })
 }
 
-type DeleteInput = string | { id: string; ifResting: true }
+type DeleteInput = string | { id: string; ifResting: true; discardQueued?: number }
 const deleteId = (input: DeleteInput) => typeof input === "string" ? input : input.id
-const deleteQuery = (input: DeleteInput) => typeof input === "string" ? "" : "?ifResting=1"
+const deleteQuery = (input: DeleteInput) => typeof input === "string" ? "" : `?ifResting=1${input.discardQueued ? `&discardQueued=${input.discardQueued}` : ""}`
 
 export function useDeleteProject() {
   const qc = useQueryClient()

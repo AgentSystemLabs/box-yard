@@ -7,6 +7,7 @@ import { createPortal } from "react-dom"
 import { ChevronLeft, X } from "lucide-react"
 import { cx } from "./ui"
 import { bindPanelSwipeBack } from "../lib/panelSwipeBack"
+import { focusSidebar, isChatComposer } from "../lib/sidebarFocus"
 
 export const MODAL_SIZES = {
   sm: "sm:max-w-md",
@@ -180,11 +181,12 @@ export function Modal({
     if (root && !root.contains(document.activeElement)) (focusables(root)[0] ?? root).focus()
 
     const onKey = (e: KeyboardEvent) => {
-      if (stack.at(-1) !== id || e.defaultPrevented) return
+      if (stack.at(-1) !== id || e.defaultPrevented || e.isComposing || e.keyCode === 229) return
       if (e.key === "Escape") {
         e.preventDefault()
         const inner = stepsRef.current.at(-1)
         if (inner) inner.back()
+        else if (inline && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && isChatComposer(e.target) && focusSidebar()) return
         else closeRef.current()
       } else if (e.key === "Tab" && panel.current && modal()) {
         const items = focusables(panel.current)

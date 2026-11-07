@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 // Task identity stays compact; secondary details and actions live in ⓘ.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, createElement } from "react"
+import { act, createElement, Fragment } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TaskHeader } from "../web/src/components/TaskHeader.js"
 import type { Artifact, MergeRequest, Project, Task } from "../shared/types.js"
 import { LOCAL_UNSANDBOXED } from "../shared/runner.js"
 import { keys } from "../web/src/lib/queries.js"
+import { ConfirmHost } from "../web/src/components/ConfirmDialog.js"
 import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
 import { undoClose } from "../web/src/lib/inbox.js"
 import { resetClosedTasks } from "../web/src/lib/closedTasks.js"
@@ -314,7 +315,7 @@ describe("TaskHeader", () => {
 
   it.each([false, true])("confirms failed-task deletion directly from the header (phone: %s)", async (phone) => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: !phone, media: query, addEventListener() {}, removeEventListener() {} }))
-    const t = task({ status: "failed", prUrl: null, previews: [] })
+    const t = task({ status: "failed", prUrl: null, previews: [], pendingCount: 5 })
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     qc.setQueryData(keys.tasks, [t])
     qc.setQueryData(keys.projects, [project])
@@ -326,7 +327,7 @@ describe("TaskHeader", () => {
       }
       return new Promise(() => {})
     })
-    act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(TaskHeader, { task: t, project, schedule: null, files: [], onBack: () => {} }))))
+    act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(Fragment, null, createElement(TaskHeader, { task: t, project, schedule: null, files: [], onBack: () => {} }), createElement(ConfirmHost)))))
     const del = document.querySelector<HTMLButtonElement>("header [data-delete-task]")!
     expect(del).not.toBeNull()
     expect(del.getAttribute("aria-label")).toBe(`Delete ${t.title}`)
@@ -334,14 +335,15 @@ describe("TaskHeader", () => {
     expect(del.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
     if (phone) expect(document.querySelector('[data-testid="task-nav"]')!.contains(del)).toBe(true)
     act(() => del.click())
-    expect(currentConfirm()).toMatchObject({ title: "Delete task?", body: "Delete this task, its workspace and its archive?", danger: true })
+    expect(currentConfirm()).toMatchObject({ title: "Delete task?", body: "Delete this task, its workspace and its archive? This also permanently deletes 5 queued messages. They won't be sent.", danger: true })
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("permanently deletes 5 queued messages")
     expect(calls).toEqual([])
     await act(async () => settleConfirm(currentConfirm()!.id, false))
     expect(qc.getQueryData(keys.tasks)).toEqual([t])
     expect(calls).toEqual([])
     act(() => del.click())
     await act(async () => settleConfirm(currentConfirm()!.id, true))
-    expect(calls).toEqual([`/api/tasks/${t.id}?ifResting=1`])
+    expect(calls).toEqual([`/api/tasks/${t.id}?ifResting=1&discardQueued=5`])
     expect(qc.getQueryData(keys.tasks)).toEqual([])
     qc.clear()
   })

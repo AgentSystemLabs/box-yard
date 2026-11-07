@@ -12,6 +12,8 @@ import { captainKey, taskKey, setTreeFolds, unfoldSidebarGroup } from "../web/sr
 import { chatProjectFilter, setChatProjectFilter } from "../web/src/lib/projectBar"
 import { resetColumns } from "../web/src/lib/columns"
 import { currentToasts, dismiss } from "../web/src/lib/toast"
+import { undoClose } from "../web/src/lib/inbox"
+import { resetClosedTasks } from "../web/src/lib/closedTasks"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const project = { id: "prj_example", name: "Example project", repo: null, notes: [], color: null } as unknown as Project
@@ -84,6 +86,7 @@ afterEach(async () => {
   qc.clear()
   act(() => { setTreeFolds({}); unfoldSidebarGroup(project.id); unfoldSidebarGroup(other.id); setChatProjectFilter(null); resetColumns() })
   for (const t of currentToasts()) dismiss(t.id)
+  act(() => { for (const t of [parent, child, sibling]) undoClose(t.id); resetClosedTasks() })
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -118,15 +121,70 @@ describe("sidebar reveal gestures", () => {
     expect(action(el)).toBeNull()
   })
 
-  it("ignores small movements and right swipes on closed rows, and preserves normal navigation", () => {
+  it("ignores small movements and preserves normal navigation", () => {
     render()
     const el = taskRow(sibling)
     swipe(el, -8)
     expect(action(el)).toBeNull()
     click(openButton(el))
     expect(new URLSearchParams(location.search).get("session")).toBe(sibling.id)
-    swipe(taskRow(parent), 70)
-    expect(action(taskRow(parent))).toBeNull()
+  })
+
+  it.each([false, true])("a right swipe exposes a clickable Delete on a selected=%s failed row", async (selected) => {
+    const failed = { ...sibling, status: "failed" as const }
+    if (selected) history.replaceState(null, "", `/?session=${failed.id}`)
+    render([parent, child, failed])
+    const el = taskRow(failed)
+    expect(el.hasAttribute("aria-current")).toBe(selected)
+    const before = location.href
+    swipe(el, 70)
+    expect(el.firstElementChild?.getAttribute("style")).toContain("translateX(88px)")
+    // A real tap starts a new pointer sequence even when the swipe produced no compatibility click.
+    const del = action(el)
+    pointer(del, "pointerdown", 30, 100)
+    pointer(del, "pointerup", 30, 100)
+    expect(click(del).defaultPrevented).toBe(true)
+    expect(currentConfirm()?.title).toBe("Delete task?")
+    expect(location.href).toBe(before)
+    answer(false)
+    await flush()
+    expect(taskRow(failed)).not.toBeNull()
+    expect(action(el)).toBeNull()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
+  it("has a named touch Actions button and hint; tapping it exposes the same actions without navigating", () => {
+    render()
+    const el = taskRow(sibling)
+    const more = el.querySelector<HTMLButtonElement>("[data-row-actions]")!
+    expect(host.textContent).toContain("Swipe rows left or right for actions")
+    expect(more.getAttribute("aria-label")).toBe(`Actions for ${sibling.title}`)
+    expect(more.className).toContain("h-11 w-11")
+    expect(more.className).toContain("pointer-coarse:flex")
+    click(more)
+    expect(more.getAttribute("aria-expanded")).toBe("true")
+    expect(action(el)).not.toBeNull()
+    expect(location.search).toBe("")
+  })
+
+  it("Mark done in the swipe menu uses the existing optimistic close and Undo, without navigation", async () => {
+    render([sibling])
+    const el = taskRow(sibling)
+    swipe(el, 70)
+    const done = el.querySelector<HTMLButtonElement>("[data-sidebar-done]")!
+    expect(done.textContent).toBe("Mark done")
+    pointer(done, "pointerdown", 30, 100)
+    pointer(done, "pointerup", 30, 100)
+    click(done)
+    await flush()
+    expect(taskRow(sibling)).toBeNull()
+    const undo = currentToasts().find((t) => t.title === "Marked done")!
+    expect(undo.action?.label).toBe("Undo")
+    expect(location.search).toBe("")
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([])
+    act(() => undo.action!.onClick())
+    await flush()
+    expect(taskRow(sibling)).not.toBeNull()
   })
 
   it("supports reversing, cancellation, lost capture and a right swipe to close", () => {
@@ -230,7 +288,7 @@ describe("sidebar deletion semantics", () => {
     render([parent, { ...child, status }, sibling])
     for (const el of [taskRow(child), taskRow(parent), row(captainKey(project.id))]) {
       swipe(el)
-      expect(action(el).disabled).toBe(true)
+      expect(action(el).disabled).toBe(false)
       expect(action(el).title).toContain("Stop")
     }
   })
@@ -239,7 +297,7 @@ describe("sidebar deletion semantics", () => {
     qc.setQueryData(keys.captain(project.id), { projectId: project.id, busy: true })
     render([parent, { ...child, status: "needs_input", turnStartedAt: 100 }])
     swipe(taskRow(parent))
-    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(action(taskRow(parent)).disabled).toBe(false)
     swipe(row(captainKey(project.id)))
     expect(action(row(captainKey(project.id))).title).toContain("Captain")
   })
@@ -247,7 +305,7 @@ describe("sidebar deletion semantics", () => {
   it("blocks pending messages and compaction without changing completion semantics", () => {
     render([parent, { ...child, pendingCount: 1, compacting: true }])
     key(taskRow(parent), "ContextMenu")
-    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(action(taskRow(parent)).disabled).toBe(false)
     expect(taskRow(parent).querySelector("[data-testid=sidebar-mark-done]")).not.toBeNull()
   })
 
@@ -293,7 +351,7 @@ describe("sidebar deletion semantics", () => {
   it("includes hidden/done descendants when protecting a parent from active work", () => {
     render([parent, { ...child, status: "done", turnStartedAt: 123 }])
     key(taskRow(parent), "ContextMenu")
-    expect(action(taskRow(parent)).disabled).toBe(true)
+    expect(action(taskRow(parent)).disabled).toBe(false)
   })
 
   it("rechecks running descendants after confirmation before sending DELETE", async () => {
@@ -365,6 +423,7 @@ describe("sidebar deletion semantics", () => {
     expect(taskRow(child)).not.toBeNull()
     expect(new URLSearchParams(location.search).get("session")).toBe(child.id)
     expect(currentToasts().some((t) => t.title.includes("Couldn't delete"))).toBe(true)
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Example refusal")
   })
 })
 
@@ -372,7 +431,7 @@ describe("visible failed-task deletion", () => {
   const failed = { ...parent, status: "failed" as const }
   const direct = (el: HTMLElement) => el.querySelector<HTMLButtonElement>("[data-delete-task]")!
 
-  it("exposes a named, focusable, touch-sized action in project, nested and waiting rows only for failures", () => {
+  it("always shows a named desktop Delete aligned with Check; touch uses the row's action menu", () => {
     const failedChild = { ...child, status: "failed" as const }
     render([failed, failedChild, sibling])
     for (const t of [failed, failedChild]) {
@@ -382,7 +441,8 @@ describe("visible failed-task deletion", () => {
       expect(button.title).toContain("Delete task")
       expect(button.tabIndex).toBe(0)
       expect(button.className).not.toContain("opacity-0")
-      expect(button.className).toContain("pointer-coarse:h-11 pointer-coarse:w-11")
+      expect(button.className).toContain("h-8 w-8")
+      expect(button.className).toContain("pointer-coarse:hidden")
       expect(direct(row(taskKey(t.id, "waiting")))).not.toBeNull()
     }
     expect(direct(taskRow(sibling))).toBeNull()
@@ -421,17 +481,51 @@ describe("visible failed-task deletion", () => {
     expect(new URLSearchParams(location.search).get("session")).toBe(sibling.id)
   })
 
+  it.each(["inline", "swipe"])("confirms retained queued messages through the %s action without losing them on cancel", async (entry) => {
+    const queued = { ...failed, pendingCount: 5 }
+    render([queued, sibling])
+    const button = () => {
+      if (entry === "inline") return direct(taskRow(queued))
+      key(taskRow(queued), "ContextMenu")
+      return action(taskRow(queued))
+    }
+    click(button())
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("permanently deletes 5 queued messages. They won't be sent.")
+    answer(false)
+    await flush()
+    expect(qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === queued.id)?.pendingCount).toBe(5)
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+    fetchMock.mockImplementation(async (_url, init) => init?.method === "DELETE" ? new Response('{"ok":true}', { status: 200 }) : new Promise(() => {}))
+    click(button())
+    answer(true)
+    await flush()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/tasks/${queued.id}?ifResting=1&discardQueued=5`, expect.objectContaining({ method: "DELETE" }))
+    expect(taskRow(queued)).toBeNull()
+  })
+
+  it("keeps a late queued message and asks for fresh consent", async () => {
+    render([{ ...failed, pendingCount: 5 }])
+    click(direct(taskRow(failed)))
+    act(() => qc.setQueryData(keys.tasks, [{ ...failed, pendingCount: 6 }]))
+    answer(true)
+    await flush()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Queued messages changed. Review them and confirm deletion again.")
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+  })
+
   it("blocks running descendants and rechecks work started during confirmation", async () => {
     render([failed, { ...child, status: "working" }, sibling])
     click(direct(taskRow(failed)))
-    expect(currentConfirm()).toBeUndefined()
-    expect(currentToasts().some((t) => t.body?.includes("Stop"))).toBe(true)
+    expect(currentConfirm()).toMatchObject({ title: "Can't delete task", body: "Stop queued or running tasks before deleting." })
+    answer(true)
+    await flush()
     render([failed, child, sibling])
     click(direct(taskRow(failed)))
     act(() => qc.setQueryData(keys.tasks, [failed, { ...child, status: "working" }, sibling]))
     answer(true)
     await flush()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toEqual([])
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Stop queued or running tasks before deleting.")
   })
 
   it("restores a failed task and its current panel when the API refuses deletion", async () => {
