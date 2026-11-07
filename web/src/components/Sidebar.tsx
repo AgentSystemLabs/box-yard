@@ -886,11 +886,11 @@ const TREE_STEPS = cx(
   "pointer-coarse:@max-[20rem]/side:[--tree-full:2] @max-[16rem]/side:[--tree-full:1] pointer-coarse:@max-[16rem]/side:[--tree-full:1]",
 )
 /**
- * Budget the indent against the actual sidebar container, including its gutters. Leave 15rem for the chevron,
+ * Budget the indent against the actual sidebar container, including its gutters. Leave 13rem for the chevron,
  * icon, readable title and non-shrinking Mark done target, even at arbitrary depth. The groups remain full width,
  * so this bounds each absolute indent rather than accumulating padding through the recursive wrappers.
  */
-export const nestAt = (level: number) => `min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(1.25rem, calc(100cqw - 15rem)))`
+export const nestAt = (level: number) => `min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(1.25rem, calc(100cqw - 13rem)))`
 /**
  * A nested list's guide: a still, faint 1px line in the border colour, 10px left of its rows' icons (under the middle
  * of their parent's icon at a full step), down to the list's last row. It's drawn over every row's fill, so a hover
