@@ -27,6 +27,7 @@ import { CURSOR_FALLBACK_MODELS } from "../../../shared/agentCli"
 import { harnessDefaults } from "../../../shared/harnessDefaults"
 import { harnessModelTargets } from "../../../shared/harnessPicks"
 import {
+  advancesInto,
   drillsInto,
   filterRunTargets,
   inlinePicksFrom,
@@ -133,6 +134,14 @@ export interface ChatPicksState {
     back: () => void
     /** The list item the "@word" is typed in ("item 9"), when the draft is a list of tasks: the pick is only that item's. */
     item: string | null
+    /** Breadcrumb segments for the open level (Harness › Cursor). */
+    trail: string[]
+    /** Letters typed in the button sheet to filter this level; empty while typing in the draft. */
+    panelQuery: string
+    /** Clear the sheet's filter (Esc's first step). */
+    clearPanelQuery: () => void
+    /** Append a typed character in the sheet, or pass -1 to delete the last one (Backspace). */
+    appendPanelQuery: (ch: string | -1) => void
   }
   /** The whole message's picks now: the "@token" / "!token" / "#token" in the draft that's for all of it (scopePicks). */
   picked: Record<ListKind, RunTarget | null>
@@ -247,6 +256,8 @@ export function useChatPicks({
   const [active, setActive] = useState(0)
   // Esc closes the list for the "@word" it was on; a new "@" (or "!", "#") opens it again.
   const [dismissed, setDismissed] = useState<number | null>(null)
+  // Letters typed while the button sheet holds focus: filter the open level without moving the draft caret (IME-safe).
+  const [panelQuery, setPanelQuery] = useState("")
   const id = useId()
 
   const at = Math.min(caret, value.length)
@@ -260,12 +271,19 @@ export function useChatPicks({
   const tagLists = useMemo(() => (enabled ? { runsOn: places, agent: harnesses, project: hashOn ? projects : undefined } : NO_LISTS), [enabled, hashOn, places, harnesses, projects])
   const source = lists[kind]
   const parent = mention && source ? runTargetParent(source, mention.query) : undefined
-  const options = useMemo(() => (mention && source ? filterRunTargets(source, mention.query, kind === "project") : []), [mention?.query, source, kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Sheet filter composes onto the open parent ("cursor" + "deep" → "cursor:deep"); at the root it is the whole query.
+  const listQuery = useMemo(() => {
+    const base = mention?.query ?? ""
+    if (!panel || !panelQuery) return base
+    return parent ? `${parent.token}:${panelQuery}` : panelQuery
+  }, [mention?.query, panel, panelQuery, parent?.token])
+  const options = useMemo(() => (mention && source ? filterRunTargets(source, listQuery) : []), [listQuery, source, mention]) // eslint-disable-line react-hooks/exhaustive-deps
   // "#" waits for a match: a heading ("# Plan") or an issue ("#123") never opens an empty or loading list.
-  const showable = kind === "project" ? options.length > 0 : !source || options.length > 0
+  const showable = kind === "project" ? options.length > 0 || Boolean(panelQuery) : !source || options.length > 0 || Boolean(panelQuery)
   const open = Boolean(enabled && (panel || (focused && showable)) && mention && dismissed !== mention.start)
   const close = () => {
     setPanel(false)
+    setPanelQuery("")
     if (mention) setDismissed(mention.start)
   }
   const errors: Record<ListKind, boolean> = { runsOn: Boolean(placesQuery.error), agent: Boolean(harnessQuery.error), project: false }
@@ -273,10 +291,14 @@ export function useChatPicks({
   const mentionItem = useMemo(() => (mention ? itemOf(value, mention.start) : null), [mention?.start, value]) // eslint-disable-line react-hooks/exhaustive-deps
   const firstEnabled = Math.max(0, options.findIndex((t) => !t.disabled))
   // A new filter highlights its first pickable option.
-  useEffect(() => setActive(firstEnabled), [mention?.query, mention?.start, kind, firstEnabled])
+  useEffect(() => setActive(firstEnabled), [listQuery, mention?.start, kind, firstEnabled])
   useEffect(() => {
     if (dismissed !== null && mention?.start !== dismissed) setDismissed(null)
   }, [mention?.start, dismissed])
+  // A new drill level (or closing the sheet) drops the sheet's own filter.
+  useEffect(() => {
+    setPanelQuery("")
+  }, [parent?.token, panel])
 
   // Only on a move: the select event after each keystroke reports the caret its input already did, and a same-value
   // setState right after a render still costs the Composer a commit.
@@ -289,23 +311,25 @@ export function useChatPicks({
   const onCaret = useCallback(() => moveCaret(input.current?.selectionStart ?? 0), [input, moveCaret])
 
   const pick = useCallback(
-    (t: RunTarget) => {
+    (t: RunTarget, forceDrill = false) => {
       const el = input.current
       if (!el || t.disabled) return
       const trigger = t.kind === "harness" ? "!" : t.kind === "project" ? "#" : "@"
       const m = mentionAt(el.value, el.selectionStart ?? el.value.length, trigger)
       if (!m) return
       // A GPU cloud with GPUs under it opens them first: picking it again (or "any GPU" on it) then picks it.
-      const targets = trigger === "!" ? harnesses : places
-      const drill = trigger !== "#" && Boolean(targets) && drillsInto(t, targets!, m.query)
+      // Tab/Space on an exact parent (`!cursor`) force a drill so the next letters filter models.
+      const targets = trigger === "!" ? harnesses : trigger === "#" ? projects : places
+      const drill = forceDrill || (trigger !== "#" && Boolean(targets) && drillsInto(t, targets!, m.query))
       const next = insertRunTarget(el.value, m, t.token, trigger, drill)
       flushSync(() => setValue(next.value))
       if (!panel || !drill) el.focus()
       el.setSelectionRange(next.caret, next.caret)
       moveCaret(next.caret)
+      setPanelQuery("")
       if (!drill) setPanel(false)
     },
-    [input, setValue, moveCaret, places, harnesses, panel],
+    [input, setValue, moveCaret, places, harnesses, projects, panel],
   )
   const opens = useCallback((t: RunTarget) => kind !== "project" && Boolean(source && mention) && drillsInto(t, source!, mention!.query), [kind, source, mention?.query]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -317,6 +341,7 @@ export function useChatPicks({
     if (!panel) el.focus()
     el.setSelectionRange(next.caret, next.caret)
     moveCaret(next.caret)
+    setPanelQuery("")
   }
 
   // A button: the trigger the caret is already in (its list opens again); else the draft's own pick of that kind, its
@@ -374,10 +399,25 @@ export function useChatPicks({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (panel) return false
     if (!open || !mention) return false
+    if (e.isComposing || e.key === "Process") return false
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault()
       setActive((i) => step(i, e.key === "ArrowDown" ? 1 : -1))
       return true
+    }
+    // Tab/Space on an exact parent (`!cursor`) advance into models so the next letters filter; Enter still picks Default.
+    if (e.key === "Tab" || e.key === " ") {
+      if (!source) {
+        e.preventDefault()
+        return true
+      }
+      const t = options[active]
+      if (t && !t.disabled && source && advancesInto(t, source, mention.query)) {
+        e.preventDefault()
+        pick(t, true)
+        return true
+      }
+      if (e.key === " ") return false
     }
     if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
       if (!source) {
@@ -415,6 +455,22 @@ export function useChatPicks({
     : kind === "project"
       ? "its Captain gets it"
       : `Default: ${defaultWords(kind, { defaults, projectId, projectName })}${defaults[kind]?.disabled ? ` (${defaults[kind]!.disabled})` : ""}`
+  const trail = useMemo(() => {
+    if (!parent || !source) return [mentionItem ? ITEM_TITLE[kind](mentionItem) : LIST_TITLE[kind]]
+    const stack: string[] = []
+    let at: RunTarget | undefined = parent
+    while (at) {
+      stack.unshift(at.menuLabel ?? at.label)
+      at = at.under ? source.find((t) => t.token === at!.under) : undefined
+    }
+    // Short kind noun + ancestry: "Harness › Cursor › DeepSeek V3"
+    const noun = kind === "agent" ? "Harness" : kind === "project" ? "Project" : "Where"
+    return [noun, ...stack]
+  }, [kind, parent, source, mentionItem])
+  const clearPanelQuery = useCallback(() => setPanelQuery(""), [])
+  const appendPanelQuery = useCallback((ch: string | -1) => {
+    setPanelQuery((q) => (ch === -1 ? q.slice(0, -1) : q + ch.toLowerCase()))
+  }, [])
   const listId = `${id}-picks`
   const optionId = (i: number) => `${listId}-${i}`
   return {
@@ -437,7 +493,25 @@ export function useChatPicks({
     open,
     panel,
     close,
-    list: { id: listId, kind, options, loading: !source, error: errors[kind], active, pick, setActive, note, opens, item: mentionItem, parent, back },
+    list: {
+      id: listId,
+      kind,
+      options,
+      loading: !source,
+      error: errors[kind],
+      active,
+      pick,
+      setActive,
+      note,
+      opens,
+      item: mentionItem,
+      parent,
+      back,
+      trail,
+      panelQuery,
+      clearPanelQuery,
+      appendPanelQuery,
+    },
     picked: { runsOn, agent, project },
     scoped: enabled ? (scoped?.picks ?? NO_SCOPED) : NO_SCOPED,
     lists: tagLists,
@@ -478,15 +552,19 @@ function TargetRow({ t, on, trigger, opens, panel = false }: { t: RunTarget; on:
   )
 }
 
+/** ↑↓ · Tab/Enter · Esc — shown in both the typed list and the button sheet. */
+const PICKER_KEYS = "↑↓ move · Tab/Enter pick · Esc back"
+
 /** The typed list ("@", "!" or "#"), just over the composer's box. Its header says what Default is, since the buttons are only icons. */
 export function RunTargetList({ list, anchor }: { list: ChatPicksState["list"]; anchor: RefObject<HTMLElement | null> }) {
-  const { id, kind, options, loading, error, active, pick, setActive, note, opens, parent, back } = list
+  const { id, kind, options, loading, error, active, pick, setActive, note, opens, parent, back, trail } = list
   const at = useAbove(anchor)
   // The highlighted row stays in view as ↑/↓ move through a long list.
   useEffect(() => {
     document.getElementById(`${id}-${active}`)?.scrollIntoView?.({ block: "nearest" })
   }, [id, active])
   if (!at) return null
+  const heading = trail.join(" › ")
   return createPortal(
     <div
       data-testid="run-target-menu"
@@ -499,12 +577,13 @@ export function RunTargetList({ list, anchor }: { list: ChatPicksState["list"]; 
       <div data-testid="run-target-menu-title" className="flex min-h-11 min-w-0 items-center gap-1.5 border-b border-zinc-800/80 px-2 py-1 text-[11px] text-zinc-500">
         {parent && <DismissButton kind="back" onClick={back} label="Back to choices" className="h-11! w-11! transition-none" />}
         <span className="min-w-0 flex-1">
-          <span className="block text-zinc-300">{parent ? `${parent.label} · ${parent.model ? "Effort" : kind === "agent" ? "Model" : "Options"}` : list.item ? ITEM_TITLE[kind](list.item) : LIST_TITLE[kind]}</span>
-          {!parent && note && <span className="block truncate text-zinc-500">{note}</span>}
+          <span className="block truncate text-zinc-300">{heading}</span>
+          <span className="block truncate text-zinc-500">{parent ? PICKER_KEYS : note ? `${note} · ${PICKER_KEYS}` : PICKER_KEYS}</span>
         </span>
       </div>
       {(loading || error) && <PickerStatus error={error} />}
-      <ul id={id} role="listbox" aria-busy={loading || undefined} aria-label={LIST_TITLE[kind]} style={{ maxHeight: at.maxHeight - 56 }} className="scroll-thin overflow-y-auto overscroll-contain py-1">
+      {options.length === 0 && !loading && !error && <div className="px-3 py-2 text-xs text-zinc-500">No matches</div>}
+      <ul id={id} role="listbox" aria-busy={loading || undefined} aria-label={heading} style={{ maxHeight: at.maxHeight - 56 }} className="scroll-thin overflow-y-auto overscroll-contain py-1">
         {options.map((t, i) => {
           const on = i === active
           return (
@@ -533,20 +612,23 @@ export function RunTargetList({ list, anchor }: { list: ChatPicksState["list"]; 
 /** Button picks share the typed list's navigation and tokens, with focus inside the panel and no phone keyboard. */
 export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; returnFocus: () => HTMLElement | null }) {
   const { list } = picks
-  const { id, kind, parent, back, options, active, loading, error, note, opens, pick, setActive } = list
+  const { id, kind, parent, back, options, active, loading, error, note, opens, pick, setActive, trail, panelQuery, clearPanelQuery } = list
   const rows = useRef<HTMLDivElement>(null)
   const level = parent?.token ?? ""
   const firstEnabled = options.find((t) => !t.disabled)?.token
   // On a drill or Back the first pickable choice takes focus. Availability may arrive after the panel opens.
+  // An empty type-to-filter focuses the listbox so Esc/typing keep working (unmounted rows would drop focus to body).
   useEffect(() => {
     const first = rows.current?.querySelector<HTMLElement>('[role="option"]:not([disabled])')
-    first?.focus({ preventScroll: true })
-  }, [level, firstEnabled])
+    if (first) first.focus({ preventScroll: true })
+    else if (panelQuery) rows.current?.focus({ preventScroll: true })
+  }, [level, firstEnabled, panelQuery])
   useEffect(() => {
     const row = document.getElementById(`${id}-${active}`)
     row?.scrollIntoView?.({ block: "nearest" })
   }, [id, active])
-  const title = parent ? `${parent.label} · ${parent.model ? "Effort" : kind === "agent" ? "Model" : "Options"}` : LIST_TITLE[kind]
+  const title = trail.join(" › ")
+  const { appendPanelQuery } = list
   return (
     <Modal
       label={title}
@@ -557,7 +639,30 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
       className="@container/picker max-h-[85dvh]! w-full max-w-lg! rounded-t-2xl [&_[data-dismiss]]:h-11 [&_[data-dismiss]]:w-11 [&_[data-dismiss]]:transition-none"
       bodyClassName="flex min-h-0 flex-col"
       onKeyDown={(e) => {
-        const current = (e.target as HTMLElement).closest<HTMLElement>('[role="option"]')
+        if (e.isComposing || e.key === "Process") return
+        const target = e.target as HTMLElement | null
+        if (target?.closest("input, textarea, select, [contenteditable=''], [contenteditable=true]")) return
+        // Esc: clear the sheet filter first, then Back/close (ModalStep still handles level Esc after).
+        if (e.key === "Escape" && panelQuery) {
+          e.preventDefault()
+          e.stopPropagation()
+          clearPanelQuery()
+          return
+        }
+        // Type-to-filter: printable keys accumulate; Backspace deletes. Never steal modifiers or IME.
+        if (!e.altKey && !e.metaKey && !e.ctrlKey) {
+          if (e.key === "Backspace" && panelQuery) {
+            e.preventDefault()
+            appendPanelQuery(-1)
+            return
+          }
+          if (e.key.length === 1 && e.key !== " ") {
+            e.preventDefault()
+            appendPanelQuery(e.key)
+            return
+          }
+        }
+        const current = target?.closest<HTMLElement>('[role="option"]')
         if (!current) return
         const buttons = [...rows.current!.querySelectorAll<HTMLButtonElement>('[role="option"]:not([disabled])')]
         const at = buttons.indexOf(current as HTMLButtonElement)
@@ -582,12 +687,27 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
           {parent && <DismissButton kind="back" onClick={back} label="Back to choices" />}
           <div className="min-w-0 flex-1 py-2.5">
             <h2 className="text-sm font-medium wrap-anywhere text-zinc-100">{title}</h2>
-            {!parent && note && <p className="mt-1 text-xs wrap-anywhere text-zinc-500">{note}</p>}
+            <p className="mt-1 text-xs wrap-anywhere text-zinc-500">
+              {panelQuery ? (
+                <>
+                  Filter <span className="font-mono text-zinc-300">{panelQuery}</span>
+                  {" · "}
+                  {PICKER_KEYS}
+                </>
+              ) : parent ? (
+                PICKER_KEYS
+              ) : note ? (
+                `${note} · ${PICKER_KEYS}`
+              ) : (
+                PICKER_KEYS
+              )}
+            </p>
           </div>
           {!parent && <DismissButton kind="close" onClick={picks.close} />}
         </div>
         {error ? <PickerStatus error /> : loading && <Loading kind="rows" label="Checking availability" className="px-3 py-3" />}
-        <div ref={rows} id={id} role="listbox" aria-label={title} aria-busy={loading || undefined} className="scroll-thin min-h-0 overflow-y-auto overscroll-contain py-1.5">
+        {options.length === 0 && !loading && !error && <div className="px-3 py-2 text-xs text-zinc-500">No matches</div>}
+        <div ref={rows} id={id} role="listbox" tabIndex={-1} aria-label={title} aria-busy={loading || undefined} className="scroll-thin min-h-0 overflow-y-auto overscroll-contain py-1.5 focus:outline-none">
           {options.map((t, i) => (
             <button
               type="button"
