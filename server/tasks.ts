@@ -1338,6 +1338,7 @@ export class TaskManager {
     this.requireRow(taskId)
     const change = this.store.cancelInput(taskId, inputId)
     if (!change.ok) throw this.queueConflict(change.row)
+    if (change.message) this.hub.broadcast({ type: "task.message", message: change.message })
     const row = this.requireRow(taskId)
     if (!this.store.hasInputs(taskId) && row.session_started && !row.compact_pending && !this.store.turnFlags(row).interrupts) {
       if (row.current_turn_id && row.status === "starting") this.cancelledAll.add(taskId)
@@ -1411,7 +1412,7 @@ export class TaskManager {
       sender: sender.label,
       text: r.content,
       attachments,
-      status: r.status === "delivering" ? (r.steering ? "steering" : "delivering") : "queued",
+      status: r.codexDelivery === "accepted" || r.codexDelivery === "uncertain" ? r.codexDelivery : r.status === "delivering" ? (r.steering ? "steering" : "delivering") : "queued",
       version: r.version,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
@@ -1438,12 +1439,14 @@ export class TaskManager {
     // The project's Captain answering an agent that waits mid-turn (message_captain): hand it over now.
     if (source === `captain:${row.project_id}` && !hook && !attachments.length && content.trim()) this.handToWaitingAgent(row, inputId, content.trim())
     const patch: Parameters<Store["updateTask"]>[1] = { lastActiveAt: Date.now() }
+    if (row.current_turn_id) patch.turnFlags = { ...this.store.turnFlags(row), finished: undefined, noop: undefined }
     if (route?.model) patch.model = route.model
     if (route?.effort) patch.effort = route.effort
     if (route?.routingRule !== undefined) patch.routingRule = route.routingRule
     if (route?.routingReason !== undefined) patch.routingReason = route.routingReason
-    if (row.status === "needs_input" && source !== "system" && !source.startsWith("agent:")) patch.question = null
-    if (!row.current_turn_id && RESTING.includes(row.status)) {
+    const uncertain = this.store.hasUncertainCodexInput(row.id)
+    if (!uncertain && row.status === "needs_input" && source !== "system" && !source.startsWith("agent:")) patch.question = null
+    if (!uncertain && !row.current_turn_id && RESTING.includes(row.status)) {
       patch.status = "queued"
       patch.error = null
       this.store.setKv(queuedFromKey(row.id), row.status)
@@ -1501,7 +1504,7 @@ export class TaskManager {
   private settleMergeRequest(taskId: string, when: "turn" | "pr") {
     const row = this.store.getTaskRow(taskId)
     const req = row ? this.store.mergeRequestOf(row) : null
-    if (!row?.merge_request_json || (when === "turn" && req && !req.deliveredAt)) return
+    if (!row?.merge_request_json || (when === "turn" && req && (!req.deliveredAt || this.store.listQueuedInputs(taskId).some((i) => i.id === req.inputId)))) return
     this.store.updateTask(taskId, { mergeRequest: null }, { quiet: true, touch: false })
   }
 
@@ -1568,19 +1571,28 @@ export class TaskManager {
 
   /**
    * Steer: hand the task's queued messages to the agent in its running turn, without stopping it. They go to the box
-   * as steer-<id>.json, the runner writes them into Claude's open stdin (box-runner.mjs steerInbox), and Claude reads
-   * them at its next step, between tool calls. Until the runner says they landed (the `steer` event, which writes
-   * their transcript lines marked steered) they're locked like a starting turn's claim. A turn that ends first gives
-   * them back, and they go in as the next turn (finishTurn). Nothing is stopped: Stop does that, and keeps the queue.
+   * as steer-<id>.json. Claude's stream-json stdin acknowledges a pipe write; Codex app-server acknowledges
+   * turn/steer acceptance. Neither acknowledgment proves model processing. Codex claims remain durable until
+   * the completed turn includes their client message IDs; ambiguous delivery is held for review, never replayed.
+   * A definitely unsubmitted/rejected steer goes in as the next turn. Stop remains a separate action.
    *
-   * No running turn: they go with the next one. A /compact turn: right after it. Codex and Cursor can't take a message
-   * mid-turn (`codex exec` and `cursor-agent -p` read their prompt once), and a box that can't be reached can't take
+   * No running turn: they go with the next one. A /compact turn: right after it. Cursor can't take a message
+   * mid-turn (`cursor-agent -p` reads its prompt once), and a box that can't be reached can't take
    * the file: then they wait for the turn's end, with a note on the task that says so ("after_turn").
    *
    * A turn carrying a merge request can be steered too (nothing is cut short): the message comes with a Box Yard note
    * to settle the merge first unless it says otherwise.
    */
+  private readonly steerWrites = new Map<string, Promise<unknown>>()
+
   async steerQueued(taskId: string, opts: { by: SteerBy }): Promise<SteerResult> {
+    const previous = this.steerWrites.get(taskId) ?? Promise.resolve()
+    const next = previous.catch(() => {}).then(() => this.writeSteer(taskId, opts))
+    this.steerWrites.set(taskId, next)
+    try { return await next } finally { if (this.steerWrites.get(taskId) === next) this.steerWrites.delete(taskId) }
+  }
+
+  private async writeSteer(taskId: string, opts: { by: SteerBy }): Promise<SteerResult> {
     const row = this.requireRow(taskId)
     const inputs = this.store.listQueuedInputs(taskId)
     const queued = inputs.filter((i) => i.status === "queued").length
@@ -1610,8 +1622,9 @@ export class TaskManager {
     const claimed = this.store.claimSteer(taskId, claim)
     if (!claimed.length) return result("already_delivered")
     const ids = claimed.map((i) => i.id)
-    this.addEvent(row.id, `${who} steered ${them} into the running turn: the agent reads ${queued === 1 ? "it" : "them"} at its next step, without stopping.`, { kind: "steer", queued })
+    this.addEvent(row.id, `${who} requested steering ${them} into the running turn; delivery has not been acknowledged yet.`, { kind: "steer", queued })
     this.emitTask(row.id)
+    let mailboxAttempted = false
     try {
       const dir = this.taskDir(boxId, taskId)
       const delivered = await this.deliverAttachments(boxId, dir, claimed)
@@ -1621,9 +1634,20 @@ export class TaskManager {
         : ""
       const projectName = (id: string) => this.store.getProject(id)?.name
       const text = mergeNote + followupPrompt(delivered, projectName, this.owner())
+      const fresh = this.store.getTaskRow(taskId)
+      if (fresh?.current_turn_id !== turnId || fresh.status !== "working") {
+        this.store.releaseSteer(claim, ids)
+        this.schedule()
+        return result("next_turn")
+      }
       const id = randomUUID()
-      await this.provider.writeFile(boxId, `${dir}/steer-${id}.json`, JSON.stringify({ id, turnId, text, inputIds: ids, at: Date.now() }))
+      mailboxAttempted = true
+      await this.provider.writeFile(boxId, `${dir}/steer-${id}.json`, JSON.stringify({ id, turnId, text, inputIds: ids, at: claimed[0]!.createdAt, sequence: this.store.nextSteerSequence() }))
     } catch (err) {
+      if (mailboxAttempted && taskAgentCli(row) === "codex") {
+        this.codexDelivery(this.requireRow(row.id), ids, "uncertain")
+        return result("steering", "Mailbox delivery is uncertain; it will be reconciled when the turn ends.")
+      }
       // The box couldn't take it: the messages are queued again (and editable), for when the turn ends.
       if (!this.store.releaseSteer(claim, ids)) return result("steering")
       const note = `the box couldn't be reached (${errorMessage(err).slice(0, 200)})`
@@ -1644,6 +1668,43 @@ export class TaskManager {
     if (merge && !merge.deliveredAt && ids.includes(merge.inputId)) this.store.updateTask(row.id, { mergeRequest: { ...merge, deliveredAt: Date.now() } }, { quiet: true, touch: false })
     if (this.store.subtaskRows(row.id).length) this.syncSubtasks(row.id)
     this.emitTask(row.id)
+  }
+
+  private codexDelivery(row: TaskRow, ids: string[], delivery: "submitted" | "accepted" | "uncertain" | "settled") {
+    if (!row.current_turn_id) return
+    for (const message of this.store.codexDelivery(row.id, row.current_turn_id, ids, delivery)) this.hub.broadcast({ type: "task.message", message })
+    if (delivery === "accepted") {
+      const fresh = this.requireRow(row.id)
+      this.store.updateTask(row.id, { turnFlags: { ...this.store.turnFlags(fresh), finished: undefined, noop: undefined } }, { quiet: true, touch: false })
+      const merge = this.store.mergeRequestOf(fresh)
+      if (merge && !merge.deliveredAt && ids.includes(merge.inputId)) this.store.updateTask(row.id, { mergeRequest: { ...merge, deliveredAt: Date.now() } }, { quiet: true, touch: false })
+    }
+    this.emitTask(row.id)
+  }
+
+  /** Recover the durable worker record even when its acknowledgment event was lost. Never replay ambiguous input. */
+  private async reconcileCodexDelivery(row: TaskRow) {
+    if (taskAgentCli(row) !== "codex" || !row.box_id || !row.current_turn_id) return
+    const inputs = this.store.listQueuedInputs(row.id).filter((r) => r.steering)
+    if (!inputs.length) return
+    const unresolved = new Set(inputs.map((i) => i.id))
+    let readable = false
+    try {
+      const raw = await this.provider.readFile(row.box_id, `${this.taskDir(row.box_id, row.id)}/codex-delivery-${row.current_turn_id}.json`)
+      const journal = JSON.parse(raw.toString()) as { turnId: string; entries: { inputIds: string[]; state: string; accepted?: boolean }[] }
+      if (journal.turnId !== row.current_turn_id || !Array.isArray(journal.entries) || journal.entries.some((entry) =>
+        !entry || !Array.isArray(entry.inputIds) || entry.inputIds.some((id) => typeof id !== "string") || !["submitted", "accepted", "uncertain", "settled", "rejected"].includes(entry.state))) throw new Error("Invalid delivery journal")
+      readable = true
+      for (const entry of journal.entries) {
+        const ids = entry.inputIds.filter((id) => unresolved.has(id))
+        for (const id of ids) unresolved.delete(id)
+        if (entry.accepted) this.codexDelivery(row, ids, "accepted")
+        if (entry.state === "rejected") this.store.codexDelivery(row.id, row.current_turn_id, ids, "rejected")
+        else this.codexDelivery(row, ids, entry.state === "settled" ? "settled" : "uncertain")
+      }
+    } catch { /* Missing/unreadable journal cannot establish non-delivery. */ }
+    // A readable journal with no submission is safe to requeue; an inaccessible worker is ambiguous.
+    this.codexDelivery(row, [...unresolved].filter((id) => !readable || inputs.find((i) => i.id === id)?.codexDelivery), "uncertain")
   }
 
   /** A steer the runner hadn't handed over when the turn ended: queued again, it goes in as the next turn. */
@@ -3741,7 +3802,7 @@ export class TaskManager {
 
   /** A task that waits for a turn: queued, or resting with queued messages or a compaction to run. */
   private wantsTurn(r: TaskRow): boolean {
-    if (r.current_turn_id || r.status === "starting" || r.status === "working") return false
+    if (r.current_turn_id || r.status === "starting" || r.status === "working" || this.store.hasUncertainCodexInput(r.id)) return false
     // Waiting on its sub-tasks: their reports queue up until the last one (or one that fails or asks) wakes it.
     if (r.status === "waiting" && this.liveSubtasks(r.id).length) return false
     return r.status === "queued" || (r.status !== "failed" && (Boolean(r.compact_pending) || this.store.hasInputs(r.id)))
@@ -6932,8 +6993,9 @@ export class TaskManager {
     if (this.stopped) return
     const fresh = this.store.getTaskRow(row.id)
     if (!fresh || fresh.current_turn_id !== turnId) return
-    if (opts.stopped || this.stopRequested.has(row.id)) return this.finishTurn(fresh, { seq: 0, ts: Date.now(), turnId, t: "turn_end", stopped: true, ok: true, exitCode: null })
-    this.interrupt(fresh, reason)
+    await this.reconcileCodexDelivery(fresh)
+    if (opts.stopped || this.stopRequested.has(row.id)) return this.finishTurn(this.requireRow(row.id), { seq: 0, ts: Date.now(), turnId, t: "turn_end", stopped: true, ok: true, exitCode: null })
+    await this.interrupt(this.requireRow(row.id), reason)
   }
 
   /**
@@ -7075,6 +7137,9 @@ export class TaskManager {
       }
       case "signing":
         return say("event", `${ev.format === "openpgp" ? "GPG signing unavailable (commits will fail)" : "This turn's commits aren't signed"}: ${String(ev.error ?? "signing isn't set up")}.`, { kind: "signing" })
+      case "session":
+        this.store.updateTask(taskId, { sessionId: String(ev.sessionId) })
+        return
       case "session_reset":
         this.store.updateTask(taskId, { sessionId: String(ev.sessionId) })
         return say("event", `${taskAgentCli(row) === "codex" ? "Codex" : taskAgentCli(row) === "cursor" ? "Cursor" : "Claude"} session was missing on this box, so the agent started a new one with a recap.`)
@@ -7098,6 +7163,10 @@ export class TaskManager {
       }
       case "captain_wait_end":
         return this.endCaptainWait(taskId, String(ev.id ?? ""))
+      case "codex_delivery": {
+        if (ev.delivery !== "submitted" && ev.delivery !== "accepted") return
+        return this.codexDelivery(row, Array.isArray(ev.inputIds) ? ev.inputIds.filter((id): id is string => typeof id === "string") : [], ev.delivery)
+      }
       case "steer":
         return this.steerLanded(row, ev)
       case "spawn_subtasks":
@@ -7190,11 +7259,13 @@ export class TaskManager {
       // done: only Cody does that (finishTurn).
       case "finish":
       case "done": {
+        if (this.store.hasInputs(taskId)) return
         const noop = ev.outcome === "noop" ? { commits: typeof ev.commits === "number" ? ev.commits : null } : undefined
         this.store.updateTask(taskId, { turnFlags: { ...flags, finished: String(ev.summary ?? "Finished."), noop } })
         return
       }
       case "turn_end": {
+        await this.reconcileCodexDelivery(row)
         await this.takeBackCodexAuth(row)
         if (!this.store.db.open) return
         // The agent may have merged or closed its PR during the turn; ask GitHub.
@@ -7228,7 +7299,7 @@ export class TaskManager {
     const originHookIds = (row.current_turn_id ? flags.hookIds : flags.lastHookIds) ?? []
     if (live) {
       this.emitTaskEvent({ type: "pr.merged", taskId, turnId: row.current_turn_id, originHookIds })
-    } else if (prev === "draft" && info.state === "open" && ["pr_ready", "done", "idle"].includes(row.status) && !row.current_turn_id) {
+    } else if (prev === "draft" && info.state === "open" && ["pr_ready", "done", "idle"].includes(row.status) && !row.current_turn_id && !this.store.hasInputs(row.id)) {
       this.emitTaskEvent({ type: "task.pr_ready", taskId, turnId: null, originHookIds })
     }
   }
@@ -7262,15 +7333,16 @@ export class TaskManager {
     const timing = this.recordTurnTiming(row, ev)
     if (row.compacting) return this.finishCompact(row, ev)
     const flags = this.store.turnFlags(row)
+    const uncertain = this.store.hasUncertainCodexInput(row.id)
     const stopped = Boolean(ev.stopped) || this.stopRequested.has(row.id)
     this.stopRequested.delete(row.id)
     this.holds.get(row.id)?.abort()
     this.holds.delete(row.id)
-    if (!stopped && !ev.ok && isLocalRunnerBox(row.box_id) && (flags.sleeps ?? 0) < MAX_SLEEP_RESUMES) {
+    if (!uncertain && !stopped && !ev.ok && isLocalRunnerBox(row.box_id) && (flags.sleeps ?? 0) < MAX_SLEEP_RESUMES) {
       const slept = this.sleptBeforeEnd(row, ev)
       if (slept > 0) return this.resumeAfterSleep(row, ev, flags, slept)
     }
-    const oom = !stopped && !ev.ok && measured?.oom ? this.oomRetry(row, flags, measured.boxSize) : null
+    const oom = !uncertain && !stopped && !ev.ok && measured?.oom ? this.oomRetry(row, flags, measured.boxSize) : null
     if (oom && "to" in oom) return this.retryAfterOom(row, ev, flags, measured!.boxSize, oom.to)
     // Its login (docs/logins.md): a usage limit or a refused login takes it out of the rotation, and the turn carries on
     // once on the next login; a turn that worked puts it back. The session keeps it until its cache cools.
@@ -7279,7 +7351,7 @@ export class TaskManager {
       this.logins.touch(row.id, login.harness)
       if (!stopped && ev.ok) this.logins.reportSuccess(login.id)
       const failure = !stopped && !ev.ok ? this.logins.reportFailure(login.id, login.harness, String(ev.error ?? "")) : null
-      if (failure && !flags.loginRetries && this.logins.hasUsable(login.harness, login.id)) return this.retryOnNextLogin(row, ev, flags, login, failure.kind)
+      if (!uncertain && failure && !flags.loginRetries && this.logins.hasUsable(login.harness, login.id)) return this.retryOnNextLogin(row, ev, flags, login, failure.kind)
     }
 
     // A merged PR means the work landed; a closed one means there's no PR to review.
@@ -7289,7 +7361,10 @@ export class TaskManager {
     let mergedDone = false
     let error: string | null = null
     // Closed while it ran (closeTask marks it done before the stop lands): it stays done.
-    if (stopped) status = row.status === "done" ? "done" : openPr ? "pr_ready" : "idle"
+    if (uncertain && row.status !== "done") {
+      status = "needs_input"
+      error = "Mid-turn delivery is uncertain. Review the transcript and remove the held message before resuming; it may already have reached Codex."
+    } else if (stopped) status = row.status === "done" ? "done" : openPr && !this.store.hasInputs(row.id) ? "pr_ready" : "idle"
     else if (!ev.ok) {
       status = "failed"
       error = String(ev.error ?? "The agent exited with an error.")
@@ -7297,6 +7372,7 @@ export class TaskManager {
     } else if (flags.asked) status = "needs_input"
     // Only Cody marks a task done. An agent that called finish rests like any finished turn, ready for review (idle,
     // or pr_ready with an open PR), so it stays in Cody's lists until Cody marks it done. It no longer waits on replies.
+    else if (this.store.hasInputs(row.id)) status = "queued"
     else if (flags.waitingOn?.length && !flags.finished) status = "waiting"
     // Done when its PR merges off (or this task stays open): the task rests idle until it's marked done. Queued
     // messages or another PR that may still be open keep it idle too (the PR is asked about once the turn has ended).
@@ -7328,7 +7404,7 @@ export class TaskManager {
       ...usageFields(ev.usage),
       sessionId: typeof ev.sessionId === "string" ? ev.sessionId : undefined,
       lastActiveAt: Date.now(),
-      question: status === "needs_input" ? (flags.asked ?? null) : null,
+      question: status === "needs_input" ? (uncertain ? error : flags.asked ?? null) : null,
       turnFlags: { interrupts: 0, ...(flags.hookIds ? { lastHookIds: flags.hookIds } : {}) },
       outcome,
     }, { quiet: stopped || agentWake })
@@ -7355,7 +7431,7 @@ export class TaskManager {
       // Nothing happened: no notice for the Captain or Coordinator, and the run's start notice is dropped too.
       this.addEvent(row.id, "Quiet run: the agent found nothing to do and changed nothing, so it's hidden from Recent and notifications.", { kind: "quiet" })
       this.store.dropTaskNotices(row.id)
-    } else if (status === "needs_input") this.notice(`🙋 **${row.title}** needs you: ${flags.asked}`, { taskId: row.id })
+    } else if (status === "needs_input") this.notice(`🙋 **${row.title}** needs you: ${uncertain ? error : flags.asked}`, { taskId: row.id })
     // Done here only when its PR merged (Done when its PR merges); a turn stopped by a close says nothing: Cody closed it.
     else if (status === "done" && !stopped) this.finishedNotice(row, `✅ **${row.title}** is done: ${gist}`, agentWake)
     else if (status === "failed") this.notice(`❌ **${row.title}** failed: ${preview(error ?? "", 300, "call get_task for the full error")}`, { taskId: row.id })
@@ -8737,7 +8813,7 @@ export class TaskManager {
         if (h === "error") await this.gpuFor(row.box_id)?.provider.destroy(row.box_id).catch(() => {})
         const cloud = GPU_PROVIDER_LABEL[gpuBoxProvider(row.box_id) ?? "runpod"]
         this.gpuPodEvent({ boxId: row.box_id, kind: "terminated", detail: `Pod ${h}`, actor: { kind: "provider" }, reason: `${cloud} reports the pod ${h === "paused" ? "stopped" : h} while a turn ran.` })
-        this.interrupt(this.requireRow(row.id), `its GPU pod ${h === "paused" ? "stopped" : `is ${h}`}`)
+        await this.interrupt(this.requireRow(row.id), `its GPU pod ${h === "paused" ? "stopped" : `is ${h}`}`)
         continue
       }
       if (isDockerBox(row.box_id) && h !== "running") {
@@ -8750,13 +8826,13 @@ export class TaskManager {
           dockerLost.add(row.box_id)
           this.dockerEvent({ boxId: row.box_id, kind: "lost", detail: "Its container and volume are gone", actor: { kind: "provider" }, reason: "Docker reports the container and its volume gone while a turn ran." })
         }
-        this.interrupt(this.requireRow(row.id), h === "paused" ? "its Docker container stopped" : h === "gone" ? "its Docker container and volume are gone" : `Docker stopped (${why})`)
+        await this.interrupt(this.requireRow(row.id), h === "paused" ? "its Docker container stopped" : h === "gone" ? "its Docker container and volume are gone" : `Docker stopped (${why})`)
         continue
       }
       if (isMachineBox(row.box_id) && h !== "running") {
         // Removed from Box Yard under a running turn: nothing can reach it to read the turn's end.
         if (h === "gone" || !this.machineOf(row.box_id)) {
-          this.interrupt(this.requireRow(row.id), `its SSH machine ${this.machineName(row.box_id)} was removed from Box Yard`)
+          await this.interrupt(this.requireRow(row.id), `its SSH machine ${this.machineName(row.box_id)} was removed from Box Yard`)
           continue
         }
         // Offline (asleep, off the network): the turn may still be running there. Check again soon; placement skips
@@ -8938,7 +9014,13 @@ export class TaskManager {
   }
 
   /** The turn died. Requeue it (a couple of times) so the agent can carry on. */
-  private interrupt(row: TaskRow, reason: string) {
+  private async interrupt(row: TaskRow, reason: string) {
+    const turnId = row.current_turn_id
+    await this.reconcileCodexDelivery(row)
+    if (!this.store.db.open) return
+    const fresh = this.store.getTaskRow(row.id)
+    if (!fresh || fresh.current_turn_id !== turnId) return
+    row = fresh
     const flags = this.store.turnFlags(row)
     const interrupts = (flags.interrupts ?? 0) + 1
     this.holds.get(row.id)?.abort()
@@ -8954,7 +9036,11 @@ export class TaskManager {
       this.schedule()
       return
     }
-    if (interrupts > MAX_INTERRUPTS) {
+    if (this.store.hasUncertainCodexInput(row.id)) {
+      const question = "Mid-turn delivery is uncertain. Review the transcript and remove the held message before resuming; it may already have reached Codex."
+      this.store.updateTask(row.id, { status: "needs_input", currentTurnId: null, question, error: reason, turnFlags: { interrupts: 0 } })
+      this.addEvent(row.id, question, { kind: "steer" })
+    } else if (interrupts > MAX_INTERRUPTS) {
       this.store.updateTask(row.id, { status: "failed", currentTurnId: null, error: `Interrupted: ${reason}`, turnFlags: { interrupts: 0, lastHookIds: flags.hookIds } })
       this.settleMergeRequest(row.id, "turn")
       this.addEvent(row.id, `Turn interrupted (${reason}). Gave up after ${MAX_INTERRUPTS} retries.`)
@@ -9082,7 +9168,7 @@ export class TaskManager {
     for (const [taskId, held] of this.diskHold) if (held === boxId) this.diskHold.delete(taskId)
     for (const row of this.store.listTaskRows({ boxId })) {
       this.store.updateTask(row.id, { boxId: null, portBase: null, previews: [] })
-      if (row.current_turn_id) this.interrupt(this.requireRow(row.id), reason)
+      if (row.current_turn_id) await this.interrupt(this.requireRow(row.id), reason)
       else if (!quiet) this.addEvent(row.id, `${reason} The workspace will be restored from its archive when needed.`)
       this.emitTask(row.id)
     }

@@ -262,7 +262,7 @@ export function useQueuedMessageActions(taskId: string) {
 
 /**
  * What Steer on the task's Queued rows needs: whether a turn is running to steer into (not a /compact) and, for a
- * Codex or Cursor agent, which can't take a message mid-turn, its CLI's name (`noSteer`). A small select, so other
+ * Cursor agent, which can't take a message mid-turn, its CLI's name (`noSteer`). A small select, so other
  * task updates don't re-render the queue.
  */
 export function useSteerState(id: string) {
@@ -282,7 +282,7 @@ export function useSteerQueued(taskId: string) {
     onSuccess: ({ delivery, queued, note }) => {
       playSendSound()
       const them = queued === 1 ? "the queued message" : `all ${queued} queued messages`
-      if (delivery === "steering") toast.info("Steering", `The agent reads ${them} at its next step, without stopping.`)
+      if (delivery === "steering") toast.info("Steering", `Delivery requested for ${them}; waiting for acknowledgment.`)
       else if (delivery === "after_turn") toast.info("Couldn't steer", `${note ? `${note[0]!.toUpperCase()}${note.slice(1)}` : "The running turn can't take it"}: ${them} go${queued === 1 ? "es" : ""} in when the turn ends.`)
       else if (delivery === "after_compaction") toast.info("Sending after compaction", `The agent is compacting its context; ${them} go out right after.`)
       else if (delivery === "already_delivered") toast.info("Already on their way", "A turn has taken the queued messages.")

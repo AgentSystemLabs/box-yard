@@ -152,6 +152,7 @@ const clip = (s, n) => {
 // Turn mode
 
 let activeChild = null
+let activeInterrupt = null
 let stopping = false
 
 // `kill -TERM -<pid>` from the orchestrator stops the turn: end Claude, then
@@ -160,7 +161,8 @@ process.on("SIGTERM", () => {
   if (mode !== "turn" || stopping) return
   stopping = true
   try {
-    activeChild?.kill("SIGTERM")
+    if (activeInterrupt) void activeInterrupt()
+    else activeChild?.kill("SIGTERM")
   } catch {}
   setTimeout(() => {
     try {
@@ -289,7 +291,7 @@ async function runTurn() {
   const codex = task.agent === "codex"
   const cursor = task.agent === "cursor"
   const harness = codex ? "Codex" : cursor ? "Cursor" : "Claude"
-  if (codex) prepareCodexHome()
+  if (codex) prepareCodexHome(turn)
   // Codex and Cursor have no /compact to run headless (they compact on their own); Box Yard doesn't ask, but an old
   // turn.json might.
   if ((codex || cursor) && turn.compact) {
@@ -305,7 +307,7 @@ async function runTurn() {
   // The session file can go missing (fresh box, lost archive), or a Codex thread can't open on the login this turn
   // was handed (its saved reasoning is encrypted for the account that wrote it). Start a new session that carries a
   // recap instead of failing the task.
-  if (!stopping && attempt.exitCode !== 0 && turn.resume && /no conversation found|session.*not found|no rollout found|invalid_encrypted_content|encrypted content\b.{0,60}\bcould not be (?:verified|decrypted)/i.test(attempt.errorText)) {
+  if (!stopping && !attempt.steerSubmitted && attempt.exitCode !== 0 && turn.resume && /no conversation found|session.*not found|no rollout found|invalid_encrypted_content|encrypted content\b.{0,60}\bcould not be (?:verified|decrypted)/i.test(attempt.errorText)) {
     sessionId = randomUUID()
     await emit({ t: "session_reset", sessionId, reason: `Previous ${harness} session was not found on this box.` })
     attempt = await runAgent({ turn, sessionId, resume: false, prompt: `${turn.recap ?? ""}\n\n---\n\n${prompt}`.trim(), mcpConfigFile })
@@ -873,9 +875,8 @@ function translate(msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Codex (docs/codex.md). The same turn as runClaude, with `codex exec --json`: the arguments, the translation of its
-// events and the context reading are server/codex.ts's, copied here (this file runs on boxes with plain Node);
-// test/codex-task.e2e.test.ts keeps them in step.
+// Codex tasks use app-server JSON-RPC over stdio. The event/context helpers mirror server/codex.ts's exec adapter
+// (still used by managers). This file must run on every worker with plain Node and an installed Codex CLI.
 
 const codexState = path.join(taskDir, "codex")
 // SSH machines keep a forwarded ChatGPT login in tmpfs even while Codex replaces auth.json on refresh.
@@ -884,15 +885,15 @@ const codexMemoryHome = task.memoryCodexHome && task.secretsDir ? path.join(task
 const codexHome = codexMemoryHome || codexState
 const codexAuthDelivery = path.join(taskDir, "codex-auth.json")
 
-/** The Codex home this turn uses: the task's own, or this computer's when it runs on the owner's own `codex login`. */
+/** Every task uses its own Codex home, including tasks that import this computer's login. */
 function codexHomeInUse() {
-  return task.isolateCodex === false ? turnBaseEnv().CODEX_HOME || path.join(os.homedir(), ".codex") : codexHome
+  return codexHome
 }
 
 function codexEnv() {
   const env = { ...turnBaseEnv(), IS_SANDBOX: "1", PORT: String(task.port ?? 4000), BOXYARD_TASK_ID: task.taskId, BOXYARD_TASK_DIR: taskDir }
   delete env.CLAUDE_CONFIG_DIR
-  if (task.isolateCodex !== false) env.CODEX_HOME = codexHome
+  env.CODEX_HOME = codexHome
   return env
 }
 
@@ -918,13 +919,34 @@ function isRefreshOf(current, candidate) {
  * Box Yard reads the copy back after the turn. With an API key (or no login) a login file left there is removed: it
  * would win over CODEX_API_KEY.
  */
-function prepareCodexHome() {
+let localCodexAuthSource = null
+function prepareCodexHome(turn) {
   let delivered = null
   try {
     delivered = fs.readFileSync(codexAuthDelivery, "utf8")
   } catch {}
   takeDelivered(codexAuthDelivery)
-  if (task.isolateCodex === false) return
+  if (task.isolateCodex === false) {
+    // app-server has no --ignore-user-config. Use a clean task home, importing only this login and legacy thread.
+    const source = turnBaseEnv().CODEX_HOME || path.join(os.homedir(), ".codex")
+    localCodexAuthSource = path.join(source, "auth.json")
+    try { delivered = fs.readFileSync(localCodexAuthSource, "utf8") } catch {}
+    if (turn?.resume && /^[a-f0-9-]+$/i.test(turn.sessionId ?? "")) {
+      const walk = (dir) => {
+        let entries = []
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+        for (const e of entries) {
+          const file = path.join(dir, e.name)
+          if (e.isDirectory()) walk(file)
+          else if (e.name.endsWith(`-${turn.sessionId}.jsonl`)) {
+            const dest = path.join(codexHome, "sessions", path.relative(path.join(source, "sessions"), file))
+            if (!fs.existsSync(dest)) { fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(file, dest) }
+          }
+        }
+      }
+      walk(path.join(source, "sessions"))
+    }
+  }
   fs.mkdirSync(codexHome, { recursive: true, mode: 0o700 })
   if (codexMemoryHome) {
     fs.mkdirSync(codexState, { recursive: true, mode: 0o700 })
@@ -936,7 +958,7 @@ function prepareCodexHome() {
     fs.symlinkSync(path.join(codexHome, "auth.json"), readback)
   }
   const file = path.join(codexHome, "auth.json")
-  if (task.codexLogin !== "chatgpt") {
+  if (task.codexLogin !== "chatgpt" && !(task.isolateCodex === false && delivered)) {
     fs.rmSync(file, { force: true })
     return
   }
@@ -964,6 +986,17 @@ function prepareCodexHome() {
  * replaces the file when it refreshes. A container that stops loses it, and the next turn takes Box Yard's copy.
  */
 function parkCodexAuth() {
+  if (localCodexAuthSource) {
+    // Never overwrite a switched account or a newer concurrent refresh.
+    try {
+      const current = fs.readFileSync(localCodexAuthSource, "utf8")
+      const refreshed = fs.readFileSync(path.join(codexHome, "auth.json"), "utf8")
+      if (isRefreshOf(current, refreshed)) {
+        const tmp = `${localCodexAuthSource}.${process.pid}.tmp`
+        fs.writeFileSync(tmp, refreshed, { mode: 0o600 }); fs.renameSync(tmp, localCodexAuthSource)
+      }
+    } catch {}
+  }
   if (!task.secretsDir || task.isolateCodex === false || codexMemoryHome) return
   const file = path.join(codexHome, "auth.json")
   try {
@@ -985,10 +1018,12 @@ const toml = (v) => JSON.stringify(v)
 const CODEX_OFF = ["apps", "plugins", "computer_use", "browser_use", "in_app_browser", "image_generation", "memories"]
 
 /** server/codex.ts codexExecArgs for a task agent: Box Yard's stdio tools, approved, and no sandbox (the box is one). */
-function codexArgs({ resume, model, effort, instructions, autoCompactTokens }) {
-  const args = ["exec", "--json", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", "--dangerously-bypass-approvals-and-sandbox"]
+function codexArgs({ effort, instructions, autoCompactTokens }) {
+  const args = ["app-server", "--listen", "stdio://"]
   const c = (k, v) => args.push("-c", `${k}=${toml(v)}`)
   c("developer_instructions", instructions)
+  c("approval_policy", "never")
+  c("sandbox_mode", "danger-full-access")
   c("mcp_servers.boxyard.command", process.execPath)
   c("mcp_servers.boxyard.args", [process.argv[1], "mcp", taskDir])
   c("mcp_servers.boxyard.default_tools_approval_mode", "approve")
@@ -998,10 +1033,16 @@ function codexArgs({ resume, model, effort, instructions, autoCompactTokens }) {
   if (effort) c("model_reasoning_effort", effort)
   if (autoCompactTokens) c("model_auto_compact_token_limit", autoCompactTokens)
   for (const f of CODEX_OFF) c(`features.${f}`, false)
-  if (model) args.push("--model", model)
-  if (resume) args.push("resume", resume)
-  args.push("-")
   return args
+}
+
+// Persist before the RPC, then after acceptance. A transport failure is ambiguous: never blindly replay it.
+function writeCodexDelivery(state) {
+  const file = path.join(taskDir, `codex-delivery-${state.turnId}.json`)
+  const tmp = `${file}.${process.pid}.tmp`
+  const fd = fs.openSync(tmp, "w", 0o600)
+  try { fs.writeFileSync(fd, JSON.stringify(state)); fs.fsyncSync(fd) } finally { fs.closeSync(fd) }
+  fs.renameSync(tmp, file)
 }
 
 /** server/codex.ts codexContext: the last token count in the thread's rollout file, and the last rate_limits one had. */
@@ -1051,7 +1092,7 @@ function codexContext(home, thread) {
       if (p?.type !== "token_count") continue
       const u = p.info?.last_token_usage
       const tokens = u ? (Number(u.input_tokens) || 0) + (Number(u.output_tokens) || 0) : 0
-      if (!ctx && tokens > 0) ctx = { tokens, window: typeof p.info.model_context_window === "number" ? p.info.model_context_window : null }
+      if (!ctx && tokens > 0) ctx = { tokens, window: typeof p.info.model_context_window === "number" ? p.info.model_context_window : null, totalUsage: p.info.total_token_usage ?? null }
       if (!limits && p.rate_limits && typeof p.rate_limits === "object") {
         const at = typeof d.timestamp === "string" ? Date.parse(d.timestamp) : NaN
         limits = { rateLimits: p.rate_limits, rateLimitsAt: Number.isFinite(at) ? at : null }
@@ -1098,99 +1139,174 @@ function codexToolError(item) {
   return null
 }
 
-function runCodex({ turn, sessionId, resume, prompt }) {
-  return new Promise((resolve) => {
-    const startedAt = Date.now()
-    const autocompact = Number(turn.autocompact) || null
-    const args = codexArgs({ resume: resume ? sessionId : null, model: turn.model || null, effort: turn.effort || null, instructions: turn.systemPrompt ?? "", autoCompactTokens: autocompact })
-    let child
-    try {
-      child = spawn(task.codexBin || "codex", [...(task.codexArgs ?? []), ...args], { cwd: path.join(taskDir, "work"), env: codexEnv(), stdio: ["pipe", "pipe", "pipe"] })
-    } catch (err) {
-      resolve({ exitCode: 1, startedAt, result: null, usage: null, sessionId: null, errorText: `Couldn't start codex: ${err.message}` })
+async function runCodex({ turn, sessionId, resume, prompt }) {
+  const startedAt = Date.now()
+  const args = codexArgs({ effort: turn.effort, instructions: turn.systemPrompt ?? "", autoCompactTokens: Number(turn.autocompact) || null })
+  const child = spawn(task.codexBin || "codex", [...(task.codexArgs ?? []), ...args], { cwd: path.join(taskDir, "work"), env: codexEnv(), stdio: ["pipe", "pipe", "pipe"] })
+  activeChild = child
+  const state = { turnId: turn.turnId, threadId: null, nativeTurnId: null, entries: [], terminal: null }
+  writeCodexDelivery(state)
+  let thread = null, nativeTurn = null, completed = null, reply = "", stderr = "", buf = "", failure = null
+  let accepting = false, polling = false, timer = null, nextId = 0, closed = false
+  let usageTotal = null
+  let usageBase = resume ? codexContext(codexHomeInUse(), sessionId)?.totalUsage : {}
+  let pending = Promise.resolve(), inFlight = Promise.resolve()
+  const calls = new Map(), seen = new Set()
+  const queue = (event) => { pending = pending.then(() => emit({ ...event, turnId: turn.turnId })) }
+  const send = (msg) => child.stdin.write(JSON.stringify(msg) + "\n")
+  const rpc = (method, params, timeout = 60_000) => new Promise((resolve, reject) => {
+    if (closed) return reject(new Error("Codex app-server connection closed"))
+    const id = ++nextId
+    const expiry = setTimeout(() => { calls.delete(id); reject(new Error(`Codex ${method} response timed out`)) }, timeout)
+    calls.set(id, { resolve, reject, expiry })
+    send({ id, method, params })
+  })
+  let endTurn
+  const ended = new Promise((resolve) => { endTurn = resolve })
+  let endProcess
+  const exited = new Promise((resolve) => { endProcess = resolve })
+  const fail = (message) => { failure ??= message; accepting = false; endTurn() }
+  const normalize = (item) => ({ ...item, type: ({ commandExecution: "command_execution", fileChange: "file_change", webSearch: "web_search", mcpToolCall: "mcp_tool_call" })[item.type] ?? item.type, exit_code: item.exitCode, aggregated_output: item.aggregatedOutput })
+  const onLine = (line) => {
+    let msg
+    try { msg = JSON.parse(line) } catch { return }
+    if (msg.id !== undefined && !msg.method) {
+      const call = calls.get(msg.id)
+      if (!call) return
+      calls.delete(msg.id); clearTimeout(call.expiry)
+      if (msg.error) call.reject(Object.assign(new Error(msg.error.message || JSON.stringify(msg.error)), { rejected: true, rpcCode: msg.error.code }))
+      else call.resolve(msg.result)
       return
     }
-    activeChild = child
-    let thread = null
-    let completed = null
-    let failed = null
-    let lastError = null
-    let reply = ""
-    let stderr = ""
-    let buf = ""
-    const seen = new Set()
-    let pending = Promise.resolve()
-    const queue = (fn) => (pending = pending.then(fn).catch((e) => process.stderr.write(`${e.stack}\n`)))
-
-    const onLine = (line) => {
-      let ev
-      try {
-        ev = JSON.parse(line)
-      } catch {
-        queue(() => emit({ t: "log", text: clip(line, 1000) }))
-        return
-      }
-      const item = ev.item
-      if (ev.type === "thread.started" && typeof ev.thread_id === "string") thread = ev.thread_id
-      else if (ev.type === "item.started" && item) {
-        const tool = codexTool(item)
-        if (tool && item.type !== "web_search") {
-          seen.add(item.id)
-          queue(() => emit({ t: "tool", name: tool.name, input: clip(tool.input, 400) }))
-        }
-      } else if (ev.type === "item.completed" && item) {
-        if (item.type === "agent_message" && item.text?.trim()) {
-          reply = item.text
-          queue(() => emit({ t: "assistant", text: item.text }))
-          return
-        }
-        const tool = codexTool(item)
-        if (tool && !seen.has(item.id)) queue(() => emit({ t: "tool", name: tool.name, input: clip(tool.input, 400) }))
-        seen.delete(item.id)
-        const error = codexToolError(item)
-        if (error) queue(() => emit({ t: "tool_error", text: clip(error, 400) }))
-      } else if (ev.type === "turn.completed") completed = ev.usage ?? {}
-      else if (ev.type === "turn.failed") failed = String(ev.error?.message ?? "Codex failed")
-      else if (ev.type === "error") lastError = String(ev.message ?? "error")
+    if (msg.id !== undefined) {
+      // Steering is never an approval response. Task policy is never/full-access; fail closed for new request types.
+      send({ id: msg.id, error: { code: -32601, message: "Interactive requests are not supported by the Box Yard task runner" } })
+      fail(`Unexpected Codex interactive request: ${msg.method}`)
+      return
     }
-
-    child.stdout.on("data", (chunk) => {
-      buf += chunk.toString("utf8")
-      const lines = buf.split("\n")
-      buf = lines.pop() ?? ""
-      for (const line of lines) if (line.trim()) onLine(line)
-    })
-    child.stderr.on("data", (chunk) => {
-      stderr = (stderr + chunk.toString("utf8")).slice(-8000)
-    })
-    child.on("error", (err) => {
-      stderr += err.code === "ENOENT" ? `\nCodex isn't installed here (${task.codexBin || "codex"} wasn't found). Install it: npm i -g @openai/codex` : `\n${err.message}`
-    })
-    child.on("close", (code, signal) => {
-      if (buf.trim()) onLine(buf)
-      buf = ""
-      pending.then(async () => {
-        const ctx = thread ? codexContext(codexHomeInUse(), thread) : null
-        if (ctx) await emit({ t: "usage", tokens: ctx.tokens, window: ctx.window })
-        // The plan's limits (server/loginLimits.ts): the server knows which login the turn had.
-        if (ctx?.rateLimits) await emit({ t: "limits", harness: "codex", rateLimits: ctx.rateLimits, at: ctx.rateLimitsAt ?? Date.now() })
-        const killed = code === null && signal ? `codex was killed (${signal})` : ""
-        const exitCode = code ?? (signal ? 128 + (os.constants.signals[signal] ?? 0) : 1)
-        const isError = Boolean(failed) || !completed
-        resolve({
-          exitCode,
-          startedAt,
-          sessionId: thread,
-          result: { result: reply, is_error: isError, duration_ms: Date.now() - startedAt, usage: claudeUsageOf(completed) },
-          usage: ctx,
-          errorText: [failed, codexErrorText(stderr), isError && !failed ? lastError : "", killed].filter(Boolean).join("\n"),
-        })
-      })
-    })
-
-    child.stdin.on("error", () => {})
-    child.stdin.end(prompt)
+    const p = msg.params ?? {}
+    if (p.threadId && p.threadId !== thread) return
+    if (msg.method === "turn/started") {
+      nativeTurn = p.turn.id; state.nativeTurnId = nativeTurn; writeCodexDelivery(state)
+      return
+    }
+    if (p.turnId && nativeTurn && p.turnId !== nativeTurn) return
+    if (msg.method === "turn/completed") {
+      if (p.turn?.id !== nativeTurn) return
+      accepting = false; completed = p.turn
+      // Capture client IDs even when an item notification was lost before completion.
+      for (const item of p.turn.items ?? []) if (item.type === "userMessage") markInput(item.clientId)
+      endTurn()
+    } else if (msg.method === "item/started" || msg.method === "item/completed") {
+      const item = p.item
+      if (!item) return
+      if (item.type === "userMessage") { markInput(item.clientId); return }
+      const finished = msg.method === "item/completed"
+      if (finished && item.type === "agentMessage" && item.text?.trim()) { reply = item.text; queue({ t: "assistant", text: reply }); return }
+      const normalized = normalize(item), tool = codexTool(normalized)
+      if (tool && !seen.has(item.id)) { seen.add(item.id); queue({ t: "tool", name: tool.name, input: clip(tool.input, 400) }) }
+      if (finished) { const error = codexToolError(normalized); if (error) queue({ t: "tool_error", text: clip(error, 400) }) }
+    } else if (msg.method === "thread/tokenUsage/updated") {
+      const total = p.tokenUsage?.total
+      if (total) {
+        if (!usageBase) {
+          const last = p.tokenUsage.last ?? {}
+          usageBase = Object.fromEntries(Object.entries(total).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`), Math.max(0, v - (last[k] ?? 0))]))
+        }
+        usageTotal = Object.fromEntries(Object.entries(total).map(([k, v]) => [k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`), v]))
+      }
+    } else if (msg.method === "error" && !p.willRetry) fail(String(p.error?.message ?? "Codex failed"))
+  }
+  function markInput(clientId) {
+    const entry = state.entries.find((e) => e.id === clientId)
+    if (entry && !entry.incorporated) { entry.incorporated = true; writeCodexDelivery(state) }
+  }
+  child.stdout.on("data", (chunk) => {
+    buf += chunk.toString("utf8")
+    const lines = buf.split("\n"); buf = lines.pop() ?? ""
+    for (const line of lines) if (line.trim()) onLine(line)
   })
+  child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString("utf8")).slice(-8000) })
+  child.stdin.on("error", () => {})
+  child.on("error", (err) => fail(`Couldn't start Codex app-server: ${err.message}`))
+  child.on("close", (code, signal) => {
+    closed = true; accepting = false
+    for (const call of calls.values()) { clearTimeout(call.expiry); call.reject(new Error("Codex app-server connection closed")) }
+    calls.clear()
+    if (!completed) fail(`Codex app-server exited before turn completion (${signal || code})`)
+    endProcess()
+  })
+  const poll = async () => {
+    if (!accepting || polling) return
+    polling = true
+    try {
+      const mail = fs.readdirSync(taskDir).filter((f) => STEER_FILE.test(f)).map((f) => ({ f, value: readJson(path.join(taskDir, f), null) }))
+        .filter(({ value }) => value?.turnId === turn.turnId).sort((a, b) =>
+          (Number.isSafeInteger(a.value.sequence) && Number.isSafeInteger(b.value.sequence) ? a.value.sequence - b.value.sequence : a.value.at - b.value.at) || a.f.localeCompare(b.f))
+      for (const { f, value } of mail) {
+        if (!accepting) break
+        if (state.entries.some((e) => e.id === value.id)) continue
+        const entry = { id: value.id, inputIds: value.inputIds, state: "submitted", incorporated: false }
+        state.entries.push(entry); writeCodexDelivery(state)
+        queue({ t: "codex_delivery", inputIds: entry.inputIds, delivery: "submitted" })
+        try {
+          const result = await rpc("turn/steer", { threadId: thread, expectedTurnId: nativeTurn, input: [{ type: "text", text: value.text, text_elements: [] }], clientUserMessageId: value.id })
+          if (result.turnId !== nativeTurn) throw new Error("Codex accepted a different turn ID")
+          entry.state = "accepted"; entry.accepted = true; writeCodexDelivery(state)
+          queue({ t: "codex_delivery", inputIds: entry.inputIds, delivery: "accepted" })
+        } catch (err) {
+          // Only validation/precondition failures establish non-delivery. An internal server error is ambiguous.
+          const rejected = err.rejected && (err.rpcCode === -32602 || /no active turn|no turn.*active|expectedTurnId.*(mismatch|does not match)|turn id mismatch/i.test(err.message))
+          entry.state = rejected ? "rejected" : "uncertain"; writeCodexDelivery(state)
+          // A timeout/disconnect might already have applied the input. Stop instead of accepting more work blindly.
+          if (!rejected) fail(err.message)
+        }
+        fs.rmSync(path.join(taskDir, f), { force: true })
+      }
+    } finally { polling = false }
+  }
+  try {
+    await rpc("initialize", { clientInfo: { name: "boxyard_task", version: RUNNER_VERSION }, capabilities: {} })
+    send({ method: "initialized", params: {} })
+    const options = { cwd: path.join(taskDir, "work"), approvalPolicy: "never", sandbox: "danger-full-access", developerInstructions: turn.systemPrompt ?? "", ...(turn.model ? { model: turn.model } : {}) }
+    const response = await rpc(resume ? "thread/resume" : "thread/start", { ...options, ...(resume ? { threadId: sessionId } : {}) })
+    thread = response.thread.id; state.threadId = thread; writeCodexDelivery(state)
+    queue({ t: "session", sessionId: thread })
+    activeInterrupt = () => nativeTurn ? rpc("turn/interrupt", { threadId: thread, turnId: nativeTurn }, 4000).catch(() => child.kill("SIGTERM")) : Promise.resolve(child.kill("SIGTERM"))
+    if (stopping) await activeInterrupt()
+    else {
+      const response = await rpc("turn/start", { threadId: thread, input: [{ type: "text", text: prompt, text_elements: [] }], ...(turn.model ? { model: turn.model } : {}), ...(turn.effort ? { effort: turn.effort } : {}) })
+      nativeTurn ??= response.turn.id; state.nativeTurnId = nativeTurn; writeCodexDelivery(state)
+      accepting = !completed && !closed && !stopping
+      timer = setInterval(() => { inFlight = poll().catch((err) => fail(err.message)) }, 150)
+      await ended
+    }
+  } catch (err) { fail(err.message) }
+  finally {
+    accepting = false; clearInterval(timer)
+    // Wait for the request that raced turn/completed before deciding whether it was accepted.
+    while (polling) await sleep(10)
+    await inFlight
+    const ok = !failure && completed?.status === "completed"
+    state.terminal = ok ? "completed" : "interrupted"
+    for (const entry of state.entries) {
+      if (entry.state === "accepted") entry.state = ok && entry.incorporated ? "settled" : "uncertain"
+      if (entry.state === "submitted") entry.state = "uncertain"
+    }
+    writeCodexDelivery(state)
+    activeInterrupt = null
+    child.stdin.end()
+    const killer = setTimeout(() => child.kill("SIGKILL"), 5000)
+    await exited; clearTimeout(killer)
+    await pending
+  }
+  const ctx = thread ? codexContext(codexHomeInUse(), thread) : null
+  if (ctx) await emit({ t: "usage", tokens: ctx.tokens, window: ctx.window, turnId: turn.turnId })
+  if (ctx?.rateLimits) await emit({ t: "limits", harness: "codex", rateLimits: ctx.rateLimits, at: ctx.rateLimitsAt ?? Date.now(), turnId: turn.turnId })
+  // Rollout totals are read separately for context; billing uses only this native turn's usage notifications below.
+  const ok = !failure && completed?.status === "completed"
+  return { steerSubmitted: state.entries.some((e) => e.state !== "rejected"), exitCode: ok ? 0 : 1, startedAt, sessionId: thread, result: { result: reply, is_error: !ok, duration_ms: Date.now() - startedAt, usage: usageTotal ? claudeUsageOf(Object.fromEntries(Object.entries(usageTotal).map(([k, v]) => [k, Math.max(0, v - (usageBase?.[k] ?? 0))]))) : null }, usage: ctx,
+    errorText: [state.entries.some((e) => e.state !== "rejected") ? "Mid-turn delivery recorded; automatic session reset is disabled." : "", failure || completed?.error?.message, codexErrorText(stderr)].filter(Boolean).join("\n") }
 }
 
 // ---------------------------------------------------------------------------
@@ -2009,6 +2125,13 @@ async function callTool(name, args = {}) {
       return text(`Cancelling ${kids.length}: ${kids.map((c) => `${c.title} (${c.id})`).join(", ")}. They won't report.`)
     }
     case "finish": {
+      if (task.agent === "codex") {
+        const turnId = currentTurnId()
+        const journal = readJson(path.join(taskDir, `codex-delivery-${turnId}.json`), null)
+        const pending = fs.readdirSync(taskDir).some((f) => STEER_FILE.test(f) && readJson(path.join(taskDir, f), null)?.turnId === turnId) ||
+          journal?.entries?.some((e) => e.state === "submitted" || e.state === "uncertain" || e.state === "accepted" && !e.incorporated)
+        if (pending) return text("Instructions are pending delivery. Read the follow-up before finishing; acceptance alone does not confirm processing.", true)
+      }
       const running = subtaskState().children.filter((c) => LIVE_SUBTASK.includes(c.status))
       if (running.length) {
         return text(

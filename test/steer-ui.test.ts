@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // Steer on the task page's Queued rows: one tap while a Claude turn runs (nothing stops, so nothing asks), no Steer
-// without a turn to steer into or on a Codex agent (its rows say why), the Steering rows, and the transcript's mark.
+// without a turn to steer into or on a Cursor agent (its rows say why), the Steering rows, and the transcript's mark.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -70,6 +70,20 @@ const button = (text: string) => [...host.querySelectorAll("button")].find((b) =
 const posts = () => calls.filter((c) => c.method === "POST")
 
 describe("Steer on Queued rows", () => {
+  it("offers Steer for Codex and distinguishes acceptance from processing", async () => {
+    seed({ status: "working", agentCli: "codex" })
+    render(); await settle()
+    expect(steerButton(rows()[0]!)).not.toBeNull()
+    queue = [{ ...queue[0]!, status: "accepted" }, { ...queue[1]!, status: "uncertain" }]
+    act(() => qc.setQueryData(keys.taskQueue(TASK), queue))
+    await settle()
+    expect(rows()[0]!.textContent).toContain("Accepted by Codex")
+    expect(rows()[0]!.textContent).toContain("does not confirm that the model processed it")
+    expect(rows()[0]!.querySelectorAll("button")).toHaveLength(0)
+    expect(rows()[1]!.textContent).toContain("Automatic retry is paused")
+    expect(rows()[1]!.querySelector('button[aria-label="Remove delivery hold"]')).not.toBeNull()
+  })
+
   it("sits next to Edit and Cancel while a turn runs, and steers the whole queue in one tap", async () => {
     seed({ status: "working" })
     render()
@@ -79,18 +93,18 @@ describe("Steer on Queued rows", () => {
     const steer = steerButton(rows()[1]!)!
     // Its name shows, not only an icon, and its title says what it does.
     expect(steer.textContent?.trim()).toBe("Steer")
-    expect(steer.getAttribute("title")).toBe("Steer: the agent reads the queued messages at its next step, without stopping")
+    expect(steer.getAttribute("title")).toBe("Steer: request delivery of the queued messages into the running turn")
     // 44px to a finger, 24px from sm.
     expect(steer.className).toMatch(/\bh-11\b/)
     expect(steer.className).toMatch(/\bsm:h-6\b/)
-    expect(rows()[0]!.textContent).toContain("Delivered when the current turn ends, or at the agent's next step with Steer.")
+    expect(rows()[0]!.textContent).toContain("Delivered when the current turn ends, or during the turn with Steer.")
 
     // On the second row it still steers the whole queue, at once: nothing stops, so nothing asks.
     click(steer)
     expect(host.querySelector("[role=alertdialog]")).toBeNull()
     await settle()
     expect(posts()).toEqual([{ method: "POST", url: `/api/tasks/${TASK}/queue/steer`, body: {} }])
-    expect(toasts().some((t) => t.title === "Steering" && t.body === "The agent reads all 2 queued messages at its next step, without stopping.")).toBe(true)
+    expect(toasts().some((t) => t.title === "Steering" && t.body === "Delivery requested for all 2 queued messages; waiting for acknowledgment.")).toBe(true)
   })
 
   it("steers a turn that is merging a PR like any other: nothing is stopped midway", async () => {
@@ -103,7 +117,7 @@ describe("Steer on Queued rows", () => {
     expect(posts()).toHaveLength(1)
   })
 
-  it("has no Steer without a running turn to steer into, or on a Codex agent, and says when the message goes", async () => {
+  it("has no Steer without a running turn to steer into, or on a Cursor agent, and says when the message goes", async () => {
     seed({ status: "queued" })
     render()
     await settle()
@@ -115,10 +129,10 @@ describe("Steer on Queued rows", () => {
     expect(steerButton(rows()[0]!)).toBeNull()
     expect(rows()[0]!.textContent).toContain("Delivered once the agent has compacted its context.")
 
-    act(() => seed({ status: "working", agentCli: "codex" }))
+    act(() => seed({ status: "working", agentCli: "cursor" }))
     await settle()
     expect(steerButton(rows()[0]!)).toBeNull()
-    expect(rows()[0]!.textContent).toContain("Delivered when the current turn ends: Codex can't take a message mid-turn.")
+    expect(rows()[0]!.textContent).toContain("Delivered when the current turn ends: Cursor can't take a message mid-turn.")
   })
 
   it("shows a steer on its way as a locked Steering row, without a spinner", async () => {
@@ -128,7 +142,7 @@ describe("Steer on Queued rows", () => {
     await settle()
     const [steering, queued] = rows()
     expect(steering!.textContent).toContain("Steering")
-    expect(steering!.textContent).toContain("On its way into the running turn: the agent reads it at its next step.")
+    expect(steering!.textContent).toContain("Delivery requested; waiting for the runner to acknowledge it.")
     expect(steering!.querySelectorAll("button")).toHaveLength(0)
     expect(steering!.querySelector(".animate-spin")).toBeNull()
     expect(steerButton(queued!)).not.toBeNull()
@@ -158,9 +172,17 @@ describe("A steered message in the transcript", () => {
     show(line({ steered: true, queuedAt: 0 }))
     const mark = [...host.querySelectorAll("span")].find((s) => s.textContent === "Steered")
     expect(mark).toBeDefined()
-    expect(mark!.getAttribute("title")).toBe("Steered into the running turn: the agent read it at its next step")
+    expect(mark!.getAttribute("title")).toBe("Written to the agent's input stream; model processing is not confirmed")
     // Its sender's label stays.
     expect(host.textContent).toContain("Cody")
+  })
+
+  it("labels a Codex acknowledgment without claiming processing", () => {
+    show(line({ steered: true, steerAccepted: true }))
+    const mark = host.querySelector('[title="Codex accepted this input; model processing is not confirmed"]')
+    expect(mark?.textContent).toBe("Accepted by Codex")
+    show(line({ deliveryUncertain: true }))
+    expect(host.textContent).toContain("Removing it from the queue does not undo delivery")
   })
 
   it("has no mark on a message a turn started with", () => {
