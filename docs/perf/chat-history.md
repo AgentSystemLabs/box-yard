@@ -28,7 +28,7 @@ These routes sit behind browser authentication and the existing Host/Origin boun
 
 ## Reproduction and methodology
 
-Measurements below compare public main `97a6e9e` with the history change merged onto that same main. Both production builds ran sequentially on one local ARM64 workstation with shared 18 GB RAM, Node 24.15.0, an unthrottled headless Chromium, 1400×900 viewport, and `America/New_York` timezone. Each sample uses a fresh browser context; tables report medians of three runs. Jobs ran sequentially. Other activity on a shared workstation remains a source of noise.
+Measurements below compare public main `ec92dac` with runtime implementation `ae301db`, merged onto that same main. Subsequent commits refine only measurement setup and documentation. Both production builds ran sequentially on one local ARM64 workstation with shared 18 GB RAM, Node 24.15.0, an unthrottled headless Chromium, 1400×900 viewport, and `America/New_York` timezone. Each sample uses a fresh browser context; tables report medians of three runs. Jobs ran sequentially. Other activity on a shared workstation remains a source of noise.
 
 Two isolated mock servers used independent data directories and ports above 4011. Neither the live app nor its data was used. Both received the same SQLite backup: the heavy fixture's 1,200 Coordinator messages and 2,000 task events, plus 1,600 Captain messages. Captain ids are `cm_example-0` through `cm_example-1599`, one hourly from `2026-09-01T00:00:00Z`, one user then two assistant messages per three rows. Their content is a numbered example reply followed by four repetitions of “An example reply with enough text to wrap in a narrow conversation.” The Captain belongs to `prj_heavy-yard` (`acme/box-yard`). Mock pulse replies are SSE-only and do not change the retained fixture.
 
@@ -55,32 +55,32 @@ HISTORY_BROWSER=webkit HISTORY_ZOOM=1.25 node scripts/perf/history-interactions.
 
 ## Results
 
-Launch readiness (`first-load.mjs`) was **73.2 → 74.5 ms**; FCP **136 → 124 ms**; blocking time to readiness **0 → 0 ms**. JavaScript fetched to readiness was **331.4 → 333.2 KB**, eight files in both builds. Lazy surface opening medians were Settings **30.3 → 52.9 ms**, project settings **12.7 → 14.5 ms**, schedules **21.6 → 23.2 ms**. These are local wall times with shared-machine noise, not network-throttled results.
+Launch readiness (`first-load.mjs`) was **71.7 → 81.2 ms**; blocking time to readiness **0 → 0 ms**. JavaScript fetched to readiness was **332.5 → 334.3 KB**, eight files in both builds. The existing script returned a missing-paint sentinel (0) for the after FCP median: its paint entry was not available when readiness was sampled. That value is unavailable, not a zero-millisecond paint or a measured improvement. Lazy surface opening medians were Settings **43.3 → 39.6 ms**, project settings **14.4 → 11.9 ms**, schedules **23.3 → 23.2 ms**. These are local wall times with shared-machine noise, not network-throttled results.
 
 | Opening response / page | Coordinator before → after | Captain before → after | Task before → after |
 | --- | ---: | ---: | ---: |
-| Initial decoded JSON bytes | 500,404 → 501,106 | 714,570 → 718,692 | 865,314 → 866,165 |
-| Initial document elements | 3,072 → 3,097 | 4,067 → 4,112 | 4,347 → 4,376 |
+| Initial decoded JSON bytes | 500,404 → 501,144 | 714,570 → 718,764 | 865,314 → 866,238 |
+| Initial document elements | 3,073 → 3,098 | 4,068 → 4,113 | 4,348 → 4,377 |
 | Initial transcript child rows | 63 → 64 | 65 → 66 | 63 → 64 |
-| Document elements after oldest-date jump | 15,348 → 2,535 | 10,013 → 4,512 | 11,718 → 3,794 |
+| Document elements after oldest-date jump | 15,349 → 2,536 | 10,014 → 4,513 | 11,719 → 3,795 |
 
-The date index adds 702 / 4,122 / 851 decoded bytes in this fixture. Initial message limits stay the same; history bodies are requested only when needed. Initial markup adds navigation/loading wrappers, while historical DOM size falls substantially.
+The date index adds 740 / 4,194 / 924 decoded bytes in this fixture. Initial message limits stay the same; history bodies are requested only when needed. Initial markup adds navigation/loading wrappers, while historical DOM size falls substantially.
 
 The following holds the work constant: one draft fill plus 22 keystrokes, five 600px upward scrolls, and one cached-row prepend. Times are milliseconds; CPU means CDP main-thread work.
 
 | Interaction | Coordinator before → after | Captain before → after | Task before → after |
 | --- | ---: | ---: | ---: |
-| Typing sequence CPU | 41.7 → 50.4 | 31.3 → 37.0 | 21.2 → 28.8 |
-| Typing sequence wall time | 57.5 → 66.3 | 38.8 → 45.7 | 30.9 → 43.3 |
-| Streamed reply CPU, per reply | 18.9 → 19.4 | — | — |
-| Five-scroll CPU | 22.1 → 28.0 | 65.0 → 51.1 | 65.0 → 51.3 |
-| Five-scroll wall time | 149.0 → 190.2 | 235.9 → 244.3 | 278.8 → 289.7 |
-| Prepend wall time | 23.5 → 25.2 | 25.6 → 21.7 | 23.1 → 21.0 |
-| Prepend anchor displacement, pixels | −0.2 → −0.2 | 0 → 0 | −0.7 → +0.3 |
-| Same-calendar-date jump | 93.2 → 98.0 | 94.4 → 152.3 | 107.8 → 128.0 |
-| Jump to true retained beginning | unavailable → 124.5 | unavailable → 68.3 | unavailable → 109.9 |
+| Typing sequence CPU | 36.3 → 35 | 26.5 → 27.4 | 34.5 → 30.8 |
+| Typing sequence wall time | 52.9 → 48.5 | 38 → 42.2 | 47.9 → 50.8 |
+| Streamed reply CPU, per reply | 20.2 → 19.9 | — | — |
+| Five-scroll CPU | 30 → 17.2 | 41.8 → 47.9 | 68.9 → 57.4 |
+| Five-scroll wall time | 151.6 → 182 | 252.5 → 299.9 | 288.1 → 327.3 |
+| Prepend wall time | 32.9 → 26.1 | 14.1 → 42.2 | 16.4 → 21.7 |
+| Prepend anchor displacement, pixels | -0.2 → -0.2 | 0 → 0 | -0.7 → 0.3 |
+| Same-calendar-date jump | 107.2 → 151.5 | 126.7 → 171.6 | 117.2 → 121.5 |
+| Jump to true retained beginning | unavailable → 204.9 | unavailable → 92.1 | unavailable → 158.9 |
 
-Typing's measured aggregate CPU rises by 5.7–8.7 ms across the whole sequence (under 0.4 ms per typed character); the streamed reply delta is 0.5 ms. These small costs are reported, not assumed to be zero. The bounded-window and memoized-transcript tests cover draft isolation. The Captain's same-date jump now fetches that date's actual first message (`cm_example-1084`), instead of stopping at the opening cap's `cm_example-1100`; that accounts for an extra request and useful work. Coordinator/task date jumps likewise reach the actual date boundary.
+The Captain same-date jump now reaches `cm_example-1084`, instead of stopping at the opening cap's `cm_example-1100`; Coordinator/task jumps likewise reach the actual first message of the date. Fetching that boundary can add a request in place of a cached-only jump. Typing and streaming values above cover the same work on both builds; small wall-time differences include frame scheduling and shared-machine activity. The separate prepend scheduling/CPU check below supplies a larger sample for that operation.
 
 Before, the oldest reachable ids were `chat_heavy00702`, `cm_example-1100`, and `tm_heavy01000`. After, the true beginnings are `chat_heavy00000`, `cm_example-0`, and `tm_heavy00000`. Header top positions after date jumps were **−56 / −41 / −56 px** before and **0 / 54 / 0 px** after. The Captain header normally begins below the 53px page header. Before, clipped `MAIN` ancestors acquired 56–95px of scroll; after, none did.
 
@@ -89,31 +89,36 @@ The existing `long-transcript.mjs` also ran three times on each build:
 | Full walk and subsequent interaction | Coordinator before → after | Task before → after |
 | --- | ---: | ---: |
 | Raw retained rows reachable by the walk | 500 → 1,200 | 1,000 → 2,000 |
-| Document elements at oldest point | 15,348 → 4,980 | 11,718 → 4,855 |
+| Document elements at oldest point | 15,349 → 4,981 | 11,719 → 4,856 |
 | Direct transcript child rows at oldest point | 329 → 136 | 446 → 87 |
-| Reply CPU while reading history | 26.3 → 6.3 ms | — |
-| Rotation CPU after reading history | 256.4 → 98.5 ms | 173.8 → 77.7 ms |
-| Entire walk CPU, different amounts of work | 524.6 → 1,272.9 ms | 341.8 → 754.6 ms |
-| Walk frames exceeding 50 ms, different work | 18 → 45 | 18 → 35 |
-| Median longest walk frame | 83.4 → 91.7 ms | 66.8 → 100.0 ms |
+| Rotation CPU after reading history | 221.3 → 77.7 | 167.1 → 74.1 |
+| Entire walk CPU, different amounts of work | 545.1 → 1,469.4 | 341.6 → 844.3 |
+| Walk frames exceeding 50 ms, different work | 24 → 131 | 19 → 62 |
+| Median longest walk frame | 91.9 → 250 | 83.4 → 266.7 |
+| Reply CPU while reading history | 24.6 → 4.9 ms | — |
 
-The largest observed single task-walk frame across runs was 415.8 ms before and 358.3 ms after. Full-walk totals include the additional network pages and retained history now accessible. They are not equivalent-work latency comparisons. Reading-window reply/rotation costs improve as the DOM stays bounded.
+The largest observed single task-walk frame across runs was 375 → 384 ms. Full-walk totals include the additional network pages and retained history now accessible. They are not equivalent-work latency comparisons. Reading-window reply/rotation costs improve as the DOM stays bounded.
+
+A supplemental five-run task-only prepend check measured 41.6 → 23.7 ms wall time and 20 → 18.1 ms main-thread CPU. The measured anchor stayed within one pixel. This control ran after the stable-cursor fix and before the final visible-date metadata adjustment, which changes no prepend/render code. It illustrates scheduling variation in the three-run wall times; it does not replace the primary results above.
+
+A separate five-run Captain check waits for at least 60 initial rows and five unchanged frames before the same interaction sequence. Its prepend median was **21.4 → 25.5 ms wall time**, **15.6 → 14.5 ms main-thread CPU**, with **-0.0 → -0.0px** displacement. This check investigates the primary Captain wall-time increase with a settled initial transcript; it does not replace that primary result.
 
 ## Browser and layout checks
 
-Chromium and WebKit each passed date jumps at **320 / 400 / 560 / 800px**, at **100% and 125% CSS zoom**: 16 combinations. Every jump focused the true oldest Captain message, left the header visible, kept clipped ancestors at zero scroll, and avoided horizontal page overflow. Date targets measure 44px at normal scale and 55 visual pixels at 125%.
+Chromium and WebKit each passed date jumps at **320 / 400 / 560 / 800px**, at **100% and 125% CSS zoom**: 16 combinations. Every jump focused the true oldest Captain message, left the header visible, kept clipped ancestors at zero scroll, and avoided horizontal page overflow. Date targets measure 44px at normal scale and 55 visual pixels at 125%. The current matrix uses the default system-light appearance from the new main; the preceding dark appearance was also checked during implementation.
 
 A separate 400px interaction check sends 20 streaming updates while reading older content, then performs four prepends (including a bounded-window change). Streaming moved the reading anchor **0px** in both engines at both scales. Prepend displacements were:
 
 | Engine / scale | Four visual-pixel displacements |
 | --- | --- |
-| Chromium 100% | −0.25, −0.25, −0.25, +0.50 |
-| Chromium 125% | +0.05, +0.19, +0.06, −0.22 |
-| WebKit 100% | +0.75, +0.75, −0.25, +0.50 |
-| WebKit 125% | −0.69, +0.44, +0.06, +0.13 |
+| Chromium 100% | -0.25, -0.25, -0.25, +0.50 |
+| Chromium 125% | +0.05, +0.19, +0.06, -0.22 |
+| WebKit 100% | +0.75, +0.75, -0.25, +0.50 |
+| WebKit 125% | -0.69, +0.44, +0.06, +0.12 |
+
+An earlier interaction sample mixed a native wheel with an immediate scripted 2,400px scroll and failed by that setup distance. The final protocol uses native wheel input alone, waits for five unchanged animation frames before marking its anchor, and reruns all four engine/scale cases. Date-rail checks wait for the virtualized first button and the requested oldest divider, rather than relying on a fixed delay.
 
 The WebKit zoom check initially exposed 1.3–1.4px drift: WebKit floors fractional `scrollTop` assignments. Choosing the nearest representable scroll position reduced every measured displacement below one visual pixel; Chromium retains its fractional positioning. A regression test models that rounding behavior.
-
 
 ## Limits of the comparison
 
