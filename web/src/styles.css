@@ -26,6 +26,9 @@
   --font-wordmark: "Box Yard Wordmark", var(--font-sans);
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-yard-50: #fffbeb;
+  --color-yard-100: #fef3c7;
+  --color-yard-200: #fde68a;
+  --color-yard-300: #fcd34d;
   --color-yard-400: #fbbf24;
   --color-yard-500: #f59e0b;
   --color-yard-600: #d97706;
