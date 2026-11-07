@@ -971,6 +971,9 @@ export class Store {
     if (discardQueued !== undefined && (rows.find((r) => r.id === ("taskId" in target ? target.taskId : ""))?.status !== "failed" || failedInputs.length !== discardQueued)) {
       throw new ConflictError("Queued messages changed. Review them and confirm deletion again.")
     }
+    if (discardQueued !== undefined && failedInputs.some((i) => i.status !== "queued")) {
+      throw new ConflictError("A queued message is being delivered or held. Stop the task and review its queued messages before deleting.")
+    }
     if (rows.some((r) => ids.has(r.id) && (r.current_turn_id || ["queued", "starting", "working"].includes(r.status) || r.compacting || r.compact_pending || (this.hasInputs(r.id) && !(discardQueued !== undefined && r.status === "failed" && this.listQueuedInputs(r.id).every((i) => i.status === "queued"))) || this.hasUncertainCodexInput(r.id)))) {
       throw new ConflictError("Stop queued or running tasks before deleting.")
     }
