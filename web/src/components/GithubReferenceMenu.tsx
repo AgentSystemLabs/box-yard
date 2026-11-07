@@ -100,7 +100,9 @@ export function useGithubReferences({ projectId, draftKey, value, setValue, inpu
 export function GithubReferenceMenu({ picker, anchor }: { picker: ReturnType<typeof useGithubReferences>; anchor: RefObject<HTMLElement | null> }) {
   const at = useAbove(anchor)
   const { id, active, items, loading, problem, repo } = picker
-  useEffect(() => document.getElementById(`${id}-${active}`)?.scrollIntoView?.({ block: "nearest" }), [id, active, items])
+  useEffect(() => {
+    document.getElementById(`${id}-${active}`)?.scrollIntoView?.({ block: "nearest" })
+  }, [id, active, items])
   if (!at) return null
   return createPortal(
     <div data-testid="github-reference-menu" style={{ left: at.left, width: at.width, bottom: at.bottom }}

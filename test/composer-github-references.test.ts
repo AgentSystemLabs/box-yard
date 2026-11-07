@@ -112,6 +112,22 @@ describe("Composer GitHub picker", () => {
     expect(textarea().value).toContain("[Issue acme/site#12: Retry webhooks](https://github.com/acme/site/issues/12)")
   })
 
+  it("ignores a browser scrollIntoView return value when changing or closing the popup", async () => {
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = () => Promise.resolve()
+    try {
+      mount()
+      await type("#retry")
+      await wait(280); await wait()
+      key("ArrowDown")
+      key("Enter")
+      expect(menu()).toBeNull()
+      expect(textarea().value).toContain("[PR acme/site#13:")
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+
   it("discards stale responses for a changed filter and project, cancelling the old request", async () => {
     const pending = new Map<string, (value: Response) => void>()
     respond = (url) => new Promise((r) => pending.set(url, r))
