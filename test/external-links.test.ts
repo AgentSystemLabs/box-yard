@@ -208,4 +208,24 @@ describe("PR chip", () => {
     expect(click(a).prevented).toBe(false)
     expect(card).not.toHaveBeenCalled()
   })
+
+  it.each([
+    ["open", "text-emerald-400", "PR #66"],
+    ["draft", "text-zinc-400", "Draft #66"],
+    ["merged", "text-merged-fg", "Merged #66"],
+    ["closed", "text-red-400/80", "Closed #66"],
+    [null, "text-emerald-400", "PR #66"],
+  ] as const)("keeps the %s state accessible and colored in number-only links", (prState, color, label) => {
+    const card = vi.fn()
+    render(createElement("div", { onClick: card }, createElement(PrChip, { task: { prUrl: PR, prState }, variant: "number" })))
+    const a = linkTo(PR)
+    expect(a.textContent).toBe("#66")
+    expect(a.className).toContain(color)
+    expect(a.getAttribute("aria-label")).toBe(`${label} on GitHub (opens in a new tab)`)
+    expect(a.title).toContain(PR)
+    expect(isNewTab(a)).toBe(true)
+    expect(hasMark(a)).toBe(true)
+    expect(click(a).prevented).toBe(false)
+    expect(card).not.toHaveBeenCalled()
+  })
 })
