@@ -1,0 +1,14 @@
+[
+  {
+    "entry": "header",
+    "confirmationCount": 0,
+    "spokenReason": "Delete cancelled. Stop queued or running tasks before deleting.",
+    "visibleToastCount": 0
+  },
+  {
+    "entry": "project row",
+    "confirmationCount": 0,
+    "spokenReason": "Delete cancelled. Stop queued or running tasks before deleting.Delete cancelled. Stop queued or running tasks before deleting.",
+    "visibleToastCount": 0
+  }
+]

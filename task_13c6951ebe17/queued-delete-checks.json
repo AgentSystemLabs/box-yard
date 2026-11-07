@@ -1,0 +1,62 @@
+[
+  {
+    "width": 1440,
+    "entry": "header",
+    "selected": true,
+    "confirmation": "passed",
+    "cancelPreservesFiveMessages": "passed",
+    "confirmedDeleteApi200AndDatabaseRemoval": "passed",
+    "writes": 1,
+    "errors": 0
+  },
+  {
+    "width": 1440,
+    "entry": "row",
+    "selected": true,
+    "confirmation": "passed",
+    "cancelPreservesFiveMessages": "passed",
+    "confirmedDeleteApi200AndDatabaseRemoval": "passed",
+    "writes": 1,
+    "errors": 0
+  },
+  {
+    "width": 1440,
+    "entry": "row",
+    "selected": false,
+    "confirmation": "passed",
+    "cancelPreservesFiveMessages": "passed",
+    "confirmedDeleteApi200AndDatabaseRemoval": "passed",
+    "writes": 1,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "entry": "header",
+    "selected": true,
+    "confirmation": "passed",
+    "cancelPreservesFiveMessages": "passed",
+    "confirmedDeleteApi200AndDatabaseRemoval": "passed",
+    "writes": 1,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "entry": "row",
+    "selected": true,
+    "confirmation": "passed",
+    "cancelPreservesFiveMessages": "passed",
+    "confirmedDeleteApi200AndDatabaseRemoval": "passed",
+    "writes": 1,
+    "errors": 0
+  },
+  {
+    "width": 400,
+    "entry": "row",
+    "selected": false,
+    "confirmation": "passed",
+    "cancelPreservesFiveMessages": "passed",
+    "confirmedDeleteApi200AndDatabaseRemoval": "passed",
+    "writes": 1,
+    "errors": 0
+  }
+]

@@ -1,38 +1,22 @@
-# Failed-task actions and chat focus validation
+# Failed task actions and chat focus
 
-Validated source commit: `1e38938882e93b452423ef670e9b0fb46090125c`.
+Source commit: 36c4d42 (failed-task-actions-and-chat-focus).
 
-## Focused regressions while iterating
+## Reproduction
 
-- Sidebar deletion, tree focus, row rendering, dialogs, shortcut handling, task headers, composer drafts and pickers: 13 files, 248 tests passed.
-- Subtask tree folding and rail indentation after adding the action wrapper: 1 file, 24 tests passed.
-- Final shell/phone focus change plus dialogs, dismissal, shortcuts and composer pickers: 6 files, 119 tests passed. Includes phone Coordinator, Captain and task drafts, IME, actual focus, immediate arrow navigation and unchanged route.
+A running browser with a failed task containing five queued messages reproduced both entry points: no confirmation, no DELETE request and no visible toast. The shared resting-delete guard rejected any pending input; its info toast was filtered out by quiet mode. Original regression fixtures had zero queued inputs. This fixture matches the reported failed-plus-queued state; the cropped screenshot did not establish the clicked task's identity.
 
-## Browser checks
+## Verification
 
-Chrome, using intercepted example API data only. Every API write was blocked; no actual tasks were deleted or marked done. Browser contexts were closed and the preview server stopped after verification.
+- Three deletion regression files: 95 tests passed.
+- Eight affected UI/API, modal, composer and shortcut files: 169 tests passed.
+- Held-delivery API regression rerun: 15 tests passed.
+- Disposable real API/database browser checks at 1440px and 400px: header plus selected/unselected row actions opened the shared confirmation; Cancel preserved all five inputs with no DELETE; confirm sent exactly one DELETE with consented message count, received HTTP 200 and removed rows and inputs from SQLite and subsequent GET /api/tasks.
+- Real right-swipe then touchscreen tap covered selected/unselected phone rows.
+- Separate held-delivery and late-input browser cases received HTTP 409, displayed actionable shared dialogs and preserved every row/input.
+- Layout/focus checks: 320/400/560/800/1440px at 100%/125%, restrained touch hint, menu-only phone Mark done, Undo, visible aligned desktop Delete, no harness header chip, runner/harness details retained, actual current-row focus on Escape, immediate arrow navigation, draft/route retained, dialog priority, no overflow or page errors.
+- Production tasks and queued messages were untouched. Only isolated example fixtures were deleted.
 
-Checked widths: 320, 400, 560, 800 and 1440px, each at 100% and 125% scale (CSS viewport divided by the scale). No horizontal sidebar overflow and no page errors.
+## Stable-HEAD gate
 
-- Touch: real touch-event right swipe followed by hit-tested touchscreen tap, for both the selected and an unselected failed task. Delete opens confirmation without navigating. Cancel keeps the task and closes the reveal.
-- Touch: the restrained hint and 44px Actions control expose the menu. Inline Delete and Mark done are hidden. Mark done and its existing Undo work from the swipe menu.
-- Desktop: failed-row Delete is visible without hover, with opacity 1 and its center aligned to the Mark done check within 1px.
-- All widths: failed-task header Delete opens confirmation, and the header has no harness chip.
-- All widths: Escape from the task composer returns actual focus to its current row, keeps the draft and route, and the next arrow moves focus. Phone layouts open the drawer; folded desktop layouts expand as needed.
-- Task details still show runner placement and the selected harness; their dialog consumes Escape first.
-
-Per-context results: [followup-checks.json](followup-checks.json).
-
-## Stable-HEAD final gate
-
-All commands passed after committing, with HEAD held at the source commit above:
-
-```text
-npm run typecheck    exit 0
-npm run build        exit 0
-npm run test:fast    exit 0
-Test Files          283 passed (283)
-Tests               3319 passed (3319)
-```
-
-The final fast run took 186.37 seconds, excluding the machine-wide lock wait. No full or slow suite was run.
+On committed HEAD `36c4d4246e42a7b0ff83a7347d2375b60e4357ae`, `npm run typecheck`, `npm run build` and `npm run test:fast` all passed; fast coverage: 284 files, 3,349 tests. HEAD remained stable and the source worktree was clean throughout the gate.
