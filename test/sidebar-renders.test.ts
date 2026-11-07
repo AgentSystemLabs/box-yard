@@ -42,6 +42,7 @@ import { DEFAULT_SETTINGS } from "../server/settings.js"
 import { keys, upsert } from "../web/src/lib/queries.js"
 import type { Project, Task, TaskStatus } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
+import { sidebarGroup } from "./sidebarTree.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -136,7 +137,7 @@ describe("a live task update in the Coordinator view", () => {
     expect(counts.TaskRow).toBe(2) // under its project, and its new copy in Waiting on you
     expect(counts.ProjectGroup).toBe(1)
     expect(counts.WaitingOnYou).toBe(1)
-    const waiting = nav().querySelector("section[aria-label='Waiting on you']")!
+    const waiting = sidebarGroup(nav(), "Waiting on you")!
     expect(waiting.textContent).toContain("Profile the shader")
     expect(row("Profile the shader")).toHaveLength(2)
     expect(row("Profile the shader").every((b) => b.textContent?.includes("asks"))).toBe(true)

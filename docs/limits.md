@@ -1,9 +1,11 @@
 # Subscription limits
 
-Settings › Usage shows how much of each login's subscription limits is used: for a Claude subscription (Pro, Max) the
+Usage (from the sidebar, or Settings › Usage → Open Usage) shows how much of each login's subscription limits is used: for a Claude subscription (Pro, Max) the
 5-hour window and the weekly ones, for a Codex ChatGPT plan its 5-hour and weekly windows. Each window has a meter,
-"64% used", and when it resets ("Resets Tomorrow 9:00 AM (in 7h)"). Settings › Credentials and each identity's card in
-Settings › Identities show their own login's windows in one line.
+"64% used", "36% remaining", and when it resets ("Resets Tomorrow 9:00 AM (in 7h)"). Settings › Credentials and each identity's card in
+Settings › Identities show their own login's windows in one line. Subscription allowances are separate from the
+reported or estimated API-equivalent model costs and box spending below them. The cost report's date and project
+filters never change the per-login allowances or current box spending limits.
 
 ## Where the numbers come from
 
@@ -25,6 +27,8 @@ What this means:
 
 - **A login shows up after its first run.** Until then there's nothing to show. A window that has reset since its last
   reading shows "reset since" and no longer counts.
+- **Unknown is not zero.** A window without a percentage, or one whose reading expired, has no percentage meter
+  or remaining figure. A reset since the last run needs a new reading; it does not mean an unused allowance.
 - **Claude Code says how full a window is only when the API does.** A refusal (`rejected`) can come with a reset time
   and no figure: the window shows "at the limit".
 - **API keys have no subscription limits.** They pay per token, and the CLIs report no such windows for them. A Claude

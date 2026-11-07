@@ -1,4 +1,4 @@
-import { useChatProjectFilter } from "../lib/projectBar"
+import { pinProject, unpinProject, useBarPins, useChatProjectFilter } from "../lib/projectBar"
 import { openChat } from "../lib/navigation"
 import { focusComposer, pickFocusesComposer } from "../lib/chatSwitch"
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
@@ -6,7 +6,6 @@ import { useLocation, useSearch } from "wouter"
 import { Activity, AlarmClock, Box, CornerDownLeft, ExternalLink, FileText, FolderGit2, GitPullRequest, Hand, History, LayoutGrid, ListTodo, ListTree, Search, Settings, X, Zap } from "lucide-react"
 import { QUIET, useArtifacts, useOwnerName, useProjects, useTasks } from "../lib/queries"
 import { buildItems, pushRecent, recentKeyFor, type PaletteCommand, type PaletteItem } from "../lib/palette"
-import type { SettingsSection } from "../lib/settingsNav"
 import { PREFIXES, bumpUsage, currentUsage, normalizeQuery, paletteIndex, paletteRows, parseQuery, rankPalette, type GroupKey, type PaletteGroup, type PaletteRow, type PaletteScope } from "../lib/paletteRank"
 import { withOwner } from "../../../shared/owner"
 import { subtaskHitsLabel } from "../lib/subtaskSearch"
@@ -140,9 +139,11 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const onCommand = (command: PaletteCommand, section?: SettingsSection) => {
-    if (command === "settings") openSettings(section)
+  const onCommand = (command: PaletteCommand, item: PaletteItem) => {
+    if (command === "settings") openSettings(item.section)
     else if (command === "shortcuts") openShortcuts()
+    else if (command === "pin-project") pinProject(item.project!)
+    else if (command === "unpin-project") unpinProject(item.project!)
     else if (command === "coordinator") {
       // As a pick in the sidebar: the chat (or, with it pinned, nothing moves and a toast says why).
       openChat(null)
@@ -186,12 +187,13 @@ const prefixOf = (scope: PaletteScope) => PREFIXES.find((p) => p.scope === scope
 /** Rows drawn at a time once "Show N more" opens a big group; scrolling near the end or moving past it draws more. */
 const ROW_PAGE = 50
 
-function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: PaletteCommand, section?: SettingsSection) => void }) {
+function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: PaletteCommand, item: PaletteItem) => void }) {
   const [, navigate] = useLocation()
   // QUIET: live updates don't re-render the open palette; the next keystroke picks them up.
   const tasks = useTasks(QUIET)
   const projects = useProjects(QUIET)
   const artifacts = useArtifacts(QUIET)
+  const pins = useBarPins()
   const ownerName = useOwnerName()
   const [text, setText] = useState("")
   const [scope, setScope] = useState<PaletteScope | null>(null)
@@ -207,8 +209,8 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
   const id = useId()
 
   const items = useMemo(
-    () => buildItems({ tasks: tasks.data, projects: projects.data, artifacts: artifacts.data }),
-    [tasks.data, projects.data, artifacts.data],
+    () => buildItems({ tasks: tasks.data, projects: projects.data, artifacts: artifacts.data, pins }),
+    [tasks.data, projects.data, artifacts.data, pins],
   )
   // Indexed for search once the palette has painted, so the first keystroke doesn't wait for it.
   useEffect(() => {
@@ -259,7 +261,7 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
     // and the box mounts after it, so it would be a caret without a keyboard there and a keyboard over the chat on
     // Android (lib/chatSwitch.ts pickFocusesComposer, as a pick in the sidebar).
     if (item.chat && pickFocusesComposer()) focusComposer(item.chat, { end: true })
-    if (item.command) return onCommand(item.command, item.section)
+    if (item.command) return onCommand(item.command, item)
     if (item.file && !newTab && isFilePath(item.file.url) && previewKind(item.file)) return openPreview(item.file)
     if (item.url) return void window.open(item.url, "_blank", "noopener")
     if (!item.href) return

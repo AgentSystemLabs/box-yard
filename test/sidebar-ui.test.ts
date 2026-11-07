@@ -18,6 +18,7 @@ import { resetClosedTasks } from "../web/src/lib/closedTasks.js"
 import { chatRef, resetColumns, setPinned } from "../web/src/lib/columns.js"
 import type { Project, Task, TaskStatus } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
+import { sidebarGroup } from "./sidebarTree.js"
 
 // Settings, project settings and schedules are lazy chunks: load them up front, as the app does once it settles, so
 // they open in the same render.
@@ -76,7 +77,7 @@ const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("c
 const current = () => nav()!.querySelector("[aria-current=page]")?.textContent
 // The chat on screen: the centre keeps the chats left last beside it, hidden (lib/keptChats.ts).
 const title = () => [...document.querySelectorAll("[data-testid=chat-title]")].find((t) => t.checkVisibility())!.textContent
-const section = (name: string) => nav()!.querySelector<HTMLElement>(`section[aria-label='${name}']`)
+const section = (name: string) => sidebarGroup(nav()!, name)
 
 beforeEach(() => {
   localStorage.clear()
@@ -312,7 +313,7 @@ describe("the sidebar", () => {
     act(() => waiting.focus())
     click(waiting)
     expect(inline()!.dataset.rail).toBeUndefined()
-    expect(document.activeElement).toBe(section("Waiting on you")!.querySelector("button"))
+    expect(document.activeElement).toBe(section("Waiting on you")!.querySelector("[role=treeitem]"))
   })
 
   it("beside an open panel, the rail's Waiting on you opens the drawer on that section; from the keyboard, the section takes the focus", () => {
@@ -325,7 +326,7 @@ describe("the sidebar", () => {
     act(() => waiting.focus())
     click(waiting)
     const drawer = document.querySelector<HTMLElement>("[role=dialog][aria-label='Projects and tasks']")!
-    const head = drawer.querySelector<HTMLButtonElement>("section[aria-label='Waiting on you'] button")!
+    const head = sidebarGroup(drawer, "Waiting on you")!.querySelector<HTMLElement>("[role=treeitem]")!
     expect(head.getAttribute("aria-expanded")).toBe("true")
     expect(document.activeElement).toBe(head)
     // The task stays open beside it, and the rail stays a rail.
@@ -751,7 +752,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
     render(`${APP_HOME}?captain=${SITE.id}`)
     expect(inline()!.dataset.rail).toBe("true")
     dblclick(railIcon("box-yard"))
-    const fold = drawer()!.querySelector<HTMLButtonElement>("section[aria-label='box-yard'] button[aria-expanded]")!
+    const fold = sidebarGroup(drawer()!, "box-yard")!.querySelector<HTMLButtonElement>("button[aria-expanded]")!
     expect(fold.getAttribute("aria-expanded")).toBe("true")
   })
 

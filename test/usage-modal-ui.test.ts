@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { UsageModal } from "../web/src/components/UsageModal.js"
 import { buildUsageLedger, type LedgerClaudeRow } from "../server/usageLedger.js"
+import type { LimitsReport, LimitWindow } from "../shared/loginLimits.js"
 import type { UsageRangeDays } from "../shared/usageLedger.js"
 
 // The Usage modal: totals, both charts and the breakdown add up; a legend item, a breakdown row or a filter chip
@@ -62,14 +63,41 @@ const TOTAL = 4 + 2 + 0.5 + 0.8
 let root: Root
 let host: HTMLElement
 let requests: string[]
+let limits: LimitsReport
+let failed: Set<string>
+let emptyUsage: boolean
+
+function allowance(windows: Partial<LimitWindow>[] = [{}]): LimitsReport {
+  const now = Date.now()
+  return {
+    now,
+    logins: [{
+      loginId: "lgn_example-claude", harness: "claude", kind: "oauth_token", source: "Acme subscription",
+      scope: "settings", fingerprint: "aaaaaaaaaaaa", plan: null, asOf: now,
+      windows: windows.map((w) => ({ window: "seven_day", label: "Weekly", minutes: 10_080, usedPct: 83, resetsAt: now + 72 * H, status: "warning", asOf: now, ...w })),
+      state: { atLimit: false, usedPct: 83, resetsAt: now + 72 * H, asOf: now },
+    }],
+  }
+}
 
 beforeEach(() => {
   requests = []
+  limits = { now: Date.now(), logins: [] }
+  failed = new Set()
+  emptyUsage = false
   vi.stubGlobal("fetch", async (url: string) => {
     requests.push(url)
+    const path = url.split("?")[0]!
+    if (failed.has(path)) return new Response(JSON.stringify({ error: "Example service unavailable" }), { status: 503 })
+    if (url === "/api/limits") return new Response(JSON.stringify(limits))
+    if (url === "/api/usage/budget") return new Response(JSON.stringify({
+      daily: { usedUsd: 3, limitUsd: 10, warning: false, exceeded: false },
+      monthly: { usedUsd: 40, limitUsd: 100, warning: false, exceeded: false },
+    }))
     const m = /^\/api\/usage\/daily\?days=([\d,]+)$/.exec(url)
     if (!m) return new Promise(() => {})
     const body = ledgerFor(m[1]!.split(",").map(Number))
+    if (emptyUsage) { body.llm = []; body.compute = [] }
     return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } })
   })
   host = document.createElement("div")
@@ -192,4 +220,86 @@ describe("the usage modal", () => {
     expect(new Set([...tokens.querySelectorAll("[data-series]")].map((e) => e.getAttribute("data-series"))).size).toBe(4)
     expect($("usage-estimates")!.textContent).toMatch(/≈/)
   })
+  it("shows per-login weekly used and remaining separately from cost, without filtering allowances", async () => {
+    limits = allowance()
+    await render()
+    const allowances = $("subscription-limits")!
+    expect(allowances.textContent).toMatch(/Claude.*Acme subscription.*Weekly.*83% used.*17% remaining.*Resets/)
+    expect(allowances.querySelector("[role=meter]")?.getAttribute("aria-valuenow")).toBe("83")
+    expect(allowances.textContent).not.toContain("$")
+    const before = allowances.textContent
+    click(buttonByText($("usage-breakdown")!, "Alpha"))
+    expect(dollars($("usage-total")!.textContent)).toBeCloseTo(4.4, 2)
+    expect(allowances.textContent).toBe(before)
+    const dialog = document.querySelector("[role=dialog]")!
+    expect(dialog.textContent).toContain("not your subscription bill")
+    const boxes = dialog.querySelector('[aria-label="Boxes against your cloud limits"]')!
+    expect(boxes.textContent).toMatch(/Box spending limits.*Model costs and subscription allowances do not count/)
+    expect(boxes.querySelector('[role=meter]')?.getAttribute("aria-valuenow")).toBe("3")
+  })
+
+  it("shows zero as measured, and does not invent percentages for unknown, rejected or reset readings", async () => {
+    limits = allowance([
+      { window: "zero", usedPct: 0 },
+      { window: "unknown", usedPct: null, status: null, resetsAt: null },
+      { window: "rejected", usedPct: null, status: "rejected" },
+      { window: "expired", resetsAt: Date.now() - H },
+      { window: "over", usedPct: 102 },
+      { window: "near", usedPct: 99.6 },
+    ])
+    await render()
+    const windows = $$("limits-window")
+    expect(windows[0]!.textContent).toContain("0% used100% remaining")
+    expect(windows[0]!.querySelector('[role=meter]')?.getAttribute("aria-valuenow")).toBe("0")
+    expect(windows[1]!.textContent).toContain("Usage not reported")
+    expect(windows[1]!.textContent).toContain("Reset time not reported")
+    expect(windows[2]!.textContent).toContain("at the limit")
+    expect(windows[3]!.textContent).toContain("reset since")
+    for (const w of windows.slice(1, 4)) {
+      expect(w.querySelector('[role=meter]')).toBeNull()
+      expect(w.textContent).not.toContain("remaining")
+    }
+    expect(windows[4]!.textContent).toContain("102% used0% remaining")
+    expect(windows[4]!.querySelector('[role=meter]')?.getAttribute("aria-valuenow")).toBe("100")
+    expect(windows[5]!.textContent).toContain("99.6% used<1% remaining")
+  })
+
+  it("explains the absence of subscription readings and empty usage independently", async () => {
+    emptyUsage = true
+    await render()
+    expect($("limits-empty")!.textContent).toContain("No readings yet")
+    expect($("limits-empty")!.textContent).toContain("API keys pay per token")
+    expect($("usage-empty")!.textContent).toBe("No recorded usage in this range.")
+    expect(dollars($("usage-total")!.textContent)).toBe(0)
+    expect(document.querySelector('[aria-label="Boxes against your cloud limits"]')).not.toBeNull()
+  })
+
+  it("keeps allowances and box limits usable if the cost ledger fails, and retries costs", async () => {
+    limits = allowance()
+    failed.add("/api/usage/daily")
+    await render()
+    expect($("subscription-limits")!.textContent).toContain("17% remaining")
+    expect(document.querySelector('[aria-label="Boxes against your cloud limits"]')?.textContent).toContain("$3.00")
+    expect(document.body.textContent).toContain("Couldn't load usage")
+    failed.clear()
+    click(buttonByText(document, "Retry costs"))
+    await settle()
+    expect(dollars($("usage-total")!.textContent)).toBeCloseTo(TOTAL, 2)
+  })
+
+  it("keeps the cost report if allowance and box readings fail, with separate retries", async () => {
+    failed.add("/api/limits").add("/api/usage/budget")
+    await render()
+    expect($("subscription-limits")!.textContent).toContain("Subscription readings are unavailable")
+    expect(document.body.textContent).toContain("Box spending limits are unavailable")
+    expect(dollars($("usage-total")!.textContent)).toBeCloseTo(TOTAL, 2)
+    limits = allowance()
+    failed.clear()
+    click(buttonByText(document, "Retry allowances"))
+    click(buttonByText(document, "Retry box limits"))
+    await settle()
+    expect($("subscription-limits")!.textContent).toContain("17% remaining")
+    expect(document.body.textContent).not.toContain("are unavailable")
+  })
+
 })
