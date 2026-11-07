@@ -1003,17 +1003,22 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
   const inTree = useContext(InTree)
   const id = useId()
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+  // The actual depth stays readable after the visual indent stops growing. ARIA already announces it.
+  // At the resizable column's 200px minimum, abbreviate Level so its number still fits.
+  const level = depth > 0 && <span aria-hidden={inTree || undefined}>L<span className="@max-[14rem]/side:hidden">evel </span>{depth + 1} · </span>
   const metadata = (
     <span className="col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 text-[11px] leading-4 @max-[14rem]/side:flex-wrap">
-      {/* The actual depth stays readable after the visual indent stops growing. ARIA already announces it. */}
-      {/* At the resizable column's 200px minimum, abbreviate Level so its number still fits. */}
-      {depth > 0 && <span className="shrink-0 text-zinc-500" aria-hidden={inTree || undefined}>L<span className="@max-[14rem]/side:hidden">evel </span>{depth + 1} · </span>}
       {prMeta ? (
         // A sibling of the task button: native link activation never picks or double-click-folds the task.
         // Its touch height reserves its own space rather than extending a hit area over the title above it.
-        <PrChip task={task} variant="number" className={cx(FOCUS, "pointer-coarse:min-h-11")} />
+        <>
+          {level && <span className="shrink-0 text-zinc-500">{level}</span>}
+          <PrChip task={task} variant="number" className={cx(FOCUS, "pointer-coarse:min-h-11")} />
+        </>
       ) : (
-        <span aria-hidden={saysState(meta, label)} className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>
+        <span className={cx("truncate", (!dim && META_TONE[task.status]) || "text-zinc-500")}>
+          {level}<span aria-hidden={saysState(meta, label)}>{meta}</span>
+        </span>
       )}
       {folded && tree && <TreeCountChip tree={tree} />}
     </span>
