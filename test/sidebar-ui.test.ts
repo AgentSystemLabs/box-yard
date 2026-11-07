@@ -224,6 +224,44 @@ describe("the sidebar", () => {
     expect(button(section("Waiting on you")!, /^Waiting on you/).className).toContain("color-mix")
   })
 
+  it.each(["pr_ready", "idle"] as const)("opens a %s row's PR number separately from the task", (status) => {
+    const prUrl = "https://github.com/acme/site/pull/739"
+    render(APP_HOME, [{ ...PR, status, prUrl, prState: "open" }])
+    const row = button(section("marketing-site")!, PR.title).parentElement!
+    const link = row.querySelector<HTMLAnchorElement>(`a[href="${prUrl}"]`)!
+    expect(link.textContent).toBe("#739")
+    expect(link.closest("button")).toBeNull()
+    expect(link.tabIndex).toBe(0)
+    expect(link.target).toBe("_blank")
+    expect(link.rel).toBe("noopener noreferrer")
+    expect(link.getAttribute("aria-label")).toContain("PR #739 on GitHub")
+    expect(link.title).toContain(prUrl)
+    expect(link.querySelector("[data-external-mark]")).not.toBeNull()
+    for (const init of [{}, { metaKey: true }, { ctrlKey: true }, { shiftKey: true }]) {
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...init })
+      act(() => void link.dispatchEvent(event))
+      expect(event.defaultPrevented).toBe(false)
+      expect(new URLSearchParams(location.search).get("session")).toBeNull()
+    }
+    act(() => link.focus())
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+    act(() => void link.dispatchEvent(enter))
+    expect(document.activeElement).toBe(link)
+    expect(enter.defaultPrevented).toBe(false)
+    expect(new URLSearchParams(location.search).get("session")).toBeNull()
+    // The title still opens the task; Mark done keeps its own button.
+    expect(row.querySelector('[data-testid="sidebar-mark-done"]')).not.toBeNull()
+    click(button(row, PR.title))
+    expect(new URLSearchParams(location.search).get("session")).toBe(PR.id)
+  })
+
+  it("keeps a running task's state as its compact meta even when it has a PR", () => {
+    render(APP_HOME, [{ ...PR, status: "working" }])
+    const row = button(section("marketing-site")!, PR.title).parentElement!
+    expect(row.textContent).toContain("working")
+    expect(row.querySelector("a[data-pr-state]")).toBeNull()
+  })
+
   it("pins keep a quiet project; unpinning moves it to More projects", () => {
     render()
     click(button(section("More projects")!, "More projects"))

@@ -63,6 +63,9 @@ export function resetFirstPaintRows() {
  * app stays open for days), until every layout, keyboard and rotation takes seconds. So `trim` drops back to
  * the newest items; StickyScroll calls it while the reader is at the bottom, where nothing moves.
  *
+ * With `max`, reading older items keeps at most that many rows, with `later`/`loadLater` to move forward again.
+ * `reset` returns to the newest rows after a send or a latest jump.
+ *
  * With `first` under `initial`, a list's first paint (a task just opened) has only its newest `first` items, a
  * screenful or more, so it's on screen sooner; the rest of the newest `initial` render right after that paint, `grow`
  * more a frame (all at once by default), and `growing` says so meanwhile. `fill` doubles them at once, for a first paint
@@ -72,11 +75,12 @@ export function resetFirstPaintRows() {
 export function useTail<T extends { id: string }>(
   items: T[],
   resetKey: unknown,
-  { initial = 60, step = 50, first = initial, grow = initial }: { initial?: number; step?: number; first?: number; grow?: number } = {},
+  { initial = 60, step = 50, first = initial, grow = initial, max = Infinity }: { initial?: number; step?: number; first?: number; grow?: number; max?: number } = {},
 ) {
+  const following = useRef(true)
   const pinned = useRef<{ key: unknown; id: string | null }>({ key: resetKey, id: null })
   const [, rerender] = useReducer((n: number) => n + 1, 0)
-  if (pinned.current.key !== resetKey) pinned.current = { key: resetKey, id: null }
+  if (pinned.current.key !== resetKey) { pinned.current = { key: resetKey, id: null }; following.current = true }
 
   // Nothing pinned yet: a list not shown before.
   const start = tailStart(items, pinned.current.id, pinned.current.id === null ? Math.min(first, initial) : initial)
@@ -85,15 +89,25 @@ export function useTail<T extends { id: string }>(
   const latest = useRef({ items, start })
   latest.current = { items, start }
 
-  const visible = useMemo(() => (start ? items.slice(start) : items), [items, start])
+  const end = Math.min(items.length, start + max)
+  const visible = useMemo(() => (start || end < items.length ? items.slice(start, end) : items), [items, start, end])
+  const loadLater = useCallback(() => {
+    const { items, start } = latest.current
+    const to = Math.min(items.length - 1, start + step)
+    pinned.current.id = items[to]?.id ?? null
+    following.current = to + max >= items.length
+    rerender()
+  }, [step, max])
 
   /** Show `step` more older items (than the newest `initial`, during a short first paint). */
   const loadEarlier = useCallback(() => {
     const { items, start } = latest.current
     if (!start) return
-    pinned.current.id = items[Math.max(0, Math.min(start, items.length - initial) - step)]!.id
+    const to = Math.max(0, Math.min(start, items.length - initial) - step)
+    pinned.current.id = items[to]!.id
+    following.current = to + max >= items.length
     rerender()
-  }, [step, initial])
+  }, [step, initial, max])
 
   // Fewer than the newest `initial` rendered, with more there: the first paint's. Grow once it's on screen (the frame,
   // then a task after it), `grow` items at a time, a frame apart, so a click or a scroll never waits behind them all.
@@ -155,26 +169,31 @@ export function useTail<T extends { id: string }>(
 
   /** Render only the newest `initial` items again, if many more than that are rendered. */
   const trim = useCallback(() => {
+    if (!following.current) return
     const { items, start } = latest.current
-    const to = trimmedStart(items.length, start, initial)
+    const to = items.length - start > max ? Math.max(0, items.length - Math.min(initial, max)) : trimmedStart(items.length, start, initial)
     if (to === null) return
     pinned.current.id = items[to]!.id
     rerender()
-  }, [initial])
+  }, [initial, max])
 
   /** Make sure the item with this id is rendered. Returns false if it isn't in the list at all. */
   const reveal = useCallback((id: string) => {
     const { items, start } = latest.current
     const idx = items.findIndex((m) => m.id === id)
     if (idx < 0) return false
-    if (idx < start) {
-      pinned.current.id = items[Math.max(0, idx - 5)]!.id
+    if (idx < start || idx >= start + max) {
+      const to = Math.max(0, idx - 5)
+      pinned.current.id = items[to]!.id
+      following.current = to + max >= items.length
       rerender()
     }
     return true
-  }, [])
+  }, [max])
 
-  return { visible, hidden: start, growing: short, loadEarlier, fill, filled, trim, reveal }
+  const reset = useCallback(() => { following.current = true; pinned.current.id = null; rerender() }, [])
+
+  return { reset, visible, hidden: start, later: items.length - end, loadLater, growing: short, loadEarlier, fill, filled, trim, reveal }
 }
 
 /**

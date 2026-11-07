@@ -48,6 +48,7 @@ let host: HTMLElement
 let scroller: HTMLElement
 let content: HTMLElement
 let top = 0
+let floorScrollTop = false
 let dispatched = 0
 
 const rows = () => [...content.children] as HTMLElement[]
@@ -75,7 +76,7 @@ function installLayout() {
     scrollTop: {
       get: () => top,
       set: (v: number) => {
-        top = Math.min(max(), Math.max(0, v))
+        top = Math.min(max(), Math.max(0, floorScrollTop ? Math.floor(v) : v))
       },
     },
   })
@@ -171,6 +172,7 @@ beforeEach(() => {
   document.body.append(host)
   root = createRoot(host)
   top = 0
+  floorScrollTop = false
   dispatched = 0
   view = VIEW
   heights = Array.from({ length: 20 }, () => 100)
@@ -250,13 +252,47 @@ describe("StickyScroll", () => {
     expect(jumpButton()).toBeDefined()
   })
 
+  it("compensates to the nearest pixel when the browser floors fractional scrollTop", () => {
+    userScroll(-500)
+    flush()
+    const before = top
+    floorScrollTop = true
+    heights[0]! += 30.75
+    render()
+    frame()
+    expect(top - before).toBe(31)
+  })
+
+  it("scrollIntoList converts zoomed rectangles into the scroller's CSS pixels", () => {
+    const target = rows()[3]!
+    Object.defineProperty(scroller, "offsetHeight", { value: 400, configurable: true })
+    scroller.getBoundingClientRect = () => ({ top: 0, bottom: 500, height: 500 } as DOMRect)
+    const y = rowTop(target) * 1.25
+    target.getBoundingClientRect = () => ({ top: y, bottom: y + 125, height: 125 } as DOMRect)
+    act(() => scrollIntoList(target, { block: "start" }))
+    expect(top).toBe(300)
+  })
+
+  it("scrollIntoList leaves clipped ancestors and the page header in place", () => {
+    host.style.overflow = "hidden"
+    host.scrollTop = 42
+    const outerScroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
+    const target = rows()[3]!
+    target.style.scrollMarginTop = "12px"
+    act(() => scrollIntoList(target, { block: "start" }))
+    expect(top).toBe(288)
+    expect(host.scrollTop).toBe(42)
+    expect(outerScroll).not.toHaveBeenCalled()
+  })
+
   it("scrollIntoList lets go of the bottom first, so growth before its scroll lands can't pull the view back down", () => {
     // A card far up, revealed by a search pick.
     const target = rows()[5]!
+    // A smooth scroll that hasn't moved the list yet.
     const scrolled = vi.fn()
-    target.scrollIntoView = scrolled
+    scroller.scrollTo = scrolled
     act(() => scrollIntoList(target, { block: "nearest", behavior: "smooth" }))
-    expect(scrolled).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" })
+    expect(scrolled).toHaveBeenCalledWith({ top: 500, behavior: "smooth" })
     const before = top
     // The card opens (or a reply streams) before the smooth scroll's first frame: the view waits for it.
     streamDelta()
@@ -272,8 +308,9 @@ describe("StickyScroll", () => {
   it("scrollIntoList holds what's in view already as it grows, instead of following the bottom; the bottom re-pins", () => {
     // Already in full view at the bottom: nothing scrolls, and the card opening below its head doesn't push it up.
     const target = rows().at(-1)!
-    target.scrollIntoView = () => {}
+    const scrolled = vi.spyOn(scroller, "scrollTo")
     act(() => scrollIntoList(target, { block: "nearest" }))
+    expect(scrolled).not.toHaveBeenCalled()
     const before = top
     streamDelta()
     expect(top).toBe(before)
@@ -1040,9 +1077,10 @@ describe("StickyScroll", () => {
   // rendering hundreds of them, and every layout (keyboard, rotation, a dialog) froze the app for seconds.
   describe("with useTail, as the chats use it", () => {
     let items: { id: string }[]
+    let cap = Infinity
 
     function TailThread({ items }: { items: { id: string }[] }) {
-      const tail = useTail(items, "chat")
+      const tail = useTail(items, "chat", { max: cap })
       return createElement(StickyScroll, {
         handle,
         count: items.length,
@@ -1063,6 +1101,7 @@ describe("StickyScroll", () => {
 
     beforeEach(() => {
       act(() => root.render(null))
+      cap = Infinity
       items = Array.from({ length: 200 }, (_, i) => ({ id: `m${i}` }))
       renderTail()
       installLayout()
@@ -1095,6 +1134,32 @@ describe("StickyScroll", () => {
       const same = messages().find((r) => r.textContent === text)!
       expect(rowTop(same)).toBe(offset)
       expect(jumpButton()).toBeDefined()
+    })
+
+    it("holds the same visible row when a bounded prepend also removes rows below", () => {
+      cap = 100
+      renderTail()
+      for (let i = 0; i < 2; i++) {
+        userScroll(i ? -5000 : -5500)
+        flush()
+        const row = messages().find((r) => rowTop(r) >= 0)!
+        const offset = rowTop(row)
+        act(() => [...host.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Show "))!.click())
+        frame()
+        expect(messages()).toHaveLength(100)
+        expect(row.isConnected).toBe(true)
+        expect(rowTop(row)).toBe(offset)
+      }
+    })
+
+    it("keeps the newest streamed row visible at a bounded tail's bottom", () => {
+      cap = 100
+      renderTail()
+      for (let i = 0; i < 150; i++) {
+        arrive()
+        expect(messages().length).toBeLessThanOrEqual(100)
+        expect(messages().at(-1)?.textContent).toBe(`m${items.length - 1}`)
+      }
     })
 
     it("a scroll that stops where the bottom was before Show earlier added rows above doesn't re-pin", () => {

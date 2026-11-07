@@ -1,8 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react"
 import { useLocation } from "wouter"
 import { useQueryClient } from "@tanstack/react-query"
-import { useNotifications } from "../lib/queries"
-import { markRead, unreadCount, viewingTaskId } from "../lib/notifications"
+import { useNotifications, useTasks } from "../lib/queries"
+import { markRead, viewingTaskId } from "../lib/notifications"
+import { inInbox, usePendingCloses } from "../lib/inbox"
 import { browserNotificationsOn, listenForNotificationClicks, registerNotificationWorker } from "../lib/browserNotifications"
 import { navigateApp } from "../lib/navigation"
 
@@ -13,19 +14,21 @@ const subscribeVisibility = (cb: () => void) => {
 const isVisible = () => document.visibilityState === "visible"
 
 /**
- * Side effects of notifications, with no UI: the unread count in the tab title, opening a task (in a visible
+ * Side effects with no UI: the Waiting on you count in the tab title, opening a task (in a visible
  * tab) marks its notifications read, and clicking a browser notification opens what it's about.
  */
 export function NotificationEffects() {
   const qc = useQueryClient()
   const [location] = useLocation()
   const { data } = useNotifications()
+  const tasks = useTasks()
+  const closing = usePendingCloses()
   const visible = useSyncExternalStore(subscribeVisibility, isVisible)
-  const unread = unreadCount(data)
+  const waiting = tasks.data?.filter((t) => inInbox(t, closing)).length ?? 0
 
   useEffect(() => {
-    document.title = unread ? `(${unread}) Box Yard` : "Box Yard"
-  }, [unread])
+    document.title = waiting ? `(${waiting}) Box Yard` : "Box Yard"
+  }, [waiting])
 
   useEffect(() => {
     // Keeps the notification worker current once Cody has turned browser notifications on.
