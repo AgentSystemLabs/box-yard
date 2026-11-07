@@ -288,7 +288,7 @@ body.resizing iframe {
 }
 
 /*
- * A "#project", "@runner" or "!harness" tag in a chat's draft (ComposerTags.tsx), in its colour (--tag) on its tint
+ * A "%project", "@runner" or "!harness" tag in a chat's draft (ComposerTags.tsx), in its colour (--tag) on its tint
  * (--tag-tint) like a chip. Its 2px of padding each side is drawn as shadow, which takes no room: the text under the
  * textarea must sit exactly where the textarea's own (transparent) text is.
  */

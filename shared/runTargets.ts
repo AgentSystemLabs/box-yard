@@ -6,7 +6,7 @@
 // pick from the same lists. A pick goes with the message as meta.runsOn / meta.agent (a RunTargetPick), the turn's
 // prompt says so, and the task tools take it as their runs_on / agent for that turn (server/mcp.ts). A runs_on pick's
 // `value` is a runs_on as the task tools take it (resolveRunsOn); an agent pick's is "claude", "codex" or "cursor".
-// In the Coordinator's chat only, "#" picks the project the message is about (`#box-yard`): it goes as meta.project and
+// In the Coordinator's chat only, "%" picks the project the message is about (`%box-yard`): it goes as meta.project and
 // the turn's prompt tells the Coordinator to route the message to that project's Captain (server/runTargets.ts).
 // Only the whole message's picks go that way. One typed for part of it (inside one item of a list of tasks, or one
 // that disagrees with another) goes as meta.inlinePicks: the prompt lists it with where it is, and nothing applies it
@@ -20,6 +20,7 @@ import { gpuChoices, gpuTypesWords } from "./gpuCatalog.js"
 import { BOX_SIZE_ORDER, BOX_SIZE_SPECS, sizeSpecLine } from "./boxSizes.js"
 import { DAYTONA_SIZES } from "./daytona.js"
 import { DAYTONA_SIZE_ALIASES } from "./runnerSizes.js"
+import { rankPickerOptions, type PickerField } from "./pickerRank.js"
 import type { Effort } from "./types.js"
 
 /** "gpu" is one GPU cloud ("@gpu:daytona") or one GPU on it ("@gpu:daytona:h100"). */
@@ -30,10 +31,10 @@ export type PickKind = "runsOn" | "agent"
 export const PICK_KINDS: readonly PickKind[] = ["runsOn", "agent"]
 /** What starts a pick in the text. Only at the start of a word, so "great!" and "me@host" never open a list. */
 export const PICK_TRIGGER: Record<PickKind, "@" | "!"> = { runsOn: "@", agent: "!" }
-/** The Coordinator chat's project pick ("#box-yard"). Same rule: only at the start of a word, so "##" and "a#b" never open it. */
-export const PROJECT_TRIGGER = "#"
+/** The Coordinator chat's project pick ("%box-yard"). Same rule: only at the start of a word, so "%%" and "a%b" never open it. */
+export const PROJECT_TRIGGER = "%"
 /** Any of the chat's pick triggers. */
-export type PickTrigger = "@" | "!" | "#"
+export type PickTrigger = "@" | "!" | "%"
 /** A tag a chat's draft can hold: where its tasks run, their harness, or (the Coordinator's) the project it's for. */
 export type TagKind = PickKind | "project"
 /** What starts each kind of tag. */
@@ -240,14 +241,14 @@ export const findRunTarget = (targets: RunTarget[], value: string): RunTarget | 
 
 export const pickOf = (t: RunTarget): RunTargetPick => ({ value: t.value, token: t.token, label: t.label, ...(t.model !== undefined ? { model: t.model } : {}), ...(t.effort ? { effort: t.effort } : {}) })
 
-/** A project's "#" token: its name in lowercase, with anything a token can't hold (spaces, slashes) as "-". */
+/** A project's "%" token: its name in lowercase, with anything a token can't hold (spaces, slashes) as "-". */
 export const projectToken = (name: string) =>
   name
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "project"
 
-/** The Coordinator chat's "#" list: Cody's projects in their saved order. Its `value` is the project id. */
+/** The Coordinator chat's "%" list: Cody's projects in their saved order. Its `value` is the project id. */
 export function buildProjectTargets(projects: { id: string; name: string; repo?: string | null }[]): RunTarget[] {
   return projects.map((p) => ({ token: projectToken(p.name), value: p.id, kind: "project", label: p.name, detail: p.repo || null, disabled: null }))
 }
@@ -287,7 +288,7 @@ export const turnPicks = (metas: (Record<string, unknown> | null | undefined)[])
 
 // ---- inline picks: ones typed for one part of a message, which Box Yard passes on as hints and never applies
 
-/** Any pick a message can name: where ("@"), which harness ("!"), and the Coordinator's project ("#"). */
+/** Any pick a message can name: where ("@"), which harness ("!"), and the Coordinator's project ("%"). */
 export type MessagePickKind = PickKind | "project"
 
 /**
@@ -466,7 +467,7 @@ export function scopePicks(text: string, placed: PlacedPick[]): MessagePicks {
 export function itemExcerpt(text: string, item: ListItem, max = 48): string {
   const first = text.slice(item.start, item.end).split("\n")[0]!.replace(ITEM_MARK, "")
   const words = first
-    .replace(/(^|\s)[@!#](?:[A-Za-z0-9._:%-]|\[[A-Za-z0-9]+\])+/g, "$1")
+    .replace(/(^|\s)[@!%](?:[A-Za-z0-9._:%-]|\[[A-Za-z0-9]+\])+/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/ ([,.;:!?])/g, "$1")
     .trim()
@@ -490,12 +491,12 @@ export function inlinePicksFrom(text: string, scoped: MessagePicks): InlinePick[
 const TOKEN_CHARS = /[A-Za-z0-9._:%\[\]-]/
 
 /**
- * The "@word" ("!word", "#word") the caret is in or right after, when it starts a word: what the list filters by.
- * A word starts at the start of the text, after whitespace or after ( [ " '; so "great!", "me@host", "##" and "a#b" don't.
+ * The "@word" ("!word", "%word") the caret is in or right after, when it starts a word: what the list filters by.
+ * A word starts at the start of the text, after whitespace or after ( [ " '; so "great!", "me@host", "%%" and "a%b" don't.
  */
 export function mentionAt(text: string, caret: number, trigger: PickTrigger = "@"): { start: number; end: number; query: string } | null {
   let i = caret
-  while (i > 0 && TOKEN_CHARS.test(text[i - 1]!)) i--
+  while (i > 0 && text[i - 1] !== trigger && TOKEN_CHARS.test(text[i - 1]!)) i--
   if (i === 0 || text[i - 1] !== trigger) return null
   const at = i - 1
   if (at > 0 && !/[\s(["']/.test(text[at - 1]!)) return null
@@ -504,62 +505,60 @@ export function mentionAt(text: string, caret: number, trigger: PickTrigger = "@
   return { start: at, end, query: text.slice(i, caret).toLowerCase() }
 }
 
+/** Searchable fields for one run-target row (token, labels, aliases). Detail is omitted so a machine listed in another row's blurb doesn't steal the match. */
+export function runTargetFields(t: RunTarget): PickerField[] {
+  const fields: PickerField[] = [
+    { text: t.token, kind: "token" },
+    { text: t.menuLabel ?? "", kind: "label" },
+    { text: t.label, kind: "label" },
+  ]
+  for (const alias of t.aliases ?? []) fields.push({ text: alias, kind: "alias" })
+  return fields
+}
+
 /**
- * The list filtered by what's typed after "@": tokens that start with it first, then any that contain it. `fuzzy`
- * (the "#" list of projects) then adds names that hold its letters in order ("bxy" finds box-yard), closest first.
- * A GPU's row (`under` its cloud's) shows once its cloud's token is typed ("@gpu:daytona"), or its GPU's own name
- * ("@h100", "@rtx").
+ * The list filtered by what's typed after "@" / "!" / "%": ranked by shared/pickerRank.ts (exact > prefix > word >
+ * substring > fuzzy). A GPU's row (`under` its cloud's) shows once its cloud's token is typed ("@gpu:daytona"), or
+ * its GPU's own name ("@h100", "@rtx"). Nested levels (harness → model → effort, box sizes) filter the same way on
+ * the text after the parent's token. `fuzzy` defaults on; pass false only for strict callers (legacy tests).
  */
-export function filterRunTargets(all: RunTarget[], query: string, fuzzy = false): RunTarget[] {
+export function filterRunTargets(all: RunTarget[], query: string, fuzzy = true): RunTarget[] {
   const q = query.trim().toLowerCase()
   const parent = runTargetParent(all, q)
   if (parent) {
     const term = q.slice(parent.token.length).replace(/^:/, "")
-    const children = all.filter((t) => t.under === parent.token && (!term || t.token.slice(parent.token.length + 1).toLowerCase().startsWith(term) || t.label.toLowerCase().includes(term)))
-    return [...(!term ? [{ ...parent, menuLabel: parent.defaultLabel! }] : []), ...children]
+    const children = all.filter((t) => t.under === parent.token)
+    const ranked = term
+      ? rankPickerOptions(children, term, (t) => {
+          const suffix = t.token.slice(parent.token.length + 1)
+          return [{ text: suffix, kind: "token" }, ...runTargetFields(t)]
+        }, fuzzy)
+      : children
+    return [...(!term ? [{ ...parent, menuLabel: parent.defaultLabel! }] : []), ...ranked]
   }
   // A GPU's name: any word of its slug ("4090" finds rtx-4090).
   const named = (t: RunTarget) => q.length >= 2 && `-${t.token.slice(t.under!.length + 1).replace(/^(cpu|gpu)-/, "")}`.includes(`-${q}`)
   const targets = all.filter((t) => !t.under || (t.kind !== "harness" && (q.startsWith(t.under) || (t.aliases?.some((a) => a.startsWith(q)) && q.length > t.under.length) || named(t))))
   if (!q) return targets
-  const starts = targets.filter((t) => t.token.startsWith(q) || t.aliases?.some((a) => a.startsWith(q)) || t.label.toLowerCase().startsWith(q))
-  const contains = targets.filter((t) => !starts.includes(t) && (t.token.includes(q) || t.aliases?.some((a) => a.includes(q)) || t.label.toLowerCase().includes(q)))
-  if (!fuzzy) return [...starts, ...contains]
-  const spread = targets
-    .filter((t) => !starts.includes(t) && !contains.includes(t))
-    .map((t) => ({ t, gap: Math.min(subsequenceGap(t.token, q), subsequenceGap(t.label.toLowerCase(), q)) }))
-    .filter((x) => x.gap < Infinity)
-    .sort((a, b) => a.gap - b.gap)
-    .map((x) => x.t)
-  return [...starts, ...contains, ...spread]
+  return rankPickerOptions(targets, q, runTargetFields, fuzzy)
 }
 
 /** The deepest open drill-down, shared by filtering and the composer's Back/Esc behavior. */
 export const runTargetParent = (all: RunTarget[], query: string): RunTarget | undefined =>
   all.filter((t) => t.defaultLabel && (query === t.token || query.startsWith(`${t.token}:`)) && all.some((x) => x.under === t.token)).sort((a, b) => b.token.length - a.token.length)[0]
 
-/** How far apart `q`'s letters sit in `word`, in order (fewer skipped letters: a closer match), or Infinity when they don't. */
-function subsequenceGap(word: string, q: string): number {
-  let at = word.indexOf(q[0]!)
-  if (at < 0) return Infinity
-  let gap = 0
-  for (let i = 1; i < q.length; i++) {
-    const next = word.indexOf(q[i]!, at + 1)
-    if (next < 0) return Infinity
-    gap += next - at - 1
-    at = next
-  }
-  return gap
-}
-
 /**
  * `text` with the "@word" at `m` replaced by `@token ` ("!token " for `trigger` "!"), and where the caret goes.
- * `drill` leaves the caret right after the token, with no space, so the list stays open on what's under it (a GPU
- * cloud's GPUs, `drillsInto`).
+ * `drill` leaves the caret right after `token:` (trailing colon, no space) so typing continues as the nested filter
+ * ("!cursor:" then "deep" finds DeepSeek) without discovering the colon by hand (`drillsInto`, `advancesInto`).
  */
 export function insertRunTarget(text: string, m: { start: number; end: number }, token: string, trigger: PickTrigger = "@", drill = false): { value: string; caret: number } {
   const after = text.slice(m.end)
-  if (drill) return { value: text.slice(0, m.start) + trigger + token + after, caret: m.start + 1 + token.length }
+  if (drill) {
+    // A nested level keeps a trailing ":" so the next letters filter children; Back to the root is just the trigger.
+    const insert = token ? `${trigger}${token}:` : trigger
+    return { value: text.slice(0, m.start) + insert + after, caret: m.start + insert.length }
+  }
   const insert = `${trigger}${token}${after.startsWith(" ") ? "" : " "}`
   return { value: text.slice(0, m.start) + insert + after, caret: m.start + insert.length + (after.startsWith(" ") ? 1 : 0) }
 }
@@ -567,13 +566,23 @@ export function insertRunTarget(text: string, m: { start: number; end: number },
 /**
  * Whether picking `t` while `query` is typed opens what's under it rather than picking it: a GPU cloud's row with GPUs
  * under it, until its token is typed in full. Then the list shows "any GPU on it" first and each GPU after.
+ * An exact token (`!cursor`) does not drill on Enter (that picks the Settings default); Tab/Space use `advancesInto`.
  */
 export const drillsInto = (t: RunTarget, all: RunTarget[], query: string) => {
   const q = query.trim().toLowerCase()
   return q !== t.token && !q.startsWith(`${t.token}:`) && all.some((x) => x.under === t.token)
 }
 
-/** Every "@word" ("!word", "#word") in `text` that names a target of `targets`, in order, where it is. */
+/**
+ * Tab/Space on an exact parent token (`!cursor`, `@box`) advances into its children (inserts `token:`) so the next
+ * letters filter the nested list. Enter still picks the Settings/default row via `drillsInto` being false.
+ */
+export const advancesInto = (t: RunTarget, all: RunTarget[], query: string) => {
+  const q = query.trim().toLowerCase()
+  return q === t.token && all.some((x) => x.under === t.token)
+}
+
+/** Every "@word" ("!word", "%word") in `text` that names a target of `targets`, in order, where it is. */
 export function tokensIn(text: string, targets: RunTarget[], trigger: PickTrigger, disabledToo = false): { target: RunTarget; start: number; end: number }[] {
   const byToken = new Map(targets.filter((t) => disabledToo || !t.disabled).flatMap((t) => [t.token, ...(t.aliases ?? [])].map((token) => [token, t] as const)))
   const out: { target: RunTarget; start: number; end: number }[] = []
@@ -589,7 +598,7 @@ export function tokensIn(text: string, targets: RunTarget[], trigger: PickTrigge
   return out
 }
 
-/** A tag in a draft: a "#project", "@runner" or "!harness" word that names a target of its kind's list, and where it is. */
+/** A tag in a draft: a "%project", "@runner" or "!harness" word that names a target of its kind's list, and where it is. */
 export interface TextTag {
   kind: TagKind
   target: RunTarget
@@ -600,7 +609,7 @@ export interface TextTag {
 }
 
 /**
- * Every tag in `text`, in order: the composer colours them (ComposerTags.tsx). A kind without a list (a Captain's "#",
+ * Every tag in `text`, in order: the composer colours them (ComposerTags.tsx). A kind without a list (a Captain's "%",
  * a list still loading) has none, so its words stay plain, as does a word no list names. Greyed-out targets count:
  * the composer warns about them rather than dropping them. Words are read by tokensIn, as the picks and the send read
  * them, so a new form (a new row in a list, or a new way tokensIn reads a word) is coloured once it can be picked.

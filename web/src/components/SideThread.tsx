@@ -387,6 +387,7 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
       <Composer
         onSubmit={submit}
         draftKey={threadDraftKey(id)}
+        githubProject={chat === "coordinator" ? null : chat}
         files={false}
         textareaRef={input}
         stop={thread && busy ? { label: `Stop the ${router}'s answer`, onStop: () => control.stop(id) } : null}

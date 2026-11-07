@@ -171,6 +171,7 @@ export const TaskComposer = memo(function TaskComposer({
       historyKey={asking ? `task-ask:${task.id}` : `task:${task.id}`}
       // One draft for the task, so turning "Side question" on or off keeps what's typed.
       draftKey={`task:${task.id}`}
+      githubProject={task.projectId}
       files={!asking}
       hint={hint}
       stop={stop}

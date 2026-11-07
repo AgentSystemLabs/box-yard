@@ -157,7 +157,8 @@ describe('Composer "@" run targets', () => {
     const enter = key("Enter")
     expect(enter.defaultPrevented).toBe(true)
     expect(onSubmit).not.toHaveBeenCalled()
-    expect(textarea().value).toBe("fix it @box")
+    // Enter on a partial token drills with a trailing ":" so sizes stay open.
+    expect(textarea().value).toBe("fix it @box:")
     expect(options()).toEqual(["box", "box:small", "box:medium", "box:large"])
     key("Enter")
     expect(textarea().value).toBe("fix it @box ")
@@ -184,6 +185,7 @@ describe('Composer "@" run targets', () => {
     mount(true)
     await type("fix it @bo")
     await tap(option("box"))
+    expect(textarea().value).toBe("fix it @box:")
     expect(option("box").textContent).toContain("Default size")
     expect(listTitle()).toContain("Upstash box")
     await tap(document.querySelector<HTMLElement>('button[aria-label="Back to choices"]')!)
@@ -221,12 +223,12 @@ describe('Composer "@" run targets', () => {
     vi.stubGlobal("fetch", (url: string) => (String(url).startsWith("/api/run-targets") ? Promise.resolve(json(gpuTargets)) : fetchAll(url)))
     mount(true)
     await type("train it @gpu")
-    expect(options()).toEqual(["gpu", "gpu:runpod", "gpu:daytona"])
+    expect(options().filter((t) => t === "gpu" || t?.startsWith("gpu:"))).toEqual(["gpu", "gpu:runpod", "gpu:daytona"])
     // A cloud with GPUs says it opens them; plain @gpu (the default cloud) doesn't.
     expect(option("gpu:daytona").querySelector('[data-testid="run-target-opens"]')).not.toBeNull()
     expect(option("gpu").querySelector('[data-testid="run-target-opens"]')).toBeNull()
     await tap(option("gpu:daytona"))
-    expect(textarea().value).toBe("train it @gpu:daytona")
+    expect(textarea().value).toBe("train it @gpu:daytona:")
     expect(menu()).not.toBeNull()
     expect(options()[0]).toBe("gpu:daytona")
     expect(options()).toContain("gpu:daytona:h100")
@@ -265,12 +267,15 @@ describe('Composer "!" harness', () => {
     expect(options()).toEqual(["claude", "codex", "cursor"])
     expect(asked).toContain("/api/harness-targets?runsOn=box")
     await type("fix it @box !co")
-    // Tokens that start with it first, then labels that contain it ("Claude Code").
-    expect(options()).toEqual(["codex", "claude"])
+    // Codex leads (token prefix); Cursor and Claude Code also match "co".
+    expect(options()[0]).toBe("codex")
+    expect(options()).toEqual(expect.arrayContaining(["codex", "cursor", "claude"]))
     key("Tab")
-    expect(textarea().value).toBe("fix it @box !codex")
+    // Partial "co" → Tab drills into Codex models with a trailing ":".
+    expect(textarea().value).toBe("fix it @box !codex:")
     expect(options()[0]).toBe("codex")
     expect(option("codex").textContent).toContain("Settings default")
+    // On `!codex:` the Settings default row picks (no further drill).
     key("Tab")
     expect(textarea().value).toBe("fix it @box !codex ")
     expect(harnessButton().getAttribute("aria-label")).toBe("Harness: !codex (Codex)")
@@ -285,14 +290,15 @@ describe('Composer "!" harness', () => {
     mount(true)
     await type("build !")
     await tap(option("codex"))
-    expect(textarea().value).toBe("build !codex")
+    expect(textarea().value).toBe("build !codex:")
     expect(options()).toContain("codex:gpt-6.1-sol")
     await tap(option("codex:gpt-6.1-sol"))
+    expect(textarea().value).toBe("build !codex:gpt-6.1-sol:")
     expect(options()[0]).toBe("codex:gpt-6.1-sol")
     expect(option("codex:gpt-6.1-sol").textContent).toContain("Default effort")
     expect(options()).toContain("codex:gpt-6.1-sol:ultra")
     key("Escape")
-    expect(textarea().value).toBe("build !codex")
+    expect(textarea().value).toBe("build !codex:")
     await tap(document.querySelector<HTMLElement>('button[aria-label="Back to choices"]')!)
     expect(textarea().value).toBe("build !")
     await tap(option("codex"))
@@ -302,6 +308,43 @@ describe('Composer "!" harness', () => {
     expect(menu()).toBeNull()
     key("Enter")
     expect(onSubmit).toHaveBeenCalledWith("build !codex:gpt-6.1-sol:xhigh", [], { agent: expect.objectContaining({ value: "codex", model: "gpt-6.1-sol", effort: "xhigh" }) })
+  })
+
+  it("Tab or Space on an exact harness advances so typing filters models (no colon to discover)", async () => {
+    mount(true)
+    await type("build !cursor")
+    await act(async () => client.setQueryData(keys.cursorModels, {
+      models: [
+        { id: "auto", label: "Auto" },
+        { id: "deepseek-v3", label: "DeepSeek V3" },
+        { id: "gpt-6.1-sol-high", label: "GPT 6.1 Sol High" },
+      ],
+      source: "cli",
+    }))
+    await settle()
+    expect(options()).toEqual(["cursor", "cursor:auto", "cursor:deepseek-v3", "cursor:gpt-6.1-sol-high"])
+    // Exact !cursor + Tab advances into models (trailing ":"); Enter would have picked Settings default.
+    const tab = key("Tab")
+    expect(tab.defaultPrevented).toBe(true)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(textarea().value).toBe("build !cursor:")
+    await type("build !cursor:deep")
+    expect(options()).toEqual(["cursor:deepseek-v3"])
+    expect(listTitle()).toMatch(/Harness/)
+    expect(listTitle()).toMatch(/Cursor|DeepSeek|↑↓|Tab/)
+    key("Tab")
+    expect(textarea().value).toBe("build !cursor:deepseek-v3 ")
+    expect(menu()).toBeNull()
+    key("Enter")
+    expect(onSubmit.mock.calls.at(-1)?.[2].agent).toMatchObject({ value: "cursor", model: "deepseek-v3" })
+    expect(onSubmit.mock.calls.at(-1)?.[2].agent.effort).toBeUndefined()
+
+    // Space on an exact harness advances the same way.
+    await type("again !cursor")
+    const space = key(" ")
+    expect(space.defaultPrevented).toBe(true)
+    expect(textarea().value).toBe("again !cursor:")
+    expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
   it("uses Cursor's live ids as leaves, and preserves model-only and plain tags typed with whitespace", async () => {
@@ -482,7 +525,8 @@ describe("Composer picks typed in one item of a list of tasks", () => {
     expect(textarea().selectionStart).toBe(1)
     expect(listTitle()).toContain("Where this message's tasks run")
     await tap(option("box"))
-    expect(textarea().value.startsWith("@box Two tasks:")).toBe(true)
+    // Drill keeps a trailing ":" so sizes stay open; the @box token still counts as the message's pick.
+    expect(textarea().value.startsWith("@box: Two tasks:")).toBe(true)
     expect(whereButton().getAttribute("aria-label")).toBe("Where tasks run: @box (Upstash box)")
     // A pick typed in an item isn't the button's: pressing Harness adds the message's own, on top too.
     await type("@box Two tasks:\n1. Port the pickaxe\n2. Fix the bridge !claude")
@@ -492,20 +536,20 @@ describe("Composer picks typed in one item of a list of tasks", () => {
   })
 })
 
-describe('Composer "#" typed in one item of a list of tasks', () => {
+describe('Composer "%" typed in one item of a list of tasks', () => {
   const scopeChips = (which: "wide" | "inline") => [...document.querySelectorAll<HTMLElement>(`[data-testid="pick-scope-${which}"]`)].map((c) => c.textContent)
   const mobile = { value: "prj_captain", token: "mobile", label: "Mobile" }
   const web = { value: "prj_web", token: "web", label: "Web" }
 
-  it("one item's #project is only that item's: the message goes with no project, and the Coordinator is told where it is", async () => {
+  it("one item's %project is only that item's: the message goes with no project, and the Coordinator is told where it is", async () => {
     projects = [PROJECT, WEB]
     mount(true)
     await settle()
-    const text = "Three tasks:\n1. Fix the flaky login test\n2. Speed up the build\n3. Tidy the header #web"
+    const text = "Three tasks:\n1. Fix the flaky login test\n2. Speed up the build\n3. Tidy the header %web"
     await type(text)
     expect(projectButton()!.getAttribute("aria-label")).toBe("Project: none picked, the Coordinator decides")
     expect(scopeChips("wide")).toEqual([])
-    expect(scopeChips("inline")).toEqual(["#web · item 3"])
+    expect(scopeChips("inline")).toEqual(["%web · item 3"])
     key("Escape")
     key("Enter")
     expect(onSubmit).toHaveBeenCalledWith(text, [], { inline: [{ kind: "project", ...web, where: 'item 3 ("Tidy the header")', reason: "item" }] })
@@ -515,10 +559,10 @@ describe('Composer "#" typed in one item of a list of tasks', () => {
     projects = [PROJECT, WEB]
     mount(true)
     await settle()
-    await type("1. #mobile Fix the flaky login test @box\n2. #web Tidy the header @box ")
+    await type("1. %mobile Fix the flaky login test @box\n2. %web Tidy the header @box ")
     expect(projectButton()!.getAttribute("aria-label")).toBe("Project: none picked, the Coordinator decides")
     // @box in every item agrees, but it's still written in the items: each item's own.
-    expect(scopeChips("inline")).toEqual(["#mobile · item 1", "@box · item 1", "#web · item 2", "@box · item 2"])
+    expect(scopeChips("inline")).toEqual(["%mobile · item 1", "@box · item 1", "%web · item 2", "@box · item 2"])
     key("Enter")
     const [, , extra] = onSubmit.mock.calls[0]!
     expect(extra.project).toBeUndefined()
@@ -528,20 +572,20 @@ describe('Composer "#" typed in one item of a list of tasks', () => {
     ])
   })
 
-  it("a #project over the list is the whole message's, as before; one over it that an item contradicts isn't", async () => {
+  it("a %project over the list is the whole message's, as before; one over it that an item contradicts isn't", async () => {
     projects = [PROJECT, WEB]
     mount(true)
     await settle()
-    await type("#mobile Two tasks:\n1. Fix the flaky login test\n2. Speed up the build")
-    expect(projectButton()!.getAttribute("aria-label")).toBe("Project: #mobile (Mobile)")
+    await type("%mobile Two tasks:\n1. Fix the flaky login test\n2. Speed up the build")
+    expect(projectButton()!.getAttribute("aria-label")).toBe("Project: %mobile (Mobile)")
     expect(document.querySelector('[data-testid="pick-scope"]')).toBeNull()
     key("Escape")
     key("Enter")
-    expect(onSubmit).toHaveBeenLastCalledWith("#mobile Two tasks:\n1. Fix the flaky login test\n2. Speed up the build", [], { project: mobile })
+    expect(onSubmit).toHaveBeenLastCalledWith("%mobile Two tasks:\n1. Fix the flaky login test\n2. Speed up the build", [], { project: mobile })
 
-    await type("#mobile Two tasks:\n1. Fix the flaky login test\n2. Tidy the header #web")
+    await type("%mobile Two tasks:\n1. Fix the flaky login test\n2. Tidy the header %web")
     expect(projectButton()!.getAttribute("aria-label")).toBe("Project: none picked, the Coordinator decides")
-    expect(scopeChips("inline")).toEqual(["#mobile · disagrees", "#web · item 2"])
+    expect(scopeChips("inline")).toEqual(["%mobile · disagrees", "%web · item 2"])
     key("Escape")
     key("Enter")
     const [, , extra] = onSubmit.mock.calls[1]!
@@ -552,78 +596,78 @@ describe('Composer "#" typed in one item of a list of tasks', () => {
     ])
   })
 
-  it("the # list typed in an item says it's that item's; the Project button puts the message's # at its start", async () => {
+  it("the % list typed in an item says it's that item's; the Project button puts the message's % at its start", async () => {
     projects = [PROJECT, WEB]
     mount(true)
     await settle()
-    await type("Two tasks:\n1. Fix the flaky login test\n2. Tidy the header #")
+    await type("Two tasks:\n1. Fix the flaky login test\n2. Tidy the header %")
     expect(menu()?.dataset.kind).toBe("project")
     expect(listTitle()).toContain("Which project item 2 is for")
     expect(listTitle()).toContain("only item 2's, not the whole message's")
     key("Escape")
     act(() => textarea().setSelectionRange(20, 20))
     await press(projectButton()!)
-    expect(textarea().value).toBe("# Two tasks:\n1. Fix the flaky login test\n2. Tidy the header #")
+    expect(textarea().value).toBe("% Two tasks:\n1. Fix the flaky login test\n2. Tidy the header %")
     expect(listTitle()).toContain("Which project this message is for")
     await tap(option("mobile"))
-    expect(textarea().value.startsWith("#mobile Two tasks:")).toBe(true)
-    expect(projectButton()!.getAttribute("aria-label")).toBe("Project: #mobile (Mobile)")
+    expect(textarea().value.startsWith("%mobile Two tasks:")).toBe(true)
+    expect(projectButton()!.getAttribute("aria-label")).toBe("Project: %mobile (Mobile)")
   })
 })
 
-describe('Composer "#" project, in the Coordinator\'s chat', () => {
-  it("the Project button types #, lists the projects, and the pick goes with the message, its #token kept in the text", async () => {
+describe('Composer "%" project, in the Coordinator\'s chat', () => {
+  it("the Project button types %, lists the projects, and the pick goes with the message, its %token kept in the text", async () => {
     mount(true)
     await settle()
     expect(projectButton()!.getAttribute("aria-label")).toBe("Project: none picked, the Coordinator decides")
     await type("fix the flaky test")
     await press(projectButton()!)
-    expect(textarea().value).toBe("fix the flaky test #")
+    expect(textarea().value).toBe("fix the flaky test %")
     expect(menu()?.dataset.kind).toBe("project")
     expect(options()).toEqual(["mobile"])
     expect(listTitle()).toContain("its Captain gets it")
     await tap(option("mobile"))
-    expect(textarea().value).toBe("fix the flaky test #mobile ")
-    expect(projectButton()!.getAttribute("aria-label")).toBe("Project: #mobile (Mobile)")
+    expect(textarea().value).toBe("fix the flaky test %mobile ")
+    expect(projectButton()!.getAttribute("aria-label")).toBe("Project: %mobile (Mobile)")
     key("Enter")
-    expect(onSubmit).toHaveBeenCalledWith("fix the flaky test #mobile", [], { project: { value: "prj_captain", token: "mobile", label: "Mobile" } })
+    expect(onSubmit).toHaveBeenCalledWith("fix the flaky test %mobile", [], { project: { value: "prj_captain", token: "mobile", label: "Mobile" } })
   })
 
   it("matches loosely as Cody types, and Tab picks", async () => {
     mount(true)
     await settle()
-    await type("see #mbl")
+    await type("see %mbl")
     expect(options()).toEqual(["mobile"])
     key("Tab")
-    expect(textarea().value).toBe("see #mobile ")
+    expect(textarea().value).toBe("see %mobile ")
   })
 
-  it("a bare # lists every project; Markdown headings, issue numbers and mid-word #s stay text", async () => {
+  it("a bare % lists every project; Markdown headings, issue numbers and mid-word %s stay text", async () => {
     mount(true)
     await settle()
-    await type("#")
+    await type("%")
     expect(options()).toEqual(["mobile"])
-    for (const text of ["# Plan", "## Plan", "see #123", "a#mob", "C#"]) {
+    for (const text of ["% Plan", "%% Plan", "see %123", "a%mob", "C%"]) {
       await type(text)
       expect(menu(), text).toBeNull()
     }
     key("Enter")
-    expect(onSubmit).toHaveBeenCalledWith("C#", [])
+    expect(onSubmit).toHaveBeenCalledWith("C%", [])
   })
 
   it("does nothing in a Captain's chat, which is already its project's", async () => {
     mount(true, 1, "prj_captain")
     await settle()
     expect(projectButton()).toBeNull()
-    await type("ask #mob")
+    await type("ask %mob")
     expect(menu()).toBeNull()
     key("Enter")
-    expect(onSubmit).toHaveBeenCalledWith("ask #mob", [])
+    expect(onSubmit).toHaveBeenCalledWith("ask %mob", [])
   })
 
   it("does nothing in a task's chat", async () => {
     mount(false)
-    await type("ask #mob")
+    await type("ask %mob")
     expect(menu()).toBeNull()
     expect(asked).not.toContain("/api/projects")
   })

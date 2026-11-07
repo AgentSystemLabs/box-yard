@@ -14,7 +14,7 @@ export class ApiError extends Error {
  * fetch() for the Box Yard API: JSON in, JSON out, readable errors. `priority: "low"` for background prefetches. `raw`
  * sends a file as the body itself (a project's icon), instead of JSON.
  */
-export async function api<T>(path: string, init: { method?: string; body?: unknown; raw?: Blob; priority?: RequestPriority } = {}): Promise<T> {
+export async function api<T>(path: string, init: { method?: string; body?: unknown; raw?: Blob; priority?: RequestPriority; signal?: AbortSignal } = {}): Promise<T> {
   // A GET of what the page already asked for as it loaded takes that answer (lib/boot.ts).
   const early = init.method === undefined && init.body === undefined && init.raw === undefined ? takeEarly(path) : undefined
   if (early) {
@@ -28,6 +28,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
       headers: init.raw !== undefined ? { "Content-Type": "application/octet-stream" } : init.body === undefined ? undefined : { "Content-Type": "application/json" },
       body: init.raw ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
       credentials: "same-origin",
+      ...(init.signal ? { signal: init.signal } : {}),
       ...(init.priority ? { priority: init.priority } : {}),
     })
   } catch {

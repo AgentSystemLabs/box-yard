@@ -88,7 +88,7 @@ export function MoreButton({ more, className, dot }: { more: MoreMenuState; clas
       title="More: the buttons that don't fit"
       aria-expanded={more.open}
       aria-controls={more.open ? more.id : undefined}
-      // The caret stays in the text, where a picked @ ! # goes.
+      // The caret stays in the text, where a picked @ ! % goes.
       onMouseDown={(e) => e.preventDefault()}
       // detail 0 is a keyboard or assistive-tech click.
       onClick={(e) => more.toggle(e.detail === 0)}
@@ -134,7 +134,7 @@ export function MoreMenu({ more, anchor, children }: { more: MoreMenuState; anch
   )
 }
 
-/** A line of the More menu: 44px tall, an icon, a name, what it's set to, and (for @ ! #) the character it types. */
+/** A line of the More menu: 44px tall, an icon, a name, what it's set to, and (for @ ! %) the character it types. */
 export function ComposerMenuItem({
   icon: Icon,
   label,
