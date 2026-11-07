@@ -212,7 +212,7 @@ describe("resuming after retention", () => {
     expect(turn.resume).toBe(false)
     expect(after.sessionId).not.toBe(pushed.sessionId)
     expect(turn.sessionId).toBe(after.sessionId)
-    expect(turn.prompt).toContain("Your previous Claude session for this task was lost")
+    expect(turn.prompt).toContain("Your previous CLI session for this task was lost")
     expect(turn.prompt).toContain(`Branch: ${pushed.branch}`)
     expect(turn.prompt).toContain("Last summary: Fixed the widget and opened a PR.")
     expect(turn.prompt).toContain("checked out from origin")
