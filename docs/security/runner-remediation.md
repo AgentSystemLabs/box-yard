@@ -33,6 +33,7 @@ if subsequent changes move line numbers.
 | --- | --- | --- |
 | **Critical: worker delegation could select an unsandboxed runner** | An isolated task emits a local/SSH child request, changes the effective default, or reuses placement/retry paths. Host execution bypasses the container without a kernel escape. | `server/tasks.ts:1169` stores a server-only ceiling, validates child ancestry/project, and checks the actual provider at assignment and launch (`:5830`, `:6029`). `place` checks requested and inherited placement (`:3871`). Choosing isolation narrows authority; switching a project default cannot widen existing tasks. |
 | **High: privileged tool delegation could broaden runner trust** | Worker/repository content persuades a privileged control-plane agent to create local tasks or schedules in an isolated project. | `server/mcp.ts:439` requires a server-trusted authenticated human runner pick for a one-off host override. Create/batch validate before any write; schedules require an already human-selected matching host project default. Model tool arguments cannot supply this approval. Existing task changes still pass the task ceiling. |
+| **High: direct worker messages/reports cross into host task authority** | An isolated worker addresses an existing local/SSH task, sends an FYI, or returns a report/question to a host parent. | `TaskManager.deliverAgentMessage` now rejects delivery across different host authority before queue/history writes. `reportToParent` withholds report bodies/questions; `writeSubtasksFile` also rechecks saved reports. Offline dispatch/report tests cover these cases. Broader manager and indirect content paths remain open below. |
 | **Critical: hostile workspace archives could write or execute outside their intended state** | A task-controlled TAR is restored, potentially on a later local runner. Sibling members, links, server config and Git hooks/config turn restoration into host writes or execution. | `server/safeArchive.ts:49` parses into fresh private staging before any provider upload. `server/tasks.ts:6671` uploads only canonical output, rejects an existing destination, extracts into a new staging directory, and restores a server-selected Git origin before reconstruction. |
 | **High: worker output/file reads could exhaust host memory** | A hostile process emits excessive output or advertises a small artifact while returning large content. | `server/workerFiles.ts:35` caps incoming bytes independently of worker stat or event size. Artifact dispatch (`server/tasks.ts:7325`) enforces 25 MiB and a task-workspace root. Local, Docker CLI and SSH collectors bound output before retaining it; Daytona bounds HTTP bodies before JSON decoding. Upstash limitations remain below. |
 | **High: shared worker Redis authority** | A worker holds shared Redis credentials and can read project information or forge another task's control events. | New worker configuration has `redis: null` (`server/tasks.ts:6630`), and server event reading uses worker files, not Redis (`:810`). New workers receive no Redis bus credentials from this path. This removes that authority rather than trying to enforce a task prefix with an unrestricted Redis token. **Existing credentials and workers are not revoked by this code.** |
@@ -123,9 +124,9 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    for the actions a model subsequently chooses. If a recipient follows malicious
    instructions, `send_to_task` can instruct an already local/SSH task without a
    runner change or fresh human elevation (`server/mcp.ts:1531`, `:1568`).
-   Workers can also message existing tasks directly: `deliverAgentMessage` checks
-   status-only project boundaries but not execution-trust differences
-   (`server/tasks.ts:8062`). The Coordinator can change global settings, including
+   The branch now rejects direct isolated-worker delivery into host task queues or
+   histories and withholds child report bodies from host parents. Those checks do
+   not constrain a manager relaying the same text. The Coordinator can change global settings, including
    the default runner, through `update_settings` (`server/mcp.ts:2619`).
    The runner ceiling prevents broadening the isolated task's own execution
    authority; it does not propagate untrusted message provenance into these
@@ -136,7 +137,9 @@ bounds do not promise a fixed process RSS or limit total retained data over time
    message origin and the approved action/target across messages, reports, hooks
    and mixed-source turns. A worker's claim that the human approved something
    must never itself supply authority. Manager shell restrictions alone do not
-   close this indirect execution path. This remains unresolved in this PR.
+   close this indirect execution path. This remains unresolved in this PR. The
+   [manager authority review](manager-authority-review.md) records the verified
+   paths, proposed permanent restrictions and their compatibility impact.
 3. **High — reachable control-plane or daemon services remain decisive.**
    Container-to-host/LAN networking is not denied by this PR. A reachable
    unauthenticated/open Box Yard API, leaked shared team credential, unauthenticated
@@ -192,6 +195,8 @@ read, network enumeration, daemon reconfiguration or production data deletion ra
   recursive/same/default children; forged placement and folder-local fallback;
   persistence after restart and project-default change; authenticated elevation
   API and composer; trusted versus model-supplied MCP runner picks; Redis omitted.
+  It also covers isolated-to-host direct messages/FYIs and withheld child reports,
+  including old saved reports rechecked when preparing the parent's wait file.
 - `test/safe-archive.test.ts`: sibling/traversal/link/special/alias/truncation/bounds
   fixtures, PAX long paths, actual restore rejection before upload, malicious Git
   hook/config removal, and a pre-existing destination symlink with an untouched
