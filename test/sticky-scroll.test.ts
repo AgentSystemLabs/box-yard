@@ -1042,9 +1042,10 @@ describe("StickyScroll", () => {
   // rendering hundreds of them, and every layout (keyboard, rotation, a dialog) froze the app for seconds.
   describe("with useTail, as the chats use it", () => {
     let items: { id: string }[]
+    let cap = Infinity
 
     function TailThread({ items }: { items: { id: string }[] }) {
-      const tail = useTail(items, "chat")
+      const tail = useTail(items, "chat", { max: cap })
       return createElement(StickyScroll, {
         handle,
         count: items.length,
@@ -1065,6 +1066,7 @@ describe("StickyScroll", () => {
 
     beforeEach(() => {
       act(() => root.render(null))
+      cap = Infinity
       items = Array.from({ length: 200 }, (_, i) => ({ id: `m${i}` }))
       renderTail()
       installLayout()
@@ -1097,6 +1099,32 @@ describe("StickyScroll", () => {
       const same = messages().find((r) => r.textContent === text)!
       expect(rowTop(same)).toBe(offset)
       expect(jumpButton()).toBeDefined()
+    })
+
+    it("holds the same visible row when a bounded prepend also removes rows below", () => {
+      cap = 100
+      renderTail()
+      for (let i = 0; i < 2; i++) {
+        userScroll(i ? -5000 : -5500)
+        flush()
+        const row = messages().find((r) => rowTop(r) >= 0)!
+        const offset = rowTop(row)
+        act(() => [...host.querySelectorAll("button")].find((b) => b.textContent?.startsWith("Show "))!.click())
+        frame()
+        expect(messages()).toHaveLength(100)
+        expect(row.isConnected).toBe(true)
+        expect(rowTop(row)).toBe(offset)
+      }
+    })
+
+    it("keeps the newest streamed row visible at a bounded tail's bottom", () => {
+      cap = 100
+      renderTail()
+      for (let i = 0; i < 150; i++) {
+        arrive()
+        expect(messages().length).toBeLessThanOrEqual(100)
+        expect(messages().at(-1)?.textContent).toBe(`m${items.length - 1}`)
+      }
     })
 
     it("a scroll that stops where the bottom was before Show earlier added rows above doesn't re-pin", () => {

@@ -48,6 +48,7 @@ beforeEach(() => {
   vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => setTimeout(() => fn(performance.now()), 1))
   vi.stubGlobal("cancelAnimationFrame", clearTimeout)
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {})
+  vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(() => {})
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -68,7 +69,8 @@ describe("chat day navigation", () => {
     expect(leaveBottom).toHaveBeenCalled()
     await settle()
     expect(host.querySelectorAll('[data-day-start="message-0"]')).toHaveLength(1)
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "auto" })
+    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "auto" })
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
     expect(document.activeElement?.getAttribute("data-day-start")).toBe("message-0")
   })
 
@@ -177,7 +179,8 @@ describe("chat day navigation", () => {
     expect(host.querySelectorAll('[data-chat-id="message-10"]')).toHaveLength(1)
     expect(document.activeElement).toBe(source)
     expect(host.querySelector('[role="region"]')).toBeNull()
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "auto" })
+    expect(HTMLElement.prototype.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "auto" })
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled()
     const interaction = action === "click" ? new PointerEvent("pointerdown", { bubbles: true }) : action === "Enter" ? new KeyboardEvent("keydown", { key: "Tab", bubbles: true }) : new WheelEvent("wheel", { bubbles: true })
     act(() => { document.dispatchEvent(interaction) })
     expect(source.hasAttribute("data-chat-highlight")).toBe(false)

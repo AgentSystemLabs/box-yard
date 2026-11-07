@@ -1,3 +1,5 @@
+import { useTranscriptHistory } from "../lib/transcriptHistory"
+import { HistoryNavigation } from "./HistoryNavigation"
 import { memo, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { useLocation } from "wouter"
 import {
@@ -124,7 +126,8 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
     [followUp],
   )
 
-  const messages = chat.data ?? NO_MESSAGES
+  const history = useTranscriptHistory("/api/chat/history", chat.data ?? NO_MESSAGES)
+  const messages = history.items
   const index = useEntityIndex()
   // Messages sent mid-turn wait under the streaming reply until the turn that reads them starts.
   const { settled: all, queued } = useMemo(() => splitQueued(messages), [messages])
@@ -132,7 +135,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
   // The plain transcript, only its newest rows rendered (useTail).
   const plain = usePlainRows(allRows)
   const days = useMemo(() => chatDays(plain.map(rowFirstMessage)), [plain])
-  const tail = useTail(plain, "chat", tailOptions())
+  const tail = useTail(plain, "chat", { ...tailOptions(), max: 200 })
   // Older replies aren't rendered yet: parse their markdown in idle time (as the transcript shows them, InRepo
   // mentions), so scrolling up into them only builds their DOM.
   const hidden = tail.hidden
@@ -164,23 +167,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
     }
     return true
   }, [tailReveal])
-  useEffect(() => {
-    const onReveal = (e: Event) => {
-      const id = (e as CustomEvent<string>).detail
-      if (typeof id !== "string" || !reveal(id)) return
-      const row = rowHolding(plainRef.current, id)!
-      // Two frames: let the list settle (and stop following the bottom) before scrolling to the message.
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          const q = CSS.escape(id)
-          const el = panel.current?.querySelector(`[id="chat-${q}"], [data-chat-id="${q}"]`) ?? document.getElementById(`chat-${row.id}`)
-          el?.scrollIntoView({ block: "center", behavior: "smooth" })
-        }),
-      )
-    }
-    window.addEventListener(REVEAL_CHAT_EVENT, onReveal)
-    return () => window.removeEventListener(REVEAL_CHAT_EVENT, onReveal)
-  }, [reveal])
+
 
   return (
     <ThreadChatProvider value={COORDINATOR_CHAT}>
@@ -231,13 +218,14 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
 
           <div className={showSetup ? "hidden" : "contents"}>
             <SelectionToTask source={selectionSource} onPrompt={submit}>
-              <ChatHistory days={days} messages={all} reveal={reveal}>
+              <ChatHistory days={history.days ?? days} messages={all} reveal={reveal} ensure={history.ensure}>
                 <StickyScroll
                   handle={scroller}
-                  count={messages.length + (talking ? 1 : 0)}
+                  count={(chat.data?.length ?? 0) + (talking ? 1 : 0)}
                   restoreKey="chat:centre"
-                  hidden={tail.hidden}
-                  onLoadEarlier={tail.loadEarlier}
+                  hidden={tail.hidden || (history.moreBefore ? 1 : 0)}
+                  onJump={() => { history.toLatest(); tail.reset() }}
+                  onLoadEarlier={tail.hidden ? tail.loadEarlier : history.earlier}
                   onTrim={tail.trim}
                   onFill={tail.fill}
                   onFilled={tail.filled}
@@ -259,7 +247,8 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
                   {/* The Coordinator's replies span projects: "#12" links only where a paragraph is about one repo. Notices and chips set their task's. */}
                   <InRepo mentions>
                     <CoordinatorTranscript rows={tail.visible} onFollowUp={followUp} />
-                    <StreamingReply busy={talking} />
+                    <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={scroller} />
+                    {!history.browsing && <StreamingReply busy={talking} />}
                     {queued.length > 0 && <ChatLines messages={queued} onFollowUp={followUp} />}
                   </InRepo>
                 </StickyScroll>

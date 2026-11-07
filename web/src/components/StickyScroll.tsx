@@ -78,8 +78,10 @@ function listScrollTop(list: HTMLElement, el: Element, block: NonNullable<Scroll
   if (block === "center") return (start + end - view) / 2
   if (block === "end") return end - view
   if (block === "nearest") {
-    if (start >= list.scrollTop && end <= list.scrollTop + view) return null
-    return start < list.scrollTop || end - start > view ? start : end - view
+    const above = start < list.scrollTop
+    const below = end > list.scrollTop + view
+    if ((!above && !below) || (above && below)) return null
+    return (above && end - start <= view) || (below && end - start > view) ? start : end - view
   }
   return start
 }
@@ -152,6 +154,7 @@ export function StickyScroll({
   hidden = 0,
   onLoadEarlier,
   onTrim,
+  onJump,
   onFill,
   onFilled,
   growing = false,
@@ -168,6 +171,7 @@ export function StickyScroll({
   hidden?: number
   onLoadEarlier?: () => void
   onTrim?: () => void
+  onJump?: () => void
   onFill?: () => boolean
   onFilled?: (share: number) => void
   growing?: boolean
@@ -197,7 +201,7 @@ export function StickyScroll({
   const [unread, setUnread] = useState(0)
   const sentinel = useRef<HTMLButtonElement>(null)
   // Scroll metrics captured just before older items are added above.
-  const beforePrepend = useRef<{ height: number; top: number; hidden: number } | null>(null)
+  const beforePrepend = useRef<{ height: number; top: number; hidden: number; anchor: { node: Element; top: number } | null } | null>(null)
   // A spot from Back/Forward being put back: `since` it started, `found` when its row (or content) first showed.
   const restoring = useRef<{ spot: LiveSpot; since: number; found: number } | null>(null)
   // Gliding to the bottom after a send: how far short of the bottom it started, and when (see glideFrame).
@@ -290,7 +294,7 @@ export function StickyScroll({
       if (rows[mid]!.getBoundingClientRect().bottom > viewTop) hi = mid
       else lo = mid + 1
     }
-    const node = rows[lo]!
+    const node = (rows[lo] === sentinel.current ? rows[lo + 1] ?? rows[lo] : rows[lo])!
     anchor.current = { node, top: node.getBoundingClientRect().top - viewTop }
   }
 
@@ -623,7 +627,8 @@ export function StickyScroll({
     const el = scroller.current
     const { hidden, onLoadEarlier } = latest.current
     if (!el || !onLoadEarlier) return
-    beforePrepend.current = { height: el.scrollHeight, top: el.scrollTop, hidden }
+    markAnchor()
+    beforePrepend.current = { height: el.scrollHeight, top: el.scrollTop, hidden, anchor: anchor.current }
     onLoadEarlier()
   }, [])
 
@@ -634,7 +639,11 @@ export function StickyScroll({
     if (!el || !prev || prev.hidden === hidden) return
     beforePrepend.current = null
     if (stuck.current) return
-    setTop(el, prev.top + (el.scrollHeight - prev.height))
+    const a = prev.anchor
+    // Bounded windows also drop rows below the viewport: total height no longer measures the prepend.
+    setTop(el, a?.node.isConnected
+      ? el.scrollTop + a.node.getBoundingClientRect().top - el.getBoundingClientRect().top - a.top
+      : prev.top + (el.scrollHeight - prev.height))
     // The bottom moved for rows above, not for anything new at the end: where it was is no bottom to reach.
     pastBottoms.current = []
     markAnchor()
@@ -656,6 +665,7 @@ export function StickyScroll({
 
   // Re-pin and go to the bottom: a glide for "Jump to latest", a jump after a send.
   const jump = (smooth = true) => {
+    onJump?.()
     restoring.current = null
     pin()
     toBottom(smooth)
@@ -704,7 +714,7 @@ export function StickyScroll({
               ref={sentinel}
               type="button"
               onClick={loadEarlier}
-              className="block w-full py-1 text-center text-xs text-zinc-500 hover:text-zinc-300"
+              className="block min-h-11 w-full py-1 text-center text-xs text-zinc-500 hover:text-zinc-300"
             >
               Show {hidden} earlier message{hidden === 1 ? "" : "s"}
             </button>

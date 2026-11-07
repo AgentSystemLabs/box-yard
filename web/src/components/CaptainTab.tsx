@@ -1,3 +1,5 @@
+import { useTranscriptHistory } from "../lib/transcriptHistory"
+import { HistoryNavigation } from "./HistoryNavigation"
 // The project page's Captain tab: the Captain's transcript as a chat, like the Coordinator panel.
 // A slim header (status, model, context + Compact, last active, ⋯ menu), the thread with task
 // notices folded into one-line rows, and the shared Composer to message the Captain directly.
@@ -146,14 +148,15 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
     [],
   )
 
-  const list = messages.data ?? NO_MESSAGES
+  const history = useTranscriptHistory(`/api/projects/${project.id}/captain/history`, messages.data ?? NO_MESSAGES)
+  const list = history.items
   // Messages sent mid-turn wait at the bottom until the turn that reads them starts.
   const { settled, queued } = useMemo(() => splitQueued(list), [list])
   // `centre` keeps the Captain's chat plain: its replies and the updates, without the tool calls between them.
   const rows = useMemo(() => captainRows(centre ? settled.filter((m) => m.role !== "tool") : settled), [settled, centre])
   const days = useMemo(() => chatDays(rows.map(firstMessage)), [rows])
   // Switching Captains (or opening one) paints just the newest rows that fill the view, then the rest of the newest 60.
-  const tail = useTail(rows, project.id, { first: firstPaintRows(project.id, CAPTAIN_FIRST_PAINT_ROWS), grow: CAPTAIN_GROW_ROWS })
+  const tail = useTail(rows, project.id, { first: firstPaintRows(project.id, CAPTAIN_FIRST_PAINT_ROWS), grow: CAPTAIN_GROW_ROWS, max: 200 })
   const rowsRef = useRef(rows)
   rowsRef.current = rows
   const tailReveal = tail.reveal
@@ -163,7 +166,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
     if (row.type === "notices") setOpenGroups((prev) => prev.has(row.id) ? prev : new Set([...prev, row.id]))
     return true
   }, [tailReveal])
-  const count = useCountFromFirst(list, project.id)
+  const count = useCountFromFirst(messages.data ?? NO_MESSAGES, project.id)
   // `centre` offers next steps only under the newest reply, like the Coordinator's chat.
   const newest = useMemo(() => {
     if (!centre) return
@@ -211,14 +214,15 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
           )}
 
           <SelectionToTask source={selectionSource} onPrompt={submit}>
-            <ChatHistory days={days} messages={settled} reveal={reveal} projectId={project.id}>
+            <ChatHistory days={history.days ?? days} messages={settled} reveal={reveal} ensure={history.ensure} projectId={project.id}>
               <StickyScroll
                 handle={thread}
                 count={count}
                 resetKey={project.id}
                 restoreKey={scrollKey ?? `captain:${project.id}`}
-                hidden={tail.hidden}
-                onLoadEarlier={tail.loadEarlier}
+                hidden={tail.hidden || (history.moreBefore ? 1 : 0)}
+                onJump={() => { history.toLatest(); tail.reset() }}
+                onLoadEarlier={tail.hidden ? tail.loadEarlier : history.earlier}
                 onTrim={tail.trim}
                 onFill={tail.fill}
                 onFilled={tail.filled}
@@ -230,7 +234,8 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
                 {messages.isLoading && <Loading kind="chat" label="Loading the Captain's conversation" />}
                 {list.length === 0 && !messages.isLoading && <EmptyCaptain project={project} onPick={fill} />}
                 <CaptainTranscript rows={tail.visible} openGroups={openGroups} onToggle={toggleGroup} onFollowUp={followUp} centre={centre} newest={newest} />
-                {busy && (
+                <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={thread} />
+                {!history.browsing && busy && (
                   // Just the dots, like the Coordinator's: the header's icon says it's working.
                   <div data-testid="captain-working" className="flex gap-1 px-1 py-2">
                     {[0, 1, 2].map((i) => (
