@@ -1,14 +1,17 @@
 Sidebar Delete validation — example fixtures only
 
-Stable commit: 3c3322a8f7437e8ac9c0fc65315d9f8866b17e3b
+Stable commit: d24c4d41c2892e57ab5dd6b52ca951639f036dba
+Includes main at 4df93eaa61e6bbabaa140abac0461114eb5b82b2 (PR #16)
 
 PASS npm run typecheck
 PASS npm run build
-PASS npm run test:fast — 278 files, 3239 tests
-PASS npm run test:related — 52 files, 677 tests
-PASS npm run test:tiers — 418 full = 278 fast + 140 slow
+PASS npm run test:fast — 281 files, 3259 tests
+PASS focused post-main regression coverage — 4 files, 48 tests (deletion reservation, HTTP delete API, sidebar UI, Captain compactions)
+PASS npm run test:tiers — 423 full = 281 fast + 142 slow; complete, disjoint, no stale entries
 PASS Chromium browser proof — 20 cases, 320/400/560/800/1600 px, 100%/125% zoom, touch/mouse
 
-Every browser DELETE was intercepted with isolated example fixtures. No user data deleted.
+The HTTP tests use isolated SQLite/server fixtures. Every browser DELETE was intercepted with example fixtures. No user data deleted.
+Protection coverage: queued/active work, hidden descendants, inputs/compaction/Captain activity, concurrent admission during cleanup, refusal preserves rows/archives, release after errors, legacy intentional-delete semantics.
+Browser coverage: horizontal direction lock and native vertical scrolling, suppressed navigation after swipe, one reveal, keyboard focus/Escape, reversal, deep nested 44px targets, confirmation cancellation and intercepted confirmed deletion.
 Native iOS/Safari hardware was not tested.
-Risk: Medium; destructive shortcut with explicit confirmation and live client eligibility rechecks.
+Risk: Medium; destructive shortcut with explicit confirmation, conservative eligibility and a server-held reservation through cleanup.
