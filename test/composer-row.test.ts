@@ -193,7 +193,7 @@ describe("Composer row", () => {
     const more = byTestId("composer-more")!
     const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
     more.dispatchEvent(down)
-    // The caret stays in the text, where a picked @ ! # goes.
+    // The caret stays in the text, where a picked @ ! % goes.
     expect(down.defaultPrevented).toBe(true)
     await press(more)
     const menu = byTestId("composer-more-menu")!
@@ -203,12 +203,12 @@ describe("Composer row", () => {
     for (const kind of ["project", "runsOn", "agent"]) expect(byTestId(`more-pick-${kind}`)!.className).toContain("@min-[22.5rem]/composer:hidden")
     expect(byTestId("tool-line")!.parentElement!.className).toContain("@min-[16.5rem]/composer:hidden")
     // A line names what it types, so the menu teaches the shortcut.
-    expect(byTestId("more-pick-project")!.textContent).toContain("#")
+    expect(byTestId("more-pick-project")!.textContent).toContain("%")
     // It sits in a box-wide `composer` container, so its queries read the box's width.
     expect(menu.parentElement!.className).toContain("@container/composer")
     await press(byTestId("more-pick-project")!)
     expect(byTestId("composer-more-menu")).toBeNull()
-    expect(document.querySelector("textarea")!.value).toBe("#")
+    expect(document.querySelector("textarea")!.value).toBe("%")
     expect(byTestId("run-target-menu")?.dataset.kind).toBe("project")
   })
 

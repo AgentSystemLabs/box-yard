@@ -8,6 +8,7 @@ import { selfUrl } from "./bind.js"
 import { browserBoundary, secureBrowserCookie } from "./browserBoundary.js"
 import { configProblems, qstashEnabled, redisEnabled, tildePath, type Config } from "./config.js"
 import { openDb, type DB } from "./db.js"
+import { transcriptHistoryRoutes } from "./transcriptHistory.js"
 import { Store, BadRequestError, ConflictError, NotFoundError, taskAgentCli } from "./store.js"
 import { Hub } from "./hub.js"
 import { Artifacts } from "./artifacts.js"
@@ -73,6 +74,7 @@ import { DockerService } from "./docker/service.js"
 import { MachineService, type MachineServiceDeps } from "./machines/service.js"
 import { MachineActions } from "./machines/actions.js"
 import { listHarnessTargets, listRunTargets, resolveHarnessPick, resolveInlinePicks, resolveProjectPick, resolveRunTargetPick, type RunTargetDeps } from "./runTargets.js"
+import { GithubReferences } from "./githubReferences.js"
 import { isMachineBox, MACHINE_LIMITS, machineOfBox, normalizeLabel, type MachineKeyRef } from "../shared/machines.js"
 import { ClaudeModels } from "./claudeModels.js"
 import { serverClaudeEnv } from "./turnCredentials.js"
@@ -267,7 +269,7 @@ const schemas = {
     runsOn: z.string().trim().min(1).max(200).optional(),
     /** The chat's "!" pick: an agent CLI from GET /api/harness-targets, checked against it. */
     agent: z.string().trim().min(1).max(400).optional(),
-    /** The Coordinator chat's "#" pick: the id of the project the message is for. A Captain's chat refuses it. */
+    /** The Coordinator chat's "%" pick: the id of the project the message is for. A Captain's chat refuses it. */
     project: z.string().trim().min(1).max(200).optional(),
     /**
      * Picks typed for only part of the message (shared/runTargets.ts scopePicks): the turn's prompt lists them, and
@@ -613,6 +615,11 @@ export function createBoxYard(
   // Read the running commit now, before a `git pull` can move HEAD under this process.
   buildInfo()
   const tasks = new TaskManager({ config: c, store, provider, hub, redis, artifacts, uploads, settings, github: opts.github, gpu, vast, daytona, docker, machines, identities, logins })
+  const githubReferences = new GithubReferences({
+    project: (id) => store.getProject(id),
+    token: opts.github?.token ?? ((id) => c.mock ? null : tasks.githubToken(id) || null),
+    fetch: opts.github?.fetch ?? (c.mock ? null : fetch),
+  })
   tasks.runnerProblem = (runner, key, cli, gpuCloud) => setup.runnerProblem(runner, key, cli, gpuCloud)
   // The chats' "@" list (server/runTargets.ts): the same runner checks and machines the task tools go by.
   const runTargetDeps: RunTargetDeps = {
@@ -636,8 +643,8 @@ export function createBoxYard(
   }
   /** A chat send's "@" and "!" picks, checked against the lists the composer showed (a 400 when one isn't on them). */
   const chatPicks = async (body: Pick<z.infer<typeof schemas.chat>, "runsOn" | "agent" | "project" | "inline">, projectId: string | null) => {
-    // "#" is the Coordinator's: a Captain's chat is already its project's.
-    if (body.project && projectId) throw new BadRequestError("A Captain's chat is already its project's: # picks a project only in the Coordinator's chat.")
+    // "%" is the Coordinator's: a Captain's chat is already its project's.
+    if (body.project && projectId) throw new BadRequestError("A Captain's chat is already its project's: % picks a project only in the Coordinator's chat.")
     const project = body.project ? resolveProjectPick(store.getProject(body.project), body.project) : null
     const runsOn = body.runsOn ? await resolveRunTargetPick(runTargetDeps, body.runsOn, projectId) : null
     const agent = body.agent ? await resolveHarnessPick(runTargetDeps, body.agent, projectId, runsOn?.value ?? null) : null
@@ -978,6 +985,7 @@ export function createBoxYard(
 
   const api = express.Router()
   api.use(auth.middleware())
+  transcriptHistoryRoutes(api, store)
 
   /** The Coordinator's CLI versions, looked up once, before /api/health reads them. */
   const lookUpClis = async () => {
@@ -1815,6 +1823,11 @@ export function createBoxYard(
     const projectId = typeof req.query.project === "string" && req.query.project ? req.query.project : null
     if (projectId && !store.getProject(projectId)) throw new BadRequestError("No such project")
     res.json(await listRunTargets(runTargetDeps, projectId))
+  })
+  // UI lookup only: repository and identity are always resolved from this project on the server.
+  api.get("/projects/:id/github-references", async (req, res) => {
+    if (req.query.q !== undefined && typeof req.query.q !== "string") throw new BadRequestError("Search must be text")
+    res.json(await githubReferences.get(req.params.id!, req.query.q ?? ""))
   })
   // The "!" list of agent CLIs for a message whose tasks go where ?runsOn= says (its "@" pick; omitted: the project's
   // Runs on, or the default): each that's installed and signed in there.

@@ -49,16 +49,19 @@ const DayDivider = memo(function DayDivider({ at, messageId }: { at: number; mes
 })
 
 /** A rail beside, rather than on top of, the list. Only this rail subscribes to task milestones. */
-export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, projectId, taskId, children }: {
+export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, ensure, projectId, taskId, children }: {
   days: ChatDay[]
   messages: readonly NoticeLike[]
   reveal: (id: string) => boolean
+  ensure?: (id: string) => Promise<boolean>
   projectId?: string
   taskId?: string
   children: ReactNode
 }) {
   const root = useRef<HTMLDivElement>(null)
   const scope = useId()
+  const pendingReveal = useRef<(() => void) | null>(null)
+  useLayoutEffect(() => { pendingReveal.current?.() })
   useEffect(() => {
     const frames = new Set<number>()
     const frame = (run: () => void) => {
@@ -74,38 +77,55 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, p
       else highlighted.setAttribute("tabindex", originalTabIndex)
       highlighted = undefined
     }
+    let sequence = 0
     const onReveal = (event: Event) => {
-      const detail = (event as CustomEvent<ChatReveal>).detail
-      if (typeof detail === "string" || detail.scope !== scope) return
+      const raw = (event as CustomEvent<ChatReveal>).detail
+      if (typeof raw === "string" ? !!projectId || !!taskId : raw.scope !== scope) return
+      const detail = typeof raw === "string" ? { id: raw, target: "message" as const, highlight: true, fallbackId: undefined } : raw
+      const token = ++sequence
+      pendingReveal.current = null
       frames.forEach(cancelAnimationFrame)
       frames.clear()
       const list = root.current?.querySelector("[data-scroller]")
       if (list) releaseListBottom(list)
       clearHighlight()
-      const id = reveal(detail.id) ? detail.id : detail.fallbackId
-      if (!id || (id !== detail.id && !reveal(id))) return
-      // Let useTail commit and StickyScroll settle its new rows before the explicit jump.
-      frame(() => frame(() => {
-        const q = CSS.escape(id)
-        // Coordinator groups share their first notice's id. Prefer the message root over the group wrapper.
-        const message = detail.target === "message" && (root.current?.querySelector<HTMLElement>(`[data-chat-id="${q}"]`) ?? root.current?.querySelector<HTMLElement>(`[id="chat-${q}"], [id="captain-${q}"]`))
-        const target = message || root.current?.querySelector<HTMLElement>(`[data-day-start="${CSS.escape(detail.fallbackId ?? id)}"]`)
-        if (!target) return
-        if (detail.highlight) {
-          highlighted = target
-          originalTabIndex = target.getAttribute("tabindex")
-          target.setAttribute("tabindex", "-1")
-          target.setAttribute("data-chat-highlight", "")
-        }
-        scrollIntoList(target, { block: "start", behavior: "auto" })
-        target.focus({ preventScroll: true })
-      }))
+      const show = () => {
+        const id = reveal(detail.id) ? detail.id : detail.fallbackId && reveal(detail.fallbackId) ? detail.fallbackId : undefined
+        if (!id) return false
+        // Let useTail commit and StickyScroll settle before the explicit jump.
+        frame(() => frame(() => {
+          const q = CSS.escape(id)
+          const message = detail.target === "message" && (root.current?.querySelector<HTMLElement>(`[data-chat-id="${q}"]`) ?? root.current?.querySelector<HTMLElement>(`[id="chat-${q}"], [id="captain-${q}"]`))
+          const target = message || root.current?.querySelector<HTMLElement>(`[data-day-start="${CSS.escape(detail.fallbackId ?? id)}"]`)
+          if (!target) return
+          if (detail.highlight) {
+            highlighted = target
+            originalTabIndex = target.getAttribute("tabindex")
+            target.setAttribute("tabindex", "-1")
+            target.setAttribute("data-chat-highlight", "")
+          }
+          scrollIntoList(target, { block: "start", behavior: "auto" })
+          target.focus({ preventScroll: true })
+        }))
+        return true
+      }
+      if (show() || !ensure) return
+      pendingReveal.current = () => {
+        if (token === sequence && show()) pendingReveal.current = null
+      }
+      void ensure(detail.id).then((found) => {
+        if (token !== sequence) return
+        if (found) frame(() => pendingReveal.current?.())
+        else pendingReveal.current = null
+      })
     }
     window.addEventListener(REVEAL_CHAT_EVENT, onReveal)
     document.addEventListener("pointerdown", clearHighlight, true)
     document.addEventListener("keydown", clearHighlight, true)
     document.addEventListener("wheel", clearHighlight, { passive: true, capture: true })
     return () => {
+      sequence++
+      pendingReveal.current = null
       clearHighlight()
       window.removeEventListener(REVEAL_CHAT_EVENT, onReveal)
       document.removeEventListener("pointerdown", clearHighlight, true)
@@ -113,7 +133,7 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, p
       document.removeEventListener("wheel", clearHighlight, true)
       frames.forEach(cancelAnimationFrame)
     }
-  }, [scope, reveal])
+  }, [scope, reveal, ensure, projectId, taskId])
   return (
     <div ref={root} data-chat-history className="@container/history relative flex min-h-0 min-w-0 flex-1">
       {days.length > 0 && <DayRail days={days} messages={messages} scope={scope} projectId={projectId} taskId={taskId} />}
@@ -143,23 +163,22 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
   const nav = useRef<HTMLElement>(null)
   const popup = useRef<HTMLDivElement>(null)
   const anchor = useRef<HTMLButtonElement | null>(null)
-  const touch = useRef(false)
-  const armed = useRef(false)
-  const returningFocus = useRef(false)
   const popupId = useId()
   const day = days.find((d) => d.key === open)
   const bullets = day ? summaries.get(day.key) ?? [] : []
   const lastDay = days.at(-1)?.key
+  // Keep even years of day buttons bounded. Fixed 44px rows preserve native scrolling and keyboard focus.
+  const [railTop, setRailTop] = useState(0)
+  const railStart = Math.max(0, Math.floor((railTop - 28) / 44) - 12)
+  const railEnd = Math.min(days.length, railStart + 80)
   const close = useCallback(() => {
     setOpen(null)
-    returningFocus.current = true
     anchor.current?.focus({ preventScroll: true })
-    returningFocus.current = false
   }, [])
 
   useLayoutEffect(() => {
-    if (nav.current) nav.current.scrollTop = nav.current.scrollHeight
-  }, [lastDay])
+    if (nav.current) { nav.current.scrollTop = nav.current.scrollHeight; setRailTop(nav.current.scrollTop) }
+  }, [lastDay, days.length])
   useLayoutEffect(() => {
     const box = popup.current
     const button = anchor.current
@@ -193,41 +212,42 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
 
   return (
     <>
-      <nav ref={nav} aria-label="Chat days: tap to preview, tap again to jump" className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
+      <nav ref={nav} onScroll={(e) => setRailTop(e.currentTarget.scrollTop)} aria-label="Chat days: activate to preview, activate again to jump" className="scroll-thin w-11 shrink-0 overflow-x-hidden overflow-y-auto border-r border-zinc-900 py-2">
         <p aria-hidden className="py-1 text-center text-[10px] text-zinc-500">Days</p>
-        {days.map((d) => (
+        {railStart > 0 && <div aria-hidden style={{ height: railStart * 44 }} />}
+        {days.slice(railStart, railEnd).map((d, index) => (
           <button
             key={d.key}
             type="button"
-            aria-label={`${dayLabel(d.at, now)}: preview day summary; tap again to jump`}
+            data-day-index={railStart + index}
+            onKeyDown={(e) => {
+              const here = railStart + index
+              const direction = e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey) ? 1 : e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey) ? -1 : 0
+              const next = e.key === "Home" ? 0 : e.key === "End" ? days.length - 1 : here + direction
+              if ((!direction && e.key !== "Home" && e.key !== "End") || next < 0 || next >= days.length) return
+              e.preventDefault()
+              const top = Math.max(0, next * 44 - (nav.current?.clientHeight ?? 0) / 2)
+              if (nav.current) nav.current.scrollTop = top
+              setRailTop(top)
+              requestAnimationFrame(() => nav.current?.querySelector<HTMLElement>(`[data-day-index="${next}"]`)?.focus({ preventScroll: true }))
+            }}
+            aria-label={`${dayLabel(d.at, now)}: preview day summary; activate again to jump`}
             aria-expanded={d.key === open}
             aria-controls={d.key === open ? popupId : undefined}
-            onPointerEnter={(e) => {
-              if (e.pointerType !== "mouse") return
-              anchor.current = e.currentTarget
-              setOpen(d.key)
-            }}
-            onPointerDown={(e) => {
-              touch.current = e.pointerType === "touch" || e.pointerType === "pen"
-              armed.current = open === d.key
-              anchor.current = e.currentTarget
-            }}
-            onFocus={(e) => {
-              if (returningFocus.current) return
-              anchor.current = e.currentTarget
-              setOpen(d.key)
-            }}
             onClick={(e) => {
-              if (touch.current && !armed.current && e.detail !== 0) setOpen(d.key)
-              else jump(d)
-              touch.current = false
+              if (open === d.key) jump(d)
+              else {
+                anchor.current = e.currentTarget
+                setOpen(d.key)
+              }
             }}
-            className={cx("flex min-h-11 w-11 flex-col items-center justify-center border-l-2 text-[10px] leading-tight focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400", d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300")}
+            className={cx("flex h-11 min-h-11 w-11 flex-col items-center justify-center border-l-2 text-[10px] leading-tight focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400", d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300")}
           >
             <span>{new Date(d.at).toLocaleDateString(undefined, { month: "short" })}</span>
             <span className="text-xs font-semibold tabular-nums">{new Date(d.at).getDate()}</span>
           </button>
         ))}
+        {railEnd < days.length && <div aria-hidden style={{ height: (days.length - railEnd) * 44 }} />}
       </nav>
       {day && (
         <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} style={{ top }} className="scroll-thin absolute left-12 z-20 max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-xl">
@@ -257,7 +277,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
                 <span className="mt-1 flex items-center gap-1 text-[11px] font-medium text-yard-300"><ArrowDownRight aria-hidden className="h-3.5 w-3.5 shrink-0" />{b.sourceMessageId ? "Jump to message" : "Jump to day"}</span>
               </div></li>)}
             </ul>
-          ) : <p className="py-1 text-zinc-400">No task milestones recorded for this day.</p>}
+          ) : <p className="py-1 text-zinc-400">No task milestones in the loaded messages. Jump to this day to read more.</p>}
           <p className="mt-3 text-[11px] text-zinc-400">Tap a summary to find it in chat. Links open GitHub.</p>
           <p className="mt-1 text-zinc-400">Tap this day again to jump to its first message.</p>
           <button type="button" onClick={() => jump(day)} className="mt-2 min-h-11 w-full rounded-lg border border-zinc-700 px-3 text-left font-medium text-yard-300 hover:bg-zinc-800">Jump to day</button>

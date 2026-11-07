@@ -1,6 +1,6 @@
 // The Coordinator's and Captains' chat picks (shared/runTargets.ts): the "@" list of where tasks run and the "!" list
 // of agent CLIs, from the server's own runner checks, machines and CLI checks; the check of a sent pick against
-// them; and the lines a turn's prompt gets for them. The Coordinator's "#" project pick is checked here too.
+// them; and the lines a turn's prompt gets for them. The Coordinator's "%" project pick is checked here too.
 
 import { buildHarnessTargets, buildRunTargets, findRunTarget, inlinePicksOf, pickKey, pickOf, projectToken, runTargetPickOf, type InlinePick, type InlineReason, type RunTarget, type RunTargetPick } from "../shared/runTargets.js"
 import { resolveRunsOn, type MachineSettings, type MachineStatus } from "../shared/machines.js"
@@ -67,9 +67,9 @@ export async function resolveRunTargetPick(d: RunTargetDeps, value: string, proj
   return pickOf(t)
 }
 
-/** A sent "#" pick (a project id) as the pick to store, or a 400 when there's no such project. */
+/** A sent "%" pick (a project id) as the pick to store, or a 400 when there's no such project. */
 export function resolveProjectPick(project: { id: string; name: string } | null | undefined, value: string): RunTargetPick {
-  if (!project) throw new BadRequestError(`"${value}" isn't one of your projects: pick one from the # list.`)
+  if (!project) throw new BadRequestError(`"${value}" isn't one of your projects: pick one from the % list.`)
   return { value: project.id, token: projectToken(project.name), label: project.name }
 }
 
@@ -147,19 +147,19 @@ export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, 
 }
 
 /**
- * The line under a Coordinator message with a "#" pick: the project it's for, so the Coordinator routes it to that
- * project's Captain instead of guessing. The "#token" stays in the message's text as Cody wrote it.
+ * The line under a Coordinator message with a "%" pick: the project it's for, so the Coordinator routes it to that
+ * project's Captain instead of guessing. The "%token" stays in the message's text as Cody wrote it.
  */
 export function projectNote(pick: RunTargetPick, ownerName: string | undefined): string {
   return withOwner(
-    `[Cody picked the project for this message: #${pick.token}, project "${pick.label}" (${pick.value}). ` +
+    `[Cody picked the project for this message: %${pick.token}, project "${pick.label}" (${pick.value}). ` +
       `It's about that project: route it to its Captain with send_to_captain (project "${pick.value}") as you would any project-scoped work, ` +
       `unless it's a quick question you can answer yourself. Don't ask Cody which project it's for.]`,
     ownerName,
   )
 }
 
-const INLINE_TRIGGER: Record<InlinePick["kind"], string> = { runsOn: "@", agent: "!", project: "#" }
+const INLINE_TRIGGER: Record<InlinePick["kind"], string> = { runsOn: "@", agent: "!", project: "%" }
 const INLINE_ARG: Record<InlinePick["kind"], string> = { runsOn: "runs_on", agent: "agent", project: "project" }
 const INLINE_WHY: Record<InlinePick["reason"], string> = {
   item: "",
@@ -178,7 +178,7 @@ export function inlinePicksNote(picks: InlinePick[], ownerName: string | undefin
   const each = picks.map((p) => `${INLINE_TRIGGER[p.kind]}${p.token} (${p.label}, ${args(p)}) ${p.where ? `in ${p.where}` : "outside any list item"}${INLINE_WHY[p.reason]}`)
   return withOwner(
     `[Cody typed picks for only part of this message, so Box Yard applies none of them to this turn: ${each.join("; ")}. ` +
-      `Pass each yourself, on the create_task call or create_tasks item for the task it's written with (a "#" one: send that part to its project's Captain), ` +
+      `Pass each yourself, on the create_task call or create_tasks item for the task it's written with (a "%" one: send that part to its project's Captain), ` +
       `and follow the message's own words for the rest: the agent, model, effort and runs_on you pass are what each task gets.` +
       (relay ? ` When you send such a part to a Captain, say its pick in your message: Box Yard doesn't carry these to Captains.` : "") +
       `]`,
@@ -187,9 +187,9 @@ export function inlinePicksNote(picks: InlinePick[], ownerName: string | undefin
 }
 
 /**
- * The lines for a message's picks ("@", "!" and the Coordinator's "#"), each on its own line under it, or "". A
+ * The lines for a message's picks ("@", "!" and the Coordinator's "%"), each on its own line under it, or "". A
  * whole-message pick that one of the message's own hints disagrees with isn't the message's (turnPick doesn't apply
- * it), so it's listed with the hints instead: a "#" has no tool to force, and its line is all it does.
+ * it), so it's listed with the hints instead: a "%" has no tool to force, and its line is all it does.
  */
 export function pickNotes(meta: Record<string, unknown> | null | undefined, ownerName: string | undefined, relay: boolean): string {
   const hints = inlinePicksOf(meta)
@@ -237,7 +237,7 @@ export async function resolveInlinePicks(
       return { kind: "agent", ...pickOf(chosen), where, reason: p.reason }
     }
     if (p.kind === "project") {
-      if (projectId) throw new BadRequestError("A Captain's chat is already its project's: # picks a project only in the Coordinator's chat.")
+      if (projectId) throw new BadRequestError("A Captain's chat is already its project's: % picks a project only in the Coordinator's chat.")
       return { kind: "project", ...resolveProjectPick(findProject(p.value), p.value), where, reason: p.reason }
     }
     const t = findRunTarget(places, p.value)

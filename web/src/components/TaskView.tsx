@@ -1,3 +1,5 @@
+import { useTranscriptHistory } from "../lib/transcriptHistory"
+import { HistoryNavigation } from "./HistoryNavigation"
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
 import { Bot, MessageCircleQuestion, Navigation2, Users, Webhook } from "lucide-react"
 import {
@@ -153,16 +155,23 @@ export const TaskThread = memo(function TaskThread({
   onStartFromSelection: (prompt: string) => void
   onFollowUp: (message: string) => void
 }) {
+  const historyHandle = useRef<StickyScrollHandle>(null)
+  const setHistoryHandle = useCallback((value: StickyScrollHandle | null) => {
+    historyHandle.current = value
+    if (typeof handle === "function") handle(value)
+    else if (handle) handle.current = value
+  }, [handle])
   const messages = useTaskMessages(id)
+  const history = useTranscriptHistory(`/api/tasks/${id}/history`, messages.data ?? [])
   const newestReply = useMemo(() => {
-    const list = messages.data ?? []
+    const list = history.items
     for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === "assistant") return list[i]!.id
     return null
-  }, [messages.data])
-  const shown = useMemo(() => (messages.data ?? []).filter((m) => m.role !== "tool"), [messages.data])
+  }, [history.items])
+  const shown = useMemo(() => history.items.filter((m) => m.role !== "tool"), [history.items])
   const days = useMemo(() => chatDays(shown), [shown])
   // Opening a task paints its newest rows first, then the rest of the tail right after.
-  const tail = useTail(shown, id, { first: firstPaintCount(shown) })
+  const tail = useTail(shown, id, { first: firstPaintCount(shown), max: 200 })
   const [revealedMessage, setRevealedMessage] = useState<{ id: string } | null>(null)
   const tailReveal = tail.reveal
   const reveal = useCallback((messageId: string) => {
@@ -183,14 +192,16 @@ export const TaskThread = memo(function TaskThread({
 
   return (
     <SelectionToTask source={selectionSource} onPrompt={onStartFromSelection}>
-      <ChatHistory days={days} messages={shown} reveal={reveal} taskId={id}>
+      <ChatHistory days={history.days ?? days} messages={shown} reveal={reveal} ensure={history.ensure} taskId={id}>
         <StickyScroll
-          handle={handle}
-          count={shown.length}
+          handle={setHistoryHandle}
+          count={messages.data?.length ?? 0}
           resetKey={id}
           restoreKey={scrollKey ?? `task:${id}`}
-          hidden={tail.hidden}
-          onLoadEarlier={tail.loadEarlier}
+          hidden={tail.hidden || (history.moreBefore ? 1 : 0)}
+          earlierLabel={tail.hidden ? undefined : "Show earlier messages"}
+          onJump={() => { history.toLatest(); tail.reset() }}
+          onLoadEarlier={tail.hidden ? tail.loadEarlier : history.earlier}
           onTrim={tail.trim}
           className={bare ? "chat-column py-3" : "rounded-xl border border-zinc-900 bg-zinc-950 p-4"}
           contentClassName="space-y-2.5"
@@ -205,6 +216,7 @@ export const TaskThread = memo(function TaskThread({
               : <Line m={r.m} next={r.m.id === newestReply} onFollowUp={onFollowUp} />}
             </Fragment>
           ))}
+          <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={historyHandle} />
           {working && (
             <div className="flex items-center gap-2 pt-1 text-xs text-sky-400">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400" /> {working}

@@ -258,7 +258,7 @@ export class Orchestrator {
     // Mid-turn it waits for the next turn: queued (see Store.deliverQueued).
     const meta = {
       ...(attachments.length ? { attachments } : {}),
-      // The "#" pick: the turn's prompt says which project's Captain it's for (pickNotes).
+      // The "%" pick: the turn's prompt says which project's Captain it's for (pickNotes).
       ...(picks.project ? { project: picks.project } : {}),
       ...(picks.runsOn ? { runsOn: picks.runsOn } : {}),
       ...(picks.agent ? { agent: picks.agent } : {}),
