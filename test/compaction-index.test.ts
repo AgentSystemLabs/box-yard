@@ -41,6 +41,24 @@ describe("dated compaction catalog", () => {
     expect(fs.readFileSync(f.markdownFile, "utf8")).toBe(f.markdown)
   })
 
+  it("keeps one-character UTF-8 reads advancing, including malformed legacy tails", () => {
+    const { dir, index } = fixture()
+    fs.writeFileSync(path.join(dir, "legacy saved note.md"), "☀️ Work on history.")
+    let offset = 0, restored = ""
+    do {
+      const chunk = index.read("legacy saved note", "full", offset, 1)
+      if (!("markdown" in chunk)) throw new Error("Expected full content")
+      restored += chunk.markdown
+      if (chunk.nextOffset === null) break
+      expect(chunk.nextOffset).toBeGreaterThan(offset)
+      offset = chunk.nextOffset
+    } while (true)
+    expect(restored).toBe("☀️ Work on history.")
+    fs.writeFileSync(path.join(dir, "broken.md"), Buffer.from([0xf0, 0x9f]))
+    expect(index.read("broken", "full", 0, 1)).toMatchObject({ nextOffset: null })
+    expect(compactionExcerpt("---\r\ntimestamp: 2020-01-01\r\n---\r\n# Old\r\n\r\nActual legacy work.").title).toBe("Actual legacy work.")
+  })
+
   it("pages every same-timestamp collision, mixed second precision, and inclusive dates without omissions", () => {
     const { dir, index } = fixture()
     const ids = Array.from({ length: 12 }, (_, i) => save(dir, narrative + `\n- Change ${i}`).id)
@@ -58,6 +76,7 @@ describe("dated compaction catalog", () => {
     expect(found.filter(id => ids.includes(id))).toEqual([...ids].reverse())
     expect(index.page({ since: "2026-10-21" })).toMatchObject({ total: 14, matched: 0, entries: [] })
     expect(() => index.page({ before: "later" })).toThrow(/ISO/)
+    expect(() => index.page({ before: "2026-10-20T10-00-00.000Z-999" })).toThrow(/retained before cursor/)
   })
 
   it("backfills legacy filenames by saved time and invalidates changed files without following symlinks", () => {
@@ -100,6 +119,24 @@ describe("dated compaction catalog", () => {
     expect(coordinator.read(f.id, "full")).toMatchObject({ markdown: f.markdown })
     store.db.prepare("DELETE FROM task_compactions WHERE id = ?").run(c.id)
     expect(task.page().total).toBe(0)
+  })
+
+  it("persists excerpts across a reopened database, keeps new entries current and rebuilds a lost cache", () => {
+    const data = tmpDir(), dir = path.join(data, "compactions")
+    const first = new Store(openDb(data)); stores.push(first)
+    const f = save(dir, narrative)
+    const original = new CompactionIndex(first, "captain:example", dir).page()
+    first.db.close(); stores.splice(stores.indexOf(first), 1)
+    const reopened = new Store(openDb(data)); stores.push(reopened)
+    const index = new CompactionIndex(reopened, "captain:example", dir)
+    const read = vi.spyOn(fs, "readSync")
+    expect(index.page()).toEqual(original)
+    expect(read).not.toHaveBeenCalled()
+    const latest = save(dir, "Newly completed history work.", at + 1000)
+    expect(index.page()).toMatchObject({ total: 2, entries: [{ id: latest.id }, { id: f.id }] })
+    reopened.db.exec("DELETE FROM compaction_index")
+    expect(index.page().entries.map(e => e.id)).toEqual([latest.id, f.id])
+    expect(fs.readFileSync(f.markdownFile, "utf8")).toBe(f.markdown)
   })
 
   it("keeps many-entry context and content work bounded and reuses the persistent cache after restart", () => {

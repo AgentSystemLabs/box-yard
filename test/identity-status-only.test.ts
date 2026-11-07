@@ -272,6 +272,8 @@ describe("what else reaches the Coordinator", () => {
     expect(internal.systemPrompt()).not.toContain("PRIVATE")
     expect(internal.latestSummary()).toBeNull(); expect(internal.recap(own.markdownFile)).toBeNull()
     expect(internal.readRules().join()).not.toContain(r.yard.orchestrator.compactionsDir)
+    const thread = r.yard.threads as unknown as { compactionsFor(host: ReturnType<typeof r.yard.orchestrator.threadHost>): unknown[] }
+    expect(thread.compactionsFor(r.yard.orchestrator.threadHost())).toEqual([])
     expect((await co("search_history", { query: "PRIVATE", sources: ["summaries"] })).text).not.toContain("historical content")
     const captain = await r.as({ kind: "captain", projectId: r.secret.id })
     expect((await captain("compaction_history")).json()).toMatchObject({ total: 1 })

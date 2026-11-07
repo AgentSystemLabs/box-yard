@@ -8,11 +8,12 @@ export const INDEX_PAGE_MAX = 20
 export const EXCERPT_SAMPLE_BYTES = 32 * 1024
 export const SUMMARY_MAX_CHARS = 2400
 export const FULL_CHUNK_MAX = 16_000
+const EXCERPT_VERSION = 1
 const clip = (s: string, n: number) => s.length > n ? `${s.slice(0, n - 1)}…` : s
 
 /** Extractive, deterministic, bounded: no model calls or invented events. Generic headings aren't topics. */
 export function compactionExcerpt(text: string) {
-  const body = summaryBody(text)
+  const body = summaryBody(text.replace(/\r\n/g, "\n"))
   const sections = body.split(/^##\s+(.+)$/m)
   const lines = (s: string) => s.split("\n").map(l => l.replace(/^\s*(?:[-*+] |\d+\. )/, "").replace(/\s+/g, " ").trim())
     .filter(l => l && !/^#{1,6}\s/.test(l) && !/^(?:none|\(none\)|- none)$/i.test(l))
@@ -40,11 +41,12 @@ interface Row {
 export interface IndexQuery { before?: string; since?: string; until?: string; limit?: number }
 export const indexTime = (value?: string) => {
   if (value === undefined) return undefined
+  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/.test(value)) throw new Error("Expected an ISO date or time with a timezone, or a retained before cursor.")
   const at = compactionTime(value)
   if (at === null) throw new Error("Expected an ISO date/time or retained compaction id.")
   return at
 }
-const safeRef = (ref: string) => ref.length <= 180 && /^[\w.\-]+$/.test(ref) && ref !== "." && ref !== ".."
+const safeRef = (ref: string) => ref.length > 0 && ref.length <= 240 && !/[\/\\\x00-\x1f\x7f]/.test(ref) && ref !== "." && ref !== ".."
 
 /** A catalog is always constructed AFTER resolving the caller's authorized project/task. Never accept a path from a caller. */
 export class CompactionIndex {
@@ -89,7 +91,7 @@ export class CompactionIndex {
         const table = backend === "coordinator" ? "orchestrator_compactions" : "task_compactions"
         const rows = db.prepare(`SELECT id, at, created_at FROM ${table}${backend === "task" ? " WHERE task_id = ?" : ""}`)
           .all(...(backend === "task" ? [this.collection.slice(5)] : [])) as { id: string; at: number; created_at: number }[]
-        for (const r of rows) add(r.id, r.at, Number(/Z-(\d+)$/.exec(r.id)?.[1] ?? 1), backend, `db:${r.at}:${r.created_at}`, "saved timestamp")
+        for (const r of rows) add(r.id, r.at, Number(/Z-(\d+)$/.exec(r.id)?.[1] ?? 1), backend, `db:${EXCERPT_VERSION}:${r.at}:${r.created_at}`, "saved timestamp")
       }
       if (this.dir) {
         let names: string[] = []
@@ -101,7 +103,7 @@ export class CompactionIndex {
           let stat: fs.Stats
           try { stat = fs.lstatSync(this.file(ref)) } catch { continue }
           if (!stat.isFile()) continue // In particular: never follow a symlink into another scope.
-          const signature = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`
+          const signature = `${EXCERPT_VERSION}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`
           const old = known.get(ref)
           if (old?.backend === "file" && old.signature === signature) { seen.add(ref); continue }
           // A bounded header read supplies real dates even for non-timestamp legacy filenames.
@@ -127,7 +129,8 @@ export class CompactionIndex {
   }
   private content(r: Row, offset: number, limit: number) {
     if (r.backend === "file") {
-      const b = this.bytes(r.ref, offset, limit)
+      let b = this.bytes(r.ref, offset, limit)
+      if (!b.text && b.total > offset && limit < 4) b = this.bytes(r.ref, offset, 4) // At least one complete UTF-8 character.
       const end = offset + b.consumed
       return { markdown: b.text, offset, nextOffset: end < b.total ? end : null, total: b.total, offsetUnit: "utf8-bytes" }
     }

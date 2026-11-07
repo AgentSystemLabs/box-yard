@@ -1258,6 +1258,12 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (collection, ref)
   );
   CREATE INDEX compaction_index_date ON compaction_index(collection, at DESC, ordinal DESC, ref DESC);
+  CREATE TRIGGER compaction_index_coordinator_insert AFTER INSERT ON orchestrator_compactions BEGIN
+    DELETE FROM compaction_index WHERE collection='coordinator' AND ref=NEW.id;
+  END;
+  CREATE TRIGGER compaction_index_task_insert AFTER INSERT ON task_compactions BEGIN
+    DELETE FROM compaction_index WHERE collection='task:' || NEW.task_id AND ref=NEW.id;
+  END;
   CREATE TRIGGER compaction_index_coordinator_update AFTER UPDATE OF markdown, at ON orchestrator_compactions BEGIN
     DELETE FROM compaction_index WHERE collection='coordinator' AND ref=OLD.id;
   END;

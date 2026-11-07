@@ -129,7 +129,7 @@ const liveNow = (live: string[]) => (live.length ? [``, `Live now, tasks it name
 export function recapBlock(file: string, markdown: string, live: string[], lead = "Your context was just compacted. This is the summary you wrote right before it"): string {
   const at = savedAt(markdown)
   return [
-    `[Box Yard: ${lead} (${at ? `${at}, ` : ""}saved as ${file}). Task states under "Live now" are current and beat the summary. For anything older, use search_history.]`,
+    `[Box Yard: ${lead} (${at ? `${at}, ` : ""}saved as ${file}). Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]`,
     summaryBody(markdown),
     ...liveNow(live),
   ].join("\n")
@@ -142,7 +142,7 @@ export function recapBlock(file: string, markdown: string, live: string[], lead 
 export function afterCompactBlock(file: string, markdown: string, live: string[]): string {
   const at = savedAt(markdown)
   return [
-    `[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (${at ? `${at}, ` : ""}${file}).${live.length ? ` Task states under "Live now" are current and beat both.` : ""} For anything older, use search_history.]`,
+    `[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (${at ? `${at}, ` : ""}${file}).${live.length ? ` Task states under "Live now" are current and beat both.` : ""} For anything older, use compaction_history or search_history.]`,
     ...liveNow(live),
   ].join("\n")
 }
@@ -259,8 +259,9 @@ function compactionOrder(name: string): [number, number, string] {
 export function listCompactions(dir: string): string[] {
   try {
     return fs
-      .readdirSync(dir)
-      .filter((f) => f.endsWith(".md"))
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((f) => f.isFile() && f.name.endsWith(".md"))
+      .map((f) => f.name)
       .sort((a, b) => {
         const [x, i, m] = compactionOrder(a)
         const [y, j, n] = compactionOrder(b)
@@ -280,7 +281,13 @@ export function lastCompaction(dir: string): CompactionInfo | null {
 
 export function readCompactionInfo(file: string): CompactionInfo | null {
   try {
-    const head = fs.readFileSync(file, "utf8").slice(0, 600)
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
+    let head: string
+    try {
+      if (!fs.fstatSync(fd).isFile()) return null
+      const buffer = Buffer.alloc(600)
+      head = buffer.subarray(0, fs.readSync(fd, buffer, 0, buffer.length, 0)).toString("utf8")
+    } finally { fs.closeSync(fd) }
     const get = (k: string) => new RegExp(`^${k}: (.*)$`, "m").exec(head)?.[1]?.trim()
     const num = (v?: string) => (v && /^\d+$/.test(v) ? Number(v) : null)
     return {
@@ -349,7 +356,7 @@ export function readCompactionRecords(dir: string, filter: { taskId?: string; li
  * suffix) or an ISO time, as ms; null when it is neither.
  */
 export function compactionTime(ref: string): number | null {
-  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(\.\d{3})?Z/.exec(ref.trim())
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(\.\d{3})?Z(?:-\d+)?$/.exec(ref.trim())
   const t = m ? Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}${m[5] ?? ""}Z`) : Date.parse(ref.trim())
   return Number.isFinite(t) ? t : null
 }
@@ -361,19 +368,9 @@ export function findCompactionRecord(dir: string, id: string): CompactionRecord 
 }
 
 export function readCompactionFile(file: string): string {
-  return fs.readFileSync(file, "utf8")
-}
-
-/** The section of the orchestrator's system prompt that points at the log. */
-export function compactionsPrompt(dir: string): string {
-  const files = listCompactions(dir)
-  const recent = files.slice(-5).reverse()
-  return [
-    ``,
-    `Compaction history: whenever your context is compacted, Box Yard first saves a markdown summary of what mattered (Cody's decisions and preferences, projects and repos, ongoing work, open threads) as one file in ${dir}/, and the summary the compaction leaves you carries it.`,
-    `File names are UTC timestamps, so they are in chronological order (oldest first). When you need history you no longer have in context (earlier decisions, who asked for what, how a project started), call search_history with a few keywords first: it searches these summaries and the chat transcripts. Then open a hit with read_compaction, or Read the files, newest first, by their full path. Don't read them otherwise.`,
-    files.length
-      ? `There ${files.length === 1 ? "is 1 file" : `are ${files.length} files`}. The newest: ${recent.map((f) => `${dir}/${f}`).join(", ")}.`
-      : `There are none yet.`,
-  ].join("\n")
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
+  try {
+    if (!fs.fstatSync(fd).isFile()) throw new Error("Not a regular compaction file")
+    return fs.readFileSync(fd, "utf8")
+  } finally { fs.closeSync(fd) }
 }
