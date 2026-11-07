@@ -28,10 +28,11 @@ export function resolveOwnerClose(store: Pick<Store, "getTask" | "listTasks">, t
     target = chat.taskId
   }
   const ref = target.replace(/^(?:the\s+)?(?:(?:failed|superseded)\s+)?task\s+(?:(?:titled|named|called)\s+)?/i, "")
+  const titled = /^(?:the\s+)?(?:(?:failed|superseded)\s+)?task\s+(?:titled|named|called)\s+/i.test(target)
   const quoted = /^(?:"([^"]+)"|'([^']+)'|“([^”]+)”|`([^`]+)`)$/u.exec(ref)
   const name = quoted ? quoted.slice(1).find((s) => s !== undefined)! : ref
   if (!quoted && /^(?:(?:this|that|the|all|these|those|latest|last|failed|superseded)\b|it$|them$)/i.test(name)) return HELP
-  const candidates = /^task_[A-Za-z0-9-]{6,40}$/.test(name)
+  const candidates = !quoted && !titled && /^task_[A-Za-z0-9-]{6,40}$/.test(name)
     ? [store.getTask(name)].filter((t): t is Task => Boolean(t))
     : store.listTasks({ projectId: chat.projectId }).filter((t) => t.title.toLowerCase() === name.toLowerCase())
   if (candidates.length !== 1) return candidates.length ? `That title identifies more than one task. ${HELP}` : `No exact task match. ${HELP}`

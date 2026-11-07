@@ -49,6 +49,15 @@ describe("whole-message owner close commands", () => {
 })
 
 describe("owner close exact target resolution", () => {
+  it("does not confuse a quoted or explicitly named title with another task's ID", () => {
+    const { store, task, beta } = setup()
+    const named = store.createTask({ projectId: beta.id, title: task.id, prompt: "p" })
+    expect(resolveOwnerClose(store, task.id, { kind: "coordinator" })).toMatchObject({ id: task.id })
+    for (const ref of [`"${task.id}"`, `task titled ${task.id}`, `task named "${task.id}"`]) {
+      expect(resolveOwnerClose(store, ref, { kind: "coordinator" })).toMatchObject({ id: named.id })
+    }
+  })
+
   it("uses IDs and unique exact titles, with no fuzzy or most-recent match", () => {
     const { store, task } = setup()
     for (const ref of [task.id, 'task "Fix login"', 'the failed task titled “FIX LOGIN”', 'Fix login']) {
