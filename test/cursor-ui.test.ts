@@ -1,14 +1,13 @@
 // @vitest-environment happy-dom
 // Cursor in the web UI: Settings › Box agents' Cursor model (the list the server's cursor-agent gives, where it came
 // from, and Refresh), the Cursor API key in Settings › Credentials, a project's Agent, the New task dialog's Cursor
-// model, and the "Cursor" chip on tasks.
+// model. Task-header harness visibility is covered alongside the other harnesses in codex-ui.test.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { SettingsDialog } from "../web/src/components/SettingsDialog.js"
 import { NewTaskDialog } from "../web/src/components/NewTask.js"
-import { AgentCliChip } from "../web/src/components/ui.js"
 import { keys } from "../web/src/lib/queries.js"
 import type { SettingsSection } from "../web/src/lib/settingsNav.js"
 import { DEFAULT_SETTINGS } from "../server/settings.js"
@@ -216,12 +215,5 @@ describe("New task › Cursor", () => {
     expect(model.options[0]!.textContent).toBe("Default (composer-2.5)")
     expect($("new-task-model-source")).toBeNull()
     expect(document.body.textContent).toContain("In the model id")
-  })
-})
-
-describe("a task's agent chip", () => {
-  it("says Cursor on a Cursor task, and nothing on Claude Code's", () => {
-    show(createElement("div", null, createElement(AgentCliChip, { cli: "cursor" }), createElement(AgentCliChip, { cli: "claude" })))
-    expect(host.textContent).toBe("Cursor")
   })
 })
