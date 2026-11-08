@@ -380,7 +380,7 @@ export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMe
   // Cody's message from a task's chat (TaskManager.forwardToCaptain): the task it's about.
   const via = source === "cody" ? forwardedFromTask(m.meta) : null
   const bubble = (
-    <div className={cx(MESSAGE_BLOCK, "max-w-[85%] min-w-0 rounded-2xl px-3 py-2 text-sm text-zinc-100", s.box, m.meta?.pending ? "opacity-70" : "")}>
+    <div className={cx(MESSAGE_BLOCK, "max-w-[85%] min-w-0 rounded-2xl px-3 py-2 text-sm text-zinc-100", s.box)} aria-busy={m.meta?.pending === true || undefined}>
       <div className={cx("mb-1 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase", s.head)}>
         <Icon className="h-3 w-3 shrink-0" />{" "}
         {source === "agent" ? <AgentSource meta={m.meta} /> : source === "hook" && typeof m.meta?.hookName === "string" ? `Hook: ${m.meta.hookName}` : s.label}
@@ -397,7 +397,7 @@ export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMe
       {m.content && <CollapsibleMarkdown>{m.content}</CollapsibleMarkdown>}
       <AttachmentList files={m.meta?.attachments} />
       <PickChips meta={m.meta} />
-      {!m.meta?.pending && m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
+      {m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
     </div>
   )
   // Queued (sent mid-turn): the bubble, then the Queued label with Edit and Delete under it.

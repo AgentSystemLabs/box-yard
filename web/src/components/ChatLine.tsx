@@ -452,7 +452,7 @@ const SentLine = memo(function SentLine({ m }: { m: ChatMessage }) {
   return (
     <div id={`chat-${m.id}`} data-testid="sent-message" className="flex flex-col items-end gap-1">
       {taskId && <SentFrom taskId={taskId} />}
-      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE)}>
+      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE)} aria-busy={m.meta?.pending === true || undefined}>
         {text}
         <AttachmentList files={m.meta?.attachments} />
         <MessageActions text={text} anchorId={m.id} />
@@ -523,11 +523,11 @@ function ChatLineBody({
   }
   if (m.role === "user") {
     const bubble = (
-      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE, m.meta?.pending ? "opacity-70" : "")}>
+      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE)} aria-busy={m.meta?.pending === true || undefined}>
         {m.content}
         <AttachmentList files={m.meta?.attachments} />
         <PickChips meta={m.meta} />
-        {!m.meta?.pending && m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
+        {m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
       </div>
     )
     return (

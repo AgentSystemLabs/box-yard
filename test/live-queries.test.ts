@@ -101,6 +101,15 @@ describe("fetchLog", () => {
     liveMessage(key, msg("tm_d"))
     expect(await fetchLog(key, async () => [])).toEqual([])
   })
+  it("keeps an unconfirmed send before later SSE output through refetch, without reviving a failed one", async () => {
+    const pending = { ...msg("chat_local", "pending", 2), meta: { pending: true } }
+    const later = msg("tm_later", "output", 3)
+    let cached = [msg("tm_old"), pending, later]
+    expect(await fetchLog(key, async () => [cached[0]!, later], () => cached)).toEqual(cached)
+    cached = [cached[0]!, later]
+    expect(await fetchLog(key, async () => cached, () => cached)).toEqual(cached)
+  })
+
 })
 
 class FakeEventSource {

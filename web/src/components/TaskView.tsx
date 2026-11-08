@@ -31,6 +31,7 @@ import { SelectionToTask } from "./SelectionToTask"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import { projectContext, taskContext, type SelectionTaskSource } from "../lib/selectionTask"
 import type { Attachment, TaskMessage } from "../../../shared/types"
+import { submissionId } from "../lib/taskSubmissions"
 import { userMessageLabel } from "../../../shared/sender"
 import { useOwnerName } from "../lib/queries"
 import { WaitFixButton, WaitReason } from "./WaitReason"
@@ -168,7 +169,7 @@ export const TaskThread = memo(function TaskThread({
     for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === "assistant") return list[i]!.id
     return null
   }, [history.items])
-  const shown = useMemo(() => history.items.filter((m) => m.role !== "tool"), [history.items])
+  const shown = useMemo(() => history.items.filter((m) => m.role !== "tool" && !(m.meta?.pending && m.meta.queued)), [history.items])
   const days = useMemo(() => chatDays(shown), [shown])
   // Opening a task paints its newest rows first, then the rest of the tail right after.
   const tail = useTail(shown, id, { first: firstPaintCount(shown), max: 200 })
@@ -209,7 +210,7 @@ export const TaskThread = memo(function TaskThread({
           {messages.isLoading && <Loading kind="chat" label="Loading the transcript" />}
           {messages.isError && <div role="alert" className="text-sm text-red-300">Couldn't load the transcript. <Button variant="ghost" onClick={() => void messages.refetch()}>Retry</Button></div>}
           {runs.map((r, i) => (
-            <Fragment key={firstMessages[i]!.id}>
+            <Fragment key={submissionId(firstMessages[i]!)}>
               <DayBoundary at={firstMessages[i]!.createdAt} previousAt={firstMessages[i - 1]?.createdAt} messageId={firstMessages[i]!.id} />
               {r.kind === "published" ? <PublishedRun messages={r.messages} />
               : r.kind === "housekeeping" ? <HousekeepingRun messages={r.messages} revealRequest={r.messages.some((m) => m.id === revealedMessage?.id) ? revealedMessage : null} />
@@ -325,7 +326,7 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
       // A hook's message (server/hooks.ts) is an automation's, not Cody's: its own colour and icon.
       const hook = m.meta?.source === "hook"
       return (
-        <div className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 px-3 py-2", hook ? "border-teal-500 bg-teal-500/5" : "border-yard-500 bg-yard-500/5", m.meta?.pending ? "opacity-60" : "")} data-testid={hook ? "hook-message" : undefined}>
+        <div className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 px-3 py-2", hook ? "border-teal-500 bg-teal-500/5" : "border-yard-500 bg-yard-500/5")} data-testid={hook ? "hook-message" : undefined} aria-busy={m.meta?.pending === true || undefined}>
           <div className={cx("mb-0.5 flex items-center gap-1 text-[11px] font-semibold", hook ? "text-teal-300" : "text-yard-400")}>
             {hook && <Webhook className="h-3 w-3" />}
             {userMessageLabel(m.meta, ownerName)}
@@ -342,7 +343,7 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
           <AttachmentList files={m.meta?.attachments} />
           {m.meta?.undelivered === true && <div className="mt-1 text-[11px] text-zinc-500">Not delivered: the task was stopped or marked done first.</div>}
           {m.meta?.deliveryUncertain === true && <div className="mt-1 text-[11px] text-zinc-500">Delivery uncertain: this may already have reached Codex. Removing it from the queue does not undo delivery.</div>}
-          {!m.meta?.pending && <MessageActions text={m.content} />}
+          <MessageActions text={m.content} />
         </div>
       )
     }
