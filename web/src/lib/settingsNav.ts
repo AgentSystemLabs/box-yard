@@ -77,7 +77,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
     key: "credentials",
     label: "Credentials",
     description:
-      "The Claude, Codex, Cursor and GitHub credentials Box Yard works with. Provider keys are in Box providers. They're kept on this server and never sent back to the browser. An env var on the server always wins. Saved changes apply from the next turn, no restart needed.",
+      "The Claude, Codex, Cursor, OpenCode and GitHub credentials Box Yard works with. Provider keys are in Box providers. They're kept on this server and never sent back to the browser. An env var on the server always wins. Saved changes apply from the next turn, no restart needed.",
     fields: [],
   },
   {

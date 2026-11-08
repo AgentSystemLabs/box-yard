@@ -202,7 +202,7 @@ const machineLabelBase = z.string().max(MACHINE_LIMITS.labelLength).optional()
 const machineLabelSchema = machineLabelBase.describe('An SSH machine label or name, e.g. "gpu" (list_machines lists them); alone it means runs_on "ssh" (Task options)')
 const envSchema = z.record(z.string(), z.string()).optional().describe("Env vars as NAME: value")
 const agentBase = z.enum(AGENT_CLIS).optional()
-const agentSchema = agentBase.describe('"claude", "codex" or "cursor"; omit it to follow the project\'s Agent (Task options)')
+const agentSchema = agentBase.describe('"claude", "codex", "cursor" or "opencode"; omit it to follow the project\'s Agent (Task options)')
 const iconSchema = z
   .enum(TASK_ICONS)
   .optional()
@@ -449,7 +449,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     if (!pick) return { agent, model, effort, note: {} }
     const cli = pick.value as AgentCli
     const owned = cliForModel(model)
-    return { agent: cli, model: pick.model, effort: cli === "cursor" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
+    return { agent: cli, model: pick.model, effort: cli === "cursor" || cli === "opencode" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
   }
   const agentPickNote = (pick: RunTargetPick, overridden: boolean) => ({
     agent_pick: owner(overridden ? `Cody picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): Cody's pick for this prompt`),
@@ -861,7 +861,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           repo: z.string().optional(),
           base_branch: z.string().optional(),
           env: envSchema,
-          agent: agentBase.describe('The agent CLI its tasks run on: "claude", "codex" or "cursor"; omit it for Settings › Box agents'),
+          agent: agentBase.describe('The agent CLI its tasks run on: "claude", "codex", "cursor" or "opencode"; omit it for Settings › Box agents'),
           ...boxSettingsInput,
         },
       },
@@ -896,7 +896,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
               .enum(AGENT_CLIS)
               .nullable()
               .optional()
-              .describe('The agent CLI its new tasks run on: "claude", "codex" or "cursor"; null goes back to Settings › Box agents. Its existing tasks keep theirs.'),
+              .describe('The agent CLI its new tasks run on: "claude", "codex", "cursor" or "opencode"; null goes back to Settings › Box agents. Its existing tasks keep theirs.'),
             ...boxSettingsInput,
             notes_max: z
               .number()
@@ -2407,6 +2407,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
                 node: toolLine(t.tools.node),
                 claude: t.tools.claude.found ? `${toolLine(t.tools.claude)}, ${loginLine(t.claudeLogin)}` : "not installed: no Claude Code tasks here",
                 codex: t.tools.codex.found ? `${toolLine(t.tools.codex)}, ${loginLine(t.codexLogin)}` : "not installed: no Codex tasks here (Box Yard never installs it on a machine)",
+                opencode: t.tools.opencode?.found ? `${toolLine(t.tools.opencode)}, API login ${t.opencodeLogin ? "present" : "not found"}` : "not installed: no OpenCode tasks here (Box Yard never installs it on a machine)",
                 cursor: t.tools.cursor?.found ? `${toolLine(t.tools.cursor)}, ${loginLine(t.cursorLogin ?? null)}` : "not installed: no Cursor tasks here (Box Yard never installs it on a machine)",
                 ...(t.problems.length ? { problems: t.problems } : {}),
                 ...(t.notes.length ? { notes: t.notes } : {}),

@@ -10,7 +10,8 @@ const sources: HarnessPickSources = {
   defaults: {
     claude: { model: "sonnet", effort: "high" },
     codex: { model: "gpt-6.1-terra", effort: "xhigh" },
-    cursor: { model: "auto", effort: null },
+    opencode: { model: "example/model#high", effort: null },
+  cursor: { model: "auto", effort: null },
   },
   cursor: [{ id: "future-model-max", label: "Future model Max" }, { id: "vendor/new:model", label: "Custom live model" }],
 }
@@ -27,7 +28,8 @@ describe("harness model and effort choices", () => {
     expect(harnessDefaults({ agentModel: "sonnet", agentEffort: "orchestrator", agentCodexModel: "", agentCodexEffort: "ultra", agentCursorModel: "gpt-6.1-sol-high" })).toEqual({
       claude: { model: "sonnet", effort: "orchestrator" },
       codex: { model: "", effort: "ultra" },
-      cursor: { model: "gpt-6.1-sol-high", effort: null },
+      opencode: { model: "example/model#high", effort: null },
+  cursor: { model: "gpt-6.1-sol-high", effort: null },
     })
   })
 

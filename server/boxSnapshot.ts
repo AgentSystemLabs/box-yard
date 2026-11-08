@@ -29,6 +29,7 @@ export const STRIP_CREDENTIALS = [
   ".claude/.credentials.json",
   ".codex/auth.json",
   ".config/cursor/auth.json",
+  ".local/share/opencode/auth.json",
   ".docker/config.json",
   ".aws/credentials",
   ".config/gcloud/credentials.db",

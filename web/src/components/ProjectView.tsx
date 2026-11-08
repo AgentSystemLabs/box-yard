@@ -1184,6 +1184,12 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
                   </button>
                 </p>
               )}
+              {(agentCli || defaultAgentCli) === "opencode" && (
+                <p className="text-xs text-zinc-500" data-testid="project-opencode-login">
+                  OpenCode 1.19.5 needs provider API logins (OAuth is not supported).{" "}
+                  <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("credentials")}>Settings › Credentials</button>
+                </p>
+              )}
               {(agentCli || defaultAgentCli) === "cursor" && setup.data?.cursor?.state === "unset" && (
                 <p className="text-xs text-zinc-500" data-testid="project-cursor-login">
                   Cursor needs a login first: a Cursor API key, or cursor-agent login on this computer.{" "}

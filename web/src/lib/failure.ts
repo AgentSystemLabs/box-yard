@@ -51,8 +51,8 @@ const API_ERROR = /\bAPI Error:\s*(\d{3})/i
 export function explainFailure(error: string, ctx: FailureContext = {}): Failure {
   const text = error.trim()
   // A toast doesn't know the task's agent: Codex's errors point at OpenAI, Cursor's at cursor-agent.
-  const cli = ctx.agentCli ?? (/\bcodex\b|openai|chatgpt/i.test(text) ? "codex" : /cursor-agent|\bcursor\b/i.test(text) ? "cursor" : "claude")
-  const agent = cli === "codex" ? "Codex" : cli === "cursor" ? "Cursor" : "Claude"
+  const cli = ctx.agentCli ?? (/\bopencode\b/i.test(text) ? "opencode" : /\bcodex\b|openai|chatgpt/i.test(text) ? "codex" : /cursor-agent|\bcursor\b/i.test(text) ? "cursor" : "claude")
+  const agent = cli === "codex" ? "Codex" : cli === "cursor" ? "Cursor" : cli === "opencode" ? "OpenCode" : "Claude"
   const now = ctx.now ?? Date.now()
   const status = Number(API_ERROR.exec(text)?.[1] ?? 0)
 

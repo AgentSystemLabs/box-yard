@@ -46,7 +46,7 @@ export function useSetupNeeded(): { status: SetupStatus | undefined; needed: boo
 type TestState = { state: "running" } | { state: "ok" | "error"; text: string }
 
 /** Credentials that are a whole file, not a one-line key: a text box takes them. */
-const MULTILINE_CREDENTIALS: CredentialKey[] = ["codexAuthJson"]
+const MULTILINE_CREDENTIALS: CredentialKey[] = ["codexAuthJson", "opencodeAuthJson"]
 
 /**
  * A credential's control. Unset: a password input (a text box for a file like Codex's auth.json) with Save and Test
@@ -563,6 +563,12 @@ function toolLine(t: LocalTool, s: SetupStatus): { ok: boolean; text: string } {
     if (local.cursorLogin === false) return { ok: false, text: `${version} · not signed in: run cursor-agent login` }
     return { ok: true, text: version }
   }
+  if (t.key === "opencode") {
+    if (!/^1\.19\.5(?:\s|$)/.test(version)) return { ok: false, text: `${version} · requires OpenCode 1.19.5` }
+    return s.credentials.opencodeAuthJson?.state === "set" || local.opencodeLogin === true
+      ? { ok: true, text: `${version} · provider API logins available` }
+      : { ok: false, text: `${version} · add OpenCode API logins below (OAuth unsupported)` }
+  }
   if (t.key === "gh") return local.ghLogin ? { ok: true, text: `${version} · signed in` } : { ok: false, text: `${version} · not signed in: run gh auth login` }
   return { ok: true, text: version }
 }
@@ -922,6 +928,9 @@ export function CredentialsPanel({ fid }: { fid: (k: string) => string }) {
           <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500" data-testid="cursor-credentials-intro">
             Only for agents set to run on Cursor (a project's Agent, or Settings › Box agents). {s.local?.cursorLogin === true ? "Agents on this computer can use its cursor-agent login; boxes and containers need this key." : "Boxes and containers need this key."}
           </p>
+          <Row id={fid("cred-opencodeAuthJson")} label={CREDENTIAL_INFO.opencodeAuthJson.label} help={<CredentialHelp k="opencodeAuthJson" />}>
+            <CredentialField k="opencodeAuthJson" status={s.credentials.opencodeAuthJson ?? UNSET} id={fid("cred-opencodeAuthJson")} />
+          </Row>
           <Row id={fid("cred-cursorApiKey")} label={CREDENTIAL_INFO.cursorApiKey.label} help={<CredentialHelp k="cursorApiKey" />}>
             <CredentialField k="cursorApiKey" status={s.credentials.cursorApiKey ?? UNSET} id={fid("cred-cursorApiKey")} />
           </Row>

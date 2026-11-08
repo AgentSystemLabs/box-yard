@@ -190,6 +190,7 @@ export const config = {
   codexApiKey: env.CODEX_API_KEY ?? "",
   /** Cursor's CLI logs in with it on boxes (docs/cursor.md); this computer can use its own `cursor-agent login`. Optional. */
   cursorApiKey: env.CURSOR_API_KEY ?? "",
+  opencodeAuthJson: env.OPENCODE_AUTH_CONTENT ?? "",
   githubToken: env.GITHUB_TOKEN ?? "",
   /** RunPod GPU pods (Settings › RunPod GPU, docs/runpod.md). Optional. */
   runpodApiKey: env.RUNPOD_API_KEY ?? "",
@@ -216,6 +217,7 @@ export const config = {
   /** Codex binary for agents set to run on Codex (docs/codex.md); mock mode uses a stand-in. */
   codexBin: mock ? `${process.execPath} ${fs.existsSync(fakeCodex) ? fakeCodex : fakeCodexSrc}` : (env.CODEX_BIN ?? "codex"),
   /** Cursor's CLI for agents set to run on Cursor (docs/cursor.md), and for Settings' model list; mock mode uses a stand-in. */
+  opencodeBin: mock ? `${process.execPath} ${path.resolve(process.cwd(), "scripts/fake-opencode.mjs")}` : env.OPENCODE_BIN?.trim() || "opencode",
   cursorBin: mock ? `${process.execPath} ${fs.existsSync(fakeCursor) ? fakeCursor : fakeCursorSrc}` : env.CURSOR_BIN?.trim() || defaultCursorBin(),
   /** What Box Yard calls its human in prompts and labels; empty means the Settings default ("Cody"). */
   ownerName: env.BOXYARD_OWNER_NAME?.trim() ?? "",

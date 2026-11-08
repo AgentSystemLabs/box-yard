@@ -37,6 +37,9 @@ export class AutoProvider implements BoxProvider {
   get codexBin() {
     return this.active.codexBin
   }
+  get opencodeBin() {
+    return this.active.opencodeBin
+  }
   get cursorBin() {
     return this.active.cursorBin
   }
