@@ -107,8 +107,8 @@ export function PullRequestsDialog({ onClose }: { onClose: () => void }) {
       {/* Keep the list mounted, so its scroll position survives opening a PR and returning. */}
       <div hidden={selected !== null} className="min-h-0 flex-1 overflow-y-auto p-3 @min-[40rem]:p-5">
         <div role="group" aria-label="Pull request filter" className="mb-3 flex flex-wrap gap-2">
-          <Button variant={history ? "ghost" : "subtle"} aria-label="Open work" aria-pressed={!history} onClick={() => { setHistory(false); setLimit(40) }}>Open work <span className="text-zinc-400">{activeCount}</span></Button>
-          <Button variant={history ? "subtle" : "ghost"} aria-label="History" aria-pressed={history} onClick={() => { setHistory(true); setLimit(40) }}>History <span className="text-zinc-400">{historyCount}</span></Button>
+          <Button variant={history ? "ghost" : "subtle"} aria-label="Open work" aria-pressed={!history} onClick={() => { setHistory(false); setLimit(40) }}>Open work <span className="text-zinc-300">{activeCount}</span></Button>
+          <Button variant={history ? "subtle" : "ghost"} aria-label="History" aria-pressed={history} onClick={() => { setHistory(true); setLimit(40) }}>History <span className="text-zinc-300">{historyCount}</span></Button>
         </div>
         <p className="mb-3 text-xs text-zinc-500">Task-linked PRs · last reported state. Check GitHub for current reviews and checks.</p>
         {tasks.isLoading ? <p role="status">Loading pull requests…</p> : tasks.isError ? (
