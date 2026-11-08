@@ -1387,7 +1387,7 @@ export class TaskManager {
 
   private queuedMessage(r: QueuedInputRow): QueuedMessage {
     const [kind, ref] = r.source.split(/:(.*)/s) as [string, string | undefined]
-    const meta = r.message ?? (kind === "captain" && ref ? captainMeta(this.store, ref) : kind === "hook" ? { source: "hook" } : { source: r.source })
+    const meta: Record<string, unknown> = r.message ?? (kind === "captain" && ref ? captainMeta(this.store, ref) : kind === "hook" ? { source: "hook" } : { source: r.source })
     const owner = this.owner()
     const sender: { kind: QueuedSender; label: string } =
       kind === "agent"
