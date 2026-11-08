@@ -41,4 +41,3 @@ export const signingInput = z.discriminatedUnion("kind", [
     .strict(),
 ])
 export const signingPatch = z.object({ requireSigned: z.boolean() }).strict()
-
