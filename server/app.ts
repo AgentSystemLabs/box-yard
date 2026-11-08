@@ -252,6 +252,7 @@ const schemas = {
     agentCli: z.enum(AGENT_CLIS).nullish(),
   }),
   message: z.object({
+    id: idSchema,
     content: z.string().trim().max(50_000),
     attachments: attachmentIds,
     runsOn: z.enum(RUNNERS).optional(),
@@ -1390,10 +1391,10 @@ export function createBoxYard(
     }
     await tasks.requireRunner(body.runsOn, row?.project_id, row ? store.taskEnv(row.id) : {}, { ...(row ? { agentCli: taskAgentCli(row) } : {}), machineLabel: body.machineLabel, gpu: body.gpu })
     if (body.runsOn) tasks.setRunsOn(req.params.id!, body.runsOn, body.machineLabel, body.gpu, body.boxSize)
-    const task = tasks.sendInput(req.params.id!, body.content, "cody", files)
+    const { task, inputId } = tasks.send(req.params.id!, body.content, "cody", files, undefined, undefined, body.id)
     orchestrator.directMessages.record({ taskId: task.id }, body.content)
     if (body.inChat) tasks.sentFromChat(task.id, body.content, files)
-    res.json(task)
+    res.json({ ...task, inputId })
   })
   // Task management from the task's chat, for its project's Captain instead of the busy agent: the Captain gets the
   // task's queue with it, and the reply shows in the task's chat (TaskManager.forwardToCaptain).
