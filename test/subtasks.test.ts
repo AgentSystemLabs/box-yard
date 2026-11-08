@@ -53,22 +53,31 @@ describe("reportText", () => {
 })
 
 describe("the worker prompt", () => {
-  const prompt = (subtasks: Parameters<typeof workerSystemPrompt>[0]["subtasks"]) =>
+  const prompt = (subtasks: Parameters<typeof workerSystemPrompt>[0]["subtasks"], ownerName = "Cody") =>
     workerSystemPrompt({
       project: { id: "p", name: "kitchen", repo: null, description: "" } as never,
       task: { id: "task_0123456789ab", title: "Pans" } as never,
       branch: null,
       port: 4000,
-      ownerName: "Cody",
+      ownerName,
       subtasks,
     } as never)
 
   it("offers spawn_subtasks above the depth cap, and tells a sub-task where its report goes", () => {
     const top = prompt({ depth: 0, maxDepth: 3, maxChildren: 10, parent: null })
     expect(top).toContain("spawn_subtasks")
+    expect(top).toContain("Every descendant keeps the original type; the server rejects other environments.")
     expect(top).not.toContain("You are a sub-task of")
     const deepest = prompt({ depth: 3, maxDepth: 3, maxChildren: 10, parent: { id: "task_aaaaaaaaaaaa", title: "Omelette" } })
     expect(deepest).toContain('You are a sub-task of "Omelette" (task id task_aaaaaaaaaaaa), depth 3 of at most 3.')
     expect(deepest).not.toContain("spawn_subtasks")
+  })
+
+  it.each(["RunPod", "Vast.ai"].flatMap((provider) => ["Cody", "Ana", ""].map((ownerName) => ({ provider, ownerName }))))("tells $provider agents to explain the unsupported subtask request to '$ownerName'", ({ provider, ownerName }) => {
+    const reason = `Subtasks are not supported on ${provider} GPU boxes.`
+    const unsupported = prompt({ depth: 0, maxDepth: 3, maxChildren: 10, parent: null, spawnUnsupported: reason }, ownerName)
+    expect(unsupported).toContain(reason)
+    expect(unsupported).toContain(`explain this limitation to ${ownerName || "the owner"} and do the work yourself`)
+    expect(unsupported).not.toContain("spawn_subtasks")
   })
 })

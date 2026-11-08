@@ -1272,6 +1272,15 @@ export const MIGRATIONS: string[] = [
   END;
 
   `,
+  `
+  -- Server-owned original physical environment, inherited by every descendant. Legacy rows are resolved
+  -- conservatively from authoritative lineage/placement on use; NULL never grants a placement exemption.
+  ALTER TABLE tasks ADD COLUMN environment_type TEXT CHECK (environment_type IN ('upstash', 'docker', 'local', 'ssh', 'runpod', 'vast', 'daytona'));
+  CREATE TRIGGER tasks_environment_immutable BEFORE UPDATE OF environment_type ON tasks
+  WHEN OLD.environment_type IS NOT NULL AND NEW.environment_type IS NOT OLD.environment_type BEGIN
+    SELECT RAISE(ABORT, 'Task environment type is immutable');
+  END;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

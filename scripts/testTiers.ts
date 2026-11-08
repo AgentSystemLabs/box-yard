@@ -4,6 +4,7 @@
 export const TEST_INCLUDE = ["test/**/*.test.ts"]
 
 export const SLOW_TESTS: Record<string, string> = {
+  "test/subtask-environment-placement.test.ts": "Full Box Yard task-manager fixture with inert provider dispatch",
   "test/owner-output.e2e.test.ts": "Full server/task-manager owner personalization fixture",
   "test/owner-close.e2e.test.ts": "Full server/HTTP/MCP owner authority and state-transition fixture",
   "test/github-reference-route.test.ts": "Full Box Yard server/HTTP fixture",
