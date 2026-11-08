@@ -3,15 +3,10 @@ import path from "node:path"
 import { z } from "zod"
 import type { DB } from "../db.js"
 import type { CredentialStore } from "../credentials.js"
-import { credentialValue } from "../credentials.js"
 import { BadRequestError, ConflictError, NotFoundError, githubSlug, newId } from "../store.js"
 import { RUNNERS, RUNNER_PHRASE, type Runner } from "../../shared/runner.js"
 import {
-  COORDINATOR_SEES,
   DEFAULT_IDENTITY_ID,
-  GITHUB_OWNER_RE,
-  GPG_KEY_ID_RE,
-  IDENTITY_CLAUDE_KINDS,
   IDENTITY_COLORS,
   type EmailCheck,
   type Identity,
@@ -68,41 +63,15 @@ const json = <T>(s: string | null, fallback: T): T => {
   }
 }
 
-const owner = z.string().trim().regex(GITHUB_OWNER_RE, "A GitHub owner is a user or org name like acme-corp")
-const author = z.object({ name: z.string().trim().min(1).max(200), email: z.string().trim().email("That isn't an email address").max(320) })
+import { identityCreate, identityPatch, tokenInput, claudeInput, signingInput, signingPatch, type ValidationField } from "../../shared/identityValidation.js"
+export { identityCreate, identityPatch, tokenInput, claudeInput, signingInput, signingPatch } from "../../shared/identityValidation.js"
 
-/** POST /api/identities and create_identity. */
-export const identityCreate = z
-  .object({
-    name: z.string().trim().min(1).max(60),
-    color: z.enum(IDENTITY_COLORS).optional(),
-    owners: z.array(owner).max(50).optional(),
-    author: author.nullable().optional(),
-    runners: z.array(z.enum(RUNNERS)).min(1, "Pick at least one runner, or null for every runner").nullable().optional(),
-    coordinatorSees: z.enum(COORDINATOR_SEES).optional(),
-  })
-  .strict()
-
-/** PATCH /api/identities/:id and update_identity. The Default identity keeps its name. */
-export const identityPatch = identityCreate.partial().strict()
-
-/** A token's owner is stored lower-case, as GitHub matches owners: "" is every owner the identity serves. */
-export const tokenInput = z.object({ owner: z.union([owner, z.literal("")]).default("").transform((o) => o.toLowerCase()), token: credentialValue }).strict()
-export const claudeInput = z.object({ kind: z.enum(IDENTITY_CLAUDE_KINDS), value: credentialValue }).strict()
-/** PUT /api/identities/:id/signing (shared IdentitySigningInput). */
-export const signingInput = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("gpg"), keyId: z.string().trim().regex(GPG_KEY_ID_RE, "Use a GPG key id or fingerprint"), requireSigned: z.boolean().optional() }).strict(),
-  z.object({ kind: z.literal("file"), privateKey: z.string().min(64, "That's too short to be a private key").max(16_000, "That's too long to be an SSH private key"), requireSigned: z.boolean().optional() }).strict(),
-  z
-    .object({
-      kind: z.literal("agent"),
-      publicKey: z.string().trim().min(16).max(4000),
-      program: z.string().trim().min(1).max(1000).nullable().optional(),
-      requireSigned: z.boolean().optional(),
-    })
-    .strict(),
-])
-export const signingPatch = z.object({ requireSigned: z.boolean() }).strict()
+/** Structured paths distinguish token owner from the identity's owners list. No rejected values. */
+export class IdentityValidationError extends BadRequestError {
+  constructor(readonly fields: ValidationField[]) {
+    super(fields.map((f) => `${f.path}: ${f.message}`).join("; "))
+  }
+}
 
 /** Env var a Claude credential kind logs `claude` in with. */
 export const CLAUDE_KIND_VAR: Record<IdentityClaudeKind, "ANTHROPIC_API_KEY" | "CLAUDE_CODE_OAUTH_TOKEN"> = {
@@ -642,7 +611,7 @@ export class Identities {
 
   private requireFreeName(name: string, self?: string) {
     const taken = this.d.db.prepare("SELECT id FROM identities WHERE name = ? COLLATE NOCASE").get(name) as { id: string } | undefined
-    if (taken && taken.id !== self) throw new BadRequestError(`An identity named "${name}" already exists.`)
+    if (taken && taken.id !== self) throw new IdentityValidationError([{ path: "name", message: `An identity named "${name}" already exists.` }])
   }
 
   private requireRunnersFit(current: Identity, runners: Runner[]) {
@@ -738,7 +707,7 @@ export class Identities {
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   const r = schema.safeParse(input)
-  if (!r.success) throw new BadRequestError(r.error.issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; "))
+  if (!r.success) throw new IdentityValidationError(r.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })))
   return r.data
 }
 
