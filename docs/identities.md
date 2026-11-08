@@ -21,7 +21,7 @@ Every project starts on the **Default** identity, which is Settings › Credenti
 | Author | `name` and `email` for every commit. Checked against the account's verified emails when the token may read them (`emailCheck`: `verified`, `unverified`, `unknown`); a GitHub noreply address counts as verified |
 | Signing key | An SSH or GPG key that signs every commit a turn makes, and optionally `requireSigned` (see [Signing](#signing)) |
 | Claude login | An API key or an OAuth token (`claude setup-token`). It always wins: its projects never take the global logins' rotation. Without one, the identity uses the global logins, round robin (docs/logins.md) |
-| Runners | The runners its projects may use (`box`, `local`, `gpu`, `docker`), or every runner |
+| Runners | The runners its projects may use (`box`, `local`, `gpu`, `docker`, `ssh`), or every runner |
 | Coordinator sees | `everything` (the default) or `status`: the Coordinator gets only the status of its projects' tasks (see [Coordinator sees: status only](#coordinator-sees-status-only)) |
 
 ## Saving identity settings

@@ -47,9 +47,9 @@ The rotation also reads each login's subscription limits (docs/limits.md) before
 
 ## Where it shows
 
-- Settings › Credentials: each login's state ("At its limit · back Today 3:00 PM", "Signed out"), last use, and its 5-hour and weekly windows once a run has read them. Settings › Usage › Subscription limits has a card per login.
+- Settings › Credentials: each login's state ("At its limit · back Today 3:00 PM", "Signed out"), last use, and its 5-hour and weekly windows once a run has read them. Settings › Usage › Open Usage shows subscription allowances and has a card per login.
 - A turn's timing (the ⏱ chip): "on Work Max (…a1b2)".
-- Settings › Usage › By login, once some run in the period took a login from the rotation.
+- Usage’s Login breakdown (open it from the sidebar, or Settings › Usage › Open Usage), once some run in the period took a login from the rotation.
 
 ## Data
 
