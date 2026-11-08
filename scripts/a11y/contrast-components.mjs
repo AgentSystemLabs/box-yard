@@ -41,6 +41,21 @@ try {
       await capture(state)
       if ((['controls','markdown','folded-message'].includes(state) || state.startsWith('icons-'))) await page.screenshot({path:path.join(output, `${theme}-${width}-${state}.png`)})
     }
+    if (!process.env.ONLY || new RegExp(process.env.ONLY).test('pr-list')) {
+      await page.getByTestId('pull-requests-button').click()
+      await page.getByRole('dialog', {name:'Pull requests',exact:true}).waitFor()
+      await capture('pr-list-open')
+      // Simulate an SSE/cache update, without any real merge or provider request.
+      await page.getByRole('button', {name:'Publish example merge update',exact:true}).dispatchEvent('click')
+      await page.locator('[data-testid=pr-row] [data-pr-state=merged]').waitFor()
+      await capture('pr-list-stale')
+      await page.screenshot({path:path.join(output, `${theme}-${width}-pr-list-stale.png`)})
+      await page.getByRole('button', {name:'History',exact:true}).click()
+      await capture('pr-list-history')
+      await page.getByRole('button', {name:/^View pull request:/}).first().click()
+      await capture('pr-list-detail')
+      await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+    }
     if (!process.env.ONLY) {
     // Verify both hover and keyboard focus without submitting anything.
     for (const control of await page.locator('[data-audit=controls] button:enabled,[data-audit=controls] input,[data-audit=controls] select:enabled,[data-audit=prs] a').all()) {

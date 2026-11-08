@@ -8,6 +8,7 @@ import { ContextMeter } from '../../web/src/components/ContextMeter'
 import { ChatLine, CollapsibleMarkdown } from '../../web/src/components/ChatLine'
 import { NewTaskButton } from '../../web/src/components/NewTask'
 import { ThreadLine } from '../../web/src/components/SideThread'
+import { PullRequestsButton } from '../../web/src/components/PullRequests'
 import { Toasts } from '../../web/src/components/Toasts'
 import { toast } from '../../web/src/lib/toast'
 import { ToCaptainLine } from '../../web/src/components/CaptainForward'
@@ -27,7 +28,7 @@ const theme = new URLSearchParams(location.search).get('theme') ?? 'light'
 document.documentElement.classList.toggle('dark', theme === 'dark')
 const client = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } })
 const projects = PROJECT_COLORS.map((color) => ({ id: `prj_${color}`, name: `Example ${color}`, color, createdAt: 1 }) as Project)
-const tasks = projects.map((p) => ({ id: `task_${p.color}`, projectId: p.id, title: `Example ${p.color}`, status: 'working', icon: 'wrench', createdAt: 1 }) as Task)
+const tasks = projects.map((p) => ({ id: `task_${p.color}`, projectId: p.id, title: `Example ${p.color}`, status: 'working', icon: 'wrench', previews: [], summary: 'Example task summary.', prUrl: p.id === projects[0]!.id ? 'https://github.com/acme/example-app/pull/1' : null, prState: p.id === projects[0]!.id ? 'open' : null, createdAt: 1, updatedAt: 1 }) as Task)
 client.setQueryData(keys.projects, projects)
 client.setQueryData(keys.tasks, tasks)
 client.setQueryData(keys.agentSettings, { settings: { ownerName: 'Example', captainIcon: 'cap' } })
@@ -65,6 +66,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     <section data-audit="pending" className="space-y-3"><ThreadLine m={{...pending, threadId:"thread_example"}}/><ChatLine m={{...pending,role:'user'}} onFollowUp={noop}/><InboundMessage m={{...pending,projectId:projects[0]!.id,role:'user'}}/><ToCaptainLine m={pending}/><Line m={pending} onFollowUp={noop}/><Line m={{...pending,meta:{pending:true,source:'hook'}}} onFollowUp={noop}/></section>
     <section data-audit="markdown"><Markdown>{md}</Markdown></section>
     <section data-audit="folded-message"><CollapsibleMarkdown>{Array.from({length: 30}, (_, i) => `Example paragraph ${i}: readable folded message.\n`).join("\n")}</CollapsibleMarkdown></section>
+    <section data-audit="pr-list"><PullRequestsButton/><Button onClick={() => client.setQueryData(keys.tasks, tasks.map((t, i) => i === 0 ? {...t,prState:'merged'} : t))}>Publish example merge update</Button></section>
     <section data-audit="new-task"><NewTaskButton projectId={projects[0]!.id}/></section>
     <section data-audit="toasts" className="relative min-h-72"><Button onClick={() => { toast.error('Example error', 'Readable error detail.', {duration: 60000}); toast.info('Example notice', 'Readable notice detail.', {duration: 60000, action:{label:'Undo',onClick:noop}}); toast.task({title:'Example task ready',body:'Readable task detail.',status:'pr_ready',href:'/?session=task_example',context:'Example project',tone:'green'},60000) }}>Show example toasts</Button><Toasts/></section>
     <Button onClick={() => void confirmDialog({title:'Example confirmation',body:'Review this example action.',danger:true,confirmLabel:'Confirm example'})}>Open confirmation</Button>

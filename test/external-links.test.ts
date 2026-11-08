@@ -213,7 +213,7 @@ describe("PR chip", () => {
     ["open", "text-emerald-400", "PR #66"],
     ["draft", "text-zinc-400", "Draft #66"],
     ["merged", "text-merged-fg", "Merged #66"],
-    ["closed", "text-red-400/80", "Closed #66"],
+    ["closed", "text-red-400", "Closed #66"],
     [null, "text-emerald-400", "PR #66"],
   ] as const)("keeps the %s state accessible and colored in number-only links", (prState, color, label) => {
     const card = vi.fn()
