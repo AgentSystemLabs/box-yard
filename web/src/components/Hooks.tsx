@@ -282,7 +282,7 @@ function HookRow({ hook: h, enabled, onEnabled, onEdit }: { hook: HookWithLastRu
   const chips = filterChips(h.filters, projectName, ownerName)
   const last = h.lastRun
   return (
-    <div id={h.id} className={cx("rounded-xl border bg-zinc-900/40 p-3 sm:p-4", enabled ? "border-zinc-800/80" : "border-zinc-900 opacity-75")} data-testid="hook-row">
+    <div id={h.id} className={cx("rounded-xl border bg-zinc-900/40 p-3 sm:p-4", enabled ? "border-zinc-800/80" : "border-zinc-900")} data-testid="hook-row">
       <div className="flex items-start gap-2 sm:gap-3">
         <div className="-my-2 -ml-1 sm:-my-0.5">
           <Switch checked={enabled} onChange={onEnabled} label={enabled ? `Turn off ${h.name}` : `Turn on ${h.name}`} />

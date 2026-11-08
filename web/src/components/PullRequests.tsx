@@ -117,7 +117,7 @@ export function PullRequestsDialog({ onClose }: { onClose: () => void }) {
           <div ref={stable.listRef} className="space-y-2">
             <ResortPill newCount={stable.newCount} changedCount={stable.changedCount} onResort={stable.resort} />
             {stable.entries.slice(0, limit).map(({ item, stale }) => (
-              <article key={item.url} data-stable-key={item.url} data-testid="pr-row" className={cx("rounded-xl border border-zinc-800 bg-zinc-900/40 p-3", stale && "border-dashed opacity-50")}>
+              <article key={item.url} data-stable-key={item.url} data-testid="pr-row" className={cx("rounded-xl border border-zinc-800 bg-zinc-900/40 p-3", stale && "border-dashed bg-zinc-900/20")}>
                 <button type="button" aria-label={`View pull request: ${item.tasks[0]!.title}`} onClick={(e) => { lastPick.current = e.currentTarget; setSelected(item.url) }} className="flex w-full min-w-0 items-start gap-2 rounded-md text-left text-sm font-medium text-zinc-100 focus-visible:outline-2 focus-visible:outline-yard-500">
                   <span className="min-w-0 flex-1 wrap-anywhere">{item.tasks[0]!.title}</span><ArrowRight aria-hidden className="h-4 w-4 shrink-0 self-center text-zinc-500" />
                 </button>

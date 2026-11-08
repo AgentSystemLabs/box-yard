@@ -95,7 +95,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
               <Loading kind="rows" label="Loading usage" />
             )
           ) : (
-            <div aria-busy={q.isPlaceholderData} className={cx("space-y-4", q.isPlaceholderData && "opacity-60")}>
+            <div aria-busy={q.isPlaceholderData} className="space-y-4">
               {view.totals.turns === 0 && view.totals.computeHours === 0 && view.totals.costUsd === 0 && view.totals.tokens.total === 0 && (
                 <p className="text-sm text-zinc-400" data-testid="usage-empty">No recorded usage in this range{Object.keys(filter).length ? " for these filters" : ""}.</p>
               )}

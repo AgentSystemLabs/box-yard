@@ -184,7 +184,7 @@ const QueuedRow = memo(function QueuedRow({
     <div
       role="listitem"
       data-testid="queued-message"
-      className={cx("@container rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 px-3 py-2", locked && "opacity-70")}
+      className="@container rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 px-3 py-2"
     >
       <div className="flex min-h-6 items-center gap-1.5 text-[11px] text-zinc-500">
         {steered ? (
