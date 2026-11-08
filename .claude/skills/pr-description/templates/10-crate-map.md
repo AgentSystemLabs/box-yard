@@ -88,7 +88,7 @@ flowchart LR
 - **web app.** `web/src/<file>.tsx` — <clause>.
 - **runner/scripts.** `runner/<file>.mjs` or `scripts/<file>.ts` — <clause>.
 - **Not done.** <The approach rejected and why.>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 📝 Notes <a id="notes"></a>
 

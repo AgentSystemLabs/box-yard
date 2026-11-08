@@ -21,7 +21,7 @@ Every project starts on the **Default** identity, which is Settings › Credenti
 | Author | `name` and `email` for every commit. Checked against the account's verified emails when the token may read them (`emailCheck`: `verified`, `unverified`, `unknown`); a GitHub noreply address counts as verified |
 | Signing key | An SSH or GPG key that signs every commit a turn makes, and optionally `requireSigned` (see [Signing](#signing)) |
 | Claude login | An API key or an OAuth token (`claude setup-token`). It always wins: its projects never take the global logins' rotation. Without one, the identity uses the global logins, round robin (docs/logins.md) |
-| Runners | The runners its projects may use (`box`, `local`, `gpu`, `docker`), or every runner |
+| Runners | The runners its projects may use (`box`, `local`, `gpu`, `docker`, `ssh`), or every runner |
 | Coordinator sees | `everything` (the default) or `status`: the Coordinator gets only the status of its projects' tasks (see [Coordinator sees: status only](#coordinator-sees-status-only)) |
 
 ## Saving identity settings
@@ -54,12 +54,12 @@ Box Yard writes no author into a clone's `.git/config` or a box's global config.
 
 Box Yard's own git work for the project (clones, fetches, the turn-end push, PR checks, branch cleanup) uses the same token. A project's Captain runs on its identity's Claude login.
 
-On the local runner, a project on any identity but Default is walled off from this computer's own git and `gh` setup:
+On the local runner, a project on any identity but Default gets separate git and `gh` configuration for normal commands:
 
 - it uses only Box Yard's git credential helper: the helpers in `~/.gitconfig` are skipped for it;
 - its turns, and Box Yard's own git work for it, get a git config and a `gh` folder of the identity's own, in `<local dir>/.boxyard/identities/<id>/` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`, `GH_CONFIG_DIR`), so `~/.gitconfig`'s name, email, signing key, `includeIf` rules and hooks, and the `gh` login, don't reach it. The repo's own `.git/config` still applies.
 
-Default projects keep this computer's setup, as before.
+Default projects keep this computer’s setup, as before. These configuration choices are not filesystem isolation: an unsandboxed local agent still runs as the server’s OS user and can read that user’s other files and credentials.
 
 ## Signing
 
@@ -101,7 +101,7 @@ Not covered yet: commits Box Yard makes through GitHub's API (the screenshots on
 - **Encrypted at rest.** Tokens and Claude logins are stored with AES-256-GCM. The key is `BOXYARD_SECRET_KEY` when it's set (64 hex characters, 32 bytes in base64, or any passphrase, hashed), else a random key in `<data dir>/secret.key` (mode 0600), made on first use. The key is never in the database: a copy of `box-yard.sqlite` alone holds no usable token.
 - **Back up the key with the database.** Without it, identities keep their names, logins and fingerprints, but each token and Claude login shows `readable: false` and turns don't get it until it's saved again.
 - **Write-only.** Values go in through the API and never come out: the API, the web app and the model see logins, owners, emails, scopes, expiry and a fingerprint (the first 12 hex of the value's sha256).
-- **Kept out of transcripts.** Every credential value in effect (Settings › Credentials' and the identities', a signing key also line by line) is replaced with `[redacted]` in task, Captain, Coordinator and side thread messages before they're saved or shown, so an agent that prints its env leaves no token behind. Any private key block, known or not and even cut off, becomes `[redacted private key]`. Cody's own messages are kept as written. API errors are redacted the same way.
+- **Kept out of transcripts.** Known credential values of at least six characters (Settings › Credentials’ and the identities’, a signing key also line by line) are replaced with `[redacted]` in task, Captain, Coordinator and side thread messages before they’re saved or shown. Recognized private-key blocks, including truncated blocks, become `[redacted private key]`. The owner’s own messages are kept as written. API errors also use secret-shape filtering. Redaction is not a guarantee against unknown secrets, encoded values or copies in files/artifacts.
 - **Kept from `claude`.** `BOXYARD_SECRET_KEY` is removed from the env of the Coordinator, the Captains and their side threads (a Captain's logs in with its identity's Claude login, like the Captain), and the local runner already strips every `BOXYARD_*` var from agents.
 
 ## Boxes
@@ -118,21 +118,21 @@ An identity's runners are checked when a project is given the identity or a new 
 
 ## Coordinator sees: status only
 
-An identity set to `status` keeps its projects' content between Cody, their Captains and their agents. The Coordinator still sees that the work exists and where it stands, so it can route requests and report progress, but not what the work says. When Default is set to `status`, every project on Default is sealed too.
+An identity set to `status` keeps its projects' content between the owner, their Captains and their agents. The Coordinator still sees that the work exists and where it stands, so it can route requests and report progress, but not what the work says. When Default is set to `status`, every project on Default is sealed too.
 
 - **What the Coordinator gets.** A sealed project's task titles, states, PRs and their state, branch, box, runner, turns, model and merge requests. Whether a task asks something or failed shows as `(status only: ask the project's Captain)`, not the question or the error. `list_projects` marks the project with `coordinatorSees` and gives its notes as a count.
-- **What it doesn't.** Replies (`lastReply`), questions, errors, summaries, previews and transcript lines; the project's notes and note suggestions; its artifacts (also as attachments); its Captain's compactions; its queued messages; its preview URLs (`get_preview_url`); its `search_history` hits (also the notices about its tasks kept in the Coordinator's chat, which `around` shows masked); and its tasks as `related_tasks` of a task elsewhere. A tool that would return them answers `Status only: …` and points at the project's Captain (`ask_captain`, `send_to_captain`). Tools that list across projects leave them out instead, and a `list_tasks` query matches only a sealed task's title and PR.
+- **What it doesn't.** Replies (`lastReply`), questions, errors, summaries, previews and transcript lines; the project's notes and note suggestions; its artifacts (also as attachments); its Captain's compactions; its queued messages; its preview URLs (`get_preview_url`); its `search_history` hits (also the notices about its tasks kept in the Coordinator's chat, which `around` shows masked); and its tasks as `related_tasks` of a task elsewhere. A tool that would return them answers `Status only: …` and points at the project's Captain (`ask_captain`, `send_to_captain`). Content lists across projects leave them out instead, and a `list_tasks` query matches only a sealed task's title and PR.
 - **Outside the tools.** The Coordinator's own summary and recap prompts leave a sealed task's question out. A compaction's task snapshot says `Status only: …` instead of the task's summary, and `read_compaction` masks snapshots written before the seal the same way. Hook notices about its tasks carry no prompt preview, and `{summary}` becomes `(status only: ask the project's Captain)` in a `message_coordinator` hook's prompt and in a `create_task` hook's task title (the new task's prompt keeps it).
 - **The Captain answers with state.** A sealed project's Captain is told to answer the Coordinator with the state of the work (what's done, what's running, which PRs are open, what waits on whom), not code, files, transcripts, notes or anyone's words. `ask_captain` and `wait_for_captain` return only its replies to the Coordinator, not the rest of its chat.
 - **Agents stay on their side.** An agent in a sealed project and one in an open project can't `message_agent` each other (either way, since a reply would come back across); the sender hears why and is pointed at its Captain. Agents within the sealed project, or between two sealed or two open projects, message as before.
-- **Still allowed.** Writes and controls: starting tasks, `send_to_task`, stop, retry, close, queued-message delivery, `save_note`, hooks and schedules (their prompts are configuration the Coordinator or Cody wrote, so the Coordinator still reads them).
-- **One-way for the model.** The Coordinator (or a Captain) can set an identity to `status` with `create_identity`, `update_identity` or `import_detected_identity`, but no tool sets it back to `everything`, moves a sealed project to an identity that shows everything (`assign_identity`), or deletes a sealed identity and moves its projects into a Default that shows everything. Cody does those in Settings › Identities or the project's *Identity / Claude login* picker.
+- **Still allowed.** Writes and controls (marking done requires an [explicit owner chat request](owner-chat-close.md), not an agent tool): starting tasks, `send_to_task`, stop, retry, queued-message delivery, note tools, hooks and schedules (their prompts are configuration the Coordinator or the owner wrote, so the Coordinator still reads them).
+- **One-way for the model.** The Coordinator (or a Captain) can set an identity to `status` with `create_identity`, `update_identity` or `import_detected_identity`, but no tool sets it back to `everything`, moves a sealed project to an identity that shows everything (`assign_identity`), or deletes a sealed identity and moves its projects into a Default that shows everything. The owner does those in Settings › Identities or the project's *Identity / Claude login* picker.
 
 It's a view, not a wall. What remains:
 
 - **The Captain's own words.** A Captain's reply to the Coordinator is sent as it is: the prompt asks for state only, but a Captain told to quote something can.
 - **Box Yard's API on this computer.** With no `BOXYARD_PASSWORD`, the API is open on loopback, and the Coordinator has `WebFetch`. Set a password to close that.
-- **What the Coordinator already knew.** Its earlier messages, its own compaction summaries and the compaction files it may `Read` keep what they held before the seal.
+- **What the Coordinator already knew.** Context already delivered before the seal is not erased. While any project is status-only, the mixed Coordinator compaction archive and its direct Read rule are withheld; see [compaction privacy](compaction-history.md#privacy).
 - **Uploads.** The Coordinator may `Read` the uploads folder; an upload's path is random and only appears in content it no longer gets.
 - **GitHub.** The Coordinator gets each PR's URL, and for a public repo `WebFetch` can open the PR there. The seal covers Box Yard's views, not who can read the repo.
 
@@ -152,7 +152,7 @@ It's a view, not a wall. What remains:
 
 ## Set up from this computer
 
-The Coordinator (or a project's Captain) can set identities up from what this computer already uses, so nobody has to work out which token, email and key go with which repo. It's how the Coordinator answers a clone, fetch or push that fails with 401, 403 or 404, or a question about GitHub accounts: it runs `detect_identities`, proposes the whole setup to Cody in one message, and imports only what Cody agrees to.
+The Coordinator (or a project's Captain) can set identities up from what this computer already uses, so nobody has to work out which token, email and key go with which repo. It's how the Coordinator answers a clone, fetch or push that fails with 401, 403 or 404, or a question about GitHub accounts: it runs `detect_identities`, proposes the whole setup to the owner in one message, and imports only what the owner agrees to.
 
 **What detection reads.** Read-only; it changes nothing:
 
@@ -208,7 +208,7 @@ To try detection on this computer: `npm run test:detect` (read-only and offline;
 | `DELETE /api/identities/:id/tokens?owner=` | | Forget the owner's token |
 | `PUT /api/identities/:id/claude` | `{ kind: "api_key" \| "oauth_token", value }` | Save its Claude login |
 | `DELETE /api/identities/:id/claude` | | Back to the global login |
-| `PUT /api/identities/:id/signing` | `{ kind: "file", privateKey, requireSigned? }` or `{ kind: "agent", publicKey, program?, requireSigned? }` | Save its signing key (replaces the old one) |
+| `PUT /api/identities/:id/signing` | `{ kind: "file", privateKey, requireSigned? }`, `{ kind: "agent", publicKey, program?, requireSigned? }` or `{ kind: "gpg", keyId, requireSigned? }` | Save its signing key (replaces the old one) |
 | `PATCH /api/identities/:id/signing` | `{ requireSigned }` | Turn `requireSigned` on or off |
 | `DELETE /api/identities/:id/signing` | | Stop signing |
 | `POST /api/identities/detect` | `{ online? }` | Detection's proposals (see above). Changes nothing |
@@ -218,6 +218,4 @@ To try detection on this computer: `npm run test:detect` (read-only and offline;
 
 Every change is broadcast as an `identities` event.
 
-## Coming next
-
-- GPG signing keys.
+GPG signing is shipped for the local runner only; see [GPG on the local runner](#gpg-on-the-local-runner).
