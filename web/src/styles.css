@@ -164,6 +164,13 @@ body {
   outline-offset: 2px;
 }
 
+/* A text field drawn inside its own rounded box shows focus on that box (focus-within). Its square
+   outline would sit inside the box's border. This rule is unlayered like the one above, so the
+   fields' `outline-none` utilities alone can't remove it. */
+:where([data-composer-box], [data-focus-box]) :where(input, textarea):focus-visible {
+  outline: none;
+}
+
 /* Keep WORKING_PULSE timing and reduced-motion behavior. A 50% trough washed out
    meaningful status icons; 80% keeps the project's indigo glyph above 3:1 on a hovered row. */
 @keyframes readable-pulse { 50% { opacity: .8; } }
