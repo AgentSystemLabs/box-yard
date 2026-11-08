@@ -72,17 +72,19 @@ for (let run = 0; run < Number(count); run++) for (const view of ['chat', 'capta
     if (!first) throw new Error('Date is outside the benchmark rail window')
     const label = first.getAttribute('aria-label')
     // Explicit activation opens the summary first. Time the subsequent jump, as on the old hover-preview UI.
-    if (label.includes('activate again')) {
+    if (label.includes('activate again') || label.includes('preview day summary')) {
       first.click()
       await new Promise((resolve) => requestAnimationFrame(resolve))
     }
+    const activation = [...historyRoot.querySelectorAll('[role="region"] button')].find((button) => button.textContent.trim() === 'Jump to day') ?? first
     const t = performance.now()
     document.activeElement?.blur()
-    first.click()
+    activation.click()
     for (let i = 0; i < 120; i++) {
       await new Promise((resolve) => requestAnimationFrame(resolve))
       if (document.activeElement?.hasAttribute('data-day-start')) break
     }
+    if (!document.activeElement?.hasAttribute('data-day-start')) throw new Error('Date jump did not focus a transcript day')
     return { wallMs: performance.now() - t, label, focused: document.activeElement?.getAttribute('data-day-start'), rows: list.firstElementChild.children.length }
   }, at)
   out.dateJump = await jumpDate(retained.find((m) => m.role !== 'tool').createdAt)

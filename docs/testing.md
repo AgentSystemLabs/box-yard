@@ -43,7 +43,7 @@ Reuse a fresh complete report from the same main revision when available. Otherw
 
 ## Daily full test suite on this computer
 
-The Captain creates this project schedule **after merge**; do not create it during tiering work. The schedule has its own nullable runner override. MCP `create_schedule`/`update_schedule` take `runs_on`; REST `POST /api/schedules` and `PATCH /api/schedules/:id` take `runsOn`. The persisted SQLite column is `schedules.runs_on`. `"local"` here explicitly means the computer running Box Yard, independent of Settings › Machines › Local means. Omission on create/null follows the project; omission on update preserves the current choice. Coordinator schedules reject runner overrides. Existing schedules and the project's runner remain unchanged. Tasks still go through the existing identity runner restrictions.
+The Captain owns this project’s daily schedule; this example is configuration guidance, not an instruction to create or change a live schedule. The schedule has its own nullable runner override. MCP `create_schedule`/`update_schedule` take `runs_on`; REST `POST /api/schedules` and `PATCH /api/schedules/:id` take `runsOn`. The persisted SQLite column is `schedules.runs_on`. `"local"` here explicitly means the computer running Box Yard, independent of Settings › Box providers › SSH machines › When you say "locally". Omission on create/null follows the project; omission on update preserves the current choice. Coordinator schedules reject runner overrides. Existing schedules and the project's runner remain unchanged. Tasks still go through the existing identity runner restrictions.
 
 Captain setup payload (configuration only, not an instruction to create it now):
 
@@ -52,7 +52,7 @@ Captain setup payload (configuration only, not an instruction to create it now):
   "project": "box-yard",
   "name": "Daily full test suite",
   "cron": "0 2 * * *",
-  "timezone": "America/New_York",
+  "timezone": "America/Chicago",
   "runs_on": "local",
   "catch_up": "skip",
   "allow_overlap": false,
@@ -60,4 +60,4 @@ Captain setup payload (configuration only, not an instruction to create it now):
 }
 ```
 
-No special runner deployment or server restart is part of this change. The running server must eventually load the merged capability before the Captain can use its new MCP argument; that operational step belongs to the live service owner.
+The running server must include the schedule runner-override capability before this payload can be used. Updating a live service belongs to its owner; this documentation does not perform that deployment.

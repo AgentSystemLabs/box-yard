@@ -70,7 +70,7 @@ stateDiagram-v2
 ## 🧪 Proof <a id="proof"></a>
 
 - **Regression test.** `<test_name>` in `server/<file>.ts or web/src/<file>.tsx` — fails on `origin/main`, passes here.
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 📝 Notes <a id="notes"></a>
 
