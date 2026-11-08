@@ -79,5 +79,21 @@
     "busy": true,
     "initialQueueRows": 1,
     "errors": []
+  },
+  {
+    "version": "after",
+    "scope": "task",
+    "variant": "rapid-before-working",
+    "initialQueueRows": 0,
+    "remainingQueueRows": 1,
+    "errors": []
+  },
+  {
+    "version": "after",
+    "scope": "subtask",
+    "variant": "rapid-before-working",
+    "initialQueueRows": 0,
+    "remainingQueueRows": 1,
+    "errors": []
   }
 ]
