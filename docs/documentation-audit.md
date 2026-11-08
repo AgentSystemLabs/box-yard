@@ -75,7 +75,7 @@ The linked script paths were checked against tracked files and their command-lin
 
 ## Security and concurrent work
 
-At the audited main revision `4bc75d0`, Docker mounts only the project workspace volume plus a credentials tmpfs, without host directories or a Docker socket. This does not establish an egress firewall, isolate tasks sharing one container/user, or constrain application-authorized runner requests. A Codex login can be on the workspace disk while its turn executes; normal archive exclusions do not prevent an agent copying readable secrets. Documentation now states these limits without treating a proposed fix as enforcement.
+At the audited main revision `4bc75d0`, Docker mounts only the project workspace volume plus a credentials tmpfs, without host directories or a Docker socket. This does not establish an egress firewall, isolate tasks sharing one container/user, or constrain application-authorized runner requests. A Codex login can be on the workspace disk while its turn executes; normal archive exclusions and known-value transcript redaction do not prevent an agent copying or encoding readable secrets. The local env filter at this revision does not remove `RUNPOD_API_KEY`, `VAST_API_KEY` or `DAYTONA_API_KEY`; provider delivery rules do not imply local credential isolation. The Captain was notified for the separate runtime work. Documentation now states these limits without treating a proposed fix as enforcement.
 
 Coordination snapshot (2026-11-08):
 

@@ -40,7 +40,7 @@ Account and tier quotas change; check [Daytona limits](https://www.daytona.io/do
 ## Setup (once per Box Yard install)
 
 1. **Credit.** Check the Daytona dashboard Wallet and the GPU-credit requirements above before starting a sandbox.
-2. **API key.** Make one at [app.daytona.io › Keys](https://app.daytona.io/dashboard/keys) with **write:sandboxes** and **delete:sandboxes**, and an expiry if you like. Those cover the client’s sandbox operations; [Daytona’s API-key documentation](https://www.daytona.io/docs/api-keys) explains that sandbox reads/toolbox access are also granted. These permissions are not a per-sandbox restriction on a stolen key. Paste it in **Settings › Box providers › Daytona › Daytona API key**, where **Test** lists this install's sandboxes with it, or set `DAYTONA_API_KEY` in Box Yard's environment. Box Yard only uses the key from the server; it never reaches an agent or a sandbox.
+2. **API key.** Make one at [app.daytona.io › Keys](https://app.daytona.io/dashboard/keys) with **write:sandboxes** and **delete:sandboxes**, and an expiry if you like. Those cover the client’s sandbox operations; [Daytona’s API-key documentation](https://www.daytona.io/docs/api-keys) explains that sandbox reads/toolbox access are also granted. These permissions are not a per-sandbox restriction on a stolen key. Paste it in **Settings › Box providers › Daytona › Daytona API key**, where **Test** lists this install's sandboxes with it, or set `DAYTONA_API_KEY` in Box Yard's environment. The provider uses this key on the server and does not deliberately send it to sandbox tasks. This is not isolation from local agents: they run as the server’s OS user, and the current local env filter does not remove `DAYTONA_API_KEY`.
 3. **Settings › Box providers › Daytona.** The defaults suit browser and WebGL game testing:
 
    | Setting | Default | What it does |
@@ -81,7 +81,7 @@ Account and tier quotas change; check [Daytona limits](https://www.daytona.io/do
   - **Keep warm** (1h/4h in Settings › Box providers › Daytona) holds one up for follow-ups; it also lengthens Daytona's auto-stop to match.
   - **Terminate** ends one now.
   - `delete_box` and `delete_idle_boxes` do the same safety checks as for RunPod pods: no running agent, every workspace archived first.
-- **Dead-man switch.** Daytona's auto-stop deletes a sandbox that hears nothing for Settings' Auto-stop time. Box Yard touches each running sandbox every 5 minutes, and a running turn's long toolbox call counts as contact too. So the auto-stop only fires when the computer running Box Yard sleeps or quits. Nothing in the sandbox holds a key.
+- **Dead-man switch.** Daytona's auto-stop deletes a sandbox that hears nothing for Settings' Auto-stop time. Box Yard touches each running sandbox every 5 minutes, and a running turn's long toolbox call counts as contact too. So the auto-stop only fires when the computer running Box Yard sleeps or quits. This watchdog needs no Daytona API key inside the sandbox; task/model credentials still reach the task normally.
 - **Previews.** Each port gets its own signed URL.
   - It opens only that port and lapses after a day; Box Yard signs a new one an hour before then.
   - Box Yard never uses Daytona's plain preview token, which opens every port and the sandbox's toolbox and can't be revoked.
@@ -106,7 +106,7 @@ Account and tier quotas change; check [Daytona limits](https://www.daytona.io/do
   - sign one port's preview URL;
   - run commands and move files in a sandbox.
 - It never calls Daytona's account-wide endpoints: API keys, organizations, regions, runners, registries, secrets, warm pools, webhooks, users, or SSH access.
-- The key is a credential (Settings › Box providers › Daytona, `DAYTONA_API_KEY`). It's read on the server only. It isn't in any prompt, image, Dockerfile or sandbox env, and the error messages carry only the API path, never the host or key.
+- The key is a credential (Settings › Box providers › Daytona, `DAYTONA_API_KEY`). The provider reads it on the server and does not add it to prompts, images, Dockerfiles or sandbox env. Its errors report the API path without the host or key. Local agents remain unsandboxed and can inherit server env or read its files; these provider-delivery rules are not a host credential boundary.
 
 ## Not done yet
 

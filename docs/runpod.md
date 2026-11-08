@@ -4,7 +4,7 @@ A project can run its agents on a RunPod GPU pod instead of this computer (the d
 
 ## Setup (once per Box Yard install)
 
-1. **API key.** Settings › Box providers › GPU clouds › RunPod GPU › API key, or set `RUNPOD_API_KEY` in Box Yard's environment. Make the key at runpod.io › Settings › API Keys.
+1. **API key.** Settings › Box providers › GPU clouds › RunPod GPU › API key, or set `RUNPOD_API_KEY` in Box Yard's environment. Make the key at runpod.io › Settings › API Keys. The provider uses it on the server; local tasks remain unsandboxed, and the current local env filter does not remove `RUNPOD_API_KEY`.
 2. **Image** (optional, but pods start much faster with it).
    - Settings › Box providers › GPU clouds › RunPod GPU › Image: type a repository you can push to, like `docker.io/<your-docker-user>/boxyard-gpu`, then press **Build & push**.
    - Box Yard runs `docker buildx build --platform linux/amd64 … --push runpod/` with your own Docker. It uses your own `docker login`; Box Yard never sees that login.
