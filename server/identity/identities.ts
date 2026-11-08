@@ -262,13 +262,13 @@ export class Identities {
     const current = this.require(id)
     const body = parse(identityPatch, input)
     if (body.name !== undefined && body.name !== current.name) {
-      if (current.isDefault) throw new BadRequestError("The Default identity keeps its name.")
+      if (current.isDefault) throw new IdentityValidationError([{ path: "name", message: "The Default identity keeps its name." }])
       this.requireFreeName(body.name, id)
     }
     if (body.runners !== undefined && body.runners !== null) {
       this.requireRunnersFit(current, body.runners)
-      if (current.signing?.kind === "gpg" && !body.runners.includes("local")) throw new BadRequestError(`The ${current.name} identity uses this computer’s GPG keyring. Keep "local" in its runners, or remove the signing reference first.`)
-      if (current.signing?.kind === "agent" && !body.runners.includes("local")) throw new BadRequestError(`The ${current.name} identity signs with a key in this computer's SSH agent, so its projects run on this computer. Keep "local" in its runners, or give it a key file first.`)
+      if (current.signing?.kind === "gpg" && !body.runners.includes("local")) throw new IdentityValidationError([{ path: "runners", message: `The ${current.name} identity uses this computer’s GPG keyring. Keep "local" in its runners, or remove the signing reference first.` }])
+      if (current.signing?.kind === "agent" && !body.runners.includes("local")) throw new IdentityValidationError([{ path: "runners", message: `The ${current.name} identity signs with a key in this computer's SSH agent, so its projects run on this computer. Keep "local" in its runners, or give it a key file first.` }])
     }
     const sets: string[] = []
     const args: unknown[] = []
@@ -617,7 +617,7 @@ export class Identities {
   private requireRunnersFit(current: Identity, runners: Runner[]) {
     const rows = this.d.db.prepare("SELECT name, runner FROM projects WHERE identity_id = ?").all(current.id) as { name: string; runner: string | null }[]
     const misfit = rows.find((p) => !runners.includes((p.runner as Runner | null) ?? "box"))
-    if (misfit) throw new BadRequestError(`${misfit.name} uses the ${current.name} identity and runs on ${RUNNER_PHRASE[(misfit.runner as Runner | null) ?? "box"]}. Keep that runner, or move the project first.`)
+    if (misfit) throw new IdentityValidationError([{ path: "runners", message: `${misfit.name} uses the ${current.name} identity and runs on ${RUNNER_PHRASE[(misfit.runner as Runner | null) ?? "box"]}. Keep that runner, or move the project first.` }])
   }
 
   private nextColor(): Identity["color"] {

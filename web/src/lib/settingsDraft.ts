@@ -13,8 +13,16 @@ export interface DraftPart {
   /** How many values differ from the saved ones (at least 1 while registered). */
   count: number
   /** Write the draft. Starts synchronously, so a permission prompt still counts as part of the Save click. */
+  validate?: () => void
   save: () => Promise<void>
   discard: () => void
+}
+
+/** A Save failure whose control may be inside another section or a collapsed editor. */
+export class SettingsFieldError extends Error {
+  constructor(message: string, readonly section: SettingsSection, readonly controlId: string, readonly reveal?: () => void) {
+    super(message)
+  }
 }
 
 export interface DraftRegistry {
@@ -89,6 +97,7 @@ export function useDraft<T>(
   persist: (draft: T) => unknown,
   /** How many changes the draft holds, for "N unsaved changes" (default: draftChanges). */
   countChanges: (draft: T, saved: T) => number = draftChanges,
+  validate?: (draft: T) => void,
 ): [value: T, set: (next: T | ((prev: T) => T)) => void, dirty: boolean] {
   const registry = useContext(SettingsDraftContext)
   const slot = useMemo(() => registry?.slot?.(id) ?? null, [registry, id])
@@ -98,8 +107,8 @@ export function useDraft<T>(
   const setDraft = useCallback((d: { value: T } | null) => (slot ? slot.set(d) : setOwn(d)), [slot])
   const value = draft ? draft.value : saved
   const count = draft ? countChanges(draft.value, saved) : 0
-  const latest = useRef({ value, saved, persist })
-  latest.current = { value, saved, persist }
+  const latest = useRef({ value, saved, persist, validate })
+  latest.current = { value, saved, persist, validate }
   // Bumped when another useDraft with this id unmounts: this one registers the part again, with its own save.
   const [turn, registerAgain] = useReducer((n: number) => n + 1, 0)
 
@@ -111,6 +120,7 @@ export function useDraft<T>(
         ? {
             section,
             count,
+            validate: () => latest.current.validate?.(latest.current.value),
             save: async () => {
               await latest.current.persist(latest.current.value)
               setDraft(null)

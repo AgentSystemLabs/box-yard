@@ -1,13 +1,14 @@
 // Settings › Identities (docs/identities.md): who each project acts as on GitHub, one card per identity. Every edit is
 // a draft that the dialog's Save writes, including Add, Delete and Import from this computer; Test and the detection
 // itself only read. Tokens and keys go in through write-only fields and never come back: the cards show fingerprints.
-import { useState, type ReactNode } from "react"
+import { createContext, useContext, useState, type InputHTMLAttributes, type ReactNode } from "react"
 import { Check, Fingerprint, KeyRound, Laptop, Pencil, Play, Plus, ScanSearch, Trash2, Undo2, X } from "lucide-react"
 import { ApiError } from "../lib/api"
 import { identityApi, useDetectIdentities, useIdentities, useProjects, useSetup, useTestIdentity } from "../lib/queries"
 import { AuthorFallbackNotice } from "./Setup"
 import { SettingsField, SearchHighlight, useSettingsSearching } from "../lib/settingsSearch"
-import { useDraft } from "../lib/settingsDraft"
+import { SettingsFieldError, useDraft } from "../lib/settingsDraft"
+import { identityCreate, identityPatch, tokenInput, claudeInput, signingInput, type ValidationField } from "../../../shared/identityValidation"
 import { GPG_KEY_ID_RE, IDENTITY_COLORS, type CoordinatorSees, type Identity, type IdentityClaudeKind, type IdentityColor, type IdentityDetection, type IdentityInput, type IdentityProposal } from "../../../shared/identities"
 import { RUNNERS, RUNNER_LABEL, type Runner } from "../../../shared/runner"
 import type { Project } from "../../../shared/types"
@@ -90,36 +91,97 @@ function fieldsOf(e: IdentityEdit): IdentityInput {
   return f
 }
 
+type IdentityOperation = "fields" | "token" | "claude" | "signing"
+interface IdentityProblem { field: string; message: string }
+interface IdentityFailure { problem: IdentityProblem; value: string }
+const FIELD_LABEL: Record<string, string> = { name: "Name", owners: "Owners", author: "Author name", authorEmail: "Author email", tokenOwner: "Token owner", token: "GitHub token", claude: "Claude login", signing: "Signing key", signingPublicKey: "Public key", signingProgram: "Signing program", runners: "Runs on", coordinatorSees: "Coordinator sees" }
+const IdentityProblems = createContext<IdentityProblem[]>([])
+
+/** API paths are relative to their endpoint: token `owner` is never the identity's `owners`. */
+function fieldProblem(operation: IdentityOperation, issue?: ValidationField): IdentityProblem {
+  const path = issue?.path ?? ""
+  const field = operation === "fields" ? (path.startsWith("owners") ? "owners" : path === "author.email" ? "authorEmail" : path === "author.name" ? "author" : path.split(".")[0] || "name")
+    : operation === "token" ? (path === "owner" ? "tokenOwner" : "token")
+    : operation === "signing" ? (path === "program" ? "signingProgram" : path === "publicKey" ? "signingPublicKey" : "signing") : "claude"
+  const message = field === "tokenOwner" ? "Enter one GitHub user or org name, like acme-corp, or leave blank for every owner. Use no repository, URL or list."
+    : field === "owners" && path.startsWith("owners.") ? "Enter GitHub user or org names like acme-corp, separated by commas or spaces. Use no repository or URL."
+    : issue?.message ?? "Couldn't save this field."
+  return { field, message }
+}
+
+function signingOf(e: IdentityEdit) {
+  const s = e.signing
+  if (!s) return null
+  return s.kind === "file" ? { kind: s.kind, privateKey: s.privateKey, requireSigned: e.requireSigned }
+    : s.kind === "gpg" ? { kind: s.kind, keyId: s.keyId.trim(), requireSigned: e.requireSigned }
+    : { kind: s.kind, publicKey: s.publicKey.trim(), program: s.program.trim() || null, requireSigned: e.requireSigned }
+}
+
+/** Check only pending writes, never saved identities unrelated to this draft. */
+function draftProblems(e: IdentityEdit, isNew = false): IdentityProblem[] {
+  if (e.remove) return []
+  const problems: IdentityProblem[] = []
+  const collect = (operation: IdentityOperation, result: { error?: { issues: { path: PropertyKey[]; message: string }[] } }) => {
+    for (const i of result.error?.issues ?? []) problems.push(fieldProblem(operation, { path: i.path.join("."), message: i.message }))
+  }
+  collect("fields", (isNew ? identityCreate : identityPatch).safeParse(fieldsOf(e)))
+  if (e.token) collect("token", tokenInput.safeParse({ owner: e.token.owner.trim(), token: e.token.value }))
+  if (e.claude) collect("claude", claudeInput.safeParse(e.claude))
+  if (e.signing) collect("signing", signingInput.safeParse(signingOf(e)))
+  return problems
+}
+
+function fieldFailure(name: string, problem: IdentityProblem, fid: (k: string) => string, reveal?: () => void) {
+  return new SettingsFieldError(`${name}: ${FIELD_LABEL[problem.field] ?? problem.field}: ${problem.message}`, "identities", fid(problem.field), reveal)
+}
+
+/** Remember a server error only while that field's draft is unchanged. */
+function problemValue(e: IdentityEdit, field: string): string {
+  const key = field.startsWith("token") ? "token" : field.startsWith("author") ? "author" : field.startsWith("signing") ? "signing" : field as keyof IdentityEdit
+  return JSON.stringify(e[key]) ?? ""
+}
+const currentFailure = (e: IdentityEdit, failure?: IdentityFailure | null) => editCount(e) && failure && failure.value === problemValue(e, failure.problem.field) ? [failure.problem] : []
+
+class IdentityWriteError {
+  constructor(readonly operation: IdentityOperation, readonly error: unknown) {}
+}
+async function writeField<T>(operation: IdentityOperation, write: () => Promise<T>): Promise<T> {
+  try { return await write() } catch (error) { throw new IdentityWriteError(operation, error) }
+}
+function serverProblem(err: unknown, edit: IdentityEdit): IdentityProblem {
+  const operation = err instanceof IdentityWriteError ? err.operation : "fields"
+  const error = err instanceof IdentityWriteError ? err.error : err
+  const problem = fieldProblem(operation, error instanceof ApiError && error.fields?.length ? error.fields[0] : { path: operation === "fields" ? Object.keys(fieldsOf(edit))[0] ?? "name" : "", message: error instanceof Error ? error.message : "Couldn't save this field." })
+  return problem.field === "signing" && edit.signing?.kind === "agent" ? { ...problem, field: "signingPublicKey" } : problem
+}
+
 /**
  * Write a card's draft: fields first (so a key that needs "This computer" finds it allowed), then the secrets. Each
  * part leaves the draft once it's saved, so a Save that stops halfway is retried from where it stopped.
  */
 async function writeEdit(id: string, e: IdentityEdit, done: (k: keyof IdentityEdit) => void) {
-  if (e.signing?.kind === "gpg" && !GPG_KEY_ID_RE.test(e.signing.keyId.trim())) throw new Error("Enter a hex GPG key id or fingerprint; never paste a private key or passphrase.")
   const fields = fieldsOf(e)
   if (Object.keys(fields).length) {
-    await identityApi.update(id, fields)
+    await writeField("fields", () => identityApi.update(id, fields))
     for (const k of ["name", "color", "owners", "author", "runners", "coordinatorSees"] as const) done(k)
   }
-  for (const owner of e.removeTokens ?? []) await identityApi.removeToken(id, owner)
+  for (const owner of e.removeTokens ?? []) await writeField("token", () => identityApi.removeToken(id, owner))
   if (e.removeTokens) done("removeTokens")
   if (e.token) {
-    await identityApi.saveToken(id, e.token.owner.trim().toLowerCase(), e.token.value.trim())
+    await writeField("token", () => identityApi.saveToken(id, e.token!.owner.trim().toLowerCase(), e.token!.value.trim()))
     done("token")
   }
   if (e.claude !== undefined) {
-    await (e.claude ? identityApi.saveClaude(id, e.claude.kind, e.claude.value.trim()) : identityApi.removeClaude(id))
+    await writeField("claude", () => e.claude ? identityApi.saveClaude(id, e.claude.kind, e.claude.value.trim()) : identityApi.removeClaude(id))
     done("claude")
   }
   if (e.signing !== undefined) {
-    if (e.signing === null) await identityApi.removeSigning(id)
-    else if (e.signing.kind === "file") await identityApi.saveSigning(id, { kind: "file", privateKey: e.signing.privateKey, requireSigned: e.requireSigned })
-    else if (e.signing.kind === "gpg") await identityApi.saveSigning(id, { kind: "gpg", keyId: e.signing.keyId.trim(), requireSigned: e.requireSigned })
-    else await identityApi.saveSigning(id, { kind: "agent", publicKey: e.signing.publicKey.trim(), program: e.signing.program.trim() || null, requireSigned: e.requireSigned })
+    const signing = signingOf(e)
+    await writeField("signing", () => signing ? identityApi.saveSigning(id, signing) : identityApi.removeSigning(id))
     done("signing")
     done("requireSigned")
   } else if (e.requireSigned !== undefined) {
-    await identityApi.setRequireSigned(id, e.requireSigned)
+    await writeField("signing", () => identityApi.setRequireSigned(id, e.requireSigned!))
     done("requireSigned")
   }
 }
@@ -132,15 +194,21 @@ export function IdentitiesPanel({ fid }: { fid: (k: string) => string }) {
   const identities = useIdentities()
   const projects = useProjects()
   const setup = useSetup()
+  const [newFailures, setNewFailures] = useState<Record<string, IdentityFailure>>({})
+  const newFid = (key: string) => (k: string) => fid(`new-${key}-${k}`)
+  const failNew = (n: NewIdentity, err: unknown): never => {
+    const problem = serverProblem(err, n.edit)
+    setNewFailures((prev) => ({ ...prev, [n.key]: { problem, value: problemValue(n.edit, problem.field) } }))
+    throw fieldFailure(n.edit.name?.trim() || "New identity", problem, newFid(n.key))
+  }
   const [news, setNews] = useDraft<NewIdentity[]>("identities-new", "identities", NO_NEW, async (list) => {
     for (const n of list) {
       const name = n.edit.name?.trim() ?? ""
-      if (!name) throw new Error("A new identity needs a name.")
       let made: Identity
       try {
         made = await identityApi.create({ ...fieldsOf(n.edit), name })
       } catch (err) {
-        throw named(name, err)
+        failNew(n, err)
       }
       try {
         const { name: _n, color: _c, owners: _o, author: _a, runners: _r, coordinatorSees: _s, ...secrets } = n.edit
@@ -148,11 +216,16 @@ export function IdentitiesPanel({ fid }: { fid: (k: string) => string }) {
       } catch (err) {
         // Nothing half-made: the identity goes again, and the draft stays for another try.
         await identityApi.remove(made.id).catch(() => {})
-        throw named(name, err)
+        failNew(n, err)
       }
       setNews((prev) => prev.filter((x) => x.key !== n.key))
     }
-  }, (list) => list.length)
+  }, (list) => list.length, (list) => {
+    for (const n of list) {
+      const problem = draftProblems(n.edit, true)[0]
+      if (problem) throw fieldFailure(n.edit.name?.trim() || "New identity", problem, newFid(n.key))
+    }
+  })
   const byId = new Map((projects.data ?? []).map((p) => [p.id, p]))
   const list = identities.data ?? []
 
@@ -173,6 +246,7 @@ export function IdentitiesPanel({ fid }: { fid: (k: string) => string }) {
             key={n.key}
             fid={(k) => fid(`new-${n.key}-${k}`)}
             edit={n.edit}
+            failure={newFailures[n.key]}
             onEdit={(edit) => setNews((prev) => prev.map((x) => (x.key === n.key ? { ...x, edit } : x)))}
             onDrop={() => setNews((prev) => prev.filter((x) => x.key !== n.key))}
           />
@@ -195,8 +269,19 @@ function nextColor(list: Identity[], news: NewIdentity[]): IdentityColor {
 // ------------------------------------------------------------------ one identity
 
 function IdentityCard({ identity: i, projects, fid }: { identity: Identity; projects: Map<string, Project>; fid: (k: string) => string }) {
-  const [edit, setEdit, dirty] = useDraft<IdentityEdit>(`identity-${i.id}`, "identities", NO_EDIT, (e): Promise<void> => persistEdit(i, e, setEdit), editCount)
   const [open, setOpen] = useState(false)
+  const [failure, setFailure] = useState<IdentityFailure | null>(null)
+  const name = (e: IdentityEdit) => e.name?.trim() || i.name
+  const [edit, setEdit, dirty] = useDraft<IdentityEdit>(`identity-${i.id}`, "identities", NO_EDIT, async (e) => {
+    try { await persistEdit(i, e, setEdit) } catch (err) {
+      const problem = serverProblem(err, e)
+      setFailure({ problem, value: problemValue(e, problem.field) })
+      throw fieldFailure(name(e), problem, fid, () => setOpen(true))
+    }
+  }, editCount, (e) => {
+    const problem = draftProblems(e)[0]
+    if (problem) throw fieldFailure(name(e), problem, fid, () => setOpen(true))
+  })
   const searching = useSettingsSearching()
   const test = useTestIdentity()
   const openSettings = useOpenSettings()
@@ -231,7 +316,7 @@ function IdentityCard({ identity: i, projects, fid }: { identity: Identity; proj
           </Button>
         </div>
       ) : open || searching ? (
-        <IdentityForm fid={fid} identity={i} edit={edit} onEdit={setEdit} />
+        <IdentityForm fid={fid} identity={i} edit={edit} onEdit={setEdit} problems={[...draftProblems(edit), ...currentFailure(edit, failure)]} />
       ) : (
         <dl className="mt-3 grid grid-cols-1 gap-x-3 gap-y-1 text-xs @min-[26rem]:grid-cols-[7rem_minmax(0,1fr)]">
           {i.isDefault && (
@@ -306,18 +391,14 @@ function IdentityCard({ identity: i, projects, fid }: { identity: Identity; proj
 
 /** Save one card's draft (the dialog's Save). Deleting moves its projects to Default first. */
 async function persistEdit(i: Identity, e: IdentityEdit, setEdit: (fn: (prev: IdentityEdit) => IdentityEdit) => void): Promise<void> {
-  try {
-    if (e.remove) {
-      await identityApi.remove(i.id)
-      return
-    }
-    await writeEdit(i.id, e, (k) => setEdit((prev) => put(prev, k, undefined, null)))
-  } catch (err) {
-    throw named(i.name, err)
+  if (e.remove) {
+    await identityApi.remove(i.id)
+    return
   }
+  await writeEdit(i.id, e, (k) => setEdit((prev) => put(prev, k, undefined, null)))
 }
 
-function NewIdentityCard({ fid, edit, onEdit, onDrop }: { fid: (k: string) => string; edit: IdentityEdit; onEdit: (e: IdentityEdit) => void; onDrop: () => void }) {
+function NewIdentityCard({ fid, edit, onEdit, onDrop, failure }: { failure?: IdentityFailure; fid: (k: string) => string; edit: IdentityEdit; onEdit: (e: IdentityEdit) => void; onDrop: () => void }) {
   return (
     <article className="@container rounded-xl border border-amber-500/40 bg-zinc-900/40 p-4" data-identity-card="new">
       <header className="flex items-center gap-2">
@@ -328,14 +409,14 @@ function NewIdentityCard({ fid, edit, onEdit, onDrop }: { fid: (k: string) => st
           <X className="h-3.5 w-3.5" />
         </Button>
       </header>
-      <IdentityForm fid={fid} identity={null} edit={edit} onEdit={(fn) => onEdit(fn(edit))} />
+      <IdentityForm fid={fid} identity={null} edit={edit} onEdit={(fn) => onEdit(fn(edit))} problems={[...draftProblems(edit, true), ...currentFailure(edit, failure)]} />
     </article>
   )
 }
 
 // ------------------------------------------------------------------ the form (an identity's draft)
 
-function IdentityForm({ fid, identity: i, edit, onEdit }: { fid: (k: string) => string; identity: Identity | null; edit: IdentityEdit; onEdit: (fn: (prev: IdentityEdit) => IdentityEdit) => void }) {
+function IdentityForm({ fid, identity: i, edit, onEdit, problems }: { problems: IdentityProblem[]; fid: (k: string) => string; identity: Identity | null; edit: IdentityEdit; onEdit: (fn: (prev: IdentityEdit) => IdentityEdit) => void }) {
   const set = <K extends keyof IdentityEdit>(k: K, v: IdentityEdit[K]) => onEdit((prev) => put(prev, k, v, i))
   const isDefault = i?.isDefault ?? false
   const author = edit.author !== undefined ? edit.author : i?.author ? { name: i.author.name, email: i.author.email } : null
@@ -345,13 +426,14 @@ function IdentityForm({ fid, identity: i, edit, onEdit }: { fid: (k: string) => 
   const openSettings = useOpenSettings()
 
   return (
+    <IdentityProblems.Provider value={problems}>
     <div className="mt-3 space-y-3">
       <div className="grid gap-3 @min-[30rem]:grid-cols-2">
         <FormField id={fid("name")} label="Name" hint={isDefault ? "The Default identity keeps its name." : undefined}>
-          <input id={fid("name")} className={inputClass} value={edit.name ?? i?.name ?? ""} disabled={isDefault} onChange={(e) => set("name", e.target.value)} placeholder="Acme" maxLength={60} />
+          <IdentityInput fid={fid} field="name" className={inputClass} value={edit.name ?? i?.name ?? ""} disabled={isDefault} onChange={(e) => set("name", e.target.value)} placeholder="Acme" maxLength={60} />
         </FormField>
         <FormField id={fid("color")} label="Colour">
-          <div id={fid("color")} role="radiogroup" aria-label="Colour" className="flex flex-wrap gap-1">
+          <IdentityControl fid={fid} field="color">{(check) => <div {...check} tabIndex={-1} role="radiogroup" aria-label="Colour" className="flex flex-wrap gap-1">
             {IDENTITY_COLORS.map((c) => {
               const on = (edit.color ?? i?.color) === c
               return (
@@ -369,20 +451,20 @@ function IdentityForm({ fid, identity: i, edit, onEdit }: { fid: (k: string) => 
                 </button>
               )
             })}
-          </div>
+          </div>}</IdentityControl>
         </FormField>
       </div>
       <FormField id={fid("owners")} label="Owners" hint="GitHub users and orgs whose repos it's for, so Import and the Coordinator know which projects it fits.">
-        <input id={fid("owners")} className={inputClass} value={edit.owners ?? i?.owners.join(", ") ?? ""} onChange={(e) => set("owners", e.target.value)} placeholder="acme-corp, octo-acme" spellCheck={false} />
+        <IdentityInput fid={fid} field="owners" className={inputClass} value={edit.owners ?? i?.owners.join(", ") ?? ""} onChange={(e) => set("owners", e.target.value)} placeholder="acme-corp, octo-acme" spellCheck={false} />
       </FormField>
       <FormField id={fid("author")} label="Git author" hint="The name and email its commits get. Use one of the account's verified emails, or GitHub won't link the commits to it. Blank: Settings › Credentials › Git author, else (Default identity on this computer) your git config, else the GitHub account behind its token.">
         <div className="grid gap-2 @min-[30rem]:grid-cols-2">
-          <input id={fid("author")} className={inputClass} value={author?.name ?? ""} onChange={(e) => set("author", { name: e.target.value, email: author?.email ?? "" })} placeholder="Ada Lovelace" aria-label="Author name" />
-          <input className={inputClass} type="email" value={author?.email ?? ""} onChange={(e) => set("author", { name: author?.name ?? "", email: e.target.value })} placeholder="ada@acme.dev" aria-label="Author email" spellCheck={false} />
+          <IdentityInput fid={fid} field="author" className={inputClass} value={author?.name ?? ""} onChange={(e) => set("author", { name: e.target.value, email: author?.email ?? "" })} placeholder="Ada Lovelace" aria-label="Author name" />
+          <IdentityInput fid={fid} field="authorEmail" className={inputClass} type="email" value={author?.email ?? ""} onChange={(e) => set("author", { name: author?.name ?? "", email: e.target.value })} placeholder="ada@acme.dev" aria-label="Author email" spellCheck={false} />
         </div>
       </FormField>
       <FormField id={fid("runners")} label="Runs on" hint="Where its projects may run. A key only this computer's SSH agent holds signs only here.">
-        <div id={fid("runners")} className="flex flex-wrap gap-x-4 gap-y-1">
+        <IdentityControl fid={fid} field="runners">{(check) => <div {...check} role="group" aria-label="Runs on" tabIndex={-1} className="flex flex-wrap gap-x-4 gap-y-1">
           {RUNNERS.map((r) => (
             <label key={r} className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
               <input
@@ -396,17 +478,17 @@ function IdentityForm({ fid, identity: i, edit, onEdit }: { fid: (k: string) => 
               {RUNNER_LABEL[r]}
             </label>
           ))}
-        </div>
+        </div>}</IdentityControl>
       </FormField>
       <FormField
         id={fid("coordinatorSees")}
         label="Coordinator sees"
         hint="Status only: the Coordinator gets its projects' task titles, states and PRs, not their replies, questions, notes, artifacts or history. Their Captains still see everything. The Coordinator can set this to status only, but only you set it back."
       >
-        <Select id={fid("coordinatorSees")} className="w-full sm:w-60" value={edit.coordinatorSees ?? i?.coordinatorSees ?? "everything"} onChange={(e) => set("coordinatorSees", e.target.value as CoordinatorSees)} data-testid="identity-coordinator-sees">
+        <IdentityControl fid={fid} field="coordinatorSees">{(check) => <Select {...check} className="w-full sm:w-60" value={edit.coordinatorSees ?? i?.coordinatorSees ?? "everything"} onChange={(e) => set("coordinatorSees", e.target.value as CoordinatorSees)} data-testid="identity-coordinator-sees">
           <option value="everything">Everything</option>
           <option value="status">Status only</option>
-        </Select>
+        </Select>}</IdentityControl>
       </FormField>
 
       {isDefault ? (
@@ -438,6 +520,7 @@ function IdentityForm({ fid, identity: i, edit, onEdit }: { fid: (k: string) => 
         </div>
       )}
     </div>
+    </IdentityProblems.Provider>
   )
 }
 
@@ -449,7 +532,7 @@ function TokenFields({ fid, identity: i, edit, onEdit }: { fid: (k: string) => s
       const next = list.includes(owner) ? list.filter((o) => o !== owner) : [...list, owner]
       return put(prev, "removeTokens", next.length ? next : undefined, null)
     })
-  const setToken = (t: { owner: string; value: string }) => onEdit((prev) => put(prev, "token", t.value.trim() ? t : undefined, null))
+  const setToken = (t: { owner: string; value: string }) => onEdit((prev) => put(prev, "token", (t.owner || t.value) ? t : undefined, null))
   return (
     <FormField
       id={fid("token")}
@@ -467,10 +550,10 @@ function TokenFields({ fid, identity: i, edit, onEdit }: { fid: (k: string) => s
           </Button>
         </div>
       ))}
+      <p className="text-xs text-zinc-500">Token owner: one GitHub user or org, like acme-corp. Blank: every owner. No repository or URL.</p>
       <div className="grid gap-2 @min-[30rem]:grid-cols-[10rem_minmax(0,1fr)]">
-        <input className={inputClass} value={edit.token?.owner ?? ""} onChange={(e) => setToken({ owner: e.target.value, value: edit.token?.value ?? "" })} placeholder="every owner" aria-label="Token owner (blank: every owner)" spellCheck={false} />
-        <input
-          id={fid("token")}
+        <IdentityInput fid={fid} field="tokenOwner" className={inputClass} value={edit.token?.owner ?? ""} onChange={(e) => setToken({ owner: e.target.value, value: edit.token?.value ?? "" })} placeholder="every owner" aria-label="Token owner (blank: every owner)" spellCheck={false} />
+        <IdentityInput fid={fid} field="token"
           type="password"
           autoComplete="off"
           spellCheck={false}
@@ -517,8 +600,7 @@ function ClaudeField({ fid, identity: i, edit, set }: { fid: (k: string) => stri
             <option value="oauth_token">OAuth token</option>
             <option value="api_key">API key</option>
           </Select>
-          <input
-            id={fid("claude")}
+          <IdentityInput fid={fid} field="claude"
             type="password"
             autoComplete="off"
             spellCheck={false}
@@ -575,11 +657,11 @@ function SigningField({ fid, identity: i, edit, set }: { fid: (k: string) => str
             ))}
           </div>
           {mode === "file" ? (
-            <div className="flex flex-wrap items-center gap-2">
+            <IdentityControl fid={fid} field="signing">{(check) => <div {...check} role="group" aria-label="Signing key file" tabIndex={-1} className="flex flex-wrap items-center gap-2">
               <label className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:bg-zinc-700 sm:min-h-0 sm:py-1">
                 <KeyRound className="h-3.5 w-3.5" /> {pending?.kind === "file" ? "Choose another file" : i?.signing ? "Replace with a key file…" : "Choose a key file…"}
                 <input
-                  id={fid("signing")}
+                  id={fid("signing-file")}
                   type="file"
                   className="sr-only"
                   onChange={async (e) => {
@@ -599,11 +681,10 @@ function SigningField({ fid, identity: i, edit, set }: { fid: (k: string) => str
                   {pending.fileName}: sent when you save
                 </span>
               )}
-            </div>
+            </div>}</IdentityControl>
           ) : mode === "gpg" ? (
             <div className="grid gap-2">
-              <input
-                id={fid("signing")}
+              <IdentityInput fid={fid} field="signing"
                 className={cx(inputClass, "font-mono text-xs")}
                 value={pending?.kind === "gpg" ? pending.keyId : ""}
                 onChange={(e) => set("signing", e.target.value.trim() ? { kind: "gpg", keyId: e.target.value } : undefined)}
@@ -622,7 +703,7 @@ function SigningField({ fid, identity: i, edit, set }: { fid: (k: string) => str
             </div>
           ) : (
             <div className="grid gap-2">
-              <input
+              <IdentityInput fid={fid} field="signingPublicKey"
                 className={cx(inputClass, "font-mono text-xs")}
                 value={pending?.kind === "agent" ? pending.publicKey : ""}
                 onChange={(e) => set("signing", e.target.value.trim() ? { kind: "agent", publicKey: e.target.value, program: pending?.kind === "agent" ? pending.program : "" } : undefined)}
@@ -630,7 +711,7 @@ function SigningField({ fid, identity: i, edit, set }: { fid: (k: string) => str
                 aria-label="Public key"
                 spellCheck={false}
               />
-              <input
+              <IdentityInput fid={fid} field="signingProgram"
                 className={cx(inputClass, "font-mono text-xs")}
                 value={pending?.kind === "agent" ? pending.program : ""}
                 disabled={pending?.kind !== "agent"}
@@ -815,6 +896,21 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       <dd className="min-w-0 text-zinc-300 wrap-anywhere">{children}</dd>
     </>
   )
+}
+
+type IdentityControlProps = { id: string; "data-identity-field": string; "aria-invalid"?: true; "aria-describedby"?: string }
+function IdentityControl({ fid, field, children }: { fid: (k: string) => string; field: string; children: (props: IdentityControlProps) => ReactNode }) {
+  const problem = useContext(IdentityProblems).find((p) => p.field === field)
+  const id = fid(field)
+  return (
+    <div className="min-w-0 space-y-1.5">
+      {children({ id, "data-identity-field": field, "aria-invalid": problem ? true : undefined, "aria-describedby": problem ? `${id}-error` : undefined })}
+      {problem && <p id={`${id}-error`} data-settings-search-ignore className="text-xs leading-relaxed text-red-300">{problem.message}</p>}
+    </div>
+  )
+}
+function IdentityInput({ fid, field, ...props }: InputHTMLAttributes<HTMLInputElement> & { fid: (k: string) => string; field: string }) {
+  return <IdentityControl fid={fid} field={field}>{(check) => <input {...props} {...check} />}</IdentityControl>
 }
 
 const Muted = ({ children }: { children: ReactNode }) => <span className="text-zinc-500">{children}</span>
