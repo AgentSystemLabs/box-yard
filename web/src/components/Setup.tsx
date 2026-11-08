@@ -774,7 +774,7 @@ export function SetupCard({ status, className }: { status: SetupStatus; classNam
         <Step n={++n} done={set("githubToken")} title={CREDENTIAL_INFO.githubToken.label} tag="Recommended" help={<CredentialHelp k="githubToken" />}>
           <CredentialField k="githubToken" status={status.credentials.githubToken} id={`${id}-gh`} />
         </Step>
-        <Step n={++n} done={owner !== undefined && owner !== "default"} title="Your name" tag="Optional" help={'What the Coordinator, Captains and agents call you. Without a name, they use “the owner”. Change it later in Settings › Agents.'}>
+        <Step n={++n} done={owner !== undefined && owner !== "default"} title="Your name" tag="Optional" help={'What the Coordinator, Captains and agents call you. Without a name, they use “the owner”. Change it later in Settings › Box agents.'}>
           <OwnerNameField id={`${id}-owner`} />
         </Step>
       </ol>
