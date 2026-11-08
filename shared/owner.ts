@@ -4,7 +4,7 @@ export const DEFAULT_OWNER_NAME = "the owner"
 /**
  * Put the configured owner name into Box Yard's own text. Only use it on
  * templates Box Yard wrote, never on user content (notes, messages, prompts),
- * which may mention the default name for other reasons.
+ * which may mention Cody for other reasons.
  */
 export function withOwner(text: string, name: string | undefined): string {
   const owner = name?.trim() || DEFAULT_OWNER_NAME

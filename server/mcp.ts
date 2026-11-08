@@ -781,11 +781,10 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     server.registerTool(
       "send_to_captain",
       {
-        description: owner(
+        description:
           "Coordinator tool: send project-scoped work to that project's Captain and return immediately. The Captain has its own persistent Claude session and owns create_task/send_to_task/model routing for the project. " +
             'Its reply shows on Cody\'s chat as soon as it\'s written ("Captain for <project> replied: …") and reaches you as a Box Yard update, so you don\'t need wait_for_captain. ' +
             "It wakes you only when there's something for you to do: a question or decision for Cody, a failure, a next step, or act_on_reply. A reply only for Cody's information (a status, an answer) comes with your next turn's updates instead. Replies to Captains you asked in the same turn (a fan-out) always wake you.",
-        ),
         inputSchema: {
           project: z.string().describe("Project id or name"),
           message: z.string().min(1).describe("The project-scoped request for the Captain."),
@@ -842,7 +841,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
 
   server.registerTool(
     "list_projects",
-    { description: owner("List all projects, in the order Cody keeps them in the sidebar, with their repo, env var names, notes and tasks.") },
+    { description: "List all projects, in the order Cody keeps them in the sidebar, with their repo, env var names, notes and tasks." },
     safe(async () => ok(scopeId ? [await projectView(ownProject())] : await Promise.all(store.listProjects().map(projectView)))),
   )
 
@@ -3390,7 +3389,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         "The box itself isn't changed: Box Yard snapshots it, strips a scratch copy of every workspace, login, token, temp file and log, saves that as the snapshot and deletes the copy. It replaces the project's previous snapshot. " +
         "Refused while agents run on the box (wait until it's idle). Runs in the background, a few minutes for a big disk; you get a notice when it's saved, and boxes made before then start without it. " +
         "New boxes of the snapshot's size or bigger use it; list_projects shows it. " +
-        owner("Cody can clear or replace it in the project's Settings. ") +
+        "Cody can clear or replace it in the project's Settings. " +
         (scopeId ? "As a Captain you can only snapshot a box your project's tasks live on, for your project." : "Pass project when the box holds more than one project's work."),
       inputSchema: {
         box: z.string().describe("Box id, from pool_status (the box the setup task ran on)"),
@@ -3443,7 +3442,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const SAFETY =
     "Safety check first, the same as Box Yard's own cleanups: refused while an agent runs or a task is queued on it, and while any workspace has uncommitted or unpushed work, unless that task's PR is merged and its branch fully pushed. " +
     "Every workspace is archived first (a merged, fully pushed one needs no archive). RunPod network volumes and project snapshots are never touched. " +
-    owner("You can't stop agents or override the check: tell Cody what holds the box, and Cody can delete it anyway from the Boxes page. ")
+    "You can't stop agents or override the check: tell Cody what holds the box, and Cody can delete it anyway from the Boxes page. "
 
   server.registerTool(
     "delete_box",

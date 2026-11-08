@@ -186,6 +186,14 @@ describe("box runner MCP tools", () => {
 })
 
 describe("Box Yard MCP tools", () => {
+  it("interpolates names containing the template name exactly once", () => {
+    const deps = { settings: { get: () => ({ ownerName: "Cody Lee" }) } } as unknown as McpDeps
+    const tools = (buildMcpServer(deps) as unknown as { _registeredTools: Record<string, { description?: string }> })._registeredTools
+    expect(tools.list_projects!.description).toContain("in the order Cody Lee keeps")
+    expect(tools.send_to_captain!.description).toContain("on Cody Lee's chat")
+    expect(JSON.stringify(Object.values(tools).map((t) => t.description))).not.toContain("Cody Lee Lee")
+  })
+
   it.each(["Ana", undefined, " "])("names the owner (%s) in tool and parameter descriptions", (ownerName) => {
     const deps = { settings: { get: () => ({ ownerName }) } } as unknown as McpDeps
     // Registered tools aren't public API; read them to check the descriptions without a transport.
