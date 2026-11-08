@@ -188,7 +188,7 @@ for (const m of chat.filter((x) => x.role === "user" && !x.meta?.scheduleId && x
   const r = chat.find((x) => x.at > m.at && x.role === "assistant")
   if (r && r.at - m.at < 30 * 60_000) replies.push(r.at - m.at)
 }
-out.push("## Cody → the Coordinator's reply", "", ...HEAD, row("message → first reply", replies), "")
+out.push("## Owner → the Coordinator's reply", "", ...HEAD, row("message → first reply", replies), "")
 
 // ---------------------------------------------------------------- settings changes
 

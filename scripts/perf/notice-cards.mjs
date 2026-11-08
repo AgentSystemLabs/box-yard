@@ -37,7 +37,7 @@ const NOTICES = [
   `📎 **${TITLE}** published Keep the Castle menu on a RunPod RTX A5000 pod: ${file(2)}`,
   `❌ **${TITLE}** failed: Claude exited with code 1.`,
   `🙋 **${TITLE}** needs you: Which GPU should the default be?`,
-  `🚢 Cody asked **${TITLE}** to merge PR #132 (Merge button): ${PR}`,
+  `🚢 The owner asked **${TITLE}** to merge PR #132 (Merge button): ${PR}`,
   `🪝 **${TITLE}** hook "box-yard: auto-merge ready PRs" (PR ready) sent to the agent: Please merge PR #132.`,
   `💬 **${TITLE}** says: The pod is up.`,
 ].map((content, i) => ({ id: `chat_cards${String(i).padStart(4, "0")}`, role: "notice", content, meta: { taskId: task.id, projectId: project.id }, createdAt: Date.now() - (20 - i) * 60_000 }))

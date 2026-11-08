@@ -5,7 +5,7 @@ import type { BoxSize, Settings } from "../../../shared/types"
 import { BOX_CREATE_CONCURRENCY, BOX_SIZES, CARDS_IDLE_HOURS, AUTOCOMPACT_MAX_TOKENS, AUTOCOMPACT_MIN_TOKENS, SUBTASK_MAX_CHILDREN, SUBTASK_MAX_DEPTH } from "../../../shared/types"
 import { NOTE_BUDGET_LIMITS } from "../../../shared/notes"
 import { LOCAL_AGENTS_LIMITS } from "../../../shared/runner"
-import { isOpenAiModel } from "../../../shared/agentCli"
+import { isOpenAiModel, isOpenCodeModel } from "../../../shared/agentCli"
 import { changedSections, type SettingsSection } from "./settingsNav"
 
 /** A field: a Settings key, or a key and the value's place inside it ("budget.dailyUsd"). */
@@ -91,6 +91,7 @@ export function settingsProblems(patch: Partial<Settings>): Record<SettingPath, 
   }
   if (patch.ownerName !== undefined) add("ownerName", ownerNameProblem(patch.ownerName))
   for (const key of ["orchestratorModel", "captainModel", "agentModel"] as const) if (patch[key] !== undefined) add(key, modelProblem(patch[key]))
+  if (patch.agentOpencodeModel !== undefined && patch.agentOpencodeModel.trim()) add("agentOpencodeModel", patch.agentOpencodeModel.length <= 100 && isOpenCodeModel(patch.agentOpencodeModel) ? null : "Use provider/model or provider/model#variant (at most 100 characters).")
   if (patch.orchestratorRelay) add("orchestratorRelay.model", modelProblem(patch.orchestratorRelay.model))
   // "" is "Same as its chat".
   if (patch.quickQuestionModel) add("quickQuestionModel", isOpenAiModel(patch.quickQuestionModel) ? "Quick questions run on Claude: pick a Claude model." : modelProblem(patch.quickQuestionModel))

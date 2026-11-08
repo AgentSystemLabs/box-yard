@@ -47,14 +47,14 @@
 ```mermaid
 flowchart TB
   subgraph cli["Box Yard CLI/scripts"]
-    M[main.rs] --> CL[cli.rs]
+    M[yard] --> CL["scripts/"]
   end
   subgraph server["server"]
-    S[server.rs] --> R[registry.rs]
-    S --> H[hooks/]
+    S["server/app.ts"] --> R["server/store.ts"]
+    S --> H["server/hooks.ts"]
   end
-  subgraph web app["web app"]
-    E[event_loop.rs] --> A[app.rs] --> UI[ui.rs]
+  subgraph web["web app"]
+    E["web/src/lib/stream.ts"] --> A["web/src/App.tsx"] --> UI["web/src/components/"]
   end
   CL --> S
   E <-->|"protocol vN"| S
@@ -91,7 +91,7 @@ flowchart TB
 - **Mechanism.** <Three or four sentences per change.>
 - **Files.** `server/<file>.ts or web/src/<file>.tsx` — <clause>; `server/<file>.ts or web/src/<file>.tsx` — <clause>.
 - **Not done.** <The approach rejected and why.>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 </details>
 

@@ -1,3 +1,4 @@
+import { DEFAULT_OWNER_NAME, withOwner } from "./owner.js"
 // The box history log: every box lifecycle event and who did it (server/boxHistory.ts writes it, the Boxes page
 // History section and the box_history MCP tool read it).
 
@@ -29,7 +30,7 @@ export type BoxEventType = (typeof BOX_EVENT_TYPES)[number]["key"]
 
 /** Who or what did it. "owner" is Cody from the UI (or the API); its label goes through withOwner. */
 export const BOX_ACTORS = [
-  { key: "owner", label: "Cody" },
+  { key: "owner", label: DEFAULT_OWNER_NAME },
   { key: "coordinator", label: "The Coordinator" },
   { key: "captain", label: "A Captain" },
   { key: "scheduler", label: "Box Yard (placement)" },
@@ -87,8 +88,9 @@ export const BOX_HISTORY_MAX_ROWS = 5000
 
 export const boxEventLabel = (type: string): string => BOX_EVENT_TYPES.find((t) => t.key === type)?.label ?? type
 
-/** "Cody", "The Coordinator", "The api Captain", "Failed-resize cleanup"… (pass the result through withOwner). */
-export function boxActorLabel(e: Pick<BoxEvent, "actor" | "actorProjectId">, projectName?: (id: string) => string | undefined): string {
+/** An actor label with only the built-in owner name personalized. */
+export function boxActorLabel(e: Pick<BoxEvent, "actor" | "actorProjectId">, projectName?: (id: string) => string | undefined, ownerName?: string): string {
+  if (e.actor === "owner") return withOwner("Cody", ownerName)
   if (e.actor === "captain") return `The ${(e.actorProjectId && projectName?.(e.actorProjectId)) || e.actorProjectId || "project"} Captain`
   return BOX_ACTORS.find((a) => a.key === e.actor)?.label ?? e.actor
 }

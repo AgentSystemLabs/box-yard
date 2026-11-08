@@ -286,7 +286,7 @@ describe("Done when its PR merges", () => {
 
     expect((await call<Task>(r, "PATCH", `/api/tasks/${t.id}`, { stayOpenOnMerge: false })).stayOpenOnMerge).toBe(false)
     expect(status(r, t)).toBe("done")
-    expect(events(r, t.id)).toContain("Stays open when its PR merges (set by Cody): Box Yard won't move it to done.")
+    expect(events(r, t.id)).toContain("Stays open when its PR merges (set by the owner): Box Yard won't move it to done.")
   })
 
   it("follows the project's own setting over Settings, both ways", async () => {

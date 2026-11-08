@@ -174,7 +174,7 @@ describe("A steered message in the transcript", () => {
     expect(mark).toBeDefined()
     expect(mark!.getAttribute("title")).toBe("Written to the agent's input stream; model processing is not confirmed")
     // Its sender's label stays.
-    expect(host.textContent).toContain("Cody")
+    expect(host.textContent).toContain("the owner")
   })
 
   it("labels a Codex acknowledgment without claiming processing", () => {

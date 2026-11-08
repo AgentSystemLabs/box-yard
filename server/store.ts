@@ -3089,6 +3089,8 @@ export class Store {
     /** The session's running token totals, every call included (sessionUsageOf). */
     sessionUsage?: Partial<TokenUsage> | null
     costUsd?: number | null
+    /** OpenCode reports per-run step sums, rather than Claude session totals. */
+    costScope?: "run" | "session"
     /** The run resumed an existing session (so its report includes the session's earlier spend). */
     resumed?: boolean
     /** The login it ran on (server/agentLogins.ts), for usage by login. */
@@ -3099,7 +3101,7 @@ export class Store {
     const reported = input.sessionUsage ? tokenUsage(input.sessionUsage) : null
     const reportedTokens = reported && sumTokens(reported) > 0 ? reported : null
     const reportedUsd = typeof input.costUsd === "number" && Number.isFinite(input.costUsd) && input.costUsd > 0 ? input.costUsd : 0
-    const { costUsd, estimated, tokens } = this.runShare({ sessionId: input.sessionId ?? null, reportedUsd, reportedTokens, main, model: input.model ?? null, resumed: Boolean(input.resumed) })
+    const { costUsd, estimated, tokens } = input.costScope === "run" ? { costUsd: reportedUsd, estimated: false, tokens: main } : this.runShare({ sessionId: input.sessionId ?? null, reportedUsd, reportedTokens, main, model: input.model ?? null, resumed: Boolean(input.resumed) })
     const totalTokens = sumTokens(tokens)
     // Some CLI runs report only cost, or only duration. Keep those rows too.
     if (totalTokens <= 0 && reportedUsd <= 0 && !reportedTokens && !(input.durationMs && input.durationMs > 0)) return 0

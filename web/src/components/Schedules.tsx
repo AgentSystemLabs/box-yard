@@ -398,7 +398,7 @@ function RunList({ runs, showQuiet, onShowQuiet }: { runs: Task[]; showQuiet: bo
       {shown.length ? (
         <ul className="divide-y divide-zinc-900 rounded-lg border border-zinc-800/80">
           {shown.slice(0, 15).map((t) => (
-            <li key={t.id} className={cx(isQuietRun(t) && "opacity-60 hover:opacity-100")}>
+            <li key={t.id}>
               <Link href={`/tasks/${t.id}`} className="flex min-h-11 items-center gap-3 px-3 py-2 text-sm hover:bg-zinc-900">
                 <span className="min-w-0 flex-1 truncate text-zinc-200">{t.summary ?? t.title}</span>
                 {isQuietRun(t) && <QuietPill />}

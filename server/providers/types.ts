@@ -43,6 +43,7 @@ export interface BoxProvider {
   /** Codex binary inside the box (docs/codex.md); "codex" when unset, installed on first use. */
   readonly codexBin?: string
   /** Cursor's CLI inside the box (docs/cursor.md); "cursor-agent" when unset, installed on first use. */
+  readonly opencodeBin?: string
   readonly cursorBin?: string
   /**
    * Each box is its own cgroup (Upstash Box), so the cgroup CPU counter the box probe reads (`usage_usec` in

@@ -43,14 +43,15 @@
 
 ```mermaid
 flowchart LR
-  subgraph web app["web app"]
+  subgraph web["web app"]
     P["panel or overlay"]
   end
   subgraph server["server"]
     R["registry / store"]
     H["hook route"]
   end
-  A["worker runner"] -->|"hook event"| H --> R --> P
+  H --> R --> P
+  H -->|"queued turn"| A["worker runner"]
   classDef changed fill:#fde68a,stroke:#b45309,color:#111
   class P,H changed
 ```
@@ -81,7 +82,7 @@ flowchart LR
 - **Features.** <Mechanism, three sentences; files with a clause each.>
 - **Fixes.** <Root cause and the one-line change; the regression test's name.>
 - **Refactor.** <What moved where, and the proof nothing changed (same test count, a diff of the rendered output).>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 📓 Notes <a id="notes"></a>
 

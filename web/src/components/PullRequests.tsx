@@ -107,8 +107,8 @@ export function PullRequestsDialog({ onClose }: { onClose: () => void }) {
       {/* Keep the list mounted, so its scroll position survives opening a PR and returning. */}
       <div hidden={selected !== null} className="min-h-0 flex-1 overflow-y-auto p-3 @min-[40rem]:p-5">
         <div role="group" aria-label="Pull request filter" className="mb-3 flex flex-wrap gap-2">
-          <Button variant={history ? "ghost" : "subtle"} aria-label="Open work" aria-pressed={!history} onClick={() => { setHistory(false); setLimit(40) }}>Open work <span className="text-zinc-400">{activeCount}</span></Button>
-          <Button variant={history ? "subtle" : "ghost"} aria-label="History" aria-pressed={history} onClick={() => { setHistory(true); setLimit(40) }}>History <span className="text-zinc-400">{historyCount}</span></Button>
+          <Button variant={history ? "ghost" : "subtle"} aria-label="Open work" aria-pressed={!history} onClick={() => { setHistory(false); setLimit(40) }}>Open work <span className="text-zinc-300">{activeCount}</span></Button>
+          <Button variant={history ? "subtle" : "ghost"} aria-label="History" aria-pressed={history} onClick={() => { setHistory(true); setLimit(40) }}>History <span className="text-zinc-300">{historyCount}</span></Button>
         </div>
         <p className="mb-3 text-xs text-zinc-500">Task-linked PRs · last reported state. Check GitHub for current reviews and checks.</p>
         {tasks.isLoading ? <p role="status">Loading pull requests…</p> : tasks.isError ? (
@@ -117,7 +117,7 @@ export function PullRequestsDialog({ onClose }: { onClose: () => void }) {
           <div ref={stable.listRef} className="space-y-2">
             <ResortPill newCount={stable.newCount} changedCount={stable.changedCount} onResort={stable.resort} />
             {stable.entries.slice(0, limit).map(({ item, stale }) => (
-              <article key={item.url} data-stable-key={item.url} data-testid="pr-row" className={cx("rounded-xl border border-zinc-800 bg-zinc-900/40 p-3", stale && "border-dashed opacity-50")}>
+              <article key={item.url} data-stable-key={item.url} data-testid="pr-row" className={cx("rounded-xl border border-zinc-800 bg-zinc-900/40 p-3", stale && "border-dashed bg-zinc-900/20")}>
                 <button type="button" aria-label={`View pull request: ${item.tasks[0]!.title}`} onClick={(e) => { lastPick.current = e.currentTarget; setSelected(item.url) }} className="flex w-full min-w-0 items-start gap-2 rounded-md text-left text-sm font-medium text-zinc-100 focus-visible:outline-2 focus-visible:outline-yard-500">
                   <span className="min-w-0 flex-1 wrap-anywhere">{item.tasks[0]!.title}</span><ArrowRight aria-hidden className="h-4 w-4 shrink-0 self-center text-zinc-500" />
                 </button>

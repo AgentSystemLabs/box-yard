@@ -215,7 +215,7 @@ describe("Delete, Clear and Clean up on a box the provider no longer has", () =>
     expect((await getTask(r, t.id)).boxId).toBeNull()
     const lost = lostEvents(r, boxId)
     expect(lost).toHaveLength(1)
-    expect(lost[0]!.reason).toBe("The provider no longer has the box (deleted outside Box Yard, e.g. in the provider's console); found when Cody pressed Delete box.")
+    expect(lost[0]!.reason).toBe("The provider no longer has the box (deleted outside Box Yard, e.g. in the provider's console); found when the owner pressed Delete box.")
 
     // Again: nothing left to delete, still fine, and no new history row.
     const rows = r.yard.tasks.history.list({ boxId }).length
@@ -246,13 +246,13 @@ describe("Delete, Clear and Clean up on a box the provider no longer has", () =>
     expect(cleaned.status).toBe(202)
     expect(cleaned.data).toMatchObject({ boxId: a.boxId, status: "done", freedBytes: 0, error: null })
     expect(boxIds(r)).not.toContain(a.boxId)
-    expect(lostEvents(r, a.boxId)[0]!.reason).toContain("found when Cody pressed Clean up now")
+    expect(lostEvents(r, a.boxId)[0]!.reason).toContain("found when the owner pressed Clean up now")
     expect((await send(r, "POST", `/api/boxes/${a.boxId}/cleanup`)).status).toBe(202)
 
     const cleared = await call<BoxCleanup>(r, "POST", `/api/boxes/${b.boxId}/clear`, {})
     expect(cleared).toMatchObject({ boxId: b.boxId, status: "done", error: null })
     expect(boxIds(r)).not.toContain(b.boxId)
-    expect(lostEvents(r, b.boxId)[0]!.reason).toContain("found when Cody pressed Clear box")
+    expect(lostEvents(r, b.boxId)[0]!.reason).toContain("found when the owner pressed Clear box")
     expect((await send(r, "POST", `/api/boxes/${b.boxId}/clear`, {})).status).toBe(200)
     expect(lostEvents(r, a.boxId)).toHaveLength(1)
     expect(lostEvents(r, b.boxId)).toHaveLength(1)

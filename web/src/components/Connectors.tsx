@@ -590,7 +590,7 @@ function SignInBox({ c, onDone }: { c: Connector; onDone: () => void }) {
       ) : (
         <>
           <p>
-            <NewTabLink href={start.authorizeUrl} mark="end" className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-yard-600 px-3 font-medium text-white sm:min-h-8" data-testid="connector-sign-in-open">
+            <NewTabLink href={start.authorizeUrl} mark="end" className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-action px-3 font-medium text-on-action hover:bg-action-hover sm:min-h-8" data-testid="connector-sign-in-open">
               Open the sign-in page at {start.signInHost}
             </NewTabLink>
           </p>

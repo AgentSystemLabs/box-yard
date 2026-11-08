@@ -12,7 +12,7 @@ import { createContext, memo, useCallback, useContext, useEffect, useId, useLayo
 import { Link } from "wouter"
 import { AlarmClock, BarChart3, Check, ChevronDown, ChevronRight, Inbox, Keyboard, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Plus, Settings as SettingsIcon } from "lucide-react"
 import type { Task } from "../../../shared/types"
-import { useCaptainState, useChatBusy, useProjects, useTasks } from "../lib/queries"
+import { useCaptainState, useCoordinatorStatus, useProjects, useTasks } from "../lib/queries"
 import { inInbox, usePendingCloses } from "../lib/inbox"
 import { useMarkDone } from "../lib/markDone"
 import { readyForReview } from "../lib/taskActions"
@@ -58,7 +58,6 @@ import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
 import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { DismissButton, isDialogOpen } from "./Modal"
-import { ChatIcon } from "./ChatIcons"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
 import { focusComposer, keepFocusForPick, pickFocusesComposer } from "../lib/chatSwitch"
 import { isTouchDevice } from "../lib/composer"
@@ -71,10 +70,9 @@ import { NewProjectDialog } from "./NewProjectDialog"
 import { openShortcuts } from "./ShortcutsHelp"
 import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
-import { CueDot, ProjectAvatar, TaskStatusIcon, WORKING_PULSE, projectColorStyle } from "./TaskIcon"
-import { CaptainTile } from "./CaptainIcon"
+import { TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
-import { PrChip, STATUS, TAP_AREA, cx } from "./ui"
+import { AgentIcon, PrChip, STATUS, TAP_AREA, cx } from "./ui"
 
 /** Keyboard focus: a white outline and no fill, so it's never mistaken for the selected row (or a hover). */
 const FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-zinc-100"
@@ -452,9 +450,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         <button type="button" onClick={onExpand} title="Show the sidebar" aria-label="Show the sidebar" className={ICON_BUTTON}>
           <PanelLeftOpen className="h-4 w-4" />
         </button>
-        <RailButton label="Coordinator" mark={mark(selection, coordinatorKey)} onClick={pick.coordinator}>
-          <CoordinatorIcon />
-        </RailButton>
+        <CoordinatorRailButton mark={mark(selection, coordinatorKey)} onClick={pick.coordinator} />
         {/* Only while something waits: the section it opens is gone when nothing does. It widens the sidebar the way
             "Show the sidebar" does (the column, or the drawer while a panel needs the room), on that section. */}
         {inbox.count > 0 && (
@@ -549,7 +545,6 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
               >
                 <CoordinatorIcon />
                 <span className="min-w-0 flex-1 truncate">Coordinator</span>
-                <CoordinatorState />
                 {coordinator === "behind" && <BehindMark />}
               </button>
             </div>
@@ -649,22 +644,20 @@ function BehindMark() {
   )
 }
 
-/** The Coordinator's tile: its helm, pulsing while its turn runs (WORKING_PULSE), as a task's does. */
+/** The Coordinator's actual state, shared by the expanded row, collapsed rail and chat header. */
 function CoordinatorIcon() {
-  const busy = Boolean(useChatBusy().data)
-  return (
-    <span className={cx("relative grid h-5 w-5 shrink-0 place-items-center rounded-md bg-yard-500/15 text-yard-400", busy && WORKING_PULSE)}>
-      <ChatIcon kind="coordinator" className="h-3.5 w-3.5" />
-      <CueDot cue={busy ? "working" : null} />
-    </span>
-  )
+  const state = useCoordinatorStatus()
+  return <AgentIcon announce={false} kind="coordinator" {...state} error={Boolean(state.error)} tile />
 }
 
-/** "working" while the Coordinator's turn runs. */
-function CoordinatorState() {
-  const busy = useChatBusy()
-  if (!busy.data) return null
-  return <span className="shrink-0 text-xs font-normal text-sky-300">working</span>
+function CoordinatorRailButton({ mark, onClick }: { mark: Mark; onClick: (e: PickEvent) => void }) {
+  const state = useCoordinatorStatus()
+  const status = agentIconLabel(state)
+  return (
+    <RailButton label={`Coordinator${status ? `, ${status}` : ""}`} mark={mark} onClick={onClick}>
+      <AgentIcon announce={false} kind="coordinator" {...state} error={Boolean(state.error)} tile />
+    </RailButton>
+  )
 }
 
 /** `captain`: the project whose Captain it opens, so a press starts rendering its chat (lib/captainPrerender.ts). */
@@ -699,13 +692,13 @@ function RailButton({ label, title = label, mark, captain, onClick, onDoubleClic
 }
 
 /**
- * A project's swatch on the rail: its icon, or its initial in its colour; a dot says one of its tasks asks, or one is
- * running. A click opens its Captain; a double click (or tap) also expands the sidebar on its tasks.
+ * A Captain on the rail: the same icon and status as its expanded row. A click opens its Captain; a double click (or tap) also expands the sidebar on its tasks.
  */
 const RailProject = memo(function RailProject({ group, mark, onPick, onExpand }: { group: SidebarGroup; mark: Mark; onPick: (projectId: string, e: PickEvent) => void; onExpand: (projectId: string) => void }) {
   const color = useTiles().colors.get(group.project.id)
-  const state = group.needs ? `${group.needs} asking` : group.running ? `${group.running} running` : null
-  const label = `${group.project.name} Captain${state ? `, ${state}` : ""}`
+  const state = useCaptainState(group.project.id).data
+  const status = agentIconLabel(state)
+  const label = `${group.project.name} Captain${status ? `, ${status}` : ""}`
   return (
     <RailButton
       label={label}
@@ -715,27 +708,10 @@ const RailProject = memo(function RailProject({ group, mark, onPick, onExpand }:
       onClick={(e) => onPick(group.project.id, e)}
       onDoubleClick={() => onExpand(group.project.id)}
     >
-      <ProjectAvatar src={group.project.iconUrl} className="h-7 w-7 rounded-md">
-        <span style={projectColorStyle(color)} className="grid h-7 w-7 place-items-center rounded-md bg-(--pc)/15 text-xs font-semibold text-(--pc) uppercase">
-          {group.project.name.slice(0, 1)}
-        </span>
-      </ProjectAvatar>
-      {(group.needs > 0 || group.running > 0) && (
-        <span className={cx("absolute top-1 right-1 h-2 w-2 rounded-full ring-2 ring-zinc-950", group.needs ? "bg-amber-400" : cx("bg-sky-400", WORKING_PULSE))} />
-      )}
+      <AgentIcon announce={false} projectId={group.project.id} color={color} busy={Boolean(state?.busy)} compacting={state?.compacting} error={Boolean(state?.error)} tile />
     </RailButton>
   )
 })
-
-/** A Captain's row's tile: its icon (CaptainIcon.tsx) in its project's colour, pulsing while its turn runs, as a task's does. */
-function CaptainRowTile({ projectId, color, busy }: { projectId: string; color: Parameters<typeof projectColorStyle>[0]; busy: boolean }) {
-  return (
-    <span style={projectColorStyle(color)} className={cx("relative grid h-5 w-5 shrink-0 place-items-center text-(--pc)", busy && WORKING_PULSE)}>
-      <CaptainTile projectId={projectId} className="h-5 w-5" glyph="h-3.5 w-3.5" />
-      <CueDot cue={busy ? "working" : null} />
-    </span>
-  )
-}
 
 /**
  * A project: one row that is its Captain (the name opens it as the centre chat), with a chevron that only folds its
@@ -743,7 +719,8 @@ function CaptainRowTile({ projectId, color, busy }: { projectId: string; color: 
  */
 const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, selection, pick }: { group: SidebarGroup; folded: boolean; treeFolds: Readonly<Record<string, true>>; selection: Selection; pick: Pick }) {
   const color = useTiles().colors.get(group.project.id)
-  const busy = Boolean(useCaptainState(group.project.id).data?.busy)
+  const captain = useCaptainState(group.project.id).data
+  const busy = Boolean(captain?.busy)
   const { project, rows } = group
   const state = mark(selection, captainKey(project.id), project.id)
   const tasksId = `sidebar-tasks-${project.id}`
@@ -776,9 +753,9 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
           title={`Talk to the ${project.name} Captain${busy ? " (working)" : ""}`}
           className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-lg pr-1.5 text-left text-sm font-medium pointer-coarse:min-h-11", FOCUS, state === "selected" ? "text-zinc-50" : "text-zinc-200")}
         >
-          <CaptainRowTile projectId={project.id} color={color} busy={busy} />
+          <AgentIcon announce={false} projectId={project.id} color={color} busy={busy} compacting={captain?.compacting} error={Boolean(captain?.error)} tile />
           <span className="min-w-0 flex-1 truncate">{project.name}</span>
-          <span className="sr-only">, Captain{busy ? ", working" : ""}</span>
+          <span className="sr-only">, Captain</span>
           {folded && rows.length > 0 && (
             <span className="flex h-5 shrink-0 items-center gap-1 rounded-full bg-zinc-800/80 px-1.5 text-[11px] font-normal text-zinc-400 tabular-nums">
               {group.needs > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
@@ -1104,7 +1081,7 @@ const saysState = (meta: string, label: string) => meta === label.toLowerCase() 
 function RowIcon({ task, label, dim }: { task: Task; label: string; dim: boolean }) {
   return (
     <span className="col-start-1 row-start-1 grid h-5 w-5 place-items-center">
-      <TaskStatusIcon task={task} label={label} muted={dim} pulse={task.status !== "working"} />
+      <TaskStatusIcon task={task} label={label} muted={dim} />
     </span>
   )
 }

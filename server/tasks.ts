@@ -1,3 +1,4 @@
+import { OPENCODE_CREDENTIAL_VARS, OPENCODE_INSTALL, OPENCODE_LOGIN_HELP } from "./opencode.js"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -78,12 +79,12 @@ import { DOCKER_MAX_TASKS, DOCKER_NEEDS_CLAUDE_KEY, DOCKER_NEEDS_CODEX_KEY, DOCK
 import { isMachineBox, labelPhrase, machineBoxId, machineLabel, machineMatches, machineOfBox, normalizeLabel, pickMachine, type Machine, type MachineCandidate, type MachinePick } from "../shared/machines.js"
 import type { DockerContainerState } from "./providers/docker.js"
 import { SleepWatch, sleepLength } from "./sleep.js"
-import { CLAUDE_CREDENTIAL_VARS, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
+import { CLAUDE_CREDENTIAL_VARS, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, openCodeTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
 import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sessions.js"
 import type { SessionRef } from "./connectors/connectors.js"
 import { claudeLoginRef, codexLoginRef, limitsOf, recordLimits, type LoginRef } from "./loginLimits.js"
 import { authorEnv, chooseAuthor, fallbackWarning, GithubAuthors, hostGitScript, parseHostGit, readHostGit, recordAuthorSource, type HostGit, type TurnAuthor } from "./gitAuthor.js"
-import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isCursorOnlyModel, isOpenAiModel, type AgentCli } from "../shared/agentCli.js"
+import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, type AgentCli } from "../shared/agentCli.js"
 import { CursorModels } from "./cursor.js"
 import type { Identities, TurnSigning } from "./identity/identities.js"
 import type { AgentLogins, PickedLogin } from "./agentLogins.js"
@@ -845,6 +846,7 @@ export class TaskManager {
     fs.mkdirSync(path.join(this.c.dataDir, "archives"), { recursive: true })
     this.history = new BoxHistory(this.store.db)
     this.janitor = new BoxJanitor({
+      ownerName: () => this.owner(),
       store: this.store,
       provider: this.provider,
       hub: this.hub,
@@ -854,13 +856,13 @@ export class TaskManager {
       hasFreshArchive: (row) => this.hasFreshArchive(row),
       archive: (taskId) => this.archiveFresh(taskId),
       archiveProblem: (taskId) => this.archiveProblem(taskId),
-      park: (taskId, boxId, note) => this.park(taskId, boxId, withOwner(note, this.owner())),
+      park: (taskId, boxId, note) => this.park(taskId, boxId, note),
       dropPushed: (taskId, boxId) => this.dropPushed(taskId, boxId),
       pushedOnGitHub: (taskId, boxId) => this.pushedOnGitHub(taskId, boxId),
       mirrorsToKeep: (boxId, owner) => this.mirrorsToKeep(boxId, owner),
       finished: (report) => this.cleanupFinished(report),
       inUse: (boxId, taskId) => this.workInUse(boxId, taskId),
-      taskEvent: (taskId, text) => this.addEvent(taskId, withOwner(text, this.owner()), { kind: "cleanup" }),
+      taskEvent: (taskId, text) => this.addEvent(taskId, text, { kind: "cleanup" }),
     })
     this.ownCleanup = new OwnCleanup({
       store: this.store,
@@ -882,7 +884,7 @@ export class TaskManager {
       dropPushed: (taskId, boxId) => this.dropPushed(taskId, boxId),
       where: (boxId) => (isMachineBox(boxId) ? `SSH machine ${this.machineName(boxId)}` : "this computer"),
       inUse: (boxId, taskId) => this.workInUse(boxId, taskId),
-      taskEvent: (taskId, text) => this.addEvent(taskId, withOwner(text, this.owner()), { kind: "cleanup" }),
+      taskEvent: (taskId, text) => this.addEvent(taskId, text, { kind: "cleanup" }),
     })
   }
 
@@ -1153,6 +1155,8 @@ export class TaskManager {
       ? undefined
       : cli === "codex"
         ? this.codexCredentials(project.id, taskEnv).kind !== null
+        : cli === "opencode"
+          ? this.openCodeCredentials(project.id, taskEnv).from !== null
         : cli === "cursor"
           ? this.cursorCredentials(project.id, taskEnv).from !== null
           : this.turnCredentials(project.id, taskEnv).claudeFrom !== null
@@ -1232,6 +1236,9 @@ export class TaskManager {
       if (!input.prompt.trim()) throw new BadRequestError("prompt is required")
       if (input.boxSize && (input.runsOn !== "box" || !isBoxSize(input.boxSize))) throw new BadRequestError("boxSize needs runsOn box and a small, medium or large size")
       if (input.runsOn) this.requireIdentityRunner(project.id, input.runsOn)
+      const cli = this.agentCliFor(input, project)
+      if (cli === "opencode" && input.model && !isOpenCodeModel(input.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant; run opencode models on the runner.")
+      if (cli === "opencode" && input.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
       return project
     })
     const batchId = inputs.length > 1 ? `batch_${randomUUID().replace(/-/g, "").slice(0, 12)}` : null
@@ -1344,8 +1351,8 @@ export class TaskManager {
   }
 
   /** sendInput that also says which queued message it made (the MCP tools hand it back for cancel/edit). */
-  send(taskId: string, content: string, source: InputSource = "cody", attachments: StoredUpload[] = [], route?: Parameters<TaskManager["sendInput"]>[4], hook?: Parameters<TaskManager["sendInput"]>[5]): { task: Task; inputId: string } {
-    const inputId = this.enqueue(this.requireRow(taskId), content, source, attachments, route, hook)
+  send(taskId: string, content: string, source: InputSource = "cody", attachments: StoredUpload[] = [], route?: Parameters<TaskManager["sendInput"]>[4], hook?: Parameters<TaskManager["sendInput"]>[5], clientMessageId?: string): { task: Task; inputId: string } {
+    const inputId = this.enqueue(this.requireRow(taskId), content, source, attachments, route, hook, clientMessageId)
     this.emitTask(taskId)
     this.schedule()
     return { task: this.store.getTask(taskId)!, inputId }
@@ -1426,7 +1433,7 @@ export class TaskManager {
 
   private queuedMessage(r: QueuedInputRow): QueuedMessage {
     const [kind, ref] = r.source.split(/:(.*)/s) as [string, string | undefined]
-    const meta = r.message ?? (kind === "captain" && ref ? captainMeta(this.store, ref) : kind === "hook" ? { source: "hook" } : { source: r.source })
+    const meta: Record<string, unknown> = r.message ?? (kind === "captain" && ref ? captainMeta(this.store, ref) : kind === "hook" ? { source: "hook" } : { source: r.source })
     const owner = this.owner()
     const sender: { kind: QueuedSender; label: string } =
       kind === "agent"
@@ -1447,6 +1454,7 @@ export class TaskManager {
     })
     return {
       id: r.id,
+      ...(typeof meta.clientMessageId === "string" ? { clientMessageId: meta.clientMessageId } : {}),
       taskId: r.taskId,
       source: r.source,
       kind: sender.kind,
@@ -1468,14 +1476,16 @@ export class TaskManager {
     attachments: StoredUpload[],
     route?: Parameters<TaskManager["sendInput"]>[4],
     hook?: Parameters<TaskManager["sendInput"]>[5],
+    clientMessageId?: string,
   ): string {
+    this.checkOpenCodeRoute(row, route)
     if (!content.trim() && !attachments.length) throw new BadRequestError("message is empty")
     // The files are copied into the box when the next turn starts, so this works while the agent is mid-turn.
     // Messages from Cody, the Coordinator, a Captain or a hook get their transcript line when a turn delivers them;
     // until then the task page shows them as Queued rows (editable, cancellable).
     const shown = source === "cody" || source === MERGE_BUTTON_SOURCE || source === "orchestrator" || source.startsWith("captain:") || hook
     const from = hook ? hook.meta : source.startsWith("captain:") ? captainMeta(this.store, source.slice("captain:".length)) : { source }
-    const message = shown ? { ...from, ...(attachments.length ? { attachments: publicFiles(attachments) } : {}) } : undefined
+    const message = shown ? { ...from, ...(clientMessageId ? { clientMessageId } : {}), ...(attachments.length ? { attachments: publicFiles(attachments) } : {}) } : undefined
     const inputId = this.store.queueInput(row.id, source, content.trim(), attachments.map((f) => f.id), { prefix: hook?.prefix, message })
     // The project's Captain answering an agent that waits mid-turn (message_captain): hand it over now.
     if (source === `captain:${row.project_id}` && !hook && !attachments.length && content.trim()) this.handToWaitingAgent(row, inputId, content.trim())
@@ -1551,6 +1561,7 @@ export class TaskManager {
 
   setTaskModel(taskId: string, route: { model?: string | null; effort?: Effort | null; routingRule?: string | null; routingReason?: string | null }): Task {
     const row = this.requireRow(taskId)
+    this.checkOpenCodeRoute(row, route)
     const patch: Parameters<Store["updateTask"]>[1] = {}
     if (route.model !== undefined) patch.model = route.model
     if (route.effort !== undefined) patch.effort = route.effort
@@ -1560,6 +1571,12 @@ export class TaskManager {
     this.addEvent(row.id, `Routing updated for subsequent turns: ${this.routeLabel({ model: route.model ?? row.model, effort: route.effort ?? row.effort, routingRule: route.routingRule ?? row.routing_rule, routingReason: route.routingReason ?? row.routing_reason })}.`)
     this.emitTask(row.id)
     return this.store.getTask(row.id)!
+  }
+
+  private checkOpenCodeRoute(row: TaskRow, route?: Parameters<TaskManager["sendInput"]>[4]) {
+    if (taskAgentCli(row) !== "opencode") return
+    if (route?.model && !isOpenCodeModel(route.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant.")
+    if (route?.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
   }
 
   /**
@@ -1603,7 +1620,7 @@ export class TaskManager {
       this.dropQueuedMessages(row.id)
       if (row.status === "waiting") this.store.updateTask(row.id, { status: "idle" }, { quiet: true })
     }
-    const why = by?.cancelled ? withOwner(`Cancelled by its parent task, ${by.parent.title}: it rests for Cody's review.`, this.owner()) : by ? `Stopped with its parent task, ${by.parent.title}.` : null
+    const why = by?.cancelled ? `Cancelled by its parent task, ${by.parent.title}: ${withOwner("it rests for Cody's review.", this.owner())}` : by ? `Stopped with its parent task, ${by.parent.title}.` : null
     this.addEvent(row.id, why ?? withOwner("Stopped by Cody.", this.owner()))
     this.emitTask(row.id)
     await this.cascadeSubtasks(row, (kid) => (this.liveSubtask(kid) ? this.stopTask(kid.id, { parent: row }) : Promise.resolve()))
@@ -1962,6 +1979,7 @@ export class TaskManager {
     const row = this.requireRow(taskId)
     if (!row.session_started) throw new BadRequestError("This agent hasn't started its session yet, so there is nothing to compact.")
     if (taskAgentCli(row) === "codex") throw new BadRequestError("This agent runs on Codex, which compacts its own context as it goes (Settings › Box agents › Auto-compact sets when).")
+    if (taskAgentCli(row) === "opencode") throw new BadRequestError("OpenCode manages its own compaction; Box Yard cannot request a headless compact turn.")
     if (taskAgentCli(row) === "cursor") throw new BadRequestError("This agent runs on Cursor, which summarizes its own context as it fills up: cursor-agent has no compact command to run.")
     if (row.compacting || row.compact_pending) return this.store.getTask(row.id)!
     if (row.status === "failed") throw new BadRequestError("The agent's last turn failed. Retry it before compacting.")
@@ -1986,6 +2004,8 @@ export class TaskManager {
     if (options.model && modelCli && agent !== "cursor" && modelCli !== agent) throw new BadRequestError(`Model ${options.model} cannot run on ${AGENT_CLI_LABEL[agent]}. Choose a compatible model or use its defaults.`)
     if (options.model && agent === "cursor" && !cursorModel(options.model, "", (id) => this.cursorModels.has(id))) throw new BadRequestError(`Model ${options.model} is not a Cursor model in its catalog. Choose a Cursor model or use its defaults.`)
     if (options.effort === "ultra" && agent !== "codex") throw new BadRequestError("Ultra effort is only available on Codex.")
+    if (agent === "opencode" && options.model && !isOpenCodeModel(options.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant.")
+    if (agent === "opencode" && options.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
     if (agent === "cursor" && options.effort) throw new BadRequestError("Cursor's effort is part of its model id; omit effort.")
     const runner = this.store.taskRunner(before)
     await this.requireRunner(runner, before.project_id, this.store.taskEnv(taskId), { agentCli: agent, machineLabel: before.machine_label, gpu: taskGpuPick(before) })
@@ -2590,7 +2610,7 @@ export class TaskManager {
     if (risky.length && !opts.override) {
       throw new ConflictError(`${check.label} was not ${pod ? "terminated" : "deleted"}: ${risky.map(refusalLine).join("; ")}. Choose ${pod ? "Terminate" : "Delete"} anyway to archive and ${pod ? "terminate" : "delete"} it.`)
     }
-    const overridden = risky.length ? withOwner(` Cody chose ${pod ? "Terminate" : "Delete"} anyway past: ${risky.map(refusalLine).join("; ")}.`, this.owner()) : ""
+    const overridden = risky.length ? ` ${withOwner("Cody", this.owner())} chose ${pod ? "Terminate" : "Delete"} anyway past: ${risky.map(refusalLine).join("; ")}.` : ""
     const result: BoxDeleteResult = { boxId, kind, label: check.label, archived: [], fromGitHub: [] }
     // The check ran before the box was claimed: an agent's delete also refuses a turn that started or got queued since.
     const lateCheck = () => {
@@ -2909,7 +2929,7 @@ export class TaskManager {
           boxId: id,
           type: "created",
           actor: { kind: "resize" },
-          reason: `Target of the resize of ${r.boxId} ${r.from} → ${r.to}, asked by ${initiatorLabel(r.by, this.initiatorProjectName(r.by))}${r.reason ? `: ${r.reason}` : "."}`,
+          reason: `Target of the resize of ${r.boxId} ${r.from} → ${r.to}, asked by ${initiatorLabel(r.by, this.initiatorProjectName(r.by), this.owner())}${r.reason ? `: ${r.reason}` : "."}`,
           relatedBoxId: r.boxId,
           resizeId: r.id,
           detail: createdDetail(made, owner ? this.store.getProject(owner)?.name : undefined),
@@ -3130,7 +3150,7 @@ export class TaskManager {
   /** A resize the Coordinator or a Captain made: a notice for the Coordinator and the box's Captains, and a notification for Cody. */
   private announceResize(r: BoxResize) {
     const captainProject = r.by.kind === "captain" ? r.by.projectId : null
-    const who = initiatorLabel(r.by, captainProject ? this.store.getProject(captainProject)?.name : undefined)
+    const who = initiatorLabel(r.by, captainProject ? this.store.getProject(captainProject)?.name : undefined, this.owner())
     const boxId = r.newBoxId && r.status === "done" ? r.newBoxId : r.boxId
     const forProject = r.by.kind === "scheduler" ? [r.by.projectId] : []
     const projectIds = [...new Set(this.store.listTaskRows({ boxId }).map((t) => t.project_id).concat(this.store.getKv(boxOwnerKey(boxId)) ?? [], forProject))].filter(
@@ -4109,7 +4129,7 @@ export class TaskManager {
     if (!this.logins) return null
     const taskEnv = this.store.taskEnv(row.id)
     // Cursor's logins don't rotate: one Cursor API key (or the computer's own login) for every turn.
-    if (taskAgentCli(row) === "cursor") return null
+    if (taskAgentCli(row) === "cursor" || taskAgentCli(row) === "opencode") return null
     if (taskAgentCli(row) === "codex") {
       if (this.codexCredentials(projectId, taskEnv, boxId).from !== "global" || !this.codexHandOver(boxId)) return null
       return this.logins.pick({ harness: "codex", holder: row.id, resume })
@@ -4182,7 +4202,12 @@ export class TaskManager {
     return codexTurnLogin({ ...this.store.projectEnv(projectId), ...taskEnv }, global)
   }
 
-  /** What a Cursor turn of this project logs in with: its own CURSOR_API_KEY, else Settings › Credentials' Cursor API key, else none. */
+  /** OpenCode API credentials for this turn, with project/task overrides ahead of Settings. */
+  openCodeCredentials(projectId: string, taskEnv: Record<string, string> = {}) {
+    return openCodeTurnLogin({ ...this.store.projectEnv(projectId), ...taskEnv }, this.settings.credentials.get("opencodeAuthJson"))
+  }
+
+  /** What a Cursor turn logs in with: its own CURSOR_API_KEY, else Settings' Cursor key, else none. */
   cursorCredentials(projectId: string, taskEnv: Record<string, string> = {}): CursorTurnLogin {
     return cursorTurnLogin({ ...this.store.projectEnv(projectId), ...taskEnv }, this.settings.credentials.get("cursorApiKey"))
   }
@@ -4740,6 +4765,7 @@ export class TaskManager {
   private dockerClaudeProblem(row: TaskRow): string | null {
     if (this.c.mock) return null
     if (taskAgentCli(row) === "codex") return this.codexCredentials(row.project_id, this.store.taskEnv(row.id)).kind ? null : DOCKER_NEEDS_CODEX_KEY
+    if (taskAgentCli(row) === "opencode") return this.openCodeCredentials(row.project_id, this.store.taskEnv(row.id)).from ? null : OPENCODE_LOGIN_HELP
     if (taskAgentCli(row) === "cursor") return this.cursorCredentials(row.project_id, this.store.taskEnv(row.id)).from ? null : DOCKER_NEEDS_CURSOR_KEY
     return this.turnCredentials(row.project_id, this.store.taskEnv(row.id)).claudeFrom ? null : DOCKER_NEEDS_CLAUDE_KEY
   }
@@ -4827,6 +4853,10 @@ export class TaskManager {
    */
   private machineAgent(row: TaskRow): (m: Machine) => Pick<MachineCandidate, "agentFound" | "agentLogin"> {
     const env = this.store.taskEnv(row.id)
+    if (taskAgentCli(row) === "opencode") {
+      const key = this.c.mock || this.openCodeCredentials(row.project_id, env).from !== null
+      return (m) => ({ agentFound: this.c.mock || (m.lastTest?.tools.opencode?.found === true && /^1\.19\.5(?:\s|$)/.test(m.lastTest.tools.opencode.version ?? "")), agentLogin: key || m.lastTest?.opencodeLogin === true })
+    }
     if (taskAgentCli(row) === "cursor") {
       const key = this.c.mock || this.cursorCredentials(row.project_id, env).from !== null
       return (m) => ({ agentFound: this.c.mock || m.lastTest?.tools.cursor?.found === true, agentLogin: key || m.lastTest?.cursorLogin === true })
@@ -6128,6 +6158,7 @@ export class TaskManager {
       const connectors = await this.turnConnectors(row, project.id, boxId)
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
       if (taskJson.agent === "cursor") await this.ensureCursor(boxId)
+      if (taskJson.agent === "opencode") await this.ensureOpenCode(boxId)
       if (taskJson.agent === "codex") {
         await this.ensureCodex(boxId)
         // The ChatGPT login goes to the box for this turn; the runner keeps whichever copy is newer, and Box Yard reads
@@ -6394,16 +6425,22 @@ export class TaskManager {
     const cli = taskAgentCli(row)
     const codex = cli === "codex"
     const cursor = cli === "cursor"
+    const opencode = cli === "opencode"
     const route = resolveAgentRoute({
       task: { model: row.model, effort: row.effort, routingRule: row.routing_rule, routingReason: row.routing_reason },
       config: loadRouting(this.c.dataDir, s).config,
       project,
-      settings: codex ? { agentModel: s.agentCodexModel, agentEffort: s.agentCodexEffort } : cursor ? { agentModel: s.agentCursorModel, agentEffort: s.agentEffort } : s,
-      sources: codex ? { agentModel: sources.agentCodexModel, agentEffort: sources.agentCodexEffort } : cursor ? { agentModel: sources.agentCursorModel, agentEffort: sources.agentEffort } : sources,
+      settings: opencode ? { agentModel: s.agentOpencodeModel, agentEffort: "orchestrator" } : codex ? { agentModel: s.agentCodexModel, agentEffort: s.agentCodexEffort } : cursor ? { agentModel: s.agentCursorModel, agentEffort: s.agentEffort } : s,
+      sources: opencode ? { agentModel: sources.agentOpencodeModel, agentEffort: "default" } : codex ? { agentModel: sources.agentCodexModel, agentEffort: sources.agentCodexEffort } : cursor ? { agentModel: sources.agentCursorModel, agentEffort: sources.agentEffort } : sources,
       builtinEffort: codex ? DEFAULT_CODEX_EFFORT : DEFAULT_EFFORT,
     })
     // Cursor's model ids carry their effort (…-high), and a route's Claude alias or Codex name isn't one of them: it
     // gives way to Settings' Cursor model, as does the built-in Claude default. Cursor has no separate effort.
+    if (opencode) {
+      const model = route.modelFrom === "builtin" ? s.agentOpencodeModel || null : route.model || null
+      if (model && !isOpenCodeModel(model)) throw new BadRequestError(`OpenCode cannot run model ${model}. Use provider/model or provider/model#variant in the task, routing or Settings.`)
+      return { model, effort: null, autocompact: null, route }
+    }
     if (cursor) {
       const model = cursorModel(route.modelFrom === "builtin" ? null : route.model, s.agentCursorModel, (id) => this.cursorModels.has(id))
       return { model, effort: null, autocompact: autocompactFlag(s.agentAutoCompact, row.context_window), route }
@@ -6411,7 +6448,7 @@ export class TaskManager {
     // Codex runs OpenAI models: a Claude model from Settings, routing or the built-in default gives way to the Codex model.
     // And the reverse: an OpenAI model on a Claude Code task gives way to Settings' (or the built-in) Claude model.
     // A Cursor-only model (composer-…, auto) is Cursor's: on Claude Code it gives way the same way.
-    const foreign = (m: string | null | undefined) => isOpenAiModel(m) || isCursorOnlyModel(m)
+    const foreign = (m: string | null | undefined) => isOpenAiModel(m) || isCursorOnlyModel(m) || isOpenCodeModel(m)
     const model = codex ? codexModel(route.model, s.agentCodexModel) : foreign(route.model) ? (foreign(s.agentModel) ? DEFAULT_MODEL : s.agentModel) : route.model
     return { model, effort: route.effort, autocompact: autocompactFlag(s.agentAutoCompact, row.context_window), route }
   }
@@ -6432,6 +6469,19 @@ export class TaskManager {
     const res = await this.provider.exec(boxId, `command -v codex >/dev/null 2>&1 || ${install} || sudo -n ${install}; command -v codex >/dev/null 2>&1 && codex --version`)
     if (res.exitCode !== 0) throw failedStep("installing Codex on the box (npm install -g @openai/codex)", new Error(errorTail(res.stderr || res.stdout) || `exit code ${res.exitCode}`))
     this.codexReady.add(boxId)
+  }
+
+  private readonly openCodeReady = new Set<string>()
+
+  /** Install the verified CLI only inside managed sandboxes; never modify an owner's local or SSH machine. */
+  private async ensureOpenCode(boxId: string) {
+    const provider = providerOf(this.provider, boxId)
+    if (this.openCodeReady.has(boxId) || provider.name === "local" || provider.name === "ssh" || this.c.mock) return
+    const managed = '"$HOME/.boxyard-tools/opencode/node_modules/.bin/opencode"'
+    const found = `{ command -v opencode >/dev/null 2>&1 || [ -x ${managed} ]; }`
+    const res = await this.provider.exec(boxId, `${found} || npm install --prefix "$HOME/.boxyard-tools/opencode" opencode-ai@1.19.5 --no-audit --no-fund >/dev/null 2>&1; ${found}`)
+    if (res.exitCode !== 0) throw failedStep("installing OpenCode 1.19.5 in the sandbox", new Error(`Install failed. Check npm registry access and available disk space (${OPENCODE_INSTALL}).`))
+    this.openCodeReady.add(boxId)
   }
 
   /** Boxes this server run found Cursor's CLI on (or installed it on). */
@@ -6589,6 +6639,15 @@ export class TaskManager {
       Object.assign(env, cursor.env)
       unsetEnv = [...new Set([...unsetEnv, ...[...CLAUDE_CREDENTIAL_VARS, ...CURSOR_CREDENTIAL_VARS].filter((v) => !(v in env))])]
     }
+    const opencode = agent === "opencode" ? this.openCodeCredentials(project.id, this.store.taskEnv(row.id)) : null
+    if (opencode) {
+      if (claudeFrom === "global") for (const k of CLAUDE_CREDENTIAL_VARS) delete env[k]
+      // Only explicit OpenCode credentials enter this adapter: other harness logins stay out.
+      for (const k of OPENCODE_CREDENTIAL_VARS) delete env[k]
+      Object.assign(env, opencode.env)
+      unsetEnv = [...new Set([...unsetEnv, ...CLAUDE_CREDENTIAL_VARS, ...CODEX_CREDENTIAL_VARS, ...CURSOR_CREDENTIAL_VARS, ...OPENCODE_CREDENTIAL_VARS])].filter((k) => !(k in env))
+    }
+    const [opencodeBin, ...opencodeArgs] = (local || this.c.mock ? this.c.opencodeBin : (provider.opencodeBin ?? "opencode")).split(" ")
     const [cursorBin, ...cursorArgs] = (local || this.c.mock ? this.c.cursorBin : (provider.cursorBin ?? "cursor-agent")).split(" ")
     return {
       taskId: row.id,
@@ -6618,6 +6677,7 @@ export class TaskManager {
         : {}),
       // Cursor's CLI keeps its chats and config in the task folder (box-runner.mjs runCursor) whatever its login is.
       ...(cursor ? { cursorBin, cursorArgs } : {}),
+      ...(opencode ? { opencodeBin, opencodeArgs, opencodeHostLogin: (local || machine || provider.name === "local") && !this.c.mock && opencode.from === null } : {}),
       port: row.port_base ?? PORT_BASE,
       // The runner puts it into its MCP tool descriptions and replies.
       ownerName: this.owner(),
@@ -7225,7 +7285,7 @@ export class TaskManager {
         return
       case "session_reset":
         this.store.updateTask(taskId, { sessionId: String(ev.sessionId) })
-        return say("event", `${taskAgentCli(row) === "codex" ? "Codex" : taskAgentCli(row) === "cursor" ? "Cursor" : "Claude"} session was missing on this box, so the agent started a new one with a recap.`)
+        return say("event", `${AGENT_CLI_LABEL[taskAgentCli(row)]} session was missing on this box, so the agent started a new one with a recap.`)
       case "ask_user": {
         const question = String(ev.question ?? "")
         this.store.updateTask(taskId, { turnFlags: { ...flags, asked: question }, question })
@@ -8075,7 +8135,7 @@ export class TaskManager {
     }
     if (log.length >= AGENT_MSG_LIMIT) {
       say(from.id, `Message to ${to} not delivered: too many agent messages in 10 minutes.`, { to, blocked: true })
-      this.store.queueInput(from.id, "system", withOwner(`Your message to ${to} was not delivered because you sent too many agent messages recently. Ask Cody with ask_user if you are stuck.`, this.owner()))
+      this.store.queueInput(from.id, "system", `Your message to ${to} was not delivered because you sent too many agent messages recently. ${withOwner("Ask Cody with ask_user if you are stuck.", this.owner())}`)
       return
     }
     log.push(now)
@@ -8101,10 +8161,7 @@ export class TaskManager {
       this.store.queueInput(
         from.id,
         "system",
-        withOwner(
-          `Your message to "${to}" was not delivered: Cody set ${this.identities.statusOnly(from.project_id) ? "your project" : "its project"} to show the Coordinator its status only, so agents don't message between it and other projects. Ask your Captain with message_captain if you need something from there.`,
-          this.owner(),
-        ),
+        `Your message to "${to}" was not delivered: ${withOwner("Cody", this.owner())} set ${this.identities.statusOnly(from.project_id) ? "your project" : "its project"} to show the Coordinator its status only, so agents don't message between it and other projects. Ask your Captain with message_captain if you need something from there.`,
       )
       this.schedule()
       return
@@ -8475,7 +8532,7 @@ export class TaskManager {
     const codex = [`${taskId}/codex-auth.json`, `${taskId}/codex/auth.json`, `${taskId}/codex/log`, `${taskId}/codex/tmp`, `${taskId}/codex/.tmp`, `${taskId}/codex/cache`]
     // Cursor's chats (cursor/chats) go with the task so it resumes anywhere; its plugin folder is written every turn.
     const cursor = [`${taskId}/cursor-plugin`, `${taskId}/cursor/statsig-cache.json`]
-    const excludes = [...ARCHIVE_EXCLUDED_DIRS, `${taskId}/task.json`, `${taskId}/turn.pid`, `${taskId}/run.json`, `${taskId}/events.lock`, `${taskId}/mcp.json`, `${taskId}/signing.key`, ...codex, ...cursor]
+    const excludes = [...ARCHIVE_EXCLUDED_DIRS, `${taskId}/task.json`, `${taskId}/turn.pid`, `${taskId}/run.json`, `${taskId}/events.lock`, `${taskId}/mcp.json`, `${taskId}/signing.key`, ...codex, ...cursor, `${taskId}/opencode/config`, `${taskId}/opencode/cache`, `${taskId}/opencode/state`, `${taskId}/opencode/data/opencode/auth.json`, `${taskId}/opencode/data/opencode/log`]
     const project = mode.thin ? this.store.getProject(this.store.getTaskRow(taskId)?.project_id ?? "") : null
     const mirror = project?.repo ? this.mirrorSpec(boxId, project).spec.mirror : undefined
     const script = archiveScript({ root: tasksRootOf(this.provider, boxId), boxRoot: this.provider.root(boxId), taskId, excludes, maxBytes, partial, thin: mode.thin, mirror, git: mode.git, keepStage: mode.keepStage })
@@ -8699,7 +8756,7 @@ export class TaskManager {
       sessionId: typeof ev.sessionId === "string" ? ev.sessionId : row.session_id,
       // The model the turn started on (task_turns), which may come from Settings or routing rather than the task row.
       // A Cursor turn on the CLI's default model says which one it ran (its label, in turn_end).
-      model: (turnId ? this.store.getTaskTurn(turnId)?.model : null) ?? (taskAgentCli(row) === "cursor" ? (typeof ev.model === "string" ? ev.model : "cursor") : null) ?? row.model ?? this.settings.get().agentModel,
+      model: (turnId ? this.store.getTaskTurn(turnId)?.model : null) ?? ((taskAgentCli(row) === "cursor" || taskAgentCli(row) === "opencode") ? (typeof ev.model === "string" ? ev.model : AGENT_CLI_LABEL[taskAgentCli(row)]) : null) ?? row.model ?? this.settings.get().agentModel,
       startedAt: typeof ev.startedAt === "number" ? ev.startedAt : Date.now() - (typeof ev.durationMs === "number" ? ev.durationMs : 0),
       endedAt: Date.now(),
       durationMs: typeof ev.durationMs === "number" ? ev.durationMs : null,
@@ -8708,6 +8765,7 @@ export class TaskManager {
       costUsd: hasCost ? (ev.costUsd as number) : null,
       // Runners before this field didn't say; then a session's first logged turn is charged what it reported.
       resumed: ev.resumed === true,
+      costScope: taskAgentCli(row) === "opencode" ? "run" : "session",
       loginId: (turnId ? this.store.getTaskTurn(turnId)?.login_id : null) ?? null,
     })
     return hasCost ? cost : null

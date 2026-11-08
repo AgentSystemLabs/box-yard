@@ -171,7 +171,7 @@ describe("Task: feedback sent while the agent works", () => {
     const p = await call<Project>(r, "POST", "/api/projects", { name: "queued-task" })
     const t = await call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Queued feedback", prompt: "write a file [slow]" })
     await waitFor(async () => (await call<Task>(r, "GET", `/api/tasks/${t.id}`)).status === "working" || null, "working")
-    await call(r, "POST", `/api/tasks/${t.id}/messages`, { content: "also add a test" })
+    await call(r, "POST", `/api/tasks/${t.id}/messages`, { id: "chat_tasksend01", content: "also add a test" })
     // The task page shows it as a Queued row (editable) until then, not as a transcript line.
     const queue = await call<QueuedMessage[]>(r, "GET", `/api/tasks/${t.id}/queue`)
     expect(queue.map((q) => q.text)).toEqual(["also add a test"])
@@ -188,6 +188,8 @@ describe("Task: feedback sent while the agent works", () => {
     const list = await call<TaskMessage[]>(r, "GET", `/api/tasks/${t.id}/messages`)
     const at = list.findIndex((m) => m.id === delivered.id)
     expect(list[at]!.meta?.queuedAt).toBe(queue[0]!.createdAt)
+    expect(queue[0]!.clientMessageId).toBe("chat_tasksend01")
+    expect(delivered.meta?.clientMessageId).toBe("chat_tasksend01")
     // Everything from the first turn (its reply included) comes before it, the second turn's reply after it.
     const firstReply = list.findIndex((m) => m.role === "assistant")
     expect(firstReply).toBeGreaterThanOrEqual(0)

@@ -167,14 +167,14 @@ describe("pull request journey", () => {
     expect(document.querySelector('[data-merge-state="queued"]')?.textContent).toContain("Merge queued")
   })
 
-  it("holds rows still and dims merged work while updates stream in", async () => {
+  it("holds rows still and marks merged work while updates stream in", async () => {
     await open()
     await act(async () => {
       qc.setQueryData(keys.tasks, [task({ prState: "merged" }), task({ id: "task_pr003", title: "New PR", prUrl: url + "3", updatedAt: 4 })])
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
     expect(rows()).toHaveLength(1)
-    expect(rows()[0]!.className).toContain("opacity-50")
+    expect(rows()[0]!.className).toContain("border-dashed")
     expect(rows()[0]!.textContent).toContain("Merged #12")
     expect(document.body.textContent).toContain("1 new")
     expect(document.body.textContent).not.toContain("New PR")

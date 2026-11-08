@@ -224,7 +224,7 @@ describe("message_captain (agent → its project's Captain, mid-turn)", () => {
     // The Captain's prompt labels it with the task and says it isn't waiting.
     await captainIdle(r, p)
     const prompt = await waitFor(() => captainPrompts(r, p).find((x) => x.includes("signup page crashes")), "the Captain's turn")
-    expect(prompt).toContain(`[From task "Login form" (${t.id}), an agent in this project, via message_captain. Not a message from Cody. It kept working.`)
+    expect(prompt).toContain(`[From task "Login form" (${t.id}), an agent in this project, via message_captain. Not a message from the owner. It kept working.`)
     expect(prompt).toContain(`reply_to_agent (task ${t.id})`)
     // It doesn't answer, so nothing comes back to the agent.
     await new Promise((res) => setTimeout(res, 500))

@@ -1,6 +1,6 @@
 # External MCP connectors
 
-A connector is an external MCP server that Box Yard passes into some of its Claude Code sessions: Gmail, Notion, Linear, Slack, or any server you point it at. Cody adds, signs in, scopes and removes connectors in Settings › Connectors. No model can change one. The Coordinator and Captains can only list them, with `list_connectors`.
+A connector is an external MCP server that Box Yard passes into some of its Claude Code sessions: Gmail, Notion, Linear, Slack, or any server you point it at. The owner adds, signs in, scopes and removes connectors in Settings › Connectors. No model can change one. The Coordinator and Captains can only list them, with `list_connectors`.
 
 Connectors carry account access, so the rules below start from the smallest exposure. The design note behind them, with the options considered and the threat model, is in the PR that added this page.
 
@@ -25,7 +25,7 @@ Connectors carry account access, so the rules below start from the smallest expo
 - No API response, event or MCP tool result ever holds one: they show the secret's name, a fingerprint (the first 12 hex digits of its sha256), whether this server's key can read it, and when an access token expires.
 - **Only access tokens leave the server.** An OAuth connector's refresh token and client secret are used by the server alone, to sign in and refresh. A session only ever gets the short-lived access token.
 - **Every secret is redacted.** Each connector secret in effect joins the redaction list for transcripts and errors, and so does every value replaced or removed while the server runs. An echoed token becomes `[redacted]`.
-- **An edit never moves a secret.** Changing a connector's kind, auth, URL, command or args, or its OAuth client or issuer, drops its saved secrets and sign-in, and it needs signing in again. A token is never sent to a new host or program by an edit. (Cody's own OAuth client secret stays unless the client itself changed.)
+- **An edit never moves a secret.** Changing a connector's kind, auth, URL, command or args, or its OAuth client or issuer, drops its saved secrets and sign-in, and it needs signing in again. A token is never sent to a new host or program by an edit. (the owner’s own OAuth client secret stays unless the client itself changed.)
 - `list_connectors` shows a remote server's host only, never its path or query, because some servers put a key in the path.
 
 ## Scope
@@ -34,7 +34,7 @@ Each connector says who gets it:
 
 - **Sessions:** the Coordinator, Captains and/or agents. Side threads never get a connector: they're read-only.
 - **Projects** (for Captains and agents): every project, or chosen ones.
-- **Runners** (for agents): this computer, Docker, Upstash boxes, RunPod.
+- **Runners** (for agents): this computer, Docker, Upstash boxes, SSH machines or the GPU runner (RunPod, Vast.ai or Daytona).
 
 **The default is the Coordinator only.** The Coordinator has no shell and runs on this computer. Agents, other projects and remote runners are each an explicit choice.
 
@@ -61,7 +61,7 @@ Each Claude Code session gets the connectors its [scope](#scope) reaches, as it 
 - **One that can't sign in is left out.** A connector that isn't signed in, has no token, or has a secret env var this server's key can't read isn't in the config. An agent's task says so once, with the reason; Settings shows the status.
 - **Turns may use them.** The Coordinator and Captains run with `dontAsk`, so their turns add `mcp__<name>` to `--allowedTools`. Their summary, compact and context runs list the same servers (for the prompt cache) but allow none. Agents bypass permissions.
 - **Not side threads.** A side thread gets Box Yard's read-only server only.
-- **Claude Code only, for now.** An agent on Codex or Cursor, and a Coordinator or Captain on another CLI than Claude Code, gets no connector (see [Coming next](#coming-next)).
+- **Claude Code only, for now.** An agent on Codex, Cursor or OpenCode, and a Coordinator or Captain on another CLI than Claude Code, gets no connector (see [Coming next](#coming-next)).
 - A change reaches the next session, or the next turn: a connector added, scoped or signed in mid-turn isn't in a running one.
 
 ## Signing in with OAuth
@@ -76,7 +76,7 @@ Box Yard follows the MCP authorization spec, using the MCP SDK's helpers:
    - A connector can name its authorization server instead (`oauth.issuer`, as Google's presets do), and then it isn't discovered.
 2. **Client.**
    - With dynamic registration (RFC 7591), Box Yard registers itself as a public client ("Box Yard", `token_endpoint_auth_method: none`). The registration is kept per issuer and redirect address.
-   - A provider without registration (Google, Slack) uses Cody's own OAuth client: its id on the connector (`clientKind` `desktop` or `web`), and its secret saved like any other.
+   - A provider without registration (Google, Slack) uses the owner’s own OAuth client: its id on the connector (`clientKind` `desktop` or `web`), and its secret saved like any other.
 3. **Authorize.** The sign-in page opens in a new tab, with:
    - PKCE S256;
    - a `state` of 32 random bytes, single use and good for ten minutes;
@@ -96,8 +96,8 @@ Box Yard follows the MCP authorization spec, using the MCP SDK's helpers:
 The provider sends the browser back to `<origin>/api/connectors/oauth/callback`. The origin depends on where Box Yard is open:
 
 - **At an `https` or loopback address** (on the Mac at `http://localhost:4000`, or over Tailscale Serve at `https://<mac>.<tailnet>.ts.net`): the provider returns to that address and the sign-in finishes by itself.
-  - On an iPhone, run `tailscale serve --bg 4000` on the Mac and open Box Yard at the `https://….ts.net` address.
-- **At a plain-http address elsewhere** (`http://100.x.y.z:4000`, a MagicDNS name): providers refuse to redirect there. So Box Yard returns to `http://127.0.0.1:<port>/api/connectors/oauth/callback`. On the Mac that loads. On a phone it doesn't, and Cody copies the address from the browser's address bar into the sign-in dialog (paste-back).
+  - On an iPhone, run `tailscale serve --bg 4000` on the Mac and open Box Yard at the `https://….ts.net` address. Register that exact HTTPS origin in `BOXYARD_PUBLIC_URL` or `BOXYARD_TRUSTED_ORIGINS` and restart the server; forwarded headers alone do not grant browser trust.
+- **At a plain-http address elsewhere** (`http://100.x.y.z:4000`, a MagicDNS name): providers refuse to redirect there. So Box Yard returns to `http://127.0.0.1:<port>/api/connectors/oauth/callback`. On the Mac that loads. On a phone it doesn't, and the owner copies the address from the browser's address bar into the sign-in dialog (paste-back).
 - **A Desktop OAuth client** (Google) always returns to loopback, since Google accepts any loopback port without registering it. **A Web client** needs Box Yard on `https`, with that exact callback address registered at the provider.
 
 The sign-in returns only to an address the request came in on (its `Origin` or `Host`) or `BOXYARD_PUBLIC_URL`, never to one taken from the body alone.
@@ -141,7 +141,7 @@ The server gets the access token in `GOOGLE_ACCESS_TOKEN` and nothing else: no r
 1. In the Google Cloud console, create a project (or pick one of yours) and enable the **Gmail API**.
 2. **Google Auth Platform › Get started**: an app name, your email as support email, Audience **External**, your email as contact. The app name can't contain "Google" or "Gmail".
 3. **Branding**: an app homepage link and a privacy policy link as well. Any address on a site you control works: your GitHub profile, a repo, a gist or your own site. Google reviews them only if you submit the app for verification, which you don't need.
-4. **Audience › Publish app**, to **In production**. Left in Testing, Google expires the sign-in (the refresh token) after 7 days. Publishing needs the Branding fields above.
+4. **Audience › Publish app**, to **In production**. For these Gmail scopes, [Google expires Testing refresh tokens after seven days](https://developers.google.com/identity/protocols/oauth2#expiration). Publishing needs the Branding fields above.
 5. **Clients › Create client**, Application type **Desktop app**, then **Download JSON**.
 6. In Settings › Connectors › Gmail, drop that `client_secret_….json` on the card (or pick it, or paste its contents, or type the client id and secret), and Save.
 7. **Sign in.** Google says it hasn't verified the app, because it's your own: **Advanced › Go to** your app, and allow reading mail and managing drafts. A Desktop client returns to this computer's loopback address, so sign in from Box Yard on this computer (`http://localhost:<port>`), or paste the address back from another device.
@@ -182,7 +182,7 @@ All under `/api`, behind the login, except the callback.
 | `PATCH /connectors/:id` | Change it. An edit that moves it drops its secrets (above) |
 | `DELETE /connectors/:id` | Remove it and its secrets |
 | `PUT` / `DELETE /connectors/:id/token` | Its token, `{ value }` |
-| `PUT` / `DELETE /connectors/:id/client-secret` | Cody's own OAuth client's secret, `{ value }` |
+| `PUT` / `DELETE /connectors/:id/client-secret` | the owner’s own OAuth client's secret, `{ value }` |
 | `PUT` / `DELETE /connectors/:id/env/:name` | A command's secret env var, `{ value }` |
 | `POST /connectors/:id/oauth/start` | `{ origin? }` → `{ authorizeUrl, redirectUri, mode: "redirect" \| "paste", signInHost, note }` |
 | `GET /connectors/oauth/callback` | Where the provider returns (public, state-gated) |
@@ -195,4 +195,4 @@ Every change is broadcast as a `connectors` event with the full list (no values)
 ## Coming next
 
 - **More presets.** Google Calendar (like Gmail: a small server Box Yard ships, given only the Google access token), Notion, Linear and Slack.
-- **Codex and Cursor sessions.** Their MCP configs are their own formats (`config.toml`, `.cursor/mcp.json`); they get no connector yet.
+- **Codex, Cursor and OpenCode sessions.** They get no external connector yet. OpenCode receives only Box Yard’s worker MCP server; see [its supported behavior](opencode.md).

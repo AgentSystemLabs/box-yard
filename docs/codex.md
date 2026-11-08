@@ -36,7 +36,7 @@ This is an explicit opt-in to share that login with the tasks that use the globa
 
 `CODEX_AUTH_JSON` takes precedence over the file reference; the file takes precedence over the saved ChatGPT login and global API key. A project's or task's own `CODEX_API_KEY` still wins. An unreadable, invalid or oversized file fails with a generic setup error, without falling back to a different account. The file is read again on use, so replacing it takes effect without a restart; changing the environment variable itself requires the normal server restart.
 
-The existing turn handoff delivers the login to an isolated worker Codex home with mode 600 and excludes it from archives. Newer same-account tokens refreshed by remote turns are kept in Box Yard's credential store; Box Yard does not modify the referenced file. Avoid independently refreshing copies of the same login on several machines (see below).
+The existing turn handoff delivers the login to a task-owned worker Codex home (login file mode 600), and archive rules exclude the normal login paths. Agents sharing a worker/user can still read or copy it. Newer same-account tokens refreshed by remote turns are kept in Box Yard's credential store; Box Yard does not modify the referenced file. Avoid independently refreshing copies of the same login on several machines (see below).
 
 If a remote Codex task fails with `401 Unauthorized: Missing bearer or basic authentication in header`, check for a configured Codex login first. A successful local `codex login` alone does not authenticate boxes. On an already running server, the existing authenticated `PUT /api/setup/credentials` can save `codexAuthJson` without a restart; automation should read the file and send it in the request body in memory, print only redacted status, and never put it in a prompt, command argument, or temporary request file. Retry the original task on its original runner after setup; changing its model alone does not change its CLI. To switch harness explicitly, use same-task continuation.
 
@@ -44,14 +44,14 @@ OpenAI documents credential caching and remote login setup in [Codex authenticat
 
 ### The ChatGPT login is refreshed, so Box Yard keeps the newest copy
 
-Codex refreshes a ChatGPT login's tokens when they're about a week old, and the refresh token it replaces stops working. A copy of `auth.json` pasted on several machines would leave all but one with a spent token. So Box Yard keeps the login itself:
+Codex can refresh a ChatGPT login’s tokens, replacing the previous refresh token. A copy of `auth.json` pasted on several machines would leave all but one with a spent token. So Box Yard keeps the login itself:
 
 - Each turn gets the current copy as `codex-auth.json` in its task folder (a link into tmpfs on SSH machines). The runner moves it into the task's own Codex home (`<task>/codex/auth.json`, mode 600), unless the copy already there is the same account refreshed later: the newer one always wins.
 - When the turn ends, Box Yard reads that file back and keeps it if Codex refreshed it, for every later turn, box and Captain. The Coordinator's own runs use `<data>/codex` and are taken back the same way.
 - On an SSH machine, the forwarded ChatGPT login and its temporary replacement files stay in a task-specific `CODEX_HOME` in tmpfs. Its `sessions` folder points back into `<task>/codex/sessions`, so conversations still archive and resume. The task folder only links to the login for the server to read it back.
-- Task archives never include the login, and box snapshots strip `~/.codex/auth.json`.
+- Task archives exclude the known login paths, and box snapshots strip `~/.codex/auth.json`. These exclusions do not detect arbitrary copies a task makes elsewhere; see [Docker credential limits](docker.md#credentials-and-isolation).
 
-Two turns that both refresh at the same moment (a week-old login, two agents starting at once) can still race: the loser's turn fails with "refresh token was already used", and the next turn gets the winner's tokens. If you run many Codex agents at once, an API key avoids the question.
+Two turns that both refresh at the same moment can still race: the loser's turn fails with "refresh token was already used", and the next turn gets the winner's tokens. If you run many Codex agents at once, an API key avoids the question.
 
 Project identities (docs/identities.md) have no Codex login of their own yet: a Codex task in a project with a non-Default identity uses Settings' Codex login, with the identity's GitHub token and git author as usual.
 
@@ -62,14 +62,14 @@ Settings › Credentials › More Codex logins takes more ChatGPT logins: new se
 **Task agents** run `codex app-server --listen stdio://` on their worker through `runner/box-runner.mjs`. Each Box Yard turn owns a process and a native turn, with:
 
 - Box Yard's tools (ask_user, create_pull_request, finish…) as an MCP server, approved to run without asking.
-- `approvalPolicy: never` and `sandbox: danger-full-access`, the same footing as Claude Code's `bypassPermissions`: the box is the sandbox. On This computer that means unsandboxed, as with Claude Code. Unexpected interactive requests fail the turn; steering never grants approval.
+- `approvalPolicy: never` and `sandbox: danger-full-access`, the same footing as Claude Code's `bypassPermissions`: the CLI adds no task-level sandbox. The runner’s container/VM and application permissions determine its reach; tasks sharing that environment can read each other’s files. On This computer it runs as the server’s OS user. Unexpected interactive requests fail the turn; steering never grants approval.
 - A clean task-owned `CODEX_HOME` (app-server has no `--ignore-user-config`), with ChatGPT apps, plugins, memories and computer use switched off. Local-login tasks import only the login and, when resuming a legacy local session, its matching rollout. The owner's home configuration/MCP servers are not imported; repository instructions still apply.
 - Sessions in `<task>/codex/sessions`, so archives/moves retain the conversation. `thread/start` names a fresh session; later turns use `thread/resume` with that same thread ID. Stop uses `turn/interrupt` and a process kill fallback.
 - Model, effort, auto-compact threshold and Box Yard developer instructions passed explicitly. Attachments keep the existing task-file delivery path; Box Yard MCP uses the same stdio adapter.
 
 The adapter is verified with Codex CLI **0.166.0**. Workers need app-server's `turn/steer`, required `expectedTurnId`, and `clientUserMessageId`/`userMessage.clientId` correlation. Unsupported versions fail or hold uncertain input; Box Yard does not silently switch harnesses. See [delivery states, diagnosis and validation](codex-steering.md).
 
-Codex is installed the first time a Codex task lands on an Upstash box or RunPod pod (`npm install -g @openai/codex`); Box Yard's Docker image and server image already have it. On This computer and on SSH machines it's yours to install: a Codex task only goes to a machine whose connection test found `codex`.
+Codex is installed when missing on an Upstash box, Docker container or GPU-cloud worker (RunPod, Vast.ai or Daytona) before a Codex task starts (`npm install -g @openai/codex`); Box Yard's Docker image and server image already have it. On This computer and on SSH machines it's yours to install: a Codex task only goes to a machine whose connection test found `codex`.
 
 Codex tasks also run on [SSH machines](machines.md#codex). Install the CLI as the SSH user and test the machine; Box Yard selects one with Codex installed and either a forwarded credential or its own login. It never installs software on an SSH machine.
 
@@ -100,3 +100,5 @@ Settings shows only the selected harness's model and effort controls, and keeps 
 ```sh
 CODEX_BIN="node scripts/fake-codex.mjs" npm run dev
 ```
+
+[OpenCode](opencode.md) is also available for task agents, with a separate model default and provider API logins. See its version contract and supported differences before switching a task.

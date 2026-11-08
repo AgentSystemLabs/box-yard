@@ -220,7 +220,7 @@ describe("Test connection's probe", () => {
     expect(t.notes.join("\n")).toMatch(/codex isn't logged in on it/)
     expect(t.notes.join("\n")).toMatch(/under 2 GB free/)
     expect(t.tools.codex).toMatchObject({ found: true })
-    expect(testFromProbe({ first, tools: tools("").set("path_claude", []), pathDirs: [], latencyMs: 1, at: 1 }).problems.join()).toMatch(/neither claude \(Claude Code\), codex nor cursor-agent is installed/)
+    expect(testFromProbe({ first, tools: tools("").set("path_claude", []), pathDirs: [], latencyMs: 1, at: 1 }).problems.join()).toMatch(/neither claude \(Claude Code\), codex, cursor-agent nor opencode is installed/)
   })
 
   it("takes a machine with only codex, for Codex tasks; reads codex's login from its exit code", () => {

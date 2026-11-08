@@ -1,3 +1,4 @@
+import { OPENCODE_INSTALL, OPENCODE_LOGIN_HELP, parseOpenCodeAuth } from "./opencode.js"
 // GET /api/setup and the Test buttons behind POST /api/setup/test/:key: what's missing before Box Yard can do real
 // work, and a cheap live check of each credential. Nothing here returns or logs a secret: every message goes
 // through redact().
@@ -152,7 +153,7 @@ export class Setup {
   refreshLocal(force = false): Promise<boolean> {
     if (!force && this.local && Date.now() - this.local.at < LOCAL_CHECK_TTL_MS) return Promise.resolve(false)
     if (this.checking) return this.checking
-    const look = this.d.localCheck ?? (() => checkLocal({ claudeBin: this.d.c.claudeBin, codexBin: this.d.c.codexBin, cursorBin: this.d.c.cursorBin, fakeClaude: isMockRun(this.d.c) }))
+    const look = this.d.localCheck ?? (() => checkLocal({ claudeBin: this.d.c.claudeBin, codexBin: this.d.c.codexBin, cursorBin: this.d.c.cursorBin, opencodeBin: this.d.c.opencodeBin, fakeClaude: isMockRun(this.d.c) }))
     this.checking = look()
       .then((result) => {
         const before = this.local
@@ -185,8 +186,8 @@ export class Setup {
     const docker = runner !== "docker" ? null : this.d.dockerProblem ? await this.d.dockerProblem() : "Docker containers aren't available on this Box Yard"
     if (c.mock || docker) return docker
     const creds = credentials.status()
-    const cursorKey = cli === "cursor" ? (claudeKey ?? creds.cursorApiKey.state === "set") : true
-    const noCursorKey = "Cursor's CLI there has no login of its own: add a Cursor API key in Settings › Credentials, or CURSOR_API_KEY in the project's env"
+    const cursorKey = cli === "opencode" ? (claudeKey ?? creds.opencodeAuthJson.state === "set") : cli === "cursor" ? (claudeKey ?? creds.cursorApiKey.state === "set") : true
+    const noCursorKey = cli === "opencode" ? OPENCODE_LOGIN_HELP : "Cursor's CLI there has no login of its own: add a Cursor API key in Settings › Credentials, or CURSOR_API_KEY in the project's env"
     if (runner === "gpu") {
       const runpod = creds.runpodApiKey.state === "set"
       const vast = creds.vastApiKey.state === "set"
@@ -200,6 +201,15 @@ export class Setup {
       if (c.boxProvider !== "local" && creds.upstashBoxApiKey.state !== "set") return "Upstash boxes aren't set up: add an Upstash Box API key in Settings › Box providers › Upstash boxes"
       // BOX_PROVIDER=local's "boxes" are folders on this computer, where its own cursor-agent login works.
       return cursorKey || c.boxProvider === "local" ? null : noCursorKey
+    }
+    if (cli === "opencode") {
+      if (runner === "docker") return cursorKey ? null : OPENCODE_LOGIN_HELP
+      await this.refreshLocal()
+      const local = this.local?.result.check
+      const tool = local?.tools.find((t) => t.key === "opencode")
+      if (!tool?.found) return `OpenCode isn't installed on this computer (${c.opencodeBin} --version failed). Install ${OPENCODE_INSTALL}, then test again`
+      if (!/^1\.19\.5(?:\s|$)/.test(tool.version ?? "")) return "OpenCode 1.19.5 is required; other versions have not been verified. Use npm install -g opencode-ai@1.19.5"
+      return cursorKey || local?.opencodeLogin ? null : OPENCODE_LOGIN_HELP
     }
     if (cli === "cursor") {
       if (runner === "docker") return cursorKey ? null : DOCKER_NEEDS_CURSOR_KEY
@@ -339,6 +349,7 @@ export class Setup {
     if (key === "codexAuthJson") return this.checkCodex({ kind: "chatgpt", auth: value })
     if (key === "codexApiKey") return this.checkCodex({ kind: "api_key", key: value })
     if (key === "cursorApiKey") return this.checkCursor(value)
+    if (key === "opencodeAuthJson") { parseOpenCodeAuth(value); return Promise.resolve("OpenCode API login format is valid. Credentials were not sent to a provider; authentication is checked on the next task run.") }
     if (key === "runpodApiKey") return this.checkRunPod(value)
     if (key === "vastApiKey") return this.checkVast(value)
     if (key === "daytonaApiKey") return this.checkDaytona(value)

@@ -128,7 +128,7 @@ const loginText = (login: boolean | null | undefined) => (login === true ? ", lo
 export function toolList(t: MachineTest): { name: string; text: string; ok: boolean | null }[] {
   const { git, node, claude, codex } = t.tools
   const cursor = t.tools.cursor ?? null
-  const others = [codex.found && "Codex", cursor?.found && "Cursor"].filter(Boolean).join(" and ")
+  const others = [codex.found && "Codex", cursor?.found && "Cursor", t.tools.opencode?.found && "OpenCode"].filter(Boolean).join(" and ")
   return [
     { name: "git", text: git.found ? version("git", git) : "missing", ok: git.found },
     { name: "node", text: node.found ? version("node", node) : "missing", ok: node.found },
@@ -141,6 +141,11 @@ export function toolList(t: MachineTest): { name: string; text: string; ok: bool
       name: "codex",
       text: !codex.found ? "not installed (no Codex tasks)" : `${version("codex", codex)}${loginText(t.codexLogin)}`,
       ok: !codex.found || t.codexLogin === false ? null : true,
+    },
+    {
+      name: "opencode",
+      text: !t.tools.opencode ? "not checked (test it again)" : !t.tools.opencode.found ? "not installed (no OpenCode tasks)" : `${version("opencode", t.tools.opencode)}${loginText(t.opencodeLogin)}`,
+      ok: !t.tools.opencode?.found || !t.opencodeLogin ? null : true,
     },
     {
       name: "cursor-agent",

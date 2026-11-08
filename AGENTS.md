@@ -14,7 +14,7 @@
 - **MCP tool scoping.** `buildMcpServer(deps, caller)` in `server/mcp.ts` serves both the Coordinator and the per-project Captains (`caller = { kind: "captain", projectId }`). A new tool must do one of these, or a Captain can reach other projects:
   - resolve every ref through the scope helpers `project()`, `task()`, `schedule()` (and `projectFilter()` for optional filters). They throw `Out of scope: …` for another project's rows.
   - or wrap the registration in `coordinatorOnly(...)`, which removes the tool for Captains.
-- **Status-only projects.** A project whose identity says "Coordinator sees: status only" shows the Coordinator its tasks' title, state and PR, never their content (`docs/identities.md`). A new tool that returns a project's content (replies, prompts, questions, errors, notes, artifacts, transcripts, history) must check `unsealed(projectId, what)` first, show tasks through `brief(t)`, and filter cross-project lists with `statusOnly()`. A tool that sets `coordinator_sees` goes through `mayLoosen`: only Cody loosens it.
+- **Status-only projects.** A project whose identity says "Coordinator sees: status only" shows the Coordinator its tasks' title, state and PR, never their content (`docs/identities.md`). A new tool that returns a project's content (replies, prompts, questions, errors, notes, artifacts, transcripts, history) must check `unsealed(projectId, what)` first, show tasks through `brief(t)`, and filter cross-project lists with `statusOnly()`. A tool that sets `coordinator_sees` goes through `mayLoosen`: only the owner loosens it.
 - **Owner name.** Box Yard-written text that says "Cody" (prompts, labels, notices, events, tool descriptions) goes through `withOwner(text, ownerName)` from `shared/owner.ts`. In `TaskManager`/`CaptainManager` that's `withOwner(text, this.owner())`. Never apply it to user content (notes, messages, prompts).
 - **Migrations.** `MIGRATIONS` in `server/db.ts` are append-only; never edit a shipped one. A test that seeds old-shaped rows stops before a specific migration by content, not by position, so later migrations don't break it:
   ```ts
@@ -46,7 +46,7 @@ Use these instead of hand-rolling:
 
 - `AppLink`, `FileLink` and `NewTabLink` stop click propagation. Never wrap rendered Markdown in a `<Link>`/`<a>`: auto-linked URLs become nested anchors. Use a `role="link"` div card (see `NoticeCard` in `ChatLine.tsx`).
 - Link colours: yellow = in-app, sky + ↗ = another site, PR glyph in its state colour + ↗ = a GitHub PR. A pasted GitHub PR/issue URL renders as "PR #154" / "owner/repo#154" (`shortGithubLabel` in `lib/linkify.ts`). Artifacts and uploads are in-app (preview modal, or download in place), so no ↗.
-- PR links and task status: `<PrChip>` and `<StatusBadge status={badgeStatus(task)} />` from `ui.tsx` (`badgeStatus` is in `lib/prState.ts`). They show the purple Merged state, so don't hand-roll PR links.
+- PR links: `<PrChip>` from `ui.tsx` shows GitHub state, including purple Merged; don’t hand-roll PR links. Task rows and headers use `<TaskStatusIcon>` from `TaskIcon.tsx`, with `WORKING_PULSE` for working tasks. Use `<StatusBadge status={badgeStatus(task)} />` (`lib/prState.ts`) only on surfaces that already show a status badge.
 - Settings: open it with `useOpenSettings()(section)` from `SettingsHost.tsx`. It's mounted once as `SettingsHost`, so don't render `<SettingsDialog>` yourself. New categories go in `SETTINGS_SECTIONS` (`lib/settingsNav.ts`); a panel's `Panel`/`Row`/`SourceHint` come from `SettingsBlocks.tsx`.
 - `useStableOrder`: pass all candidate items and filter with `include` (pre-filtering makes rows vanish instead of dimming). `resetKey` is the sort/filter/search, never `now`.
 
@@ -54,7 +54,7 @@ Use these instead of hand-rolling:
 
 Long threads must stay fast while typing and while SSE events stream in.
 
-- **The Composer owns its draft** and calls `onSubmit(text, attachments)`. Never lift the draft into `ChatPanel`, `CaptainTab` or `TaskView`. Chat footers use `COMPOSER_FOOTER` from `Composer.tsx`.
+- **The Composer owns its draft** through `web/src/lib/composerDraft.ts` and calls `onSubmit(text, attachments)`. Prefill with `setDraftText`/`prependDraft`/`appendDraft`, never a Composer ref. Never lift the draft into `ChatPanel`, `CaptainTab` or `TaskView`. Chat footers use `COMPOSER_FOOTER` from `Composer.tsx`.
 - **The transcript doesn't re-render on header or draft updates (#29).** Keep transcripts in their own memo'd component (`TaskThread` in `TaskView.tsx`). `ChatLine`, `ToolLine` and `Line` are memo'd, so keep their props stable (callbacks via `useCallback`).
 - Long lists render through `useTail` (`web/src/lib/tail.ts`) plus `StickyScroll`'s `hidden`/`onLoadEarlier`, so only the newest items are in the DOM. To jump to an older chat message, call `revealChatMessage(id)` (`lib/reveal.ts`), not `getElementById`.
 - `Markdown` is memo'd and cached; pass `live` for streaming text.

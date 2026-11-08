@@ -22,6 +22,7 @@ export class LocalProvider implements BoxProvider {
   /** Its Codex: the stand-in beside a stand-in claude (scripts/fake-codex.mjs), so folder boxes never run the real one by accident. */
   readonly codexBin: string
   /** Its Cursor CLI: the stand-in beside a stand-in claude (scripts/fake-cursor.mjs), likewise. */
+  readonly opencodeBin: string
   readonly cursorBin: string
   constructor(
     private readonly baseDir: string,
@@ -30,6 +31,7 @@ export class LocalProvider implements BoxProvider {
   ) {
     if (makeDir) fs.mkdirSync(baseDir, { recursive: true })
     this.codexBin = /fake-claude\.mjs/.test(claudeBin) ? claudeBin.replace(/fake-claude\.mjs/, "fake-codex.mjs") : "codex"
+    this.opencodeBin = /fake-claude\.mjs/.test(claudeBin) ? claudeBin.replace(/fake-claude\.mjs/, "fake-opencode.mjs") : "opencode"
     this.cursorBin = /fake-claude\.mjs/.test(claudeBin) ? claudeBin.replace(/fake-claude\.mjs/, "fake-cursor.mjs") : "cursor-agent"
   }
 
@@ -163,6 +165,13 @@ const SERVER_KEYS = new Set([
   "CODEX_BIN",
   "CODEX_AUTH_JSON",
   "CODEX_API_KEY",
+  "OPENCODE_BIN",
+  "OPENCODE_AUTH_CONTENT",
+  "OPENCODE_API_KEY",
+  "OPENCODE_CONFIG",
+  "OPENCODE_CONFIG_CONTENT",
+  "OPENCODE_CONFIG_DIR",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
   "CURSOR_BIN",
   "CURSOR_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
@@ -334,6 +343,9 @@ export class LocalRunnerRouter implements BoxProvider {
   }
   get codexBin() {
     return this.base.codexBin
+  }
+  get opencodeBin() {
+    return this.base.opencodeBin
   }
   get cursorBin() {
     return this.base.cursorBin

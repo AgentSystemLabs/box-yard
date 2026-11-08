@@ -141,7 +141,7 @@ describe("delete box", () => {
     expect(stopped.status).not.toBe("working")
     expect(stopped.boxId).toBeNull()
     expect(stopped.lastArchivedAt).toBeTruthy()
-    expect(r.yard.store.listTaskMessages(t.id, 200).some((m) => m.content === `Stopped so Cody could delete box ${boxId}.`)).toBe(true)
+    expect(r.yard.store.listTaskMessages(t.id, 200).some((m) => m.content === `Stopped so the owner could delete box ${boxId}.`)).toBe(true)
   })
 
   it("keeps the box when a workspace can't be archived", async () => {

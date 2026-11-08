@@ -65,13 +65,14 @@ describe("a machine's last test", () => {
       { name: "node", text: "20.11.1", ok: true },
       { name: "claude", text: "2.0.14, not logged in", ok: null },
       { name: "codex", text: "0.40.0", ok: true },
+      { name: "opencode", text: "not installed (no OpenCode tasks)", ok: null },
       { name: "cursor-agent", text: "not installed (no Cursor tasks)", ok: null },
     ])
     expect(toolList({ ...test, codexLogin: true })[3]).toEqual({ name: "codex", text: "0.40.0, logged in", ok: true })
     expect(toolList({ ...test, codexLogin: false })[3]).toEqual({ name: "codex", text: "0.40.0, not logged in", ok: null })
     const codexOnly = { ...test, tools: { ...test.tools, claude: { found: false, version: null, path: null } } }
     expect(toolList(codexOnly)[2]).toEqual({ name: "claude", text: "missing (Codex tasks only)", ok: null })
-    expect(toolList(failedTest("x", 1)).map((t) => t.text)).toEqual(["missing", "missing", "missing", "not installed (no Codex tasks)", "not installed (no Cursor tasks)"])
+    expect(toolList(failedTest("x", 1)).map((t) => t.text)).toEqual(["missing", "missing", "missing", "not installed (no Codex tasks)", "not installed (no OpenCode tasks)", "not installed (no Cursor tasks)"])
     // A test from before Cursor has no cursor-agent row to read.
     const { cursor: _, ...before } = test.tools
     expect(toolList({ ...test, tools: before as typeof test.tools }).at(-1)).toEqual({ name: "cursor-agent", text: "not checked (test it again)", ok: null })

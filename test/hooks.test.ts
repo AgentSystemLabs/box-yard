@@ -146,7 +146,7 @@ describe("fire keys and task sources", () => {
 
   it("labels a hook's messages as the hook's, by the owner's configured name", () => {
     const h = { name: "Auto-merge", trigger: "task.pr_ready" as const, createdBy: "Sam" }
-    expect(hookLabel(h)).toBe('Message from the Box Yard hook "Auto-merge" (an automation that runs on "PR ready", set up by Sam; not a new message from Cody)')
+    expect(hookLabel(h)).toBe('Message from the Box Yard hook "Auto-merge" (an automation that runs on "PR ready", set up by Sam; not a new message from the owner)')
     expect(hookLabel(h, "Sam")).toMatch(/not a new message from Sam\)$/)
   })
 

@@ -404,6 +404,8 @@ export type QueuedSender = "owner" | "coordinator" | "captain" | "hook" | "agent
  */
 export interface QueuedMessage {
   id: string
+  /** Correlates a browser submission with its queue row and eventual transcript line. */
+  clientMessageId?: string
   taskId: string
   /** The raw input source: cody, cody:merge, orchestrator, captain:<project>, hook:<id>, agent:<task>, system. */
   source: string
@@ -880,6 +882,7 @@ export interface Settings {
    * Box agents' model on Cursor (a `cursor-agent models` id, which carries its effort), unless the task or routing
    * picks one Cursor runs; "" is the CLI's own default (docs/cursor.md).
    */
+  agentOpencodeModel: string
   agentCursorModel: string
   agentEffort: AgentEffort
   /** YAML routing rules the orchestrator uses to choose per-task/per-turn model and effort. */

@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { parseOpenCodeAuth } from "./opencode.js"
 import fs from "node:fs"
 import type { Config } from "./config.js"
 import { BadRequestError, type Store } from "./store.js"
@@ -31,7 +32,10 @@ export const codexAuthValue = z
   })
 
 /** The validator for a value of credential `k`. */
-export const credentialValueFor = (k: CredentialKey) => (k === "codexAuthJson" ? codexAuthValue : credentialValue)
+const opencodeAuthValue = z.string().trim().max(50_000).transform((text, ctx) => {
+  try { return parseOpenCodeAuth(text) } catch (e) { ctx.addIssue({ code: "custom", message: (e as Error).message }); return z.NEVER }
+})
+export const credentialValueFor = (k: CredentialKey) => (k === "codexAuthJson" ? codexAuthValue : k === "opencodeAuthJson" ? opencodeAuthValue : credentialValue)
 
 export const credentialsPatch = z
   .object(Object.fromEntries(CREDENTIAL_KEYS.map((k) => [k, credentialValueFor(k).nullable()])) as unknown as Record<CredentialKey, z.ZodNullable<z.ZodType<string>>>)
@@ -168,10 +172,12 @@ export class CredentialStore {
 
   /** Every secret in effect, for redact(). */
   secrets(): string[] {
+    const opencodeSecrets: string[] = []
+    try { for (const v of Object.values(JSON.parse(this.get("opencodeAuthJson"))) as { key?: string }[]) if (v.key) opencodeSecrets.push(v.key) } catch {}
     const values = CREDENTIAL_KEYS.flatMap((k) => [this.envValue(k), this.saved()[k] ?? "", this.fallback(k)]).filter(Boolean)
     // A login file's tokens show up on their own (an error that quotes one), never the file as a whole.
     const codex = [this.get("codexAuthJson"), this.store.getKv(CODEX_REFRESHED_KV) ?? ""].flatMap(codexAuthSecrets)
-    return [...values, ...codex]
+    return [...values, ...codex, ...opencodeSecrets]
   }
 
   /** Save or forget values. A credential its env var sets can't be changed here: the env var would still win. */

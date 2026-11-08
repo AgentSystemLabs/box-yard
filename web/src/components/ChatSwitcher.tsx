@@ -18,7 +18,7 @@ import { useLocation } from "wouter"
 import { useQueries } from "@tanstack/react-query"
 import { Check, ChevronDown, Search } from "lucide-react"
 import { api } from "../lib/api"
-import { keys, useChatBusy, useProjects } from "../lib/queries"
+import { keys, useCoordinatorStatus, useProjects } from "../lib/queries"
 import { COORDINATOR_CHAT } from "../lib/threads"
 import { PROJECT_PICKER_KEY_LABEL, focusComposer, isProjectPickerKey, openCoordinator, rankChats } from "../lib/chatSwitch"
 import { projectChatHref } from "../lib/navigation"
@@ -26,11 +26,8 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
 import { isDialogOpen } from "./Modal"
 import { menuItemBase, usePopover } from "./TaskHeader"
 import { usePlacement } from "./TurnTimingChip"
-import { projectColorStyle } from "./TaskIcon"
-import { CaptainIcon } from "./CaptainIcon"
-import { ChatIcon } from "./ChatIcons"
 import { projectColors, type ProjectColor } from "../../../shared/projectColors"
-import { cx } from "./ui"
+import { AgentIcon, cx } from "./ui"
 import type { CaptainState, Project } from "../../../shared/types"
 
 const MENU_WIDTH = 256
@@ -180,7 +177,7 @@ interface Item {
   aliases?: string[]
   project: Project | null
   color: ProjectColor | null
-  busy: boolean | null
+  state: Partial<CaptainState> | undefined
 }
 
 function SwitcherMenu({
@@ -209,8 +206,8 @@ function SwitcherMenu({
 }) {
   const [, navigate] = useLocation()
   const projects = useProjects().data
-  const coordinatorBusy = useChatBusy().data
-  // Captains' busy flags as the live stream left them in the cache: never fetched here, so a Captain nobody has
+  const coordinator = useCoordinatorStatus()
+  // Captains' states as the live stream left them in the cache: never fetched here, so a Captain nobody has
   // opened since the page loaded just has no dot.
   const captains = useQueries({
     queries: (projects ?? []).map((p) => ({
@@ -225,10 +222,10 @@ function SwitcherMenu({
   const items: Item[] = useMemo(
     () => [
       // Always first, from every header.
-      { chat: COORDINATOR_CHAT, label: "Coordinator", aliases: ["All"], project: null, color: null, busy: coordinatorBusy ?? null },
-      ...(projects ?? []).map((p, i) => ({ chat: p.id, label: p.name, project: p, color: colors.get(p.id) ?? null, busy: captains[i]?.data?.busy ?? null })),
+      { chat: COORDINATOR_CHAT, label: "Coordinator", aliases: ["All"], project: null, color: null, state: coordinator },
+      ...(projects ?? []).map((p, i) => ({ chat: p.id, label: p.name, project: p, color: colors.get(p.id) ?? null, state: captains[i]?.data })),
     ],
-    [projects, colors, captains, coordinatorBusy],
+    [projects, colors, captains, coordinator],
   )
   // Placed for the whole list, so the menu doesn't move as the filter narrows it (it shrinks from the bottom).
   const placement = usePlacement(trigger, panel, true, items.length, MENU_WIDTH)
@@ -354,7 +351,7 @@ function SwitcherMenu({
               onBlur={() => setInFilter(false)}
               onKeyDown={onFilterKeyDown}
               // 16px on phones, so iOS doesn't zoom in.
-              className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-900/60 pr-2 pl-7 text-base text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none sm:text-sm pointer-coarse:h-11"
+              className="h-8 w-full rounded-md border border-control bg-zinc-900/60 pr-2 pl-7 text-base text-zinc-100 placeholder:text-zinc-500 focus:border-yard-500 focus:outline-none sm:text-sm pointer-coarse:h-11"
             />
           </div>
         </div>
@@ -386,7 +383,6 @@ function SwitcherMenu({
 const itemId = (menuId: string, chat: string) => `${menuId}-${chat}`
 
 function SwitcherItem({ menuId, item, current, active, onPick }: { menuId: string; item: Item; current: boolean; active: boolean; onPick: (chat: string) => void }) {
-  const who = item.project ? "Captain" : "Coordinator"
   return (
     <button
       type="button"
@@ -403,24 +399,9 @@ function SwitcherItem({ menuId, item, current, active, onPick }: { menuId: strin
         current && "text-zinc-50",
       )}
     >
-      {item.project ? <CaptainMark project={item.project} color={item.color} /> : <ChatIcon kind="coordinator" className="h-4 w-4 shrink-0 text-yard-400" />}
+      <AgentIcon announce={false} kind={item.project ? "captain" : "coordinator"} projectId={item.project?.id} color={item.color} busy={Boolean(item.state?.busy)} compacting={item.state?.compacting} error={Boolean(item.state?.error)} />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-      {item.busy !== null && (
-        <span
-          data-testid="chat-switcher-busy"
-          data-busy={item.busy || undefined}
-          title={item.busy ? `${who} is working` : `${who} is idle`}
-          className={cx("h-2 w-2 shrink-0 rounded-full", item.busy ? "animate-pulse bg-sky-400" : "bg-zinc-600")}
-        >
-          <span className="sr-only">{item.busy ? "working" : "idle"}</span>
-        </span>
-      )}
       <Check className={cx("h-3.5 w-3.5 shrink-0 text-yard-400", !current && "invisible")} aria-hidden />
     </button>
   )
-}
-
-/** A Captain's chat: its icon (CaptainIcon.tsx) in its project's colour, as its sidebar row has it. */
-function CaptainMark({ project, color }: { project: Project; color: ProjectColor | null }) {
-  return <CaptainIcon projectId={project.id} style={projectColorStyle(color)} data-color={color ?? undefined} className="h-4 w-4 text-(--pc)" rounded="rounded-[4px]" />
 }

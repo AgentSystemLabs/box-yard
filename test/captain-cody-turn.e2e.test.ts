@@ -91,7 +91,7 @@ describe("Cody's messages to a Captain", () => {
 
     expect(triggers(r, p)).toEqual(["updates", "cody"])
     const last = captainPrompts(r, p).at(-1)!
-    expect(last).toContain("[From Cody]\nGenerate artwork for the buy menu")
+    expect(last).toContain("[From the owner]\nGenerate artwork for the buy menu")
     expect(last).not.toContain("Automatic wake-up")
   })
 
@@ -113,8 +113,8 @@ describe("Cody's messages to a Captain", () => {
     expect(triggers(again, p)).toEqual(["cody"])
     const last = captainPrompts(again, p).at(-1)!
     expect(last).toContain("Box Yard restarted while you were answering the messages below")
-    expect(last).toContain("[From Cody]\nGenerate artwork for the buy menu")
-    expect(last).toContain("[From Cody]\nAnd a 3D-model toggle")
+    expect(last).toContain("[From the owner]\nGenerate artwork for the buy menu")
+    expect(last).toContain("[From the owner]\nAnd a 3D-model toggle")
     expect(last).not.toContain("Automatic wake-up")
     expect(again.yard.store.getKv(`captain_open_turn:${p.id}`)).toBeNull()
     const replies = (await call<CaptainMessage[]>(again, "GET", `/api/projects/${p.id}/captain/messages`)).filter((m) => m.role === "assistant")

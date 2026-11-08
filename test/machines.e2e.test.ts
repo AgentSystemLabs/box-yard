@@ -236,7 +236,7 @@ describe("SSH machines (mock mode: machines are folders)", () => {
     await call(r, "PUT", "/api/machines/settings", { localLabel: "Linux" })
     expect((await coordinator("list_machines")).local_means).toMatch(/runs_on "local" goes to SSH machines labelled "linux"/)
     const local = await coordinator("create_task", { project: p.id, title: "local one", prompt: "write a haiku", runs_on: "local" })
-    expect(local.runs_on).toMatch(/SSH machines labelled "linux": that's what "local" means in Cody's Settings › Machines/)
+    expect(local.runs_on).toMatch(/SSH machines labelled "linux": that's what "local" means in the owner's Settings › Machines/)
     await done(r, local.id)
     expect(getTask(r, local.id)).toMatchObject({ boxId: box, runsOn: "ssh", machineLabel: "linux" })
 
@@ -426,7 +426,7 @@ describe("SSH machines over ssh (a stand-in ssh: no sshd here)", () => {
     expect(r.boxes.created).toBe(0)
   })
 
-  it("runs Codex tasks on a machine's own codex: Box Yard's ChatGPT login only in its memory folder, else an API key for one turn; nothing installed", { timeout: 200_000 }, async () => {
+  it("runs Codex tasks on a machine's own codex with task-owned homes: forwarded ChatGPT login only in memory, else an API key or machine login; nothing installed", { timeout: 200_000 }, async () => {
     const root = tmpDir("by-fake-ssh-")
     cleanup.push(() => fs.rmSync(root, { recursive: true, force: true }))
     const memory = path.join(root, "tmpfs")
@@ -513,19 +513,57 @@ describe("SSH machines over ssh (a stand-in ssh: no sshd here)", () => {
     expect(filesWith(fake.home, key)).toEqual([])
     await archived(r, second.id)
 
-    // With no forwarded credentials, a machine's own Codex login works and survives task deletion.
+    // app-server cannot ignore user config: import the machine's login into a task-owned home, leaving its
+    // config/MCP servers and unrelated conversations behind. Refreshed tokens go back to the source login.
     r.yard.settings.credentials.update({ codexAuthJson: null, codexApiKey: null })
     const ownHome = path.join(fake.home, ".codex")
     fs.mkdirSync(ownHome)
-    fs.writeFileSync(path.join(ownHome, "auth.json"), login, { mode: 0o600 })
+    const ownLogin = JSON.parse(login)
+    ownLogin.tokens.account_id = "acct-machine-only"
+    ownLogin.tokens.refresh_token = "rt_machine_only_0000000000"
+    const ownAuth = path.join(ownHome, "auth.json")
+    fs.writeFileSync(ownAuth, JSON.stringify(ownLogin), { mode: 0o600 })
+    const ownConfig = '[mcp_servers.machine_only]\ncommand = "example-machine-mcp"\n'
+    fs.writeFileSync(path.join(ownHome, "config.toml"), ownConfig)
+    const unrelated = path.join("sessions", "2026", "01", "01", "rollout-2026-01-01T00-00-00-00000000-0000-4000-8000-000000000001.jsonl")
+    fs.mkdirSync(path.dirname(path.join(ownHome, unrelated)), { recursive: true })
+    fs.writeFileSync(path.join(ownHome, unrelated), "unrelated machine conversation\n")
     const tested = await r.yard.machines.test(machine.id)
     expect(tested.lastTest?.codexLogin).toBe(true)
     const own = create("machine login")
     await done(r, own.id)
-    expect(fake.codexRuns().at(-1)).toMatchObject({ home: ownHome, login: "chatgpt" })
     await archived(r, own.id)
+    const ownDir = r.yard.tasks.taskDir(machineBoxId(machine.id), own.id)
+    const ownState = path.join(ownDir, "codex")
+    expect(fake.codexRuns().at(-1)).toMatchObject({ home: ownState, login: "chatgpt", account: ownLogin.tokens.account_id, secret: ownLogin.tokens.refresh_token })
+    expect(fs.existsSync(path.join(ownState, "config.toml"))).toBe(false)
+    expect(fs.existsSync(path.join(ownState, unrelated))).toBe(false)
+    const refreshed = fs.readFileSync(path.join(ownState, "auth.json"), "utf8")
+    expect(JSON.parse(refreshed).tokens.refresh_token).not.toBe(ownLogin.tokens.refresh_token)
+    expect(fs.readFileSync(ownAuth, "utf8")).toBe(refreshed)
+    expect(fs.statSync(ownAuth).mode & 0o777).toBe(0o600)
+    expect(fs.statSync(path.join(ownState, "auth.json")).mode & 0o777).toBe(0o600)
+
+    // The next turn resumes the task's conversation on the refreshed machine login, still in its own home.
+    const ownSession = getTask(r, own.id).sessionId
+    await call(r, "POST", `/api/tasks/${own.id}/messages`, { content: "Say hi again" })
+    await done(r, own.id, 2)
+    await archived(r, own.id)
+    expect(getTask(r, own.id).sessionId).toBe(ownSession)
+    expect(fake.codexRuns().at(-1)).toMatchObject({ home: ownState, login: "chatgpt", resume: ownSession, secret: JSON.parse(refreshed).tokens.refresh_token })
+    expect(fs.existsSync(path.join(ownState, "config.toml"))).toBe(false)
+    expect(fs.existsSync(path.join(ownState, unrelated))).toBe(false)
+    const latest = fs.readFileSync(path.join(ownState, "auth.json"), "utf8")
+    expect(fs.readFileSync(ownAuth, "utf8")).toBe(latest)
+    expect(r.yard.settings.credentials.codexAuth()).toBe("")
+    const ownArchive = execFileSync("tar", ["tzf", r.yard.store.getTaskRow(own.id)!.archive_path!], { encoding: "utf8" })
+    expect(ownArchive).toMatch(/codex\/sessions\//)
+    expect(ownArchive).not.toMatch(/auth\.json/)
     await r.yard.tasks.deleteTask(own.id)
-    expect(fs.existsSync(path.join(ownHome, "auth.json"))).toBe(true)
+    expect(fs.existsSync(ownState)).toBe(false)
+    expect(fs.readFileSync(ownAuth, "utf8")).toBe(latest)
+    expect(fs.readFileSync(path.join(ownHome, "config.toml"), "utf8")).toBe(ownConfig)
+    expect(fs.readFileSync(path.join(ownHome, unrelated), "utf8")).toBe("unrelated machine conversation\n")
     expect(r.boxes.created).toBe(0)
   })
 })

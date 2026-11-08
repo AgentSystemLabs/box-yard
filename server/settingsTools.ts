@@ -221,7 +221,7 @@ export class SettingsTools {
       group: e.group,
       value: e.value,
       default: e.default,
-      allowed: describeSchema(e.schema),
+      allowed: withOwner(describeSchema(e.schema), this.d.settings.get().ownerName),
       source: e.source,
       envVar: e.envVar,
       writable: true,
@@ -248,16 +248,17 @@ export class SettingsTools {
     const entries = this.entries()
     const locked = new Map(this.readOnly().map((r) => [r.key, r]))
     const errors: string[] = []
+    const owner = withOwner("Cody", this.d.settings.get().ownerName)
     const next = new Map<string, unknown>()
     const assign = (raw: string, value: unknown) => {
       const key = raw.replace(/^settings\./, "")
       const ro = locked.get(key)
       if (ro?.secret || (!entries.has(key) && SECRET_NAME.test(key))) {
-        errors.push(`${key}: API keys, tokens and passwords can't be read or written with these tools. Cody sets them in Settings › Credentials (or Voice) or with ${ro?.envVar ?? "an env var"}.`)
+        errors.push(`${key}: API keys, tokens and passwords can't be read or written with these tools. ${owner} sets them in Settings › Credentials (or Voice) or with ${ro?.envVar ?? "an env var"}.`)
         return
       }
       if (ro?.envLocked) {
-        errors.push(`${key}: set by the ${ro.envVar} env var on the server, so it can't be changed here. Cody edits .env and restarts Box Yard.`)
+        errors.push(`${key}: set by the ${ro.envVar} env var on the server, so it can't be changed here. ${owner} edits .env and restarts Box Yard.`)
         return
       }
       const exact = entries.get(key)
@@ -317,7 +318,7 @@ export class SettingsTools {
     }
     if (errors.length) {
       const text = `Nothing was changed. ${errors.length === 1 ? "Problem" : `${errors.length} problems`}:\n- ${errors.join("\n- ")}`
-      throw new Error(withOwner(text, this.d.settings.get().ownerName))
+      throw new Error(text)
     }
 
     const before = this.snapshot()

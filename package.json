@@ -29,7 +29,10 @@
     "smoke:models": "tsx scripts/smoke-models.ts",
     "test:docker": "BOXYARD_DOCKER_E2E=1 vitest run test/docker-real.e2e.test.ts",
     "test:detect": "BOXYARD_DETECT_E2E=1 vitest run test/identity-detect-here.e2e.test.ts --silent=false",
-    "demo": "./yard demo"
+    "demo": "./yard demo",
+    "test:contrast": "node scripts/a11y/contrast.mjs",
+    "test:contrast:components": "node scripts/a11y/contrast-components.mjs",
+    "test:contrast:interactions": "node scripts/a11y/contrast-interactions.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -51,9 +54,11 @@
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^6.1.2",
+    "axe-core": "^4.14.0",
     "concurrently": "^10.0.6",
     "happy-dom": "^21.0.4",
     "lucide-react": "^1.61.0",
+    "playwright-core": "^1.65.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-markdown": "^10.1.0",

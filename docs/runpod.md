@@ -4,7 +4,7 @@ A project can run its agents on a RunPod GPU pod instead of this computer (the d
 
 ## Setup (once per Box Yard install)
 
-1. **API key.** Settings › Box providers › GPU clouds › RunPod GPU › API key, or set `RUNPOD_API_KEY` in Box Yard's environment. Make the key at runpod.io › Settings › API Keys.
+1. **API key.** Settings › Box providers › GPU clouds › RunPod GPU › API key, or set `RUNPOD_API_KEY` in Box Yard's environment. Make the key at runpod.io › Settings › API Keys. The provider uses it on the server; local tasks remain unsandboxed, and the current local env filter does not remove `RUNPOD_API_KEY`.
 2. **Image** (optional, but pods start much faster with it).
    - Settings › Box providers › GPU clouds › RunPod GPU › Image: type a repository you can push to, like `docker.io/<your-docker-user>/boxyard-gpu`, then press **Build & push**.
    - Box Yard runs `docker buildx build --platform linux/amd64 … --push runpod/` with your own Docker. It uses your own `docker login`; Box Yard never sees that login.
@@ -12,7 +12,7 @@ A project can run its agents on a RunPod GPU pod instead of this computer (the d
    - The repository must be public, because RunPod pulls with no credentials. After the push, Box Yard checks that it can pull the image anonymously and warns if it can't.
    - The image holds only public tools. Before a build starts, Box Yard scans the files for anything shaped like a key and refuses to build if it finds one.
    - With no image, pods start from RunPod's stock PyTorch image (`RUNPOD_STOCK_IMAGE` in `shared/runpod.ts`). `bootstrap.sh` then installs the tools, which takes about a minute the first time a pod starts. Use the stock image when there's no Docker on the computer running Box Yard.
-3. **GPU types**: an ordered list, A5000 then A40 by default. A pod gets the first type with stock that fits under the caps. The picker shows each type's VRAM, its live price on the chosen cloud, its stock and what it's good for (`RUNPOD_GPU_GUIDE` in `shared/runpod.ts`). For browser and WebGL game testing a cheaper one is plenty:
+3. **GPU types**: an ordered list, A5000 then A40 by default. A pod gets the first type with stock that fits under the caps. The picker shows each type’s VRAM, its live price on the chosen cloud, its stock and what it’s good for (`RUNPOD_GPU_GUIDE` in `shared/runpod.ts`). The prices below are that guide’s approximate snapshot, not a current quote; use the live picker before spending. For browser and WebGL game testing a cheaper one is plenty:
 
    | GPU (RunPod `gpuTypeId`) | VRAM | About | Good for |
    | --- | --- | --- | --- |
@@ -34,7 +34,7 @@ A project can run its agents on a RunPod GPU pod instead of this computer (the d
 
    | Setting | Default | What it does |
    | --- | --- | --- |
-   | Idle stop | 10 min | Time with no task working before a pod is stopped |
+   | Idle stop | 10 min | Time with no task working or waiting before a pod is terminated (not paused) |
    | Tasks running at once per pod | 3 | Tasks of one project that may run on one pod at once, unless the project sets Tasks running at once |
    | Max per project | $1/hr | Most one project's pods may cost together, unless the project sets its own GPU cap |
    | Max for all pods | $3/hr | Most all of this install's pods may cost together |
@@ -67,11 +67,11 @@ A project can run its agents on a RunPod GPU pod instead of this computer (the d
   - **Stop** ends a pod right away.
   - **Dead-man switch.** If the computer running Box Yard sleeps or quits, the pod's own watchdog (`runpod/watchdog.sh`) terminates it after the watchdog time with no contact. It uses the pod-scoped key RunPod gives each pod.
 - **Previews.** An agent's `$PORT` is reachable at `https://<podId>-<port>.proxy.runpod.net`.
-- **Costs.** Pods bill by the second while they run. Volumes bill monthly whether or not a pod is up (about $0.07/GB a month). Delete a volume you no longer need in Settings › Box providers › GPU clouds › RunPod GPU › Volumes.
+- **Costs.** Pods bill by the second while they run. Volumes keep billing whether or not a pod is up; check [RunPod storage pricing](https://docs.runpod.io/pods/storage/types) for current rates. Delete a volume you no longer need in Settings › Box providers › GPU clouds › RunPod GPU › Volumes.
 
 ## Checking it works
 
-`npm run smoke:runpod` (with `RUNPOD_API_KEY` set) starts one pod with the default settings and checks SSH, the tools, `nvidia-smi`, WebGL in headless Chrome on the NVIDIA GPU, files, and the proxy URL. Then it terminates the pod and deletes its volume. It takes about three minutes and costs about two cents. `--keep` leaves the pod up; `SMOKE_IMAGE=<your image>` tries a built image.
+`npm run smoke:runpod` (with `RUNPOD_API_KEY` set) starts one pod with the default settings and checks SSH, the tools, `nvidia-smi`, WebGL in headless Chrome on the NVIDIA GPU, files, and the proxy URL. Then it terminates the pod and deletes its volume. It spends money; duration and cost depend on current stock, prices and build/download time. Run only with the owner’s approval. `--keep` leaves the pod up; `SMOKE_IMAGE=<your image>` tries a built image.
 
 ## Files
 

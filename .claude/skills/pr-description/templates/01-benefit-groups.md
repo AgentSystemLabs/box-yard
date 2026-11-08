@@ -83,7 +83,7 @@ flowchart LR
 - **Mechanism.** <How it works, in three or four sentences: the type or flag added, who owns the state, what triggers it.>
 - **Files.** `server/<file>.ts or web/src/<file>.tsx` — <one clause>; `server/<file>.ts or web/src/<file>.tsx` — <one clause>.
 - **Not done.** <The approach rejected and why, so the reviewer does not ask "why not X".>
-- **Gate.** `npm test` and `npm run typecheck` green. <Or: what did not run, and why.>
+- **Gate.** `npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD. <Or: what did not run, and why.>
 
 ## 📝 Notes <a id="notes"></a>
 

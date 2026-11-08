@@ -10,7 +10,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardE
 import { useQueryClient } from "@tanstack/react-query"
 import { Clock, Loader2, Navigation2, Pencil, X } from "lucide-react"
 import type { Attachment, CaptainMessage, ChatMessage, QueuedMessage } from "../../../shared/types"
-import { keys, useOwnerName, useQueuedChatActions, useQueuedMessageActions, useSteerQueued, useSteerState, useTaskQueue } from "../lib/queries"
+import { keys, useOwnerName, useQueuedChatActions, useQueuedMessageActions, useSteerQueued, useSteerState, useTaskMessages, useTaskQueue } from "../lib/queries"
 import { isQueued } from "../lib/queued"
 import { takeBack } from "../lib/takeBack"
 import { primeSendSound } from "../lib/sendSound"
@@ -34,6 +34,8 @@ const STEER_TITLE = "Steer: request delivery of the queued messages into the run
 
 export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string }) {
   const queue = useTaskQueue(taskId)
+  const messages = useTaskMessages(taskId)
+  const immediate = useMemo(() => new Set(messages.data?.filter((m) => m.meta?.pending && !m.meta.queued).map((m) => m.id)), [messages.data])
   const { edit, remove, restore } = useQueuedMessageActions(taskId)
   const steerState = useSteerState(taskId)
   const steer = useSteerQueued(taskId)
@@ -42,7 +44,7 @@ export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string })
   const [deleted, setDeleted] = useState<QueuedMessage[]>([])
   // Each cancelled row's text went back in the message box (or its draft, with no box on screen): its Undo takes it out again (lib/takeBack.ts).
   const untakes = useRef(new Map<string, () => void>())
-  const list = queue.data ?? []
+  const list = useMemo(() => (queue.data ?? []).filter((m) => !m.clientMessageId || !immediate.has(m.clientMessageId)), [queue.data, immediate])
   const root = useRef<HTMLDivElement>(null)
 
   const rows = useMemo(() => {
@@ -184,7 +186,7 @@ const QueuedRow = memo(function QueuedRow({
     <div
       role="listitem"
       data-testid="queued-message"
-      className={cx("@container rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 px-3 py-2", locked && "opacity-70")}
+      className="@container rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 px-3 py-2"
     >
       <div className="flex min-h-6 items-center gap-1.5 text-[11px] text-zinc-500">
         {steered ? (

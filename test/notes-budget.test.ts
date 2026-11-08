@@ -99,7 +99,7 @@ describe("notes in prompts", () => {
   it("the first prompt lists the budgeted notes and says how many were left out", () => {
     const r = budgetNotes([1, 2, 3].map((i) => note(i)), { maxNotes: 2, maxTokens: 4000 })
     const text = firstTurnPrompt({ task: { title: "T", prompt: "p" }, notes: r.shown, hiddenNotes: r.hidden.length, directory: [], extraInputs: [] })
-    expect(text).toContain("## Project notes (lasting rules from Cody and the project's Captain)")
+    expect(text).toContain("## Project notes (lasting rules from the owner and the project's Captain)")
     expect(text).not.toContain("rule 1")
     expect(text).toContain("- (captain) rule 2\n- (captain) rule 3")
     expect(text).toContain("1 older note doesn't fit the notes budget and isn't shown here; read_notes lists every note.")

@@ -130,7 +130,7 @@ describe("the Coordinator's view of a status-only project", () => {
     expect(list.find((t) => t.id === r.visible.id)).toMatchObject({ question: "Which colour? QUESTION-WORDS", summary: "Did the thing. SUMMARY-WORDS" })
 
     const got = (await tool("get_task", { task: r.hidden.id })).json()
-    expect(got).toMatchObject({ id: r.hidden.id, status: "needs_input", branch: "boxyard/build-1a2b", coordinatorSees: expect.stringMatching(/^status only: Cody set its identity/) })
+    expect(got).toMatchObject({ id: r.hidden.id, status: "needs_input", branch: "boxyard/build-1a2b", coordinatorSees: expect.stringMatching(/^status only: the owner set its identity/) })
     expect(got.lastReply).toBeUndefined()
     expect(got.lines).toBeUndefined()
     const waited = (await tool("wait_for_tasks", { tasks: [r.hidden.id], timeout_seconds: 5 })).text
@@ -346,11 +346,11 @@ describe("agents across the seal", () => {
     // Out of the sealed project: refused, and only the sender hears why.
     await message(r.hidden.id, r.visible.id, "What I found: CHAT-WORDS")
     expect(words(r.visible.id)).not.toContain("CHAT-WORDS")
-    expect(words(r.hidden.id)).toMatch(/was not delivered: Cody set your project to show the Coordinator its status only[\s\S]*message_captain/)
+    expect(words(r.hidden.id)).toMatch(/was not delivered: the owner set your project to show the Coordinator its status only[\s\S]*message_captain/)
     // Into it: refused too, since the reply would come back out.
     await message(r.visible.id, r.hidden.id, "Tell me what you found")
     expect(words(r.hidden.id)).not.toContain("Tell me what you found")
-    expect(words(r.visible.id)).toMatch(/was not delivered: Cody set its project to show the Coordinator its status only/)
+    expect(words(r.visible.id)).toMatch(/was not delivered: the owner set its project to show the Coordinator its status only/)
 
     // Inside the sealed project, and between two open projects, messages go through as before.
     const sibling = r.yard.store.createTask({ projectId: r.secret.id, title: "Private sibling", prompt: "x", branch: "boxyard/sib-1a2b" })

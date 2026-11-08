@@ -36,7 +36,7 @@ sequenceDiagram
   U->>T: key or command
   T->>D: request
   D->>C: spawn / signal / hook
-  C-->>D: hook event
+  D->>C: poll turn events
   Note over D: the new step — what this PR adds
   D-->>T: status change
   T-->>U: what the user sees
@@ -68,7 +68,7 @@ sequenceDiagram
 - **Mechanism.** <Three or four sentences: the type or flag, who owns the state, what triggers it.>
 - **Files.** `server/<file>.ts or web/src/<file>.tsx` — <clause>; `server/<file>.ts or web/src/<file>.tsx` — <clause>.
 - **Why not <the obvious alternative>.** <One or two sentences.>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 7. Notes <a id="7-notes"></a>
 

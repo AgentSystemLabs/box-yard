@@ -7,6 +7,7 @@ import { AppLink, Button, LineIcon, NewTabLink, TimeAgo, cx, inputClass } from "
 import { Loading } from "./Loading"
 import { MoreLogins } from "./MoreLogins"
 import type { LoginHarness } from "../../../shared/agentLogins"
+import { ownerNameProblem } from "../lib/settingsValidation"
 import { localFlag } from "../lib/localFlag"
 import { Panel, Row, SourceHint } from "./SettingsBlocks"
 import { SearchHighlight } from "../lib/settingsSearch"
@@ -46,7 +47,7 @@ export function useSetupNeeded(): { status: SetupStatus | undefined; needed: boo
 type TestState = { state: "running" } | { state: "ok" | "error"; text: string }
 
 /** Credentials that are a whole file, not a one-line key: a text box takes them. */
-const MULTILINE_CREDENTIALS: CredentialKey[] = ["codexAuthJson"]
+const MULTILINE_CREDENTIALS: CredentialKey[] = ["codexAuthJson", "opencodeAuthJson"]
 
 /**
  * A credential's control. Unset: a password input (a text box for a file like Codex's auth.json) with Save and Test
@@ -563,6 +564,12 @@ function toolLine(t: LocalTool, s: SetupStatus): { ok: boolean; text: string } {
     if (local.cursorLogin === false) return { ok: false, text: `${version} · not signed in: run cursor-agent login` }
     return { ok: true, text: version }
   }
+  if (t.key === "opencode") {
+    if (!/^1\.19\.5(?:\s|$)/.test(version)) return { ok: false, text: `${version} · requires OpenCode 1.19.5` }
+    return s.credentials.opencodeAuthJson?.state === "set" || local.opencodeLogin === true
+      ? { ok: true, text: `${version} · provider API logins available` }
+      : { ok: false, text: `${version} · add OpenCode API logins below (OAuth unsupported)` }
+  }
   if (t.key === "gh") return local.ghLogin ? { ok: true, text: `${version} · signed in` } : { ok: false, text: `${version} · not signed in: run gh auth login` }
   return { ok: true, text: version }
 }
@@ -654,14 +661,15 @@ function Step({ n, done, title, tag, help, children }: { n: number; done: boolea
 function OwnerNameField({ id }: { id: string }) {
   const info = useAgentSettings()
   const save = useSaveSettings()
-  const name = info.data?.settings.ownerName ?? ""
+  const name = info.data?.sources.ownerName === "default" ? "" : (info.data?.settings.ownerName ?? "")
   const source = info.data?.sources.ownerName
   const [value, setValue] = useState<string | null>(null)
   const draft = value ?? name
   const changed = value !== null && value.trim() !== name
+  const problem = value !== null ? ownerNameProblem(draft) : null
   if (source === "env")
     return <p className="text-xs text-zinc-500">{name}: set on the server by BOXYARD_OWNER_NAME.</p>
-  const submit = () => changed && save.mutate({ ownerName: draft.trim() }, { onSuccess: () => setValue(null) })
+  const submit = () => changed && !problem && save.mutate({ ownerName: draft.trim() }, { onSuccess: () => setValue(null) })
   return (
     <div className="space-y-2">
       <input
@@ -676,9 +684,14 @@ function OwnerNameField({ id }: { id: string }) {
             submit()
           }
         }}
+        aria-invalid={Boolean(problem)}
+        aria-describedby={problem ? `${id}-problem` : undefined}
+        placeholder="Enter your name"
         aria-label="Your name"
       />
-      <Button type="button" size="sm" variant={changed ? "primary" : "subtle"} disabled={!changed || !draft.trim()} loading={save.isPending} onClick={submit}>
+      {problem && <p id={`${id}-problem`} className="text-xs text-red-300" role="alert">{problem}</p>}
+      {save.error && <p className="text-xs text-red-300" role="alert">{save.error.message}</p>}
+      <Button type="button" size="sm" variant={changed ? "primary" : "subtle"} disabled={!changed || Boolean(problem)} loading={save.isPending} onClick={submit}>
         Save
       </Button>
     </div>
@@ -767,7 +780,7 @@ export function SetupCard({ status, className }: { status: SetupStatus; classNam
         <Step n={++n} done={set("githubToken")} title={CREDENTIAL_INFO.githubToken.label} tag="Recommended" help={<CredentialHelp k="githubToken" />}>
           <CredentialField k="githubToken" status={status.credentials.githubToken} id={`${id}-gh`} />
         </Step>
-        <Step n={++n} done={owner !== undefined && owner !== "default"} title="Your name" tag="Optional" help="What the Coordinator, Captains and agents call you.">
+        <Step n={++n} done={owner !== undefined && owner !== "default"} title="Your name" tag="Optional" help={'What the Coordinator, Captains and agents call you. Without a name, they use “the owner”. Change it later in Settings › Box agents.'}>
           <OwnerNameField id={`${id}-owner`} />
         </Step>
       </ol>
@@ -924,6 +937,11 @@ export function CredentialsPanel({ fid }: { fid: (k: string) => string }) {
           </p>
           <Row id={fid("cred-cursorApiKey")} label={CREDENTIAL_INFO.cursorApiKey.label} help={<CredentialHelp k="cursorApiKey" />}>
             <CredentialField k="cursorApiKey" status={s.credentials.cursorApiKey ?? UNSET} id={fid("cred-cursorApiKey")} />
+          </Row>
+          <h4 className="mt-6 border-t border-zinc-900 pt-5 text-sm font-semibold text-zinc-100">OpenCode</h4>
+          <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500">Task agents on OpenCode 1.19.5 use provider API logins. OAuth and manager chats are not supported. Test validates the JSON format without contacting a model provider.</p>
+          <Row id={fid("cred-opencodeAuthJson")} label={CREDENTIAL_INFO.opencodeAuthJson.label} help={<CredentialHelp k="opencodeAuthJson" />}>
+            <CredentialField k="opencodeAuthJson" status={s.credentials.opencodeAuthJson ?? UNSET} id={fid("cred-opencodeAuthJson")} />
           </Row>
           {s.restart.map((r) => (
             <p key={r} className="mt-4 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-xs leading-relaxed text-amber-200">

@@ -28,9 +28,9 @@ import {
 import { RepoContext, repoScopeKey, resolveRepoScope, useRepoScopeKey } from "../lib/repoScope"
 import { liveMarkdown, type LiveMarkdown, type RenderMarkdown } from "../lib/liveMarkdown"
 import { FileLink, PREVIEW_GROUP, galleryFor } from "./FileLink"
-import { CueDot, TaskTile, WORKING_PULSE, projectColorStyle } from "./TaskIcon"
+import { CueDot, TaskTile, WORKING_PULSE, agentIconCue, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { Helm } from "./ShipIcons"
-import { CaptainIcon } from "./CaptainIcon"
+import { CaptainIcon, CaptainTile } from "./CaptainIcon"
 import { clickImage, imageTarget, openLightbox } from "../lib/lightbox"
 import { openPreview } from "../lib/preview"
 import { previewKind } from "../lib/filePreview"
@@ -81,33 +81,44 @@ export function LineIcon({ icon: Icon, className, box, label }: { icon: LucideIc
  * The icon at the top left of the Coordinator's chat (its helm, in the yard's yellow) and a Captain's (its icon, the
  * cap unless its project or Settings picks another, in its project's colour, as everywhere a Captain shows), as in
  * their boxes (ChatIcons.tsx, CaptainIcon.tsx). It is the header's status: while the agent works (or a Captain
- * compacts) it pulses gently (WORKING_PULSE; under prefers-reduced-motion a still sky dot instead), and a Captain whose
- * last turn errored wears a still red dot. The tooltip says it in words, and screen readers hear it through the live
- * region.
+ * compacts) it pulses gently (WORKING_PULSE), with a still sky dot in either motion mode. An error takes precedence
+ * over working for the dot; the glyph keeps pulsing if still busy. Tooltips and screen readers say the state too.
  */
-export function AgentIcon({ busy, compacting = false, error = false, kind = "captain", color, projectId }: {
+export function AgentIcon({ busy, compacting = false, error = false, kind = "captain", color, projectId, tile = false, announce = true }: {
   busy: boolean
   compacting?: boolean
   error?: boolean
   kind?: "coordinator" | "captain"
   color?: ProjectColor | null
   projectId?: string | null
+  /** Sidebar/rail tile instead of a bare header/menu glyph; images retain their own shape. */
+  tile?: boolean
+  /** Headers announce transitions; repeated navigation icons expose an accessible name instead. */
+  announce?: boolean
 }) {
   const tint = kind === "coordinator" ? "text-yard-400" : color ? "text-(--pc)" : "text-zinc-300"
   const working = busy || compacting
-  const state = error ? "Error" : compacting ? "Compacting…" : busy ? "Working…" : undefined
+  const model = { busy, compacting, error: error ? "error" : null }
+  const cue = agentIconCue(model)
+  const state = agentIconLabel(model)
   const className = cx("h-4 w-4", tint, working && WORKING_PULSE)
   return (
-    <span className="relative flex shrink-0" title={state} style={kind === "captain" ? projectColorStyle(color) : undefined}>
-      {kind === "captain" ? (
-        <CaptainIcon projectId={projectId} data-testid="agent-icon" data-busy={working || undefined} className={className} />
-      ) : (
-        <Helm data-testid="agent-icon" data-busy={working || undefined} className={className} aria-hidden />
-      )}
-      <CueDot cue={error ? "failed" : working ? "working" : null} />
-      <span className="sr-only" aria-live="polite">
+    <span data-testid="agent-status-icon" className="relative flex shrink-0" title={state} role={!announce && state ? "img" : undefined} aria-label={!announce ? state : undefined} style={kind === "captain" ? projectColorStyle(color) : undefined}>
+      {tile ? (
+        <span data-testid="agent-icon" data-busy={working || undefined} className={cx("grid h-5 w-5 place-items-center", working && WORKING_PULSE)}>
+          {kind === "captain" && projectId ? (
+            <CaptainTile projectId={projectId} className="h-5 w-5" glyph="h-3.5 w-3.5" />
+          ) : (
+            <span className="grid h-5 w-5 place-items-center rounded-md bg-yard-500/15 text-yard-400"><Helm className="h-3.5 w-3.5" aria-hidden /></span>
+          )}
+        </span>
+      ) : kind === "captain" ? (
+        <CaptainIcon projectId={projectId} data-testid="agent-icon" data-busy={working || undefined} data-color={color ?? undefined} className={className} rounded="rounded-[4px]" />
+      ) : <Helm data-testid="agent-icon" data-busy={working || undefined} className={className} aria-hidden />}
+      <CueDot cue={cue} />
+      {announce && <span className="sr-only" aria-live="polite">
         {state ?? ""}
-      </span>
+      </span>}
     </span>
   )
 }
@@ -211,7 +222,7 @@ export const PR_STYLE: Record<PrState, { icon: LucideIcon; chip: string; link: s
   open: { icon: GitPullRequest, chip: "border-emerald-900/60 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20", link: "text-emerald-400" },
   draft: { icon: GitPullRequestDraft, chip: "border-zinc-700 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-800", link: "text-zinc-400" },
   merged: { icon: GitMerge, chip: "border-merged/50 bg-merged/15 text-merged-fg hover:bg-merged/25", link: "text-merged-fg" },
-  closed: { icon: GitPullRequestClosed, chip: "border-red-900/60 bg-red-500/10 text-red-300/80 hover:bg-red-500/15", link: "text-red-400/80" },
+  closed: { icon: GitPullRequestClosed, chip: "border-red-900/60 bg-red-500/10 text-red-300 hover:bg-red-500/15", link: "text-red-400" },
 }
 
 /**
@@ -260,7 +271,7 @@ export function PrChip({
     >
       {variant !== "number" && <>{activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}</>}
       <span className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
-      {activity && <span className={cx("font-normal opacity-80", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
+      {activity && <span className={cx("font-normal", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
     </NewTabLink>
   )
 }
@@ -613,7 +624,7 @@ export function ExternalMark({ className }: { className?: string }) {
       role="img"
       aria-label="(opens in a new tab)"
       aria-hidden={false}
-      className={cx("ml-px inline-block h-[0.95em] w-[0.95em] shrink-0 align-[-0.125em] opacity-70", className)}
+      className={cx("ml-px inline-block h-[0.95em] w-[0.95em] shrink-0 align-[-0.125em]", className)}
     />
   )
 }
@@ -992,7 +1003,7 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
 }
 
 export const inputClass =
-  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500/70 sm:min-h-0 sm:text-sm"
+  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
 
 const SELECT_SIZE = {
   md: "min-h-11 rounded-lg py-2 pr-9 pl-3 text-base sm:min-h-0 sm:text-sm",
@@ -1005,7 +1016,7 @@ export function Select({ size = "md", className, ...props }: Omit<ComponentProps
     <select
       {...props}
       className={cx(
-        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-700 focus:border-yard-500 focus:ring-2 focus:ring-yard-500/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-500 focus:border-yard-500 focus:ring-2 focus:ring-yard-500/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
         SELECT_SIZE[size],
         className,
       )}

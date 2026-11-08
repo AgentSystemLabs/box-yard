@@ -5,7 +5,7 @@ Settings › Credentials › **More Claude logins** and **More Codex logins** ta
 ## Adding a login
 
 - **Claude.** Run `claude setup-token` on each account and paste the token with a name ("Work Max"). API keys aren't accepted here: they bill per call. An API key in Settings › Credentials is still part of the rotation, as its first login.
-- **Codex.** Paste the whole `auth.json` of a ChatGPT login. To sign in to another account without signing out of the one on your computer, run `CODEX_HOME=$(mktemp -d) codex login` and paste the `auth.json` it writes in that folder. The server keeps the copy Codex refreshes, as it does for Settings' own login, so sign in once and don't use that copy anywhere else.
+- **Codex.** Paste the whole `auth.json` of a ChatGPT login. To sign in to another account without signing out of the one on your computer, create a temporary folder (`codex_login_dir="$(mktemp -d)"`), run `CODEX_HOME="$codex_login_dir" codex login`, then select the `auth.json` in that folder. Keep that file private; it contains the account’s login. The server keeps the copy Codex refreshes, as it does for Settings' own login, so sign in once and don't use that copy anywhere else.
 - **One account, one login.** A login already in the list, or the account Settings › Credentials already uses, is refused. A Codex login is known by its ChatGPT account, so a refreshed file of the same account is the same login.
 - **Test** runs one tiny prompt with the CLI agents use, on that login alone: a pasted value before it's added, or a saved one.
 - Adding, renaming and removing are drafts the Settings dialog's Save writes, like every other setting. Test runs at once.
@@ -47,10 +47,12 @@ The rotation also reads each login's subscription limits (docs/limits.md) before
 
 ## Where it shows
 
-- Settings › Credentials: each login's state ("At its limit · back Today 3:00 PM", "Signed out"), last use, and its 5-hour and weekly windows once a run has read them. Settings › Usage › Subscription limits has a card per login.
+- Settings › Credentials: each login's state ("At its limit · back Today 3:00 PM", "Signed out"), last use, and its 5-hour and weekly windows once a run has read them. Settings › Usage › Open Usage shows subscription allowances and has a card per login.
 - A turn's timing (the ⏱ chip): "on Work Max (…a1b2)".
-- Settings › Usage › By login, once some run in the period took a login from the rotation.
+- Usage’s Login breakdown (open it from the sidebar, or Settings › Usage › Open Usage), once some run in the period took a login from the rotation.
 
 ## Data
 
 `agent_logins` holds added logins (encrypted value, name, last 4, fingerprint). `agent_login_status` holds each login's state, last Test and the name it ran under (Settings › Credentials' login too). `agent_login_holds` is which login each task, the Coordinator and each Captain last ran on, and when. `task_turns`, `turn_timings` and `claude_usage` have a `login_id`. Settings › Credentials' own login has the id `lgn_cred-<harness>-<fp8>`, the one its limit readings are kept under (docs/limits.md › Logins), so a new value there is a new login.
+
+[OpenCode task agents](opencode.md) use API-only provider logins in their own Credentials field. They do not join the Claude/Codex subscription rotation or report subscription windows.

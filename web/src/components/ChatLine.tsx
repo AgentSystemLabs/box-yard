@@ -30,8 +30,7 @@ export function CollapsibleMarkdown({ children, className }: { children: string;
   const [open, setOpen] = useState(false)
   return (
     <div className={className}>
-      {/* A mask, not an overlay, so the fade works on any bubble background. */}
-      <div className={cx(long && !open && "max-h-48 overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]")}>
+      <div className={cx(long && !open && "max-h-48 overflow-hidden")}>
         <Markdown>{children}</Markdown>
       </div>
       {long && (
@@ -327,7 +326,7 @@ export function NoticeCard({ taskId, className, children }: { taskId: string; cl
       onClick={open}
       onAuxClick={open}
       onKeyDown={open}
-      className={cx(NOTICE_CLASS, "cursor-pointer hover:opacity-90 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none", className)}
+      className={cx(NOTICE_CLASS, "cursor-pointer hover:bg-zinc-800/40 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none", className)}
     >
       {children}
     </div>
@@ -523,7 +522,7 @@ function ChatLineBody({
   }
   if (m.role === "user") {
     const bubble = (
-      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE, m.meta?.pending ? "opacity-70" : "")}>
+      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE)} aria-busy={m.meta?.pending === true || undefined}>
         {m.content}
         <AttachmentList files={m.meta?.attachments} />
         <PickChips meta={m.meta} />

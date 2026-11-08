@@ -1,6 +1,7 @@
 import { q } from "./providers/types.js"
 import { KEEP_PACK, cloneTaskScript, setHelperScript, syncMirrorScript, withMirrorLock, type MirrorSpec } from "./gitShare.js"
 import { GIT_MANIFEST, GIT_PACK, readableIndexScript, stageBaseScript } from "./gitFirst.js"
+import { AGENT_CLIS } from "../shared/agentCli.js"
 
 /**
  * Workspace archives stream off the box: tar writes to stdout, base64 makes it text the exec stream can carry, and
@@ -101,7 +102,7 @@ export function archiveScript(o: ArchiveScript): string {
     )
   } else if (o.thin) {
     lines.push(
-      `  m=(); for f in claude events.jsonl events.seq; do [ -e ${id}/"$f" ] && m+=(${id}/"$f"); done`,
+      `  m=(); for f in ${AGENT_CLIS.join(" ")} events.jsonl events.seq; do [ -e ${id}/"$f" ] && m+=(${id}/"$f"); done`,
       `  if [ -e ${id}/work/.git ]; then`,
       // Staged like the partial archive's snapshot, on whichever of /tmp and the work disk has more room.
       `    ${stageBaseScript(o.boxRoot ?? o.root.replace(/\/[^/]+\/?$/, "")).split("\n").join("; ")}`,

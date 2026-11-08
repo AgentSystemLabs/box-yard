@@ -203,5 +203,5 @@ function GpuCloudRow({ fid, settings, active, status }: { fid: (k: string) => st
 
 function localStatus(s: SetupStatus) {
   if (!s.local) return "Tools not checked"
-  return s.local.tools.some((t) => t.key === "node" && t.found) && s.local.tools.some((t) => (t.key === "claude" || t.key === "codex") && t.found) ? "Tools available" : "Tools need setup"
+  return s.local.tools.some((t) => t.key === "node" && t.found) && s.local.tools.some((t) => (t.key === "claude" || t.key === "codex" || t.key === "cursor" || t.key === "opencode") && t.found) ? "Tools available" : "Tools need setup"
 }

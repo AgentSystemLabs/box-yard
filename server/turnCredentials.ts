@@ -3,6 +3,7 @@
 // global Claude login and GitHub token in its env), so the turn names the ones the runner removes before it starts
 // `claude`, as well as the ones it sets. What a project's own env vars don't set comes from its identity
 // (server/identity/identities.ts `base`), and for the Default identity from Settings › Credentials.
+import { OPENCODE_CREDENTIAL_VARS, parseOpenCodeAuth } from "./opencode.js"
 import { CLAUDE_CREDENTIAL_VARS, DEFAULT_IDENTITY_ID } from "../shared/identities.js"
 
 export { CLAUDE_CREDENTIAL_VARS }
@@ -150,6 +151,16 @@ export function identityHomeEnv(home: string): Record<string, string> {
  * rest (the Default identity) use the global one. A task's own env doesn't count: its tasks share their project's boxes.
  */
 export function credentialSet(projectId: string, projectEnv: Record<string, string>, identityId: string = DEFAULT_IDENTITY_ID): string {
-  if ([...CLAUDE_CREDENTIAL_VARS, ...CODEX_CREDENTIAL_VARS, ...CURSOR_CREDENTIAL_VARS, ...GITHUB_TOKEN_VARS].some((v) => projectEnv[v])) return `project:${projectId}`
+  if ([...CLAUDE_CREDENTIAL_VARS, ...CODEX_CREDENTIAL_VARS, ...CURSOR_CREDENTIAL_VARS, ...OPENCODE_CREDENTIAL_VARS, ...GITHUB_TOKEN_VARS].some((v) => projectEnv[v])) return `project:${projectId}`
   return identityId === DEFAULT_IDENTITY_ID ? GLOBAL_CREDENTIALS : `identity:${identityId}`
+}
+
+/** Explicit project credentials replace global OpenCode logins; host logins are read only on owner runners. */
+export function openCodeTurnLogin(own: Record<string, string>, globalAuth: string): { env: Record<string, string>; from: "project" | "global" | null } {
+  if (OPENCODE_CREDENTIAL_VARS.some((k) => own[k])) {
+    if (own.OPENCODE_AUTH_CONTENT) parseOpenCodeAuth(own.OPENCODE_AUTH_CONTENT)
+    return { env: Object.fromEntries(OPENCODE_CREDENTIAL_VARS.filter((k) => own[k]).map((k) => [k, own[k]!])), from: "project" }
+  }
+  if (globalAuth) return { env: { OPENCODE_AUTH_CONTENT: parseOpenCodeAuth(globalAuth) }, from: "global" }
+  return { env: {}, from: null }
 }

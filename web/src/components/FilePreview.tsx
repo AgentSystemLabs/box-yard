@@ -200,7 +200,7 @@ function StepButton({ side, onClick }: { side: "left" | "right"; onClick: () => 
       aria-label={side === "left" ? "Previous image (←)" : "Next image (→)"}
       title={side === "left" ? "Previous (←)" : "Next (→)"}
       className={cx(
-        "absolute top-1/2 z-10 grid h-11 w-11 place-items-center rounded-full bg-zinc-950/70 text-zinc-300 shadow-lg ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-900 hover:text-white sm:h-10 sm:w-10",
+        "absolute top-1/2 z-10 grid h-11 w-11 place-items-center rounded-full bg-zinc-950/70 text-zinc-300 shadow-lg ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-900 hover:text-zinc-50 sm:h-10 sm:w-10",
         side === "left" ? "left-3" : "right-3",
       )}
     >

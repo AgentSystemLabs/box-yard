@@ -51,7 +51,7 @@ function setup(creds: Partial<Record<CredentialKey, CredentialStatus>> = {}): Se
     claude: { required: true, state: claude ? "set" : "unset", using: credentials.anthropicApiKey.state === "set" ? "anthropicApiKey" : claude ? "claudeOauthToken" : null },
     codex: { required: false, state: "unset", using: null },
     github: { state: credentials.githubToken.state },
-    owner: { name: "Cody", source: "default" },
+    owner: { name: DEFAULT_SETTINGS.ownerName, source: "default" },
     // These tests follow the Upstash path; the "This computer" path has its own (local-onboarding-ui.test.ts).
     runner: { choice: "box", provider: "box", default: "box" },
     upstash: { available: boxes },
@@ -75,7 +75,7 @@ function render(path: string, o: { newTab?: boolean; settingsLoaded?: boolean; s
   qc.setQueryData(keys.health, { ok: true, provider: "local", mock: false, bus: "file", claude: { available: true, version: "x" }, problems: [], pool: {}, orchestratorBusy: false, scheduler: "local" })
   qc.setQueryData(keys.orchestrator, { busy: false, usage: { tokens: 0, window: 1_000_000, updatedAt: now }, compacting: false, compactQueued: false, lastCompaction: null, compactionsDir: "", error: null })
   if (o.settingsLoaded !== false)
-    qc.setQueryData(keys.agentSettings, { settings: { ...DEFAULT_SETTINGS, ownerName: o.owner ?? "Cody" }, sources: { ownerName: o.owner ? "ui" : "default" }, defaults: {} })
+    qc.setQueryData(keys.agentSettings, { settings: { ...DEFAULT_SETTINGS, ownerName: o.owner ?? DEFAULT_SETTINGS.ownerName }, sources: { ownerName: o.owner ? "ui" : "default" }, defaults: {} })
   qc.setQueryData(keys.setup, o.status ?? setup({ upstashBoxApiKey: saved, claudeOauthToken: saved }))
   qc.setQueryData(keys.chat, o.chat ?? [])
   qc.setQueryData(keys.chatBusy, false)
@@ -261,6 +261,51 @@ describe("first-run setup", () => {
     render(APP_HOME, { status: { ...setup(), ready: true, missing: [], mock: true } })
     expect(card()).toBeNull()
     expect(document.querySelector("[data-testid=setup-reminder]")).toBeNull()
+  })
+})
+
+describe("owner name setup", () => {
+  const name = () => card()!.querySelector<HTMLInputElement>('input[aria-label="Your name"]')!
+  const step = () => name().closest("li")!
+
+  it("starts blank with a neutral fallback, and saves only after Save", async () => {
+    const settings = { ...DEFAULT_SETTINGS, ownerName: "Ana" }
+    routes["PUT /api/agent-settings"] = () => ({ settings, sources: { ownerName: "ui" }, defaults: DEFAULT_SETTINGS })
+    render(APP_HOME, { status: setup() })
+    expect(name().value).toBe("")
+    expect(step().textContent).toContain("the owner")
+    expect(card()!.textContent).not.toMatch(/cody/i)
+    type(name(), "  Ana  ")
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
+    act(() => byText("Save", step())!.click())
+    await settle()
+    expect(calls.find((c) => c.method === "PUT")).toMatchObject({ body: { ownerName: "Ana" } })
+    expect(name().value).toBe("Ana")
+  })
+
+  it("settings keeps a custom name in the draft until Save", async () => {
+    routes["PUT /api/agent-settings"] = () => ({ settings: { ...DEFAULT_SETTINGS, ownerName: "Sam" }, sources: { ownerName: "ui" }, defaults: DEFAULT_SETTINGS })
+    render("/?settings=agents", { status: setup() })
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
+    const label = [...dialog.querySelectorAll("label")].find((l) => l.textContent?.includes("Your name"))!
+    const input = document.getElementById(label.htmlFor) as HTMLInputElement
+    expect(input.value).toBe("the owner")
+    type(input, "Sam")
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
+    act(() => byText("Save", dialog)!.click())
+    await settle()
+    expect(calls.find((c) => c.method === "PUT")).toMatchObject({ body: { ownerName: "Sam" } })
+  })
+
+  it("validates the name before Save or Enter", () => {
+    render(APP_HOME, { status: setup() })
+    for (const invalid of [" ", "<b>Ana</b>"]) {
+      type(name(), invalid)
+      expect(name().getAttribute("aria-invalid")).toBe("true")
+      expect(byText("Save", step())!.disabled).toBe(true)
+      act(() => name().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+    }
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
   })
 })
 

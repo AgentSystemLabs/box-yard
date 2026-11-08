@@ -117,7 +117,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
       )}
-      <Field label="Agent" hint="Claude Code, Codex or Cursor for its tasks. Change it any time in Settings › Projects.">
+      <Field label="Agent" hint="Claude Code, Codex, Cursor or OpenCode for its tasks. Change it any time in Settings › Projects.">
         <Select className="w-full sm:w-80" value={agentCli} onChange={(e) => setAgentCli(e.target.value as AgentCli | "")} data-testid="new-project-agent-cli">
           <option value="">Settings default ({AGENT_CLI_LABEL[defaultAgentCli]})</option>
           {AGENT_CLIS.map((c) => (

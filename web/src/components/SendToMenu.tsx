@@ -151,7 +151,7 @@ export function SendToMenu({ picker, anchor, input }: { picker: Picker; anchor: 
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing || e.keyCode === 229) return
         pickerKeyDown(e as unknown as KeyboardEvent<HTMLTextAreaElement>, { options: picker.options, active: picker.active, setActive: picker.setActive, disabled: () => picker.loading || picker.error, pick: picker.pick, escape: picker.close })
-      }} className="mb-2 min-h-11 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-base text-zinc-100 focus:outline-yard-500" />
+      }} className="mb-2 min-h-11 w-full rounded-lg border border-control bg-zinc-950 px-3 text-base text-zinc-100 focus:outline-yard-500" />
     <Choices picker={picker} maxHeight={320} />
   </Modal>
   if (!at) return null
