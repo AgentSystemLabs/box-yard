@@ -74,7 +74,7 @@ describe("reopenTask", () => {
       expect(back.turnCount).toBe(2)
       expect(y.store.listQueuedInputs(t.id)).toEqual([])
       expect(row(y, t.id).done_from_json).toBeNull()
-      expect(events(y, t.id).at(-1)).toMatch(/^Reopened by Cody: back to .*\. No turn started\.$/)
+      expect(events(y, t.id).at(-1)).toMatch(/^Reopened by the owner: back to .*\. No turn started\.$/)
     }
   })
 

@@ -117,7 +117,7 @@ describe("identity tools, as the Coordinator", () => {
       ["octocat", ["site"]],
       ["octo-acme", ["app"]],
     ])
-    expect(d.next).toMatch(/Tell Cody in one message/)
+    expect(d.next).toMatch(/Tell the owner in one message/)
     // Detection changes nothing.
     expect(r.yard.identities.list().map((i) => i.name)).toEqual(["Default"])
 

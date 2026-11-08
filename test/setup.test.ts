@@ -88,7 +88,7 @@ describe("GET /api/setup", () => {
     // The Coordinator runs on Claude Code by default, so Codex is optional.
     expect(body.codex).toEqual({ required: false, state: "unset", using: null })
     expect(body.github).toEqual({ state: "unset" })
-    expect(body.owner).toEqual({ name: "Cody", source: "default" })
+    expect(body.owner).toEqual({ name: "the owner", source: "default" })
     expect(body.restart).toEqual([])
   })
 

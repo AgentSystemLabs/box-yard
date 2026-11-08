@@ -129,7 +129,7 @@ describe("hook editor helpers", () => {
     expect(filterChips({ projectId: "prj_b", titleRegex: "^feat", sources: ["cody", "schedule"], labels: ["ship"], excludeLabels: ["no-automerge"], includeDrafts: true }, () => "beta")).toEqual([
       "Only beta",
       "Title ~ /^feat/",
-      "Started by Cody or Schedule",
+      "Started by the owner or Schedule",
       "Label ship",
       "Not no-automerge",
       "Drafts too",
