@@ -118,9 +118,10 @@ describe("Stop", () => {
     act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(Harness))))
     act(() => stop(ID))
     act(() => send({ content: "and then this" }))
-    expect(cached().status).toBe("queued")
+    // Sending a message does not invent a task state; the old stopped turn cannot return via HTTP.
+    expect(cached().status).toBe("idle")
     await answer(`POST /api/tasks/${ID}/messages`, 200, task({ pendingCount: 1 }))
-    expect(cached().status).toBe("queued")
+    expect(cached().status).toBe("idle")
   })
 })
 
