@@ -169,7 +169,7 @@ body {
 @keyframes readable-pulse { 50% { opacity: .75; } }
 
 ::selection {
-  @apply bg-yard-500/30;
+  @apply bg-yard-500/30 text-zinc-100;
 }
 
 /* Custom chevron for <Select> (ui.tsx): the native arrow sits flush against the border */
@@ -382,3 +382,7 @@ body.resizing iframe {
 
 .task-title-failed { color: var(--color-red-400); }
 :root:not(.dark) .task-title-failed { color: var(--color-red-600); }
+
+/* Match bars and legend swatches, including the selected day's tinted surface. */
+.usage-fill { background: var(--series-color); }
+:root:not(.dark) .usage-fill { background: color-mix(in srgb, var(--series-color) 85%, #18181b); }

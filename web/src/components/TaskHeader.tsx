@@ -403,8 +403,8 @@ export function usePopover(portal?: RefObject<HTMLElement | null>) {
 /** A menu switch's knob (role="switch" on the row). */
 function Knob({ on }: { on: boolean }) {
   return (
-    <span className={cx("relative h-4 w-7 shrink-0 rounded-full", on ? "bg-yard-500" : "bg-zinc-700")} aria-hidden>
-      <span className={cx("absolute top-0.5 h-3 w-3 rounded-full bg-zinc-950", on ? "left-3.5" : "left-0.5")} />
+    <span className={cx("relative h-4 w-7 shrink-0 rounded-full", on ? "bg-action" : "border border-control bg-zinc-800")} aria-hidden>
+      <span className={cx("absolute top-0.5 h-3 w-3 rounded-full", on ? "left-3.5 bg-on-action" : "left-0.5 bg-zinc-100")} />
     </span>
   )
 }
