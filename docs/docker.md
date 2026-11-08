@@ -1,13 +1,13 @@
 # Docker containers
 
-A project can run its agents in a Docker container on the computer running Box Yard, instead of straight on this computer (the default on a fresh install), on an Upstash box or on a RunPod pod: pick **Runs on: Docker container** on the project's page, or `runs_on: "docker"` for one task. Each Docker project gets one container of its own. Agents work inside it with only its workspace volume, and they can't see this computer's files, its other projects, or Docker itself.
+A project can run its agents in a Docker container on the computer running Box Yard, instead of straight on this computer (the default on a fresh install), on an Upstash box or on a RunPod pod: pick **Runs on: Docker container** on the project's page, or `runs_on: "docker"` for one task. Each Docker project gets one container of its own. Box Yard mounts the project’s workspace volume, without host directories or the Docker socket. Tasks in that container share its user, files and credentials; this is not a hostile-agent security boundary.
 
-Use it when you want the local runner's speed and price (free, no network hop) without an agent being able to touch the rest of the computer.
+Use it to run tasks in a container with local compute and a separate filesystem. The default bridge still reaches services on the host’s network; loopback-only preview publishing does not restrict outbound access. See [Credentials and isolation](#credentials-and-isolation) before giving tasks sensitive credentials.
 
 ## Setup (once per Box Yard install)
 
 1. **Docker.** Install Docker Desktop (or Docker Engine on Linux) and start it. Box Yard finds the `docker` CLI on the PATH or in Docker Desktop's usual places (`DOCKER_BIN` pins one). Settings › Box providers › Docker shows whether it's running, and how many CPUs and how much memory it has for all containers.
-2. **A Claude key.** Settings › Credentials › Claude, the project identity's Claude login (Settings › Identities), or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in the project's or the task's env. `claude setup-token` makes one. A container can't use this computer's own `claude` login, because macOS keeps it in the keychain and no host folder is mounted. Box Yard asks the same resolver that writes the turn's `task.json` (docs/identities.md), so a task waits for a key only when its turns really would have none.
+2. **A login for the selected harness.** For Claude Code: Settings › Credentials › Claude, the project identity’s Claude login (Settings › Identities), or `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` in the project’s or the task’s env. `claude setup-token` makes one. A container can't use this computer's own `claude` login, because macOS keeps it in the keychain and no host folder is mounted. Box Yard asks the same resolver that writes the turn's `task.json` (docs/identities.md), so a task waits for a key only when its turns really would have none. Codex needs a forwarded [ChatGPT login or Codex API key](codex.md#logging-in); Cursor needs a [Cursor API key](cursor.md#logging-in). A container does not inherit the host’s interactive CLI login.
 3. **GitHub.** The same token boxes and pods get: Settings › Credentials › GitHub, or the project's own `GITHUB_TOKEN`. When Box Yard runs on this computer (Setup › Where agents run: This computer or Docker containers) and none is set, it uses this computer's `gh` login, as the local runner does.
 4. **The image** (optional). The first task builds it, which takes a few minutes. **Settings › Box providers › Docker › Build image now** builds it ahead of time.
 
@@ -62,7 +62,7 @@ Box Yard runs every command with `docker exec -i <container> bash -c 'eval "$(ca
 
 ## Credentials and isolation
 
-- **In the container only, in memory only.** A turn's credentials (the Claude key, `GITHUB_TOKEN`, the project's env) reach the container in `task.json`, as on boxes. On Docker, `task.json` is written to a tmpfs (`/run/boxyard/<task>.json`, mode 0700, in the container's memory) and linked from the task folder. So is an identity's signing key (`/run/boxyard/<task>.signing.key`), which the runner keeps on the tmpfs while the turn signs and removes after (docs/identities.md).
+- **Delivery files on tmpfs.** A turn’s credentials (the Claude key, `GITHUB_TOKEN`, the project's env) reach the container in `task.json`, as on boxes. On Docker, `task.json` is written to a tmpfs (`/run/boxyard/<task>.json`, mode 0700, in the container's memory) and linked from the task folder. So is an identity's signing key (`/run/boxyard/<task>.signing.key`), which the runner keeps on the tmpfs while the turn signs and removes after (docs/identities.md).
   - Credentials are never in the image or a layer: the build context is only the Dockerfile, and a Dockerfile holding something shaped like a key, or any credential value in effect (Settings › Credentials and every identity's), is refused. The build log never shows one.
   - They're never in `docker run -e`, `docker inspect` or a command line.
   - The tmpfs is gone when the container stops or is deleted.
@@ -70,13 +70,15 @@ Box Yard runs every command with `docker exec -i <container> bash -c 'eval "$(ca
   - `gh` reads `$GITHUB_TOKEN`.
   - git's credential helper (in the image's `/etc/gitconfig`, and in each repo's config) answers with the turn's `$GITHUB_TOKEN` and clears every other helper first, so no stored credential can answer before it.
   - Nothing writes a credential store or `~/.git-credentials`.
-- **Mounts.** The only mount is the project's own volume: no folder of this computer, and no Docker socket. A container can't start other containers or reach the Docker daemon.
+- **Mounts.** Box Yard mounts the project’s workspace volume and a credentials tmpfs; it mounts no host directory or Docker socket. This removes the direct mounted-socket path to Docker. It does not block access to a daemon or owner API exposed over the network.
 - **Inside the container.** Agents run as the image's user (`agent`, uid 1000, on Box Yard's image). It has passwordless sudo inside the container only, so agents can `apt-get` what a task needs. Limits: `--pids-limit 4096`, CPU and memory from Settings, and `/dev/shm` of 1 GB for Chromium.
-- **Network.** Docker's default bridge network, so git, npm and the Claude API work. The container can reach the internet and anything this computer's network can.
+- **Network.** Docker’s default bridge network, so git, npm and model APIs work. There is no Box Yard egress firewall; agents may reach host/LAN services accessible from that bridge.
+- **Credential limits.** A task can read its process environment and other tasks’ files inside the same container. Codex’s forwarded login is copied to `<task>/codex/auth.json` during a turn, then parked on tmpfs between turns; it is not memory-only during execution. Archive exclusions protect the normal delivery files, not arbitrary copies an agent makes.
+- **Control-plane limits.** Container mounts do not establish the authority of task messages, runner requests or archive contents. Security proposals must be checked against merged code; an open PR is not an enforced protection. The [audit inventory](documentation-audit.md#security-and-concurrent-work) records the reviewed revision and outstanding overlaps.
 
 ## The image
 
-Box Yard's image (`docker/`) is Debian (`node:24-bookworm`) with Node 24, git, git-lfs, gh, Claude Code, build tools (build-essential, Python 3), ripgrep, jq and Chromium (`CHROME_PATH`, `PUPPETEER_EXECUTABLE_PATH`). It's multi-arch: arm64 Macs and amd64.
+Box Yard's image (`docker/`) is Debian (`node:24-bookworm`) with Node 24, git, git-lfs, gh, Claude Code, Codex, build tools (build-essential, Python 3), ripgrep, jq and Chromium (`CHROME_PATH`, `PUPPETEER_EXECUTABLE_PATH`). It's multi-arch: arm64 Macs and amd64.
 
 - It's tagged `boxyard-agent:bx-<hash of docker/>`, so editing `docker/` builds a new image and containers move to it on their next start.
 - It's built on this computer only, never pushed.
@@ -88,7 +90,7 @@ Box Yard's image (`docker/`) is Debian (`node:24-bookworm`) with Node 24, git, g
 
 - the image has node, git, gh, claude and Chromium;
 - the preview answers on localhost;
-- only the workspace volume is mounted, there is no Docker socket, and ports bind to 127.0.0.1 only;
+- the workspace volume and credentials tmpfs are mounted, there is no Docker socket, and ports bind to 127.0.0.1 only;
 - `task.json` is on the tmpfs and holds the project's `GITHUB_TOKEN`, while `docker inspect` and the image's history don't;
 - a credential store in the container's own git config can't answer before the turn's `GITHUB_TOKEN` (F1);
 - Stop keeps the workspace and drops the tmpfs;
