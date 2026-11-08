@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createBoxYard, type BoxYard } from "../server/app.js"
+import { strippedEvent, type JanitorHost } from "../server/janitor.js"
 import { buildMcpServer, type McpDeps } from "../server/mcp.js"
 import { testConfig } from "./helpers.js"
 
@@ -22,6 +23,11 @@ describe("configured owner in generated manager and tool output", () => {
     await yard.tasks.stopTask(task.id)
     expect(yard.store.listTaskMessages(task.id, 100).some((m) => m.content === `Stopped by ${owner}.`)).toBe(true)
     expect(yard.store.getTask(task.id)).toMatchObject({ title: "Cody's task", prompt: "Ask Cody about the code" })
+
+    const cleanup = (yard.tasks.janitor as unknown as { host: JanitorHost }).host
+    const cleanupText = strippedEvent(["Cody/node_modules"], `when ${owner} pressed Clean up now`)
+    cleanup.taskEvent(task.id, cleanupText)
+    expect(yard.store.listTaskMessages(task.id, 100).at(-1)?.content).toBe(cleanupText)
 
     const captain = yard.captains.find(project.id)
     const prompts: string[] = []

@@ -842,6 +842,7 @@ export class TaskManager {
     fs.mkdirSync(path.join(this.c.dataDir, "archives"), { recursive: true })
     this.history = new BoxHistory(this.store.db)
     this.janitor = new BoxJanitor({
+      ownerName: () => this.owner(),
       store: this.store,
       provider: this.provider,
       hub: this.hub,
@@ -851,13 +852,13 @@ export class TaskManager {
       hasFreshArchive: (row) => this.hasFreshArchive(row),
       archive: (taskId) => this.archiveFresh(taskId),
       archiveProblem: (taskId) => this.archiveProblem(taskId),
-      park: (taskId, boxId, note) => this.park(taskId, boxId, withOwner(note, this.owner())),
+      park: (taskId, boxId, note) => this.park(taskId, boxId, note),
       dropPushed: (taskId, boxId) => this.dropPushed(taskId, boxId),
       pushedOnGitHub: (taskId, boxId) => this.pushedOnGitHub(taskId, boxId),
       mirrorsToKeep: (boxId, owner) => this.mirrorsToKeep(boxId, owner),
       finished: (report) => this.cleanupFinished(report),
       inUse: (boxId, taskId) => this.workInUse(boxId, taskId),
-      taskEvent: (taskId, text) => this.addEvent(taskId, withOwner(text, this.owner()), { kind: "cleanup" }),
+      taskEvent: (taskId, text) => this.addEvent(taskId, text, { kind: "cleanup" }),
     })
     this.ownCleanup = new OwnCleanup({
       store: this.store,
@@ -879,7 +880,7 @@ export class TaskManager {
       dropPushed: (taskId, boxId) => this.dropPushed(taskId, boxId),
       where: (boxId) => (isMachineBox(boxId) ? `SSH machine ${this.machineName(boxId)}` : "this computer"),
       inUse: (boxId, taskId) => this.workInUse(boxId, taskId),
-      taskEvent: (taskId, text) => this.addEvent(taskId, withOwner(text, this.owner()), { kind: "cleanup" }),
+      taskEvent: (taskId, text) => this.addEvent(taskId, text, { kind: "cleanup" }),
     })
   }
 

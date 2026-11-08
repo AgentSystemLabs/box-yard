@@ -155,6 +155,7 @@ describe("generated output boundaries", () => {
     expect(captain).toContain("at /Cody/repo")
     expect(routeRules({ task: { id: "task_1", title: "Cody" }, ownerName: "Ana" })).toContain('task "Cody"')
     expect(taskThreadPrompt({ title: "Cody", state: "idle", notices: "Cody", question: "Cody?", context: null, ownerName: "Ana" })).toContain('task "Cody"')
+    expect(routingInstructions(tmpDir(), { agentRoutingConfig: "", agentCodexModel: "Cody", ownerName: "Ana" })).toContain("Codex model Cody")
     expect(projectNote({ token: "Cody", label: "Cody", value: "prj_1" }, "Ana")).toContain('project "Cody"')
     expect(inlinePicksNote([{ kind: "project", token: "Cody", label: "Cody", value: "prj_1", where: 'item 1 ("Cody")', reason: "item" }], "Ana", false)).toContain('item 1 ("Cody")')
     const selection = buildSelectionTaskPrompt({ source: { kind: "orchestrator" }, selectedText: "Cody said hello", instructions: "Ask Cody", ownerName: "Ana" })
