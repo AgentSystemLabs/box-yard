@@ -381,7 +381,7 @@ body.resizing iframe {
 }
 
 .task-title-failed { color: var(--color-red-400); }
-:root:not(.dark) .task-title-failed { color: var(--color-red-600); }
+:root:not(.dark) .task-title-failed { color: var(--color-red-500); }
 
 /* Match bars and legend swatches, including the selected day's tinted surface. */
 .usage-fill { background: var(--series-color); }
