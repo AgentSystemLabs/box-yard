@@ -258,7 +258,7 @@ describe("the sidebar's sub-task tree", () => {
     expect(plain.querySelector("[data-task-row-title]")!.textContent).toBe(OTHER.title)
     for (const row of [plain, open(PANS), open(FRENCH)]) {
       expect(row.querySelector(".task-title-working")).toBeNull()
-      expect(row.querySelector<HTMLElement>('[data-testid="task-status-icon"]')!.className).toContain("motion-safe:animate-pulse")
+      expect(row.querySelector<HTMLElement>('[data-testid="task-status-icon"] svg')!.getAttribute("class")!).toContain("motion-safe:animate-pulse")
     }
     expect(open(FRENCH).querySelector(".col-start-2.row-start-1")!.className).toContain("truncate")
     // A chevron sits on its parent's guide, the guide broken behind it; it and the rows keep 44px to a finger.
@@ -621,9 +621,10 @@ describe("sub-task panels", () => {
     const parent = panel(OMELETTE)
     const working = link(parent, PANS)
     const icon = working.querySelector<HTMLElement>('[data-testid="task-status-icon"]')!
-    expect(icon.className).toContain("motion-safe:animate-pulse")
+    expect(icon.querySelector("svg")!.getAttribute("class")).toContain("motion-safe:animate-pulse")
     expect(icon.dataset.status).toBe("working")
-    expect(icon.querySelector('[data-cue="working"]')!.className).toContain("motion-reduce:block")
+    expect(icon.querySelector('[data-cue="working"]')!.className).not.toMatch(/hidden|motion-reduce|animate/)
+    expect(icon.className).not.toContain("animate-pulse")
     expect(working.querySelector(".task-title-working")).toBeNull()
     expect(working.querySelector("[data-task-row-title]")!.textContent).toBe(PANS.title)
     expect(working.querySelector("[data-subtask-status]")!.className).toContain("sr-only")

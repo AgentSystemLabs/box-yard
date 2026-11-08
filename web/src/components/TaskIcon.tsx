@@ -181,6 +181,7 @@ export const TaskTile = memo(function TaskTile({ id, size = "sm", bare = false, 
 
 /** A still corner dot, with the working icon's pulse as an additional cue. */
 export type IconCue = "working" | "asks" | "failed" | null
+type ManagerIconState = Partial<Pick<CaptainState, "busy" | "compacting" | "error">> | null | undefined
 
 export function iconCue(status: TaskStatus): IconCue {
   if (status === "working" || status === "starting") return "working"
@@ -190,10 +191,14 @@ export function iconCue(status: TaskStatus): IconCue {
 }
 
 /** Managers have no needs-input state. Never infer one from their tasks, queued work or chat text. */
-export function agentIconCue(state: Partial<Pick<CaptainState, "busy" | "compacting" | "error">> | null | undefined): IconCue {
+export function agentIconCue(state: ManagerIconState): IconCue {
   if (state?.error) return "failed"
   if (state?.busy || state?.compacting) return "working"
   return null
+}
+
+export function agentIconLabel(state: ManagerIconState): string | undefined {
+  return state?.error ? "Error" : state?.compacting ? "Compacting…" : state?.busy ? "Working…" : undefined
 }
 
 /**

@@ -28,7 +28,7 @@ import {
 import { RepoContext, repoScopeKey, resolveRepoScope, useRepoScopeKey } from "../lib/repoScope"
 import { liveMarkdown, type LiveMarkdown, type RenderMarkdown } from "../lib/liveMarkdown"
 import { FileLink, PREVIEW_GROUP, galleryFor } from "./FileLink"
-import { CueDot, TaskTile, WORKING_PULSE, agentIconCue, projectColorStyle } from "./TaskIcon"
+import { CueDot, TaskTile, WORKING_PULSE, agentIconCue, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { Helm } from "./ShipIcons"
 import { CaptainIcon, CaptainTile } from "./CaptainIcon"
 import { clickImage, imageTarget, openLightbox } from "../lib/lightbox"
@@ -98,8 +98,9 @@ export function AgentIcon({ busy, compacting = false, error = false, kind = "cap
 }) {
   const tint = kind === "coordinator" ? "text-yard-400" : color ? "text-(--pc)" : "text-zinc-300"
   const working = busy || compacting
-  const cue = agentIconCue({ busy, compacting, error: error ? "error" : null })
-  const state = error ? "Error" : compacting ? "Compacting…" : busy ? "Working…" : undefined
+  const model = { busy, compacting, error: error ? "error" : null }
+  const cue = agentIconCue(model)
+  const state = agentIconLabel(model)
   const className = cx("h-4 w-4", tint, working && WORKING_PULSE)
   return (
     <span data-testid="agent-status-icon" className="relative flex shrink-0" title={state} role={!announce && state ? "img" : undefined} aria-label={!announce ? state : undefined} style={kind === "captain" ? projectColorStyle(color) : undefined}>

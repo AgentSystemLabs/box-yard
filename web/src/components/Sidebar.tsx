@@ -70,7 +70,7 @@ import { NewProjectDialog } from "./NewProjectDialog"
 import { openShortcuts } from "./ShortcutsHelp"
 import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
-import { TaskStatusIcon, projectColorStyle } from "./TaskIcon"
+import { TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
 import { AgentIcon, PrChip, STATUS, TAP_AREA, cx } from "./ui"
 
@@ -450,9 +450,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         <button type="button" onClick={onExpand} title="Show the sidebar" aria-label="Show the sidebar" className={ICON_BUTTON}>
           <PanelLeftOpen className="h-4 w-4" />
         </button>
-        <RailButton label="Coordinator" mark={mark(selection, coordinatorKey)} onClick={pick.coordinator}>
-          <CoordinatorIcon />
-        </RailButton>
+        <CoordinatorRailButton mark={mark(selection, coordinatorKey)} onClick={pick.coordinator} />
         {/* Only while something waits: the section it opens is gone when nothing does. It widens the sidebar the way
             "Show the sidebar" does (the column, or the drawer while a panel needs the room), on that section. */}
         {inbox.count > 0 && (
@@ -652,6 +650,16 @@ function CoordinatorIcon() {
   return <AgentIcon announce={false} kind="coordinator" {...state} error={Boolean(state.error)} tile />
 }
 
+function CoordinatorRailButton({ mark, onClick }: { mark: Mark; onClick: (e: PickEvent) => void }) {
+  const state = useCoordinatorStatus()
+  const status = agentIconLabel(state)
+  return (
+    <RailButton label={`Coordinator${status ? `, ${status}` : ""}`} mark={mark} onClick={onClick}>
+      <AgentIcon announce={false} kind="coordinator" {...state} error={Boolean(state.error)} tile />
+    </RailButton>
+  )
+}
+
 /** `captain`: the project whose Captain it opens, so a press starts rendering its chat (lib/captainPrerender.ts). */
 function RailButton({ label, title = label, mark, captain, onClick, onDoubleClick, children }: {
   label: string
@@ -689,7 +697,8 @@ function RailButton({ label, title = label, mark, captain, onClick, onDoubleClic
 const RailProject = memo(function RailProject({ group, mark, onPick, onExpand }: { group: SidebarGroup; mark: Mark; onPick: (projectId: string, e: PickEvent) => void; onExpand: (projectId: string) => void }) {
   const color = useTiles().colors.get(group.project.id)
   const state = useCaptainState(group.project.id).data
-  const label = `${group.project.name} Captain`
+  const status = agentIconLabel(state)
+  const label = `${group.project.name} Captain${status ? `, ${status}` : ""}`
   return (
     <RailButton
       label={label}

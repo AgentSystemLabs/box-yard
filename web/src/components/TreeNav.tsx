@@ -3,7 +3,7 @@
 // a phone the sidebar's ☰ and the Coordinator, then on any screen the Captain's icon and its project's name, then each
 // task above as its icon. A desktop's title follows on the same row; a phone's whole title is the row under them
 // (TaskHeader.tsx). A Captain's header gets the Coordinator's crumb before its name.
-import { memo, type ReactNode } from "react"
+import { memo, type ComponentProps, type ReactNode } from "react"
 import { ChevronRight } from "lucide-react"
 import type { Project, Task } from "../../../shared/types"
 import { crumbTo, goChat, goTask, useTaskPath } from "../lib/treeNav"
@@ -11,9 +11,9 @@ import { chatRef } from "../lib/columns"
 import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
 import { useProjectColor } from "../lib/taskTiles"
 import { useCaptainState, useCoordinatorStatus, useTask } from "../lib/queries"
-import { ProjectAvatar, TaskStatusIcon } from "./TaskIcon"
+import { ProjectAvatar, TaskStatusIcon, agentIconLabel, iconCue } from "./TaskIcon"
 import { useCaptainMark } from "./CaptainIcon"
-import { AgentIcon, cx } from "./ui"
+import { AgentIcon, STATUS, cx } from "./ui"
 
 const Sep = () => <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
 function CoordinatorMark() {
@@ -27,9 +27,10 @@ const TIGHT = "@max-[22rem]/head:w-9 @max-[22rem]/head:[&>svg]:hidden"
 const NAMED = "@min-[36rem]/head:w-auto @min-[36rem]/head:max-w-[13rem] @min-[36rem]/head:pr-2"
 
 /** Keep the path's quiet list subscription; only the ancestor whose status changes needs to redraw. */
-const AncestorTaskIcon = memo(function AncestorTaskIcon({ task }: { task: Task }) {
+const AncestorTaskCrumb = memo(function AncestorTaskCrumb({ task, children, ...props }: { task: Task; children?: ReactNode } & Omit<ComponentProps<typeof Crumb>, "children">) {
   const current = useTask(task.id).data ?? task
-  return <TaskStatusIcon task={current} size="lg" />
+  const status = iconCue(current.status) ? STATUS[current.status].label : undefined
+  return <Crumb {...props} label={`${props.label}${status ? `, ${status}` : ""}`}><TaskStatusIcon task={current} size="lg" />{children}</Crumb>
 })
 
 function Crumb({ label, name, onClick, first = false, className, children }: { label: string; name?: string; onClick: () => void; first?: boolean; className?: string; children: ReactNode }) {
@@ -65,11 +66,12 @@ function CaptainCrumb({ projectId, project, wide, onClick }: { projectId: string
   // As in the Captain's header: the project's image beside the name unless it's already the Captain's icon.
   const imageMark = useCaptainMark(projectId).kind === "image"
   const label = project ? `${project.name} Captain` : "Captain"
+  const status = agentIconLabel(state)
   return (
     <button
       type="button"
-      aria-label={label}
-      title={label}
+      aria-label={`${label}${status ? `, ${status}` : ""}`}
+      title={`${label}${status ? `, ${status}` : ""}`}
       onClick={onClick}
       data-testid="captain-crumb"
       className="-ml-2 flex h-11 min-w-0 items-center gap-2 rounded-lg pr-1.5 pl-2 text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
@@ -110,14 +112,13 @@ export function TaskCrumbs({ task, project, className }: { task: Task; project: 
       {above.map((t, i) => {
         const parent = i === above.length - 1
         return (
-          <Crumb key={t.id} label={parent ? `Up to ${t.title}` : t.title} name={parent && !desktop ? t.title : undefined} onClick={() => toTask(t.id)} className={parent ? "relative" : "@max-[25rem]/head:hidden"}>
-            <AncestorTaskIcon task={t} />
+          <AncestorTaskCrumb task={t} key={t.id} label={parent ? `Up to ${t.title}` : t.title} name={parent && !desktop ? t.title : undefined} onClick={() => toTask(t.id)} className={parent ? "relative" : "@max-[25rem]/head:hidden"}>
             {parent && folded > 0 && (
               <span aria-hidden className="absolute top-1 right-0 hidden h-3.5 min-w-3.5 place-items-center rounded-full bg-zinc-700 px-0.5 text-[9px] font-semibold text-zinc-100 tabular-nums @max-[25rem]/head:grid">
                 +{folded}
               </span>
             )}
-          </Crumb>
+          </AncestorTaskCrumb>
         )
       })}
       {/* On a desktop the title follows on the same row; a phone's is the row below. */}
@@ -135,9 +136,10 @@ export function TaskCrumbs({ task, project, className }: { task: Task; project: 
  * crumbs tighten too, as the Captain's header keeps every button, so the Captain's icon after it stays put.
  */
 export function CoordinatorCrumb({ className }: { className?: string }) {
+  const status = agentIconLabel(useCoordinatorStatus())
   return (
     <span className={cx("-mr-1 -ml-1.5 flex shrink-0 items-center", className)}>
-      <Crumb first label="Coordinator" onClick={() => goChat(null)} className="min-w-11">
+      <Crumb first label={`Coordinator${status ? `, ${status}` : ""}`} onClick={() => goChat(null)} className="min-w-11">
         <CoordinatorMark />
       </Crumb>
       <Sep />

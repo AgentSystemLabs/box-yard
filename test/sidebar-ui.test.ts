@@ -759,7 +759,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
 
   it("a single click opens the Captain and leaves the rail folded; the tooltip says what a double click does", () => {
     folded()
-    expect(railIcon("box-yard").title).toBe("box-yard Captain (double-click to expand)")
+    expect(railIcon("box-yard").title).toBe("box-yard Captain, Working… (double-click to expand)")
     clickAt(railIcon("box-yard"), 1000)
     expect(title()).toBe("box-yard Captain")
     expect(inline()!.dataset.rail).toBe("true")
