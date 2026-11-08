@@ -64,5 +64,20 @@
     "busy": true,
     "initialQueueRows": 1,
     "errors": []
+  },
+  {
+    "version": "after",
+    "scope": "subtask",
+    "busy": false,
+    "initialQueueRows": 0,
+    "errors": [],
+    "failedDraftRestored": true
+  },
+  {
+    "version": "after",
+    "scope": "subtask",
+    "busy": true,
+    "initialQueueRows": 1,
+    "errors": []
   }
 ]
