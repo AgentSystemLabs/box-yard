@@ -1,6 +1,6 @@
 # SSH machines
 
-Box Yard can run agents on computers of your own that it reaches over SSH: an old laptop, a GPU tower, a Mac mini in a cupboard. A machine is used like a box. Box Yard logs in, makes a folder for the task, clones the repo with the project's GitHub token, runs Claude Code, [Codex](codex.md) [Cursor](cursor.md) or [OpenCode](opencode.md) headless with the same MCP bridge, streams its output, archives the workspace, pushes the branch and opens the PR, as it does on Upstash boxes.
+Box Yard can run agents on computers of your own that it reaches over SSH: an old laptop, a GPU tower, a Mac mini in a cupboard. A machine is used like a box. Box Yard logs in, makes a folder for the task, clones the repo with the project's GitHub token, runs Claude Code, [Codex](codex.md), [Cursor](cursor.md) or [OpenCode](opencode.md) headless with the same MCP bridge, streams its output, archives the workspace, pushes the branch and opens the PR, as it does on Upstash boxes.
 
 Give machines **labels** (`laptops`, `gpu`, `local`). A project that runs on "SSH machine", or a task with `runs_on: "label:gpu"`, goes to a free machine with that label. Tasks wait while every matching machine is busy.
 
