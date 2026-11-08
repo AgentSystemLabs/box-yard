@@ -44,14 +44,14 @@ OpenAI documents credential caching and remote login setup in [Codex authenticat
 
 ### The ChatGPT login is refreshed, so Box Yard keeps the newest copy
 
-Codex refreshes a ChatGPT login's tokens when they're about a week old, and the refresh token it replaces stops working. A copy of `auth.json` pasted on several machines would leave all but one with a spent token. So Box Yard keeps the login itself:
+Codex can refresh a ChatGPT login’s tokens, replacing the previous refresh token. A copy of `auth.json` pasted on several machines would leave all but one with a spent token. So Box Yard keeps the login itself:
 
 - Each turn gets the current copy as `codex-auth.json` in its task folder (a link into tmpfs on SSH machines). The runner moves it into the task's own Codex home (`<task>/codex/auth.json`, mode 600), unless the copy already there is the same account refreshed later: the newer one always wins.
 - When the turn ends, Box Yard reads that file back and keeps it if Codex refreshed it, for every later turn, box and Captain. The Coordinator's own runs use `<data>/codex` and are taken back the same way.
 - On an SSH machine, the forwarded ChatGPT login and its temporary replacement files stay in a task-specific `CODEX_HOME` in tmpfs. Its `sessions` folder points back into `<task>/codex/sessions`, so conversations still archive and resume. The task folder only links to the login for the server to read it back.
 - Task archives never include the login, and box snapshots strip `~/.codex/auth.json`.
 
-Two turns that both refresh at the same moment (a week-old login, two agents starting at once) can still race: the loser's turn fails with "refresh token was already used", and the next turn gets the winner's tokens. If you run many Codex agents at once, an API key avoids the question.
+Two turns that both refresh at the same moment can still race: the loser's turn fails with "refresh token was already used", and the next turn gets the winner's tokens. If you run many Codex agents at once, an API key avoids the question.
 
 Project identities (docs/identities.md) have no Codex login of their own yet: a Codex task in a project with a non-Default identity uses Settings' Codex login, with the identity's GitHub token and git author as usual.
 
@@ -69,7 +69,7 @@ Settings › Credentials › More Codex logins takes more ChatGPT logins: new se
 
 The adapter is verified with Codex CLI **0.166.0**. Workers need app-server's `turn/steer`, required `expectedTurnId`, and `clientUserMessageId`/`userMessage.clientId` correlation. Unsupported versions fail or hold uncertain input; Box Yard does not silently switch harnesses. See [delivery states, diagnosis and validation](codex-steering.md).
 
-Codex is installed the first time a Codex task lands on an Upstash box or RunPod pod (`npm install -g @openai/codex`); Box Yard's Docker image and server image already have it. On This computer and on SSH machines it's yours to install: a Codex task only goes to a machine whose connection test found `codex`.
+Codex is installed when missing on an Upstash box, Docker container or GPU-cloud worker (RunPod, Vast.ai or Daytona) before a Codex task starts (`npm install -g @openai/codex`); Box Yard's Docker image and server image already have it. On This computer and on SSH machines it's yours to install: a Codex task only goes to a machine whose connection test found `codex`.
 
 Codex tasks also run on [SSH machines](machines.md#codex). Install the CLI as the SSH user and test the machine; Box Yard selects one with Codex installed and either a forwarded credential or its own login. It never installs software on an SSH machine.
 

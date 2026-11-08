@@ -9,7 +9,7 @@ Box Yard's task agents can run on [Cursor's CLI](https://cursor.com/docs/cli/ove
 
 Changing a project's Agent or Settings' default only changes new tasks. To switch existing work explicitly, use **Continue with…** on a resting task or `continue_task {task, agent: "codex"}` (choose `claude` or `cursor` as needed). This keeps the same task and workspace; see [continuing tasks](task-continuation.md).
 
-The Coordinator and the Captains don't run on Cursor. A manager acts only through Box Yard's tools: it has no shell and no file reads, so it can't read a status-only project's data. `cursor-agent` has no way to turn its built-in tools off. Settings › Coordinator still offers only Claude Code and Codex.
+The Coordinator and the Captains don't run on Cursor. Managers have no shell or write tools; Claude Code managers have restricted read tools, including a Captain’s own repo clone. Codex managers act through Box Yard’s tools without file tools. `cursor-agent` has no way to turn its built-in tools off. Settings › Coordinator still offers only Claude Code and Codex.
 
 ## Logging in
 
@@ -17,9 +17,9 @@ Box Yard gives Cursor one of these logins. The first one found wins:
 
 1. **A project's own `CURSOR_API_KEY`** in its env (or a task's).
 2. **Settings › Credentials › Cursor API key** (`CURSOR_API_KEY` on the server). To make one, open the [Cursor dashboard](https://cursor.com/dashboard?tab=integrations), go to Integrations › User API Keys, and create a key. Usage is billed to your Cursor plan.
-3. **Nothing set: this computer's or the SSH machine's own `cursor-agent login`.** Upstash boxes, RunPod pods, Daytona and Docker containers have no login of their own, so they need a key. Box Yard says so before it creates a box.
+3. **Nothing set: this computer's or the SSH machine's own `cursor-agent login`.** Upstash boxes, RunPod and Vast.ai pods, Daytona and Docker containers have no login of their own, so they need a key. Box Yard says so before it creates a box.
 
-A turn gets the key in its environment, through the task's `task.json` (as Claude Code's token does). The key never goes on a command line or into an archive. An SSH machine drops `task.json` when the turn ends.
+A turn gets the key in its environment, through the task's `task.json` (as Claude Code's token does). Box Yard’s launch path puts no key on a command line and excludes the delivery file from archives. An agent can still read or copy credentials available to its process; see [Docker credential limits](docker.md#credentials-and-isolation). An SSH machine drops `task.json` when the turn ends.
 
 The Test button runs `cursor-agent models` with only that key, in a throwaway config folder. This costs no model request. Cursor refuses a key it doesn't know ("The provided API key is invalid").
 
@@ -49,7 +49,7 @@ cursor-agent -p --output-format stream-json --force --trust --approve-mcps --san
 - **Nothing to approve.** `--force --trust --sandbox disabled` puts Cursor on the same footing as Claude Code's `bypassPermissions`: the box is the sandbox. On This computer that means it runs unsandboxed, as Claude Code does.
 - **The task has its own Cursor folder.** `CURSOR_CONFIG_DIR` and `CURSOR_DATA_DIR` point at `<task>/cursor`, so its chats move with the task between boxes. Box Yard names the session, and `--resume <id>` starts a chat under that id the first time. If the chat has gone missing (a fresh box, a lost archive), the runner starts a new chat with a recap instead of failing, as it does for Claude Code.
 - **Its stream is mapped to Box Yard's events.** Replies, tool calls (named the way Claude Code's are, e.g. `Bash`, `Edit`), tool errors, and the context size after each model call (`CURSOR_EMIT_MODEL_CALL_USAGE=1`). When a model's name states a context window ("… 1M High"), the context meter uses it.
-- **Installing it.** Box Yard installs `cursor-agent` the first time a Cursor task lands on an Upstash box, RunPod or Daytona pod, or Docker container (`curl https://cursor.com/install -fsS | bash`, into `~/.local/bin`). On This computer and on SSH machines it's yours to install. A Cursor task only goes to a machine whose connection test found `cursor-agent` and a login: Box Yard's key, or the machine's own `cursor-agent login`.
+- **Installing it.** Box Yard installs `cursor-agent` the first time a Cursor task lands on an Upstash box, RunPod or Vast.ai pod, Daytona sandbox, or Docker container (`curl https://cursor.com/install -fsS | bash`, into `~/.local/bin`). On This computer and on SSH machines it's yours to install. A Cursor task only goes to a machine whose connection test found `cursor-agent` and a login: Box Yard's key, or the machine's own `cursor-agent login`.
 
 The server finds `cursor-agent` on `PATH`, else in `~/.local/bin` (`CURSOR_BIN` overrides both).
 

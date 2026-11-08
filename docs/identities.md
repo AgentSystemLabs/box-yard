@@ -54,12 +54,12 @@ Box Yard writes no author into a clone's `.git/config` or a box's global config.
 
 Box Yard's own git work for the project (clones, fetches, the turn-end push, PR checks, branch cleanup) uses the same token. A project's Captain runs on its identity's Claude login.
 
-On the local runner, a project on any identity but Default is walled off from this computer's own git and `gh` setup:
+On the local runner, a project on any identity but Default gets separate git and `gh` configuration for normal commands:
 
 - it uses only Box Yard's git credential helper: the helpers in `~/.gitconfig` are skipped for it;
 - its turns, and Box Yard's own git work for it, get a git config and a `gh` folder of the identity's own, in `<local dir>/.boxyard/identities/<id>/` (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`, `GH_CONFIG_DIR`), so `~/.gitconfig`'s name, email, signing key, `includeIf` rules and hooks, and the `gh` login, don't reach it. The repo's own `.git/config` still applies.
 
-Default projects keep this computer's setup, as before.
+Default projects keep this computer’s setup, as before. These configuration choices are not filesystem isolation: an unsandboxed local agent still runs as the server’s OS user and can read that user’s other files and credentials.
 
 ## Signing
 
@@ -132,7 +132,7 @@ It's a view, not a wall. What remains:
 
 - **The Captain's own words.** A Captain's reply to the Coordinator is sent as it is: the prompt asks for state only, but a Captain told to quote something can.
 - **Box Yard's API on this computer.** With no `BOXYARD_PASSWORD`, the API is open on loopback, and the Coordinator has `WebFetch`. Set a password to close that.
-- **What the Coordinator already knew.** Its earlier messages, its own compaction summaries and the compaction files it may `Read` keep what they held before the seal.
+- **What the Coordinator already knew.** Context already delivered before the seal is not erased. While any project is status-only, the mixed Coordinator compaction archive and its direct Read rule are withheld; see [compaction privacy](compaction-history.md#privacy).
 - **Uploads.** The Coordinator may `Read` the uploads folder; an upload's path is random and only appears in content it no longer gets.
 - **GitHub.** The Coordinator gets each PR's URL, and for a public repo `WebFetch` can open the PR there. The seal covers Box Yard's views, not who can read the repo.
 
@@ -208,7 +208,7 @@ To try detection on this computer: `npm run test:detect` (read-only and offline;
 | `DELETE /api/identities/:id/tokens?owner=` | | Forget the owner's token |
 | `PUT /api/identities/:id/claude` | `{ kind: "api_key" \| "oauth_token", value }` | Save its Claude login |
 | `DELETE /api/identities/:id/claude` | | Back to the global login |
-| `PUT /api/identities/:id/signing` | `{ kind: "file", privateKey, requireSigned? }` or `{ kind: "agent", publicKey, program?, requireSigned? }` | Save its signing key (replaces the old one) |
+| `PUT /api/identities/:id/signing` | `{ kind: "file", privateKey, requireSigned? }`, `{ kind: "agent", publicKey, program?, requireSigned? }` or `{ kind: "gpg", keyId, requireSigned? }` | Save its signing key (replaces the old one) |
 | `PATCH /api/identities/:id/signing` | `{ requireSigned }` | Turn `requireSigned` on or off |
 | `DELETE /api/identities/:id/signing` | | Stop signing |
 | `POST /api/identities/detect` | `{ online? }` | Detection's proposals (see above). Changes nothing |
@@ -218,6 +218,4 @@ To try detection on this computer: `npm run test:detect` (read-only and offline;
 
 Every change is broadcast as an `identities` event.
 
-## Coming next
-
-- GPG signing keys.
+GPG signing is shipped for the local runner only; see [GPG on the local runner](#gpg-on-the-local-runner).
