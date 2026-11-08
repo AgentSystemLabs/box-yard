@@ -42,7 +42,7 @@ describe("BoxHistory", () => {
   })
 
   it("labels actors", () => {
-    expect(boxActorLabel({ actor: "owner", actorProjectId: null })).toBe("Cody")
+    expect(boxActorLabel({ actor: "owner", actorProjectId: null })).toBe("the owner")
     expect(boxActorLabel({ actor: "captain", actorProjectId: "prj_alpha1" }, () => "alpha")).toBe("The alpha Captain")
     expect(boxActorLabel({ actor: "captain", actorProjectId: "prj_gone01" }, () => undefined)).toBe("The prj_gone01 Captain")
     expect(boxActorLabel({ actor: "resize-cleanup", actorProjectId: null })).toBe("Failed-resize cleanup")

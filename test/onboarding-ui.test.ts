@@ -283,6 +283,20 @@ describe("owner name setup", () => {
     expect(name().value).toBe("Ana")
   })
 
+  it("settings keeps a custom name in the draft until Save", async () => {
+    routes["PUT /api/agent-settings"] = () => ({ settings: { ...DEFAULT_SETTINGS, ownerName: "Sam" }, sources: { ownerName: "ui" }, defaults: DEFAULT_SETTINGS })
+    render("/?settings=agents", { status: setup() })
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
+    const label = [...dialog.querySelectorAll("label")].find((l) => l.textContent?.includes("Your name"))!
+    const input = document.getElementById(label.htmlFor) as HTMLInputElement
+    expect(input.value).toBe("the owner")
+    type(input, "Sam")
+    expect(calls.some((c) => c.method === "PUT")).toBe(false)
+    act(() => byText("Save", dialog)!.click())
+    await settle()
+    expect(calls.find((c) => c.method === "PUT")).toMatchObject({ body: { ownerName: "Sam" } })
+  })
+
   it("validates the name before Save or Enter", () => {
     render(APP_HOME, { status: setup() })
     for (const invalid of [" ", "<b>Ana</b>"]) {

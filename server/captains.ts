@@ -160,10 +160,7 @@ function sourceLabel(m: CaptainMessage, ownerName: string) {
   if (source === "agent") return `${agentCaptainLabel(m.meta)}${withOwner(agentLabelTail(m), ownerName)}`
   const via = source === "cody" ? forwardedFromTask(m.meta) : null
   if (via)
-    return withOwner(
-      `From Cody, sent from the chat of task "${via.taskTitle}" (${via.taskId}) to you instead of its busy agent: task management for you to act on. Your reply shows in that task's chat`,
-      ownerName,
-    )
+    return `${withOwner("From Cody", ownerName)}, sent from the chat of task "${via.taskTitle}" (${via.taskId}) to you instead of its busy agent: task management for you to act on. Your reply shows in that task's chat`
   return withOwner(SOURCE_LABEL[source], ownerName)
 }
 

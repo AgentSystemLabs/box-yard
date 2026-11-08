@@ -122,12 +122,11 @@ export async function resolveHarnessPick(d: RunTargetDeps, value: string, projec
  * create_tasks and send_to_task calls, and carries it to a Captain the turn messages (server/mcp.ts, captains.ts).
  */
 export function runTargetNote(pick: RunTargetPick, ownerName: string | undefined, relay: boolean): string {
-  return withOwner(
-    `[Cody picked where tasks run for this message: @${pick.token} (${pick.label}), runs_on "${pick.value}". ` +
+  return (
+    `[${withOwner("Cody", ownerName)} picked where tasks run for this message: @${pick.token} (${pick.label}), runs_on "${pick.value}". ` +
       `Every task you create or message for it gets runs_on "${pick.value}": Box Yard applies it to create_task, create_tasks and send_to_task during this turn` +
       (relay ? ", and a Captain you message this turn gets the same pick." : ".") +
-      ` Don't ask Cody where to run it.]`,
-    ownerName,
+      ` Don't ask ${withOwner("Cody", ownerName)} where to run it.]`
   )
 }
 
@@ -136,13 +135,12 @@ export function runTargetNote(pick: RunTargetPick, ownerName: string | undefined
  * create_tasks; send_to_task keeps the existing harness. continue_task explicitly switches a resting task.
  */
 export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, relay: boolean): string {
-  return withOwner(
-    `[Cody picked the harness for this message: !${pick.token} (${pick.label}), agent "${pick.value}".` +
+  return (
+    `[${withOwner("Cody", ownerName)} picked the harness for this message: !${pick.token} (${pick.label}), agent "${pick.value}".` +
       (pick.model !== undefined ? ` Model "${pick.model}"${pick.effort ? `, effort "${pick.effort}"` : pick.value === "cursor" ? " with effort included in its model ID" : " with the harness's Settings effort"}.` : " Use this harness's model and effort defaults in Settings.") + " " +
       `Every task you create for it gets agent "${pick.value}": Box Yard applies it to create_task and create_tasks during this turn` +
       (relay ? ", and a Captain you message this turn gets the same pick." : ".") +
-      ` send_to_task keeps the saved harness. To continue the same work on ${pick.label}, wait for it to stop and finish saving, then call continue_task with the same task and agent "${pick.value}" (and this pick's model/effort if specified); do not create a replacement task.]`,
-    ownerName,
+      ` send_to_task keeps the saved harness. To continue the same work on ${pick.label}, wait for it to stop and finish saving, then call continue_task with the same task and agent "${pick.value}" (and this pick's model/effort if specified); do not create a replacement task.]`
   )
 }
 
@@ -151,11 +149,10 @@ export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, 
  * project's Captain instead of guessing. The "%token" stays in the message's text as Cody wrote it.
  */
 export function projectNote(pick: RunTargetPick, ownerName: string | undefined): string {
-  return withOwner(
-    `[Cody picked the project for this message: %${pick.token}, project "${pick.label}" (${pick.value}). ` +
+  return (
+    `[${withOwner("Cody", ownerName)} picked the project for this message: %${pick.token}, project "${pick.label}" (${pick.value}). ` +
       `It's about that project: route it to its Captain with send_to_captain (project "${pick.value}") as you would any project-scoped work, ` +
-      `unless it's a quick question you can answer yourself. Don't ask Cody which project it's for.]`,
-    ownerName,
+      `unless it's a quick question you can answer yourself. Don't ask ${withOwner("Cody", ownerName)} which project it's for.]`
   )
 }
 
@@ -176,13 +173,12 @@ export function inlinePicksNote(picks: InlinePick[], ownerName: string | undefin
   // A harness's model and effort (shared/harnessPicks.ts) go with it as the tools' model and effort.
   const args = (p: InlinePick) => `${INLINE_ARG[p.kind]} "${p.value}"${p.model !== undefined ? `, model "${p.model}"` : ""}${p.effort ? `, effort "${p.effort}"` : ""}`
   const each = picks.map((p) => `${INLINE_TRIGGER[p.kind]}${p.token} (${p.label}, ${args(p)}) ${p.where ? `in ${p.where}` : "outside any list item"}${INLINE_WHY[p.reason]}`)
-  return withOwner(
-    `[Cody typed picks for only part of this message, so Box Yard applies none of them to this turn: ${each.join("; ")}. ` +
+  return (
+    `[${withOwner("Cody", ownerName)} typed picks for only part of this message, so Box Yard applies none of them to this turn: ${each.join("; ")}. ` +
       `Pass each yourself, on the create_task call or create_tasks item for the task it's written with (a "%" one: send that part to its project's Captain), ` +
       `and follow the message's own words for the rest: the agent, model, effort and runs_on you pass are what each task gets.` +
       (relay ? ` When you send such a part to a Captain, say its pick in your message: Box Yard doesn't carry these to Captains.` : "") +
-      `]`,
-    ownerName,
+      `]`
   )
 }
 

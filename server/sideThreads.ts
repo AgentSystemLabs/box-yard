@@ -266,9 +266,7 @@ export function routeRules(o: { task: { id: string; title: string } | null; owne
     own("Route each of Cody's messages in this thread. Decide what it is:"),
     own("- A question, or anything you can answer from what you know or can look up: answer it here, briefly and directly."),
     o.task
-      ? own(
-          `- An instruction or feedback for the agent working on the task "${o.task.title}" (${o.task.id}): what to change, fix or try, an answer to its question, a go-ahead. Reply with only [[route:agent]]. Box Yard sends Cody's words to that agent unchanged.`,
-        )
+      ? `- An instruction or feedback for the agent working on the task "${o.task.title}" (${o.task.id}): what to change, fix or try, an answer to its question, a go-ahead. Reply with only [[route:agent]]. ${own("Box Yard sends Cody's words to that agent unchanged.")}`
       : null,
     own(
       "- Something only your main chat can do: start, split, stop, merge or reprioritise tasks, a message to another task, settings, schedules. Reply with only [[route:chat]]. Box Yard posts it in your main chat, where you act on it with all your tools.",
@@ -322,9 +320,7 @@ export function noticeLines(notices: ChatMessage[]): string {
 export function taskThreadPrompt(o: { title: string; state: string; notices: string; question: string; context: string | null; ownerName?: string }): string {
   const own = (t: string) => withOwner(t, o.ownerName)
   return [
-    own(
-      `[Box Yard side thread] Cody is asking you about a task, from the card of the task "${o.title}" in the Coordinator chat. This thread is separate from the main conversation: the main chat never sees it, and it starts at your newest message there.`,
-    ),
+    `[Box Yard side thread] ${own("Cody")} is asking you about a task, from the card of the task "${o.title}" in the Coordinator chat. This thread is separate from the main conversation: the main chat never sees it, and it starts at your newest message there.`,
     o.context ? `[Your session for this thread was started fresh, from your notes.]\n\n${o.context}` : null,
     o.state,
     o.notices ? `Its updates in the chat, oldest first:\n${o.notices}` : null,

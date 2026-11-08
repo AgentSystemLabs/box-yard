@@ -347,9 +347,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const statusOnlyError = (projectId: string, what: string) =>
     new Error(
       `Status only: ${what}. ` +
-        owner(
-          `Cody set project "${store.getProject(projectId)?.name ?? projectId}" to show you its status only (its identity's Coordinator sees). Its Captain sees everything: ask it with ask_captain or send_to_captain, and it answers with the state of the work.`,
-        ),
+        `${owner("Cody")} set project "${store.getProject(projectId)?.name ?? projectId}" to show you its status only (its identity's Coordinator sees). Its Captain sees everything: ask it with ask_captain or send_to_captain, and it answers with the state of the work.`,
     )
   /** list_projects' word on a status-only project. */
   const STATUS_ONLY_PROJECT = owner(
@@ -437,7 +435,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const differs = (pick: RunTargetPick, runsOn: RunsOn | undefined, machineLabel: string | undefined) =>
     (runsOn !== undefined || machineLabel !== undefined) && !(runsOn === pick.value && !machineLabel)
   const pickNote = (pick: RunTargetPick, overridden: boolean) => ({
-    runs_on_pick: owner(overridden ? `Cody picked @${pick.token} (${pick.label}) for this prompt, so it runs there, not where you asked` : `@${pick.token} (${pick.label}): Cody's pick for this prompt`),
+    runs_on_pick: overridden ? `${owner("Cody")} picked @${pick.token} (${pick.label}) for this prompt, so it runs there, not where you asked` : `@${pick.token} (${pick.label}): ${owner("Cody")}'s pick for this prompt`,
   })
   /**
    * The message's harness/model/effort wins over tool arguments. Plain !harness leaves model and effort unset so
@@ -451,11 +449,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     return { agent: cli, model: pick.model, effort: cli === "cursor" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
   }
   const agentPickNote = (pick: RunTargetPick, overridden: boolean) => ({
-    agent_pick: owner(overridden ? `Cody picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): Cody's pick for this prompt`),
+    agent_pick: overridden ? `${owner("Cody")} picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): ${owner("Cody")}'s pick for this prompt`,
   })
   /** What a reply says when "local" went to SSH machines (Settings › Machines › Local means). */
   const viaLocal = (p: { viaLocal: boolean; machineLabel: string | null }) =>
-    p.viaLocal ? { runs_on: owner(`${labelPhrase(p.machineLabel)}: that's what "local" means in Cody's Settings › Machines (runs_on "this_computer" is this computer)`) } : {}
+    p.viaLocal ? { runs_on: `${labelPhrase(p.machineLabel)}: that's what "local" means in ${owner("Cody")}'s Settings › Machines (runs_on "this_computer" is this computer)` } : {}
   /** Who set a task's priority, for its log. */
   const prioritySetter = scopeId ? "its project's Captain" : "the Coordinator"
   const absolute = (url: string) => (url.startsWith("/") && deps.publicUrl() ? `${deps.publicUrl().replace(/\/$/, "")}${url}` : url)
@@ -504,7 +502,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     mergeRequested: t.mergeRequest
       ? t.mergeRequest.requestedBy
         ? `The ${t.mergeRequest.requestedBy} asked for a merge of #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`
-        : owner(`Cody pressed Merge PR for #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`)
+        : `${owner("Cody")} pressed Merge PR for #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`
       : undefined,
     previews: t.previews.length ? t.previews.map((p) => p.url) : undefined,
     error: t.error ?? undefined,
@@ -955,7 +953,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         const box = boxSettingsPatch(a)
         if (a.machine_label !== undefined && !scopeId) {
           const current = store.getProject(id)!
-          if (current.runner !== "ssh") return fail(owner(`${current.name} doesn't run on SSH machines (its Runs on is ${current.runner ?? "box"}). Cody picks Runs on in the project's settings; for one task, pass runs_on "label:<label>" to create_task.`))
+          if (current.runner !== "ssh") return fail(`${current.name} doesn't run on SSH machines (its Runs on is ${current.runner ?? "box"}). ${owner("Cody")} picks Runs on in the project's settings; for one task, pass runs_on "label:<label>" to create_task.`)
           if (a.machine_label) await tasks.requireRunner("ssh", id, {}, { agentCli: a.agent, machineLabel: a.machine_label })
         }
         const p = store.updateProject(
@@ -1534,9 +1532,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       const keeps =
         agentPick && agentPick.value !== before.agentCli
           ? {
-              agent_pick: owner(
-                `This task runs on ${AGENT_CLI_LABEL[before.agentCli]}; send_to_task does not change its harness. To continue this same work on Cody's !${agentPick.token} choice, wait for it to stop, then use continue_task with agent \"${agentPick.value}\". Do not create a replacement task.`,
-              ),
+              agent_pick: `This task runs on ${AGENT_CLI_LABEL[before.agentCli]}; send_to_task does not change its harness. To continue this same work on ${owner("Cody")}'s !${agentPick.token} choice, wait for it to stop, then use continue_task with agent \"${agentPick.value}\". Do not create a replacement task.`,
             }
           : {}
       await tasks.requireRunner(where.runner, before.projectId, store.taskEnv(before.id), { agentCli: before.agentCli, machineLabel: where.machineLabel, gpu: where.gpu })
@@ -2414,7 +2410,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     }
     const localMeans = () => {
       const label = machines.settings().localLabel
-      return owner(label ? `runs_on "local" goes to ${labelPhrase(label)} (Cody's Settings › Machines › Local means); "this_computer" is this computer` : `runs_on "local" is this computer (Cody can point it at a machine label in Settings › Machines)`)
+      return label ? `runs_on "local" goes to ${labelPhrase(label)} (${owner("Cody")}'s Settings › Machines › Local means); "this_computer" is this computer` : owner(`runs_on "local" is this computer (Cody can point it at a machine label in Settings › Machines)`)
     }
     const sshKeyInput = z
       .string()
@@ -2712,7 +2708,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
      * these tools an identity can be set to show status only, but never back: a model can't undo the seal.
      */
     const keepSealed = (what: string) =>
-      new Error(owner(`Only Cody can let the Coordinator see more: ${what}. Cody does that in Settings › Identities (Coordinator sees) or in the project's settings.`))
+      new Error(`Only ${owner("Cody")} can let the Coordinator see more: ${what}. ${owner("Cody")} does that in Settings › Identities (Coordinator sees) or in the project's settings.`)
     const mayLoosen = (i: Identity, sees: CoordinatorSees | undefined) => {
       if (i.coordinatorSees === "status" && sees === "everything") throw keepSealed(`the ${i.name} identity shows the Coordinator its projects' status only`)
     }
@@ -3329,7 +3325,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           box: e.boxId,
           ...(e.boxName && e.boxName !== e.boxId ? { name: e.boxName } : {}),
           event: e.type,
-          by: owner(boxActorLabel(e, projectName)),
+          by: boxActorLabel(e, projectName, ownerName),
           reason: e.reason ?? undefined,
           size: e.fromSize && e.toSize ? `${e.fromSize} → ${e.toSize}` : (e.size ?? undefined),
           other_box: e.relatedBoxId ?? undefined,
@@ -3365,7 +3361,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         return fail(owner("Cody has turned off automatic box resizing (Settings › Box providers › Upstash boxes › Size and resize boxes automatically). Tell Cody why a resize would help; Cody can resize it from the Boxes page."))
       }
       if (compareSizes(a.size, guard.max_size) > 0) {
-        return fail(owner(`Cody's Settings let you resize boxes up to ${guard.max_size}; ${a.size} is above that. Ask Cody to resize it from the Boxes page, or pick ${guard.max_size}.`))
+        return fail(`${owner("Cody")}'s Settings let you resize boxes up to ${guard.max_size}; ${a.size} is above that. Ask ${owner("Cody")} to resize it from the Boxes page, or pick ${guard.max_size}.`)
       }
       const box = store.getBox(a.box)
       if (!box) return fail(`No box "${a.box}". Use pool_status.`)

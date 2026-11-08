@@ -9,6 +9,13 @@ import { captainPrompt, firstTurnPrompt, followupPrompt, ORCHESTRATOR_PROMPT, wo
 import { routingInstructions } from "../server/routing.js"
 import { buildMcpServer, type McpDeps } from "../server/mcp.js"
 import { DEFAULT_OWNER_NAME, withOwner } from "../shared/owner.js"
+import { initiatorLabel } from "../shared/boxSizes.js"
+import { boxActorLabel } from "../shared/boxHistory.js"
+import { sourceLabel } from "../shared/hooks.js"
+import { previewLine } from "../shared/tts.js"
+import { buildSelectionTaskPrompt } from "../web/src/lib/selectionTask.js"
+import { projectNote, inlinePicksNote } from "../server/runTargets.js"
+import { routeRules, taskThreadPrompt } from "../server/sideThreads.js"
 import { userMessageLabel } from "../shared/sender.js"
 import type { Project } from "../shared/types.js"
 import { tmpDir } from "./helpers.js"
@@ -47,6 +54,17 @@ describe("ownerName setting", () => {
     const info = settings.update({ ownerName: "  Sam  " })
     expect(info.settings.ownerName).toBe("Sam")
     expect(info.sources.ownerName).toBe("ui")
+  })
+
+  it("preserves explicitly configured names, including the former default, without rewriting settings", () => {
+    const store = memStore()
+    const settings = new SettingsStore(store, { ...noEnv, ownerName: " " })
+    expect(settings.get().ownerName).toBe("the owner")
+    settings.update({ ownerName: "Cody" })
+    const before = store.getKv("settings")
+    expect(new SettingsStore(store, noEnv).get().ownerName).toBe("Cody")
+    expect(store.getKv("settings")).toBe(before)
+    expect(withOwner("Ask Cody.", "Cody")).toBe("Ask Cody.")
   })
 
   it("rejects empty or markup-like names", () => {
@@ -107,6 +125,41 @@ describe("prompts with an owner name", () => {
   it("transcript labels use the name", () => {
     expect(userMessageLabel({}, "Ana")).toBe("Ana")
     expect(userMessageLabel({})).toBe("the owner")
+  })
+})
+
+describe("generated output boundaries", () => {
+  it.each(["Ana", undefined, " "])("personalizes all runner and manager instructions (%s)", (ownerName) => {
+    const clean = { ...project, name: "demo", description: "", repo: "acme/site" }
+    const boxes = [undefined, { memoryBytes: null, slots: 1, local: true }, { memoryBytes: null, slots: 1, docker: { cpus: 2 } }, { memoryBytes: null, slots: 1, machine: { name: "Example", os: null, cpus: 2 } }, { memoryBytes: null, slots: 1, gpu: { name: "GPU", cloud: "daytona" as const } }]
+    for (const box of boxes) {
+      const prompt = workerSystemPrompt({ project: clean, task: { id: "task_1", title: "T" }, branch: "main", port: 4000, box, ownerName })
+      expect(prompt).not.toMatch(/cody/i)
+      expect(prompt).toContain(`ask ${ownerName?.trim() || "the owner"} (the human)`)
+    }
+    expect(captainPrompt(clean, ownerName, undefined, true, "/example/repo")).not.toMatch(/cody/i)
+    expect(withOwner(ORCHESTRATOR_PROMPT, ownerName)).not.toMatch(/cody/i)
+    expect(sourceLabel("cody", ownerName)).toBe(ownerName?.trim() || "the owner")
+    expect(initiatorLabel({ kind: "cody" }, undefined, ownerName)).toBe(ownerName?.trim() || "the owner")
+    expect(boxActorLabel({ actor: "owner", actorProjectId: null }, undefined, ownerName)).toBe(ownerName?.trim() || "the owner")
+    expect(userMessageLabel({}, ownerName)).toBe(ownerName?.trim() || "the owner")
+    expect(previewLine("Example", ownerName)).toBe(ownerName?.trim() ? "Hi Ana, this is Example." : "Hi, this is Example.")
+  })
+
+  it("keeps repositories, branches, parent and machine names, paths and quoted instructions unchanged", () => {
+    const p = { ...project, repo: "Cody/site", baseBranch: "Cody" }
+    const prompt = workerSystemPrompt({ project: p, task: { id: "task_1", title: "Cody" }, branch: "Cody", port: 4000, ownerName: "Ana", box: { memoryBytes: null, slots: 1, machine: { name: "Cody", os: "Cody OS", cpus: 1 } }, subtasks: { depth: 1, maxDepth: 3, maxChildren: 2, parent: { id: "task_parent", title: "Cody" } } })
+    for (const text of ['on Cody, one of Ana', 'Cody OS', 'repository Cody/site', 'on branch Cody', 'push to Cody directly', 'sub-task of "Cody"']) expect(prompt).toContain(text)
+    const captain = captainPrompt(p, "Ana", undefined, false, "/Cody/repo")
+    expect(captain).toContain("Repository: Cody/site (base branch Cody)")
+    expect(captain).toContain("at /Cody/repo")
+    expect(routeRules({ task: { id: "task_1", title: "Cody" }, ownerName: "Ana" })).toContain('task "Cody"')
+    expect(taskThreadPrompt({ title: "Cody", state: "idle", notices: "Cody", question: "Cody?", context: null, ownerName: "Ana" })).toContain('task "Cody"')
+    expect(projectNote({ token: "Cody", label: "Cody", value: "prj_1" }, "Ana")).toContain('project "Cody"')
+    expect(inlinePicksNote([{ kind: "project", token: "Cody", label: "Cody", value: "prj_1", where: 'item 1 ("Cody")', reason: "item" }], "Ana", false)).toContain('item 1 ("Cody")')
+    const selection = buildSelectionTaskPrompt({ source: { kind: "orchestrator" }, selectedText: "Cody said hello", instructions: "Ask Cody", ownerName: "Ana" })
+    expect(selection).toContain("## Ana's additional instructions\nAsk Cody")
+    expect(selection).toContain("> Cody said hello")
   })
 })
 
