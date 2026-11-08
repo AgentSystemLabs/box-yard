@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Server } from "node:http"
 import { createBoxYard, type BoxYard } from "../server/app.js"
 import type { Project, Task, TaskMessage } from "../shared/types.js"
@@ -29,6 +29,7 @@ async function start(): Promise<Running> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const r of running.splice(0)) {
     r.yard.stop()
     await new Promise((res) => r.server.close(() => res(null)))
@@ -59,6 +60,16 @@ describe("sub-tasks", () => {
   it("runs one parent and its sub-tasks (one of them nested), and the parent answers from their reports", async () => {
     const r = await start()
     const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const apply = r.yard.tasks.apply.bind(r.yard.tasks)
+    vi.spyOn(r.yard.tasks, "apply").mockImplementation(async (id, event) => {
+      const parentId = r.yard.store.getTaskRow(id)?.parent_task_id
+      // This case asserts that a waiting parent wakes once for the final report. Fast fake children can
+      // otherwise report before its initial turn ends, exercising a different (queued-input) scenario.
+      if (event.t === "turn_end" && parentId && r.yard.store.getTaskRow(parentId)?.turn_count === 1) {
+        await waitFor(() => r.yard.store.getTaskRow(parentId)?.status === "waiting", "the parent to wait before child reports")
+      }
+      return apply(id, event)
+    })
     const parent = await call<Task>(r, "POST", "/api/tasks", {
       projectId: project.id,
       title: "Research the best way to cook an omelette",
