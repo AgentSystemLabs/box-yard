@@ -1802,7 +1802,7 @@ export function useChatTurnStop(projectId: string | null, busy: boolean) {
   const coordinator = useQuery({ queryKey: keys.orchestrator, queryFn: ({ client }) => fetchLiveState(client, keys.orchestrator, () => api<OrchestratorState>("/api/orchestrator")), staleTime: Infinity, enabled: busy && !projectId, select: isCompacting })
   const captain = useQuery({
     queryKey: keys.captain(projectId ?? ""),
-    queryFn: ({ client }) => fetchLiveState(client, keys.captain(projectId), () => api<CaptainState>(`/api/projects/${projectId}/captain`)),
+    queryFn: ({ client }) => fetchLiveState(client, keys.captain(projectId ?? ""), () => api<CaptainState>(`/api/projects/${projectId}/captain`)),
     staleTime: Infinity,
     enabled: busy && projectId !== null,
     select: isCompacting,
