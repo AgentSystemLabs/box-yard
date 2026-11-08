@@ -258,12 +258,14 @@ describe("TaskHeader", () => {
       ["queued", "Queued", false, null],
       ["idle", "Idle", false, null],
       ["pr_ready", "PR ready", false, null],
+      ["waiting", "Waiting on agent", false, null],
+      ["done", "Done", false, null],
     ] as const) {
       renderInPanel(task({ status }))
       expect(icon().getAttribute("aria-label"), status).toBe(label)
       expect(icon().dataset.status).toBe(status)
-      // The pulse only where motion is welcome; the working dot shows only under reduced motion, in its place.
-      expect(icon().className.includes("motion-safe:animate-pulse"), status).toBe(pulse)
+      // The glyph pulses only where motion is welcome; the corner dot stays visible in either mode.
+      expect(icon().querySelector("svg")!.getAttribute("class")!.includes("motion-safe:animate-pulse"), status).toBe(pulse)
       expect(cue(), status).toBe(dot)
       expect(meta().textContent, status).not.toContain(label)
     }

@@ -141,20 +141,22 @@ describe("the chat switcher in the Coordinator's header", () => {
       const mark = items().find((el) => el.dataset.chat === p.id)!.querySelector<HTMLElement>("[data-captain-icon]")!
       expect(mark.dataset.captainIcon).toBe("captain-cap")
       expect(mark.getAttribute("data-color")).toBe(colors.get(p.id))
-      expect(mark.getAttribute("style")).toContain("--pc")
+      expect(mark.parentElement!.getAttribute("style")).toContain("--pc")
     }
   })
 
-  it("shows each chat's busy dot from what's cached, and none for a Captain it hasn't heard about", () => {
+  it("puts a still working dot on the cached Captain icon, with no dot for idle or unknown chats", () => {
     render()
     click(switcher(centre()))
-    const dot = (label: string) => items().find((el) => el.textContent!.startsWith(label))!.querySelector("[data-testid=chat-switcher-busy]")
-    expect(dot("Coordinator")!.getAttribute("title")).toBe("Coordinator is idle")
-    expect(dot("box-yard")!.getAttribute("title")).toBe("Captain is idle")
-    expect(dot("keep-the-castle")!.getAttribute("data-busy")).toBe("true")
-    expect(dot("keep-the-castle")!.getAttribute("title")).toBe("Captain is working")
-    expect(dot("alpha")).toBeNull()
-    // Nothing fetched to find out.
+    const item = (label: string) => items().find((el) => el.textContent === label)!
+    for (const label of ["Coordinator", "box-yard", "alpha"]) expect(item(label).querySelector("[data-cue]")).toBeNull()
+    const mark = item("keep-the-castle").querySelector('[data-testid="agent-status-icon"]')!
+    expect(mark.getAttribute("title")).toBe("Working…")
+    expect(mark.getAttribute("aria-label")).toBe("Working…")
+    expect(mark.querySelector('[data-cue="working"]')).not.toBeNull()
+    expect(mark.querySelector("[data-captain-icon]")!.className).toContain("motion-safe:animate-pulse")
+    expect(menu()!.querySelector("[data-testid=chat-switcher-busy]")).toBeNull()
+    // Nothing fetched to find out a Captain's status.
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/captain"))).toEqual([])
   })
 
