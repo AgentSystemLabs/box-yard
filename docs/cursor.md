@@ -75,3 +75,5 @@ CURSOR_BIN="node scripts/fake-cursor.mjs" npm run dev
 ```
 
 `FAKE_CURSOR_LOGIN=required` makes it fail like a CLI with no login, and `FAKE_CURSOR_MODELS=fail` makes `models` fail. A `CURSOR_API_KEY` containing `invalid` is refused like a key Cursor doesn't know.
+
+[OpenCode](opencode.md) is also available for task agents, with a separate model default and provider API logins. See its version contract and supported differences before switching a task.

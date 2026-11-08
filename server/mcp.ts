@@ -31,7 +31,7 @@ import { boxHead, boxSummary, mapLimit } from "./boxDelete.js"
 import type { BoxActor } from "../shared/boxHistory.js"
 import { errorMessage } from "./util/retry.js"
 import { PR_REPORT_FRESH_MS } from "./prs.js"
-import { DEFAULT_OWNER_NAME, withOwner } from "../shared/owner.js"
+import { withOwner } from "../shared/owner.js"
 import { usd } from "./cloudLimit.js"
 import { cleanupSummary, diskLine, rootDiskLine, rootLow } from "../shared/disk.js"
 import { compareSizes, resizeSummary, resizeTitle, sizeSpecLine } from "../shared/boxSizes.js"
@@ -138,7 +138,7 @@ function safe<A>(fn: (args: A) => Promise<ToolResult> | ToolResult) {
 const STATUS_ONLY_FIELD = "(status only: ask the project's Captain)"
 
 const STEER_DESCRIPTION =
-  "true: steer it into a mid-turn agent's running turn, with every other queued message, in send order. Requests delivery without stopping; the result is not confirmation that the model processed them. Use it when the message changes what it's doing right now. A Cursor agent can't take messages mid-turn; theirs wait for the turn's end (the delivery field says so). To stop the turn instead, call stop_task: the queued messages are kept and start its next turn."
+  "true: steer it into a mid-turn agent's running turn, with every other queued message, in send order. Requests delivery without stopping; the result is not confirmation that the model processed them. Use it when the message changes what it's doing right now. Cursor and OpenCode agents can't take messages mid-turn; theirs wait for the turn's end (the delivery field says so). To stop the turn instead, call stop_task: the queued messages are kept and start its next turn."
 const INTERRUPT_DESCRIPTION = "Old name for steer, with the same effect: it no longer stops the turn (stop_task does)."
 
 /** What steerQueued did, for the MCP reply. */
@@ -176,9 +176,9 @@ const modelBase = z
   .trim()
   .min(1)
   .max(100)
-  .regex(/^[A-Za-z0-9._:\[\]/-]+$/, "Model names have no spaces")
+  .regex(/^[A-Za-z0-9._:#\[\]/-]+$/, "Model names have no spaces")
   .optional()
-const modelSchema = modelBase.describe("Any id or alias `claude --model` takes; omit it for the defaults (Task options)")
+const modelSchema = modelBase.describe("A harness model id; omit it for the harness defaults (Task options)")
 const routingRuleBase = z.string().trim().min(1).max(120).optional()
 const routingReasonBase = z.string().trim().min(1).max(500).optional()
 const routingRuleSchema = routingRuleBase.describe("Routing rule name/id that selected this model and effort")
@@ -202,7 +202,7 @@ const machineLabelBase = z.string().max(MACHINE_LIMITS.labelLength).optional()
 const machineLabelSchema = machineLabelBase.describe('An SSH machine label or name, e.g. "gpu" (list_machines lists them); alone it means runs_on "ssh" (Task options)')
 const envSchema = z.record(z.string(), z.string()).optional().describe("Env vars as NAME: value")
 const agentBase = z.enum(AGENT_CLIS).optional()
-const agentSchema = agentBase.describe('"claude", "codex" or "cursor"; omit it to follow the project\'s Agent (Task options)')
+const agentSchema = agentBase.describe('"claude", "codex", "cursor" or "opencode"; omit it to follow the project\'s Agent (Task options)')
 const iconSchema = z
   .enum(TASK_ICONS)
   .optional()
@@ -223,7 +223,6 @@ const stayOpenSchema = z
  */
 /** Rewrite tool and parameter descriptions with the configured owner name as tools are registered. */
 function nameOwnerInTools(server: McpServer, ownerName: string | undefined) {
-  if (!ownerName?.trim() || ownerName.trim() === DEFAULT_OWNER_NAME) return
   const register = server.registerTool.bind(server) as (name: string, config: Record<string, unknown>, cb: unknown) => RegisteredTool
   const named = (text: unknown) => (typeof text === "string" ? withOwner(text, ownerName) : text)
   server.registerTool = ((name: string, config: { description?: string; inputSchema?: Record<string, z.ZodType> }, cb: unknown) => {
@@ -257,9 +256,9 @@ function alwaysLoadCore(server: McpServer, core: ReadonlySet<string>) {
  * A side thread's tools: every tool stays listed with its description (so the thread's fork keeps the chat's prompt
  * cache), but only THREAD_TOOLS run; the rest answer READ_ONLY_REFUSAL. The CLI's allowlist refuses them first.
  */
-function readOnlyTools(server: McpServer) {
+function readOnlyTools(server: McpServer, ownerName?: string) {
   const register = server.registerTool.bind(server) as (name: string, config: Record<string, unknown>, cb: unknown) => RegisteredTool
-  const refuse = async () => ({ content: [{ type: "text" as const, text: READ_ONLY_REFUSAL }], isError: true })
+  const refuse = async () => ({ content: [{ type: "text" as const, text: withOwner(READ_ONLY_REFUSAL, ownerName) }], isError: true })
   server.registerTool = ((name: string, config: Record<string, unknown>, cb: unknown) => register(name, config, THREAD_TOOLS.has(name) ? cb : refuse)) as typeof server.registerTool
 }
 
@@ -302,7 +301,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const owner = (text: string) => withOwner(text, ownerName)
   nameOwnerInTools(server, ownerName)
   alwaysLoadCore(server, CORE_TOOLS[caller.kind])
-  if (caller.readOnly) readOnlyTools(server)
+  if (caller.readOnly) readOnlyTools(server, ownerName)
   const scopeId = caller.kind === "captain" ? caller.projectId : null
   const ownProject = (): Project => {
     const p = scopeId ? store.getProject(scopeId) : null
@@ -348,9 +347,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const statusOnlyError = (projectId: string, what: string) =>
     new Error(
       `Status only: ${what}. ` +
-        owner(
-          `Cody set project "${store.getProject(projectId)?.name ?? projectId}" to show you its status only (its identity's Coordinator sees). Its Captain sees everything: ask it with ask_captain or send_to_captain, and it answers with the state of the work.`,
-        ),
+        `${owner("Cody")} set project "${store.getProject(projectId)?.name ?? projectId}" to show you its status only (its identity's Coordinator sees). Its Captain sees everything: ask it with ask_captain or send_to_captain, and it answers with the state of the work.`,
     )
   /** list_projects' word on a status-only project. */
   const STATUS_ONLY_PROJECT = owner(
@@ -438,25 +435,25 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const differs = (pick: RunTargetPick, runsOn: RunsOn | undefined, machineLabel: string | undefined) =>
     (runsOn !== undefined || machineLabel !== undefined) && !(runsOn === pick.value && !machineLabel)
   const pickNote = (pick: RunTargetPick, overridden: boolean) => ({
-    runs_on_pick: owner(overridden ? `Cody picked @${pick.token} (${pick.label}) for this prompt, so it runs there, not where you asked` : `@${pick.token} (${pick.label}): Cody's pick for this prompt`),
+    runs_on_pick: overridden ? `${owner("Cody")} picked @${pick.token} (${pick.label}) for this prompt, so it runs there, not where you asked` : `@${pick.token} (${pick.label}): ${owner("Cody")}'s pick for this prompt`,
   })
   /**
    * The message's harness/model/effort wins over tool arguments. Plain !harness leaves model and effort unset so
-   * the task follows that harness's Settings defaults. Cursor carries effort in its model id.
+   * the task follows that harness's Settings defaults. Cursor carries effort in its model id; OpenCode uses provider/model#variant and rejects generic effort.
    */
   const pickedAgent = (agent: AgentCli | undefined, model: string | undefined, effort?: Effort): { agent: AgentCli | undefined; model: string | undefined; effort: Effort | undefined; note: { agent_pick?: string } } => {
     const pick = picksNow().agent
     if (!pick) return { agent, model, effort, note: {} }
     const cli = pick.value as AgentCli
     const owned = cliForModel(model)
-    return { agent: cli, model: pick.model, effort: cli === "cursor" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
+    return { agent: cli, model: pick.model, effort: cli === "cursor" || cli === "opencode" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
   }
   const agentPickNote = (pick: RunTargetPick, overridden: boolean) => ({
-    agent_pick: owner(overridden ? `Cody picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): Cody's pick for this prompt`),
+    agent_pick: overridden ? `${owner("Cody")} picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): ${owner("Cody")}'s pick for this prompt`,
   })
   /** What a reply says when "local" went to SSH machines (Settings › Machines › Local means). */
   const viaLocal = (p: { viaLocal: boolean; machineLabel: string | null }) =>
-    p.viaLocal ? { runs_on: owner(`${labelPhrase(p.machineLabel)}: that's what "local" means in Cody's Settings › Machines (runs_on "this_computer" is this computer)`) } : {}
+    p.viaLocal ? { runs_on: `${labelPhrase(p.machineLabel)}: that's what "local" means in ${owner("Cody")}'s Settings › Machines (runs_on "this_computer" is this computer)` } : {}
   /** Who set a task's priority, for its log. */
   const prioritySetter = scopeId ? "its project's Captain" : "the Coordinator"
   const absolute = (url: string) => (url.startsWith("/") && deps.publicUrl() ? `${deps.publicUrl().replace(/\/$/, "")}${url}` : url)
@@ -505,7 +502,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     mergeRequested: t.mergeRequest
       ? t.mergeRequest.requestedBy
         ? `The ${t.mergeRequest.requestedBy} asked for a merge of #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`
-        : owner(`Cody pressed Merge PR for #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`)
+        : `${owner("Cody")} pressed Merge PR for #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`
       : undefined,
     previews: t.previews.length ? t.previews.map((p) => p.url) : undefined,
     error: t.error ?? undefined,
@@ -784,11 +781,10 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     server.registerTool(
       "send_to_captain",
       {
-        description: owner(
+        description:
           "Coordinator tool: send project-scoped work to that project's Captain and return immediately. The Captain has its own persistent Claude session and owns create_task/send_to_task/model routing for the project. " +
             'Its reply shows on Cody\'s chat as soon as it\'s written ("Captain for <project> replied: …") and reaches you as a Box Yard update, so you don\'t need wait_for_captain. ' +
             "It wakes you only when there's something for you to do: a question or decision for Cody, a failure, a next step, or act_on_reply. A reply only for Cody's information (a status, an answer) comes with your next turn's updates instead. Replies to Captains you asked in the same turn (a fan-out) always wake you.",
-        ),
         inputSchema: {
           project: z.string().describe("Project id or name"),
           message: z.string().min(1).describe("The project-scoped request for the Captain."),
@@ -845,7 +841,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
 
   server.registerTool(
     "list_projects",
-    { description: owner("List all projects, in the order Cody keeps them in the sidebar, with their repo, env var names, notes and tasks.") },
+    { description: "List all projects, in the order Cody keeps them in the sidebar, with their repo, env var names, notes and tasks." },
     safe(async () => ok(scopeId ? [await projectView(ownProject())] : await Promise.all(store.listProjects().map(projectView)))),
   )
 
@@ -861,7 +857,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           repo: z.string().optional(),
           base_branch: z.string().optional(),
           env: envSchema,
-          agent: agentBase.describe('The agent CLI its tasks run on: "claude", "codex" or "cursor"; omit it for Settings › Box agents'),
+          agent: agentBase.describe('The agent CLI its tasks run on: "claude", "codex", "cursor" or "opencode"; omit it for Settings › Box agents'),
           ...boxSettingsInput,
         },
       },
@@ -896,7 +892,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
               .enum(AGENT_CLIS)
               .nullable()
               .optional()
-              .describe('The agent CLI its new tasks run on: "claude", "codex" or "cursor"; null goes back to Settings › Box agents. Its existing tasks keep theirs.'),
+              .describe('The agent CLI its new tasks run on: "claude", "codex", "cursor" or "opencode"; null goes back to Settings › Box agents. Its existing tasks keep theirs.'),
             ...boxSettingsInput,
             notes_max: z
               .number()
@@ -956,7 +952,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         const box = boxSettingsPatch(a)
         if (a.machine_label !== undefined && !scopeId) {
           const current = store.getProject(id)!
-          if (current.runner !== "ssh") return fail(owner(`${current.name} doesn't run on SSH machines (its Runs on is ${current.runner ?? "box"}). Cody picks Runs on in the project's settings; for one task, pass runs_on "label:<label>" to create_task.`))
+          if (current.runner !== "ssh") return fail(`${current.name} doesn't run on SSH machines (its Runs on is ${current.runner ?? "box"}). ${owner("Cody")} picks Runs on in the project's settings; for one task, pass runs_on "label:<label>" to create_task.`)
           if (a.machine_label) await tasks.requireRunner("ssh", id, {}, { agentCli: a.agent, machineLabel: a.machine_label })
         }
         const p = store.updateProject(
@@ -1535,9 +1531,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       const keeps =
         agentPick && agentPick.value !== before.agentCli
           ? {
-              agent_pick: owner(
-                `This task runs on ${AGENT_CLI_LABEL[before.agentCli]}; send_to_task does not change its harness. To continue this same work on Cody's !${agentPick.token} choice, wait for it to stop, then use continue_task with agent \"${agentPick.value}\". Do not create a replacement task.`,
-              ),
+              agent_pick: `This task runs on ${AGENT_CLI_LABEL[before.agentCli]}; send_to_task does not change its harness. To continue this same work on ${owner("Cody")}'s !${agentPick.token} choice, wait for it to stop, then use continue_task with agent \"${agentPick.value}\". Do not create a replacement task.`,
             }
           : {}
       await tasks.requireRunner(where.runner, before.projectId, store.taskEnv(before.id), { agentCli: before.agentCli, machineLabel: where.machineLabel, gpu: where.gpu })
@@ -1601,7 +1595,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     {
       description:
         "Steer: hand the messages queued for a task to its agent in the turn it's running now, without stopping it. Delivery is requested in send order; Codex acceptance is recorded separately and does not confirm model processing. " +
-        "Use it when a queued message changes what the agent is doing and waiting for the turn to end would waste work. If no turn is running, the messages simply go out with the next turn. A Cursor agent can't take messages mid-turn: they wait for the turn's end, and the delivery field says so. " +
+        "Use it when a queued message changes what the agent is doing and waiting for the turn to end would waste work. If no turn is running, the messages simply go out with the next turn. Cursor and OpenCode agents can't take messages mid-turn: they wait for the turn's end, and the delivery field says so. " +
         "To stop the turn instead, call stop_task: the queued messages are kept and start the next turn.",
       inputSchema: { task: z.string() },
     },
@@ -1814,7 +1808,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         task: z.string(),
         agent: z.enum([...AGENT_CLIS, "default"]).optional(),
         model: z.string().trim().min(1).max(100).nullable().optional().describe("Compatible model for subsequent turns; null clears the pin. Omit on a harness switch to use its defaults/routing."),
-        effort: z.enum([...EFFORTS, "ultra"]).nullable().optional().describe("Effort pin for subsequent turns; null clears it. Cursor carries effort in its model id."),
+        effort: z.enum([...EFFORTS, "ultra"]).nullable().optional().describe("Effort pin for subsequent turns; null clears it. Cursor carries effort in its model id; OpenCode uses provider/model#variant and rejects generic effort."),
         message: z.string().trim().min(1).max(50_000).optional().describe("Optional continuation instructions; existing queued messages are kept too."),
       },
     },
@@ -2407,6 +2401,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
                 node: toolLine(t.tools.node),
                 claude: t.tools.claude.found ? `${toolLine(t.tools.claude)}, ${loginLine(t.claudeLogin)}` : "not installed: no Claude Code tasks here",
                 codex: t.tools.codex.found ? `${toolLine(t.tools.codex)}, ${loginLine(t.codexLogin)}` : "not installed: no Codex tasks here (Box Yard never installs it on a machine)",
+                opencode: t.tools.opencode?.found ? `${toolLine(t.tools.opencode)}, API login ${t.opencodeLogin ? "present" : "not found"}` : "not installed: no OpenCode tasks here (Box Yard never installs it on a machine)",
                 cursor: t.tools.cursor?.found ? `${toolLine(t.tools.cursor)}, ${loginLine(t.cursorLogin ?? null)}` : "not installed: no Cursor tasks here (Box Yard never installs it on a machine)",
                 ...(t.problems.length ? { problems: t.problems } : {}),
                 ...(t.notes.length ? { notes: t.notes } : {}),
@@ -2415,7 +2410,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     }
     const localMeans = () => {
       const label = machines.settings().localLabel
-      return owner(label ? `runs_on "local" goes to ${labelPhrase(label)} (Cody's Settings › Machines › Local means); "this_computer" is this computer` : `runs_on "local" is this computer (Cody can point it at a machine label in Settings › Machines)`)
+      return label ? `runs_on "local" goes to ${labelPhrase(label)} (${owner("Cody")}'s Settings › Machines › Local means); "this_computer" is this computer` : owner(`runs_on "local" is this computer (Cody can point it at a machine label in Settings › Machines)`)
     }
     const sshKeyInput = z
       .string()
@@ -2481,7 +2476,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         {
           description:
             "Add one of Cody's own computers as an SSH machine agents can run on, when Cody asks to and gives its address, user and SSH key reference; then Box Yard tests the connection (OS, CPUs, memory, disk, git, node, claude and codex with their logins) and the reply shows the result. " +
-            "Never ask Cody to paste a private key: ssh_key is a reference (file:~/.ssh/<key> or the SSH agent). The machine needs node 18+, git, and Claude Code, Codex or Cursor's CLI (Box Yard never installs them there; a task goes only to a machine with its agent), each with a login on it or one Box Yard forwards (Settings › Credentials or the project's identity); docs/machines.md is the setup guide. Agents there are not sandboxed: they run as that user.",
+            "Never ask Cody to paste a private key: ssh_key is a reference (file:~/.ssh/<key> or the SSH agent). The machine needs node 18+, git, and Claude Code, Codex, Cursor or OpenCode 1.19.5 (Box Yard never installs them there; a task goes only to a machine with its agent), each with a login on it or one Box Yard forwards (Settings › Credentials or the project's identity); docs/machines.md is the setup guide. Agents there are not sandboxed: they run as that user.",
           inputSchema: { ...machineInput, test: z.boolean().optional().describe("false: add it without testing (default: test now)") },
         },
         safe(async (a: MachineArgs & { name: string; host: string; user: string; ssh_key: string; test?: boolean }) => {
@@ -2713,7 +2708,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
      * these tools an identity can be set to show status only, but never back: a model can't undo the seal.
      */
     const keepSealed = (what: string) =>
-      new Error(owner(`Only Cody can let the Coordinator see more: ${what}. Cody does that in Settings › Identities (Coordinator sees) or in the project's settings.`))
+      new Error(`Only ${owner("Cody")} can let the Coordinator see more: ${what}. ${owner("Cody")} does that in Settings › Identities (Coordinator sees) or in the project's settings.`)
     const mayLoosen = (i: Identity, sees: CoordinatorSees | undefined) => {
       if (i.coordinatorSees === "status" && sees === "everything") throw keepSealed(`the ${i.name} identity shows the Coordinator its projects' status only`)
     }
@@ -3330,7 +3325,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           box: e.boxId,
           ...(e.boxName && e.boxName !== e.boxId ? { name: e.boxName } : {}),
           event: e.type,
-          by: owner(boxActorLabel(e, projectName)),
+          by: boxActorLabel(e, projectName, ownerName),
           reason: e.reason ?? undefined,
           size: e.fromSize && e.toSize ? `${e.fromSize} → ${e.toSize}` : (e.size ?? undefined),
           other_box: e.relatedBoxId ?? undefined,
@@ -3366,7 +3361,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         return fail(owner("Cody has turned off automatic box resizing (Settings › Box providers › Upstash boxes › Size and resize boxes automatically). Tell Cody why a resize would help; Cody can resize it from the Boxes page."))
       }
       if (compareSizes(a.size, guard.max_size) > 0) {
-        return fail(owner(`Cody's Settings let you resize boxes up to ${guard.max_size}; ${a.size} is above that. Ask Cody to resize it from the Boxes page, or pick ${guard.max_size}.`))
+        return fail(`${owner("Cody")}'s Settings let you resize boxes up to ${guard.max_size}; ${a.size} is above that. Ask ${owner("Cody")} to resize it from the Boxes page, or pick ${guard.max_size}.`)
       }
       const box = store.getBox(a.box)
       if (!box) return fail(`No box "${a.box}". Use pool_status.`)
@@ -3395,7 +3390,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         "The box itself isn't changed: Box Yard snapshots it, strips a scratch copy of every workspace, login, token, temp file and log, saves that as the snapshot and deletes the copy. It replaces the project's previous snapshot. " +
         "Refused while agents run on the box (wait until it's idle). Runs in the background, a few minutes for a big disk; you get a notice when it's saved, and boxes made before then start without it. " +
         "New boxes of the snapshot's size or bigger use it; list_projects shows it. " +
-        owner("Cody can clear or replace it in the project's Settings. ") +
+        "Cody can clear or replace it in the project's Settings. " +
         (scopeId ? "As a Captain you can only snapshot a box your project's tasks live on, for your project." : "Pass project when the box holds more than one project's work."),
       inputSchema: {
         box: z.string().describe("Box id, from pool_status (the box the setup task ran on)"),
@@ -3448,7 +3443,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const SAFETY =
     "Safety check first, the same as Box Yard's own cleanups: refused while an agent runs or a task is queued on it, and while any workspace has uncommitted or unpushed work, unless that task's PR is merged and its branch fully pushed. " +
     "Every workspace is archived first (a merged, fully pushed one needs no archive). RunPod network volumes and project snapshots are never touched. " +
-    owner("You can't stop agents or override the check: tell Cody what holds the box, and Cody can delete it anyway from the Boxes page. ")
+    "You can't stop agents or override the check: tell Cody what holds the box, and Cody can delete it anyway from the Boxes page. "
 
   server.registerTool(
     "delete_box",

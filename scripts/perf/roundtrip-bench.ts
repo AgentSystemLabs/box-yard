@@ -195,7 +195,7 @@ const hops = (t: Trip) => [t.coordinator, t.captain, t.wake].filter((r): r is Tu
 const stepRows = [
   ...(
     [
-      ["Coordinator (Cody)", (t: Trip) => t.coordinator],
+      ["Coordinator (Owner)", (t: Trip) => t.coordinator],
       ["Captain", (t: Trip) => t.captain],
       ["Coordinator wake (updates)", (t: Trip) => t.wake],
     ] as const
@@ -221,10 +221,10 @@ const out = [
   "",
   "| Stage | p50 | p95 | max | n |",
   "|---|---:|---:|---:|---:|",
-  ...(viaCaptain ? [line("Cody → the Captain's reply on the Coordinator chat", trips.map((t) => t.toCaptainReplyMs))] : []),
-  line(viaCaptain ? "Cody → the Coordinator's wake on it done" : "Cody → the Coordinator's answer done", trips.map((t) => t.toCoordinatorDoneMs)),
-  line("Cody → all turns done (quiet)", trips.map((t) => t.toQuietMs)),
-  ...stageRows("Coordinator (Cody)", trips.map((t) => t.coordinator)),
+  ...(viaCaptain ? [line("Owner → the Captain's reply on the Coordinator chat", trips.map((t) => t.toCaptainReplyMs))] : []),
+  line(viaCaptain ? "Owner → the Coordinator's wake on it done" : "Owner → the Coordinator's answer done", trips.map((t) => t.toCoordinatorDoneMs)),
+  line("Owner → all turns done (quiet)", trips.map((t) => t.toQuietMs)),
+  ...stageRows("Coordinator (Owner)", trips.map((t) => t.coordinator)),
   ...toolRows("Coordinator", trips.map((t) => t.coordinator)),
   ...stageRows("Captain", trips.map((t) => t.captain)),
   ...toolRows("Captain", trips.flatMap((t) => (t.captain ? [t.captain] : []))),

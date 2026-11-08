@@ -22,7 +22,7 @@ export function harnessModelTargets(harnesses: RunTarget[], sources: HarnessPick
     const effortWords = saved.effort === "orchestrator" ? "Automatic effort" : saved.effort ? `${EFFORT_LABEL[saved.effort]} effort` : null
     const defaultDetail = [saved.model || "CLI default", effortWords].filter(Boolean).join(" · ")
     const root = { ...h, defaultLabel: "Settings default", detail: defaultDetail }
-    const models = cli === "codex" ? CODEX_MODELS : cli === "cursor" ? sources.cursor.map((m) => ({ ...m, efforts: [] as Effort[] })) : sources.claude ?? BUILTIN_MODELS
+    const models = cli === "opencode" ? (saved.model ? [{ id: saved.model, label: saved.model, efforts: [] as Effort[] }] : []) : cli === "codex" ? CODEX_MODELS : cli === "cursor" ? sources.cursor.map((m) => ({ ...m, efforts: [] as Effort[] })) : sources.claude ?? BUILTIN_MODELS
     return [root, ...models.flatMap((m): RunTarget[] => {
       const token = `${h.token}:${modelToken(m.id)}`
       const model: RunTarget = {

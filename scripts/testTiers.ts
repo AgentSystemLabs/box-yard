@@ -4,6 +4,7 @@
 export const TEST_INCLUDE = ["test/**/*.test.ts"]
 
 export const SLOW_TESTS: Record<string, string> = {
+  "test/owner-output.e2e.test.ts": "Full server/task-manager owner personalization fixture",
   "test/owner-close.e2e.test.ts": "Full server/HTTP/MCP owner authority and state-transition fixture",
   "test/github-reference-route.test.ts": "Full Box Yard server/HTTP fixture",
   "test/automation-status-only-mcp.test.ts": "Full server/task-manager MCP fixture",
@@ -53,6 +54,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/connector-routes.test.ts": "Full Box Yard server/task-manager fixture",
   "test/context.e2e.test.ts": "End-to-end runner/server integration",
   "test/create-tasks.test.ts": "Full Box Yard server/task-manager fixture",
+  "test/opencode-task.e2e.test.ts": "End-to-end OpenCode worker/server and archive integration",
   "test/cursor-task.e2e.test.ts": "End-to-end runner/server integration",
   "test/daytona-pods.e2e.test.ts": "End-to-end runner/server integration",
   "test/daytona.test.ts": "Provider archive-stream transport and shell integration (mock cloud)",

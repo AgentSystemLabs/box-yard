@@ -882,6 +882,7 @@ export interface Settings {
    * Box agents' model on Cursor (a `cursor-agent models` id, which carries its effort), unless the task or routing
    * picks one Cursor runs; "" is the CLI's own default (docs/cursor.md).
    */
+  agentOpencodeModel: string
   agentCursorModel: string
   agentEffort: AgentEffort
   /** YAML routing rules the orchestrator uses to choose per-task/per-turn model and effort. */

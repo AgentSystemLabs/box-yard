@@ -4,7 +4,7 @@ import { act, createElement, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { CaptainIconPicker, type CaptainIconDefault } from "../web/src/components/CaptainIconPicker.js"
-import { CaptainIcon } from "../web/src/components/CaptainIcon.js"
+import { CaptainIcon, loadCaptainIcons } from "../web/src/components/CaptainIcon.js"
 import { SettingsDialog } from "../web/src/components/SettingsDialog.js"
 import { ProjectSettingsHost } from "../web/src/components/ProjectSettingsDialog.js"
 import { warmLazyParts } from "../web/src/components/LazyPart.js"
@@ -142,7 +142,7 @@ describe("CaptainIcon", () => {
     expect(mark().dataset.captainIcon).toBe("anchor")
     expect(svgClass()).toContain("lucide-captain-icon-pending")
     expect(mark().querySelector("svg")!.children).toHaveLength(0)
-    await settle()
+    await act(async () => { await loadCaptainIcons() })
     expect(svgClass()).toContain("lucide-anchor")
   })
 
@@ -185,6 +185,7 @@ describe("CaptainIconPicker", () => {
     picked = []
     act(() => root.render(createElement(QueryClientProvider, { client: client() }, createElement(Harness, { start, useDefault }))))
     click($("captain-icon-picker-toggle")!)
+    await act(async () => { await loadCaptainIcons() })
     await settle()
   }
   const toggle = () => $<HTMLButtonElement>("captain-icon-picker-toggle")!

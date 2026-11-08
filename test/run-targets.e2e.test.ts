@@ -118,7 +118,7 @@ describe('chat "@" run targets', () => {
     await coordinatorIdle(r)
   })
 
-  it("the Coordinator's turn says what Cody picked, and its create_task runs there even when it passes no runs_on", async () => {
+  it("the Coordinator's turn says what the owner picked, and its create_task runs there even when it passes no runs_on", async () => {
     const r = await start()
     await addMachine(r)
     await call<Project>(r, "POST", "/api/projects", { name: "demo" })
@@ -128,7 +128,7 @@ describe('chat "@" run targets', () => {
     expect(r.yard.store.getTaskRow(t.id)?.machine_label).toBe("studio-mac")
     await coordinatorIdle(r)
     const prompt = sessionPrompts(r, "orchestrator_session")[0]!
-    expect(prompt).toContain('[Cody picked where tasks run for this message: @studio-mac (Studio-Mac), runs_on "label:studio-mac".')
+    expect(prompt).toContain('[the owner picked where tasks run for this message: @studio-mac (Studio-Mac), runs_on "label:studio-mac".')
     expect(r.yard.orchestrator.turnPicks).toEqual({ runsOn: null, agent: null })
 
     // The next message has no pick: its task follows the project.
@@ -148,7 +148,7 @@ describe('chat "@" run targets', () => {
     expect(relayed.meta).toMatchObject({ source: "coordinator", runsOn: { value: "box", token: "box" } })
     await captainIdle(r, p)
     await coordinatorIdle(r)
-    expect(sessionPrompts(r, `captain_session:${p.id}`).join("\n")).toContain("[Cody picked where tasks run for this message: @box")
+    expect(sessionPrompts(r, `captain_session:${p.id}`).join("\n")).toContain("[the owner picked where tasks run for this message: @box")
   })
 
   it("a Captain message's pick wins over the project's runner", async () => {
@@ -173,7 +173,7 @@ describe('chat "%" project pick', () => {
     expect(sent.meta?.project).toEqual({ value: p.id, token: "demo", label: "demo" })
     await coordinatorIdle(r)
     const prompt = sessionPrompts(r, "orchestrator_session")[0]!
-    expect(prompt).toContain(`[Cody picked the project for this message: %demo, project "demo" (${p.id}).`)
+    expect(prompt).toContain(`[the owner picked the project for this message: %demo, project "demo" (${p.id}).`)
     expect(prompt).toContain(`send_to_captain (project "${p.id}")`)
   })
 })
@@ -232,11 +232,11 @@ describe('chat "@" pick on the task tools', () => {
 
     const one = await tool("create_task", { project: "demo", title: "Asked box", prompt: "x", runs_on: "box" })
     expect(r.yard.store.getTask(one.id)?.runsOn).toBe("local")
-    expect(one.runs_on_pick).toMatch(/Cody picked @local \(This computer\) for this prompt, so it runs there/)
+    expect(one.runs_on_pick).toMatch(/the owner picked @local \(This computer\) for this prompt, so it runs there/)
 
     const same = await tool("create_task", { project: "demo", title: "No runs_on", prompt: "x" })
     expect(r.yard.store.getTask(same.id)?.runsOn).toBe("local")
-    expect(same.runs_on_pick).toMatch(/^@local \(This computer\): Cody's pick/)
+    expect(same.runs_on_pick).toMatch(/^@local \(This computer\): the owner's pick/)
 
     const batch = await tool("create_tasks", { project: "demo", tasks: [{ title: "B1", prompt: "x" }, { title: "B2", prompt: "x", runs_on: "box" }] })
     for (const t of batch.tasks) expect(r.yard.store.getTask(t.id)?.runsOn).toBe("local")
@@ -246,7 +246,7 @@ describe('chat "@" pick on the task tools', () => {
     expect(r.yard.store.getTask(other.id)?.runsOn).toBe("box")
     const moved = await tool("send_to_task", { task: other.id, message: "carry on" })
     expect(r.yard.store.getTask(other.id)?.runsOn).toBe("local")
-    expect(moved.runs_on_pick).toMatch(/Cody's pick/)
+    expect(moved.runs_on_pick).toMatch(/the owner's pick/)
   })
 
   it("a ! pick wins over the agent and drops the other CLI's model; send_to_task keeps a task's agent and says so", async () => {
@@ -257,7 +257,7 @@ describe('chat "@" pick on the task tools', () => {
 
     const one = await tool("create_task", { project: "demo", title: "Asked claude", prompt: "x", agent: "claude", model: "opus" })
     expect(r.yard.store.getTask(one.id)).toMatchObject({ agentCli: "codex", model: null })
-    expect(one.agent_pick).toMatch(/Cody picked !codex \(Codex\) for this prompt, so it runs on that/)
+    expect(one.agent_pick).toMatch(/the owner picked !codex \(Codex\) for this prompt, so it runs on that/)
 
     const batch = await tool("create_tasks", { project: "demo", tasks: [{ title: "C1", prompt: "x" }, { title: "C2", prompt: "x", agent: "claude" }] })
     for (const t of batch.tasks) expect(r.yard.store.getTask(t.id)?.agentCli).toBe("codex")
@@ -293,11 +293,13 @@ describe('chat "!" harness picks', () => {
       ["claude", null],
       ["codex", null],
       ["cursor", null],
+      ["opencode", null],
     ])
     await addMachine(r)
     const onAir = await call<RunTarget[]>(r, "GET", "/api/harness-targets?runsOn=label%3Astudio-mac")
     expect(onAir.find((t) => t.token === "codex")?.disabled).toBeNull()
     expect(onAir.find((t) => t.token === "claude")?.disabled).toBeNull()
+    expect(onAir.find((t) => t.token === "opencode")?.disabled).toBeNull()
   })
 
   it("refuses a harness that isn't on the list or can't go with the @ pick, and keeps a good one", async () => {
@@ -320,7 +322,7 @@ describe('chat "!" harness picks', () => {
     const t = await taskNamed(r, "Picked codex")
     expect(t.agentCli).toBe("codex")
     await coordinatorIdle(r)
-    expect(sessionPrompts(r, "orchestrator_session")[0]).toContain('[Cody picked the harness for this message: !codex (Codex), agent "codex".')
+    expect(sessionPrompts(r, "orchestrator_session")[0]).toContain('[the owner picked the harness for this message: !codex (Codex), agent "codex".')
     expect(r.yard.orchestrator.turnPicks).toEqual({ runsOn: null, agent: null })
 
     await call(r, "POST", "/api/chat", { content: "tell captain demo: task demo: Relayed codex -- go", agent: "codex", runsOn: "box" })
@@ -330,7 +332,7 @@ describe('chat "!" harness picks', () => {
     expect(relayed.meta).toMatchObject({ source: "coordinator", agent: { value: "codex" }, runsOn: { value: "box" } })
     await captainIdle(r, p)
     await coordinatorIdle(r)
-    expect(sessionPrompts(r, `captain_session:${p.id}`).join("\n")).toContain("[Cody picked the harness for this message: !codex")
+    expect(sessionPrompts(r, `captain_session:${p.id}`).join("\n")).toContain("[the owner picked the harness for this message: !codex")
   })
 })
 
@@ -375,10 +377,10 @@ describe("picks typed for only part of a message (inline)", () => {
     await captainIdle(r, p)
     await coordinatorIdle(r)
     const prompt = sessionPrompts(r, "orchestrator_session")[0]!
-    expect(prompt).toContain('[Cody typed picks for only part of this message, so Box Yard applies none of them to this turn: !codex (Codex, agent "codex") in item 2 ("Port the pickaxe"); @local (This computer, runs_on "local") in item 2')
+    expect(prompt).toContain('[the owner typed picks for only part of this message, so Box Yard applies none of them to this turn: !codex (Codex, agent "codex") in item 2 ("Port the pickaxe"); @local (This computer, runs_on "local") in item 2')
     expect(prompt).toContain("Box Yard doesn't carry these to Captains.]")
-    expect(prompt).not.toContain("[Cody picked")
-    expect(sessionPrompts(r, `captain_session:${p.id}`).join("\n")).not.toContain("[Cody picked")
+    expect(prompt).not.toContain("[the owner picked")
+    expect(sessionPrompts(r, `captain_session:${p.id}`).join("\n")).not.toContain("[the owner picked")
   })
 
   it("a picker pick for the whole message still applies, and still reaches the Captain, beside an item's hint", async () => {
@@ -388,8 +390,8 @@ describe("picks typed for only part of a message (inline)", () => {
     expect(await taskNamed(r, "Whole box")).toMatchObject({ runsOn: "box", agentCli: "claude" })
     await coordinatorIdle(r)
     const prompt = sessionPrompts(r, "orchestrator_session")[0]!
-    expect(prompt).toContain('[Cody picked where tasks run for this message: @box (Upstash box), runs_on "box".')
-    expect(prompt).toContain("[Cody typed picks for only part of this message")
+    expect(prompt).toContain('[the owner picked where tasks run for this message: @box (Upstash box), runs_on "box".')
+    expect(prompt).toContain("[the owner typed picks for only part of this message")
 
     await call(r, "POST", "/api/chat", { content: "tell captain demo: task demo: Relayed box -- go", runsOn: "box", inline: [hint("agent", "codex")] })
     expect(await taskNamed(r, "Relayed box")).toMatchObject({ runsOn: "box", agentCli: "claude" })
@@ -418,8 +420,8 @@ describe("picks typed for only part of a message (inline)", () => {
     await call(r, "POST", "/api/chat", { content: "status of both again", project: demo.id, inline: [hint("project", web.id)] })
     await coordinatorIdle(r)
     const prompts = sessionPrompts(r, "orchestrator_session").join("\n")
-    expect(prompts).not.toContain("[Cody picked the project")
-    expect(prompts).toContain(`[Cody typed picks for only part of this message, so Box Yard applies none of them to this turn: %web (web, project "${web.id}") in item 2 ("Port the pickaxe").`)
+    expect(prompts).not.toContain("[the owner picked the project")
+    expect(prompts).toContain(`[the owner typed picks for only part of this message, so Box Yard applies none of them to this turn: %web (web, project "${web.id}") in item 2 ("Port the pickaxe").`)
     expect(prompts).toContain(`%demo (demo, project "${demo.id}") outside any list item, with another of its kind in the message; %web (web, project "${web.id}") in item 2`)
   })
 

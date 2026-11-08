@@ -41,11 +41,12 @@ import { EffortPicker, ModelPicker } from "./ModelPicker"
 import { CaptainIconPicker } from "./CaptainIconPicker"
 import { EFFORT_LABEL } from "../../../shared/models"
 import { CodexModelSelect } from "./CodexModelSelect"
+import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
 import { Button, LineIcon, NewTabLink, Select, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { BOX_SIZE_SPECS } from "../../../shared/boxSizes"
-import { AGENT_CLIS, AGENT_CLI_LABEL, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
+import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
 import { NOTE_BUDGET_LIMITS } from "../../../shared/notes"
 import { LOCAL_AGENTS_LIMITS, LOCAL_UNSANDBOXED } from "../../../shared/runner"
 import {
@@ -798,7 +799,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("on")}
                     label="Your name"
-                    help="What the Coordinator, Captains and agents call you in their prompts and labels."
+                    help={'What the Coordinator, Captains and agents call you in their prompts and labels. The default is “the owner” until you save your name.'}
                     hint={hint("ownerName")}
                   >
                     <input id={fid("on")} className={inputClass} value={s.ownerName} maxLength={40} onChange={(e) => set("ownerName", e.target.value)} {...field("ownerName")} />
@@ -806,12 +807,16 @@ export function SettingsDialog({
                   <Row
                     id={fid("acli")}
                     label="Agent"
-                    help="The coding agent new tasks run on: a project can pick its own. Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
+                    help="The coding agent new tasks run on: a project can pick its own. Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given provider/model runs on OpenCode, one given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
                     hint={hint("agentCli")}
                   >
                     <AgentCliSelect id={fid("acli")} clis={AGENT_CLIS} value={s.agentCli} onChange={(v) => set("agentCli", v)} testId="agent-cli" />
                   </Row>
-                  {s.agentCli === "cursor" ? (
+                  {s.agentCli === "opencode" ? (
+                    <Row id={fid("aoc")} label="OpenCode model" help="Provider and model for OpenCode tasks. An optional #variant selects provider-specific reasoning. Generic effort and Box Yard compaction thresholds do not apply." hint={hint("agentOpencodeModel")}>
+                      <OpenCodeModelInput id={fid("aoc")} value={s.agentOpencodeModel} onChange={(v) => set("agentOpencodeModel", v)} testId="agent-opencode-model" />
+                    </Row>
+                  ) : s.agentCli === "cursor" ? (
                     <Row
                       id={fid("acu")}
                       label="Cursor model"
@@ -829,7 +834,7 @@ export function SettingsDialog({
                       <ModelPicker id={fid("am")} value={s.agentModel} onChange={(v) => set("agentModel", v)} testId="agent-model" customInputProps={field("agentModel")} />
                     </Row>
                   )}
-                  {s.agentCli !== "cursor" && (
+                  {hasSeparateEffort(s.agentCli) && (
                     <Row
                       id={fid("ae")}
                       label="Effort"
@@ -854,7 +859,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("arc")}
                     label="Routing YAML"
-                    help="Optional rules for task model and effort, also read from routing.yaml in the data directory. Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
+                    help="Optional rules for task model and effort, also read from routing.yaml in the data directory. Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (OpenCode: provider/model above, no generic effort; Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
                     hint={hint("agentRoutingConfig")}
                   >
                     <textarea

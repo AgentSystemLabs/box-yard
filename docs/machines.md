@@ -1,6 +1,6 @@
 # SSH machines
 
-Box Yard can run agents on computers of your own that it reaches over SSH: an old laptop, a GPU tower, a Mac mini in a cupboard. A machine is used like a box. Box Yard logs in, makes a folder for the task, clones the repo with the project's GitHub token, runs Claude Code, [Codex](codex.md) or [Cursor](cursor.md) headless with the same MCP bridge, streams its output, archives the workspace, pushes the branch and opens the PR, as it does on Upstash boxes.
+Box Yard can run agents on computers of your own that it reaches over SSH: an old laptop, a GPU tower, a Mac mini in a cupboard. A machine is used like a box. Box Yard logs in, makes a folder for the task, clones the repo with the project's GitHub token, runs Claude Code, [Codex](codex.md), [Cursor](cursor.md) or [OpenCode](opencode.md) headless with the same MCP bridge, streams its output, archives the workspace, pushes the branch and opens the PR, as it does on Upstash boxes.
 
 Give machines **labels** (`laptops`, `gpu`, `local`). A project that runs on "SSH machine", or a task with `runs_on: "label:gpu"`, goes to a free machine with that label. Tasks wait while every matching machine is busy.
 
@@ -22,7 +22,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && . ~/.nvm/nvm.sh && nvm install --lts
    # or NodeSource, system-wide: curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
    ```
-3. **Claude Code, Codex or Cursor.** A machine runs the tasks whose agent it has; Box Yard never installs one there.
+3. **Claude Code, Codex, Cursor or OpenCode.** A machine runs the tasks whose agent it has; Box Yard never installs one there.
    ```sh
    curl -fsSL https://claude.ai/install.sh | bash       # Claude Code, in ~/.local/bin/claude
    # or: npm install -g @anthropic-ai/claude-code
@@ -81,7 +81,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
   - it has the label;
   - it's turned on and passed its last test;
   - it answered the last time Box Yard reached it;
-  - it has the task's agent installed (Claude Code, Codex or Cursor), with a login to use (its own, or one Box Yard hands it for the turn);
+  - it has the task's agent installed (Claude Code, Codex, Cursor or OpenCode), with a login to use (its own, or one Box Yard hands it for the turn);
   - it has a free slot.
 
   A task returns to the machine its workspace is on while that machine qualifies. Otherwise it goes to the matching machine with the fewest agents running. A task moves to another machine only when nothing would be lost (its work is pushed and archived).
@@ -179,3 +179,7 @@ A Codex task (a project's Agent set to Codex, or `agent: "codex"`, [docs/codex.m
 
   A machine with none of these isn't picked. The task waits and says what to do.
 - **Its Codex home.** With Box Yard's ChatGPT login, the turn uses a task-specific Codex home in tmpfs (`<secrets>/<task>.codex`), including while Codex atomically refreshes its login. Sessions link to `<task>/codex/sessions`, so archives keep the conversation, and `<task>/codex/auth.json` links back to memory for the server to read refreshed tokens. With an API key, the home is `<task>/codex`, as on boxes. With the machine’s own login, it copies only that login (and a matching legacy rollout when resuming) into the task-owned home; it does not import the machine’s Codex config or MCP servers. Refreshed local-login tokens are written back to the source login.
+
+## OpenCode
+
+SSH machines can also run [OpenCode task agents](opencode.md). Install `npm install -g opencode-ai@1.19.5` as the SSH user and test the machine again. Placement checks the version and API login availability; old probe results do not imply support. Box Yard never installs OpenCode on an SSH machine. Forward OpenCode API logins from Settings or provide an API-only native auth file; OAuth is unsupported. Sessions use the task profile and travel in archives.

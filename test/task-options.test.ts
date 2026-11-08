@@ -18,8 +18,10 @@ function tools(kind: "coordinator" | "captain"): Registered {
 
 describe("Task options", () => {
   it("are in the Coordinator's and every Captain's system prompt, once", () => {
-    for (const text of [ORCHESTRATOR_PROMPT, captainPrompt(project)]) expect(text.split(TASK_OPTIONS)).toHaveLength(2)
-    expect(captainPrompt(project, "Ana")).toContain(withOwner(TASK_OPTIONS, "Ana"))
+    for (const ownerName of [undefined, "", " ", "Ana", "Cody Lee"]) {
+      const options = withOwner(TASK_OPTIONS, ownerName)
+      for (const text of [withOwner(ORCHESTRATOR_PROMPT, ownerName), captainPrompt(project, ownerName)]) expect(text.split(options)).toHaveLength(2)
+    }
     for (const term of ['"local" = this computer', 'priority "high"', "low = one-command chores", "claude-opus-5-5", '"codex" (OpenAI Codex)', "attachments/"]) expect(TASK_OPTIONS).toContain(term)
   })
 

@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process"
 import { ArchiveDecoder, THIN_DIR, archiveOutcome, archiveScript, thinRestoreScript } from "../server/archive.js"
 import type { MirrorSpec } from "../server/gitShare.js"
 import { tmpDir } from "./helpers.js"
+import { AGENT_CLIS } from "../shared/agentCli.js"
 
 // Thin archives: a task whose git history alone is over the cap (a clone from before tasks shared the box mirror)
 // archives only what GitHub doesn't have — HEAD, refs, a bundle of unpushed commits, the WIP snapshot — and the
@@ -49,6 +50,10 @@ function task(root: string, url: string, style: "self-contained" | "shared", par
   const dir = path.join(root, "tasks", "task_a")
   fs.mkdirSync(path.join(dir, "claude", "projects"), { recursive: true })
   fs.writeFileSync(path.join(dir, "claude", "projects", "s.jsonl"), '{"session":1}\n')
+  for (const cli of AGENT_CLIS.filter((cli) => cli !== "claude")) {
+    fs.mkdirSync(path.join(dir, cli, "sessions"), { recursive: true })
+    fs.writeFileSync(path.join(dir, cli, "sessions", "example.json"), JSON.stringify({ harness: cli, session: "example" }))
+  }
   fs.writeFileSync(path.join(dir, "events.jsonl"), "{}\n")
   fs.writeFileSync(path.join(dir, "events.seq"), "7\n")
   if (style === "self-contained") git(dir, "clone", "-q", url, "work")
@@ -129,6 +134,7 @@ describe("thin archive round trip", () => {
       expect(back.out).toContain("boxyard-thin=ok")
       expect(state(back.work)).toEqual(before)
       expect(fs.readFileSync(path.join(back.dir, "claude", "projects", "s.jsonl"), "utf8")).toBe('{"session":1}\n')
+      for (const cli of AGENT_CLIS.filter((cli) => cli !== "claude")) expect(JSON.parse(fs.readFileSync(path.join(back.dir, cli, "sessions", "example.json"), "utf8"))).toEqual({ harness: cli, session: "example" })
       expect(fs.readFileSync(path.join(back.dir, "events.seq"), "utf8")).toBe("7\n")
       expect(fs.existsSync(path.join(back.dir, THIN_DIR))).toBe(false)
       expect(git(back.work, "fsck", "--no-progress", "--connectivity-only")).toBe("")

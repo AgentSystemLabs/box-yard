@@ -48,7 +48,7 @@ const task = mode === "clean" || mode === "live" || mode === "deps" ? {} : readJ
 /** Box Yard's built-in text says "Cody"; swap in the configured owner name (same rule as shared/owner.ts). */
 function owner(text) {
   const name = typeof task.ownerName === "string" ? task.ownerName.trim() : ""
-  return name && name !== "Cody" ? text.replace(/\bCody\b/g, () => name) : text
+  return text.replace(/\bCody\b/g, () => name || "the owner")
 }
 /** Tool definitions with every description run through owner(). */
 function namedTools(value) {
@@ -290,15 +290,16 @@ async function runTurn() {
 
   const codex = task.agent === "codex"
   const cursor = task.agent === "cursor"
-  const harness = codex ? "Codex" : cursor ? "Cursor" : "Claude"
+  const opencode = task.agent === "opencode"
+  const harness = codex ? "Codex" : cursor ? "Cursor" : opencode ? "OpenCode" : "Claude"
   if (codex) prepareCodexHome(turn)
   // Codex and Cursor have no /compact to run headless (they compact on their own); Box Yard doesn't ask, but an old
   // turn.json might.
-  if ((codex || cursor) && turn.compact) {
+  if ((codex || cursor || opencode) && turn.compact) {
     await emit({ t: "turn_end", startedAt: Date.now(), stopped: false, exitCode: 0, ok: true, result: null, sessionId: turn.sessionId, compact: true, usage: null, error: null, sleptMs: 0 })
     return
   }
-  const runAgent = codex ? runCodex : cursor ? runCursor : runClaude
+  const runAgent = codex ? runCodex : cursor ? runCursor : opencode ? runOpenCode : runClaude
   let sessionId = turn.sessionId
   // Runner start → the CLI's spawn (signing, MCP config, dependency restore): the box side of a task's setup.
   const preSpawnMs = Date.now() - clocks.wall
@@ -307,7 +308,7 @@ async function runTurn() {
   // The session file can go missing (fresh box, lost archive), or a Codex thread can't open on the login this turn
   // was handed (its saved reasoning is encrypted for the account that wrote it). Start a new session that carries a
   // recap instead of failing the task.
-  if (!stopping && !attempt.steerSubmitted && attempt.exitCode !== 0 && turn.resume && /no conversation found|session.*not found|no rollout found|invalid_encrypted_content|encrypted content\b.{0,60}\bcould not be (?:verified|decrypted)/i.test(attempt.errorText)) {
+  if (!stopping && !attempt.steerSubmitted && attempt.exitCode !== 0 && turn.resume && (!opencode || attempt.missingSession) && /no conversation found|session.*not found|no rollout found|invalid_encrypted_content|encrypted content\b.{0,60}\bcould not be (?:verified|decrypted)/i.test(attempt.errorText)) {
     sessionId = randomUUID()
     await emit({ t: "session_reset", sessionId, reason: `Previous ${harness} session was not found on this box.` })
     attempt = await runAgent({ turn, sessionId, resume: false, prompt: `${turn.recap ?? ""}\n\n---\n\n${prompt}`.trim(), mcpConfigFile })
@@ -340,6 +341,7 @@ async function runTurn() {
     sessionId,
     // Whether this turn continued its session; the CLI's total_cost_usd then includes earlier turns.
     resumed: Boolean(turn.resume) && sessionId === turn.sessionId,
+    ...(opencode ? { costScope: "run" } : {}),
     compact: Boolean(turn.compact),
     usage,
     resultUsage: attempt.result?.usage ?? null,
@@ -347,7 +349,7 @@ async function runTurn() {
     modelUsage: attempt.result?.modelUsage ?? null,
     // Cursor names the model it ran (its label); Claude's and Codex's come from task_turns.
     ...(cursor && attempt.result?.model ? { model: attempt.result.model } : {}),
-    error: ok ? null : clip(attempt.errorText || attempt.result?.result || `${codex ? "codex" : cursor ? "cursor-agent" : "claude"} exited with code ${attempt.exitCode}`, 2000),
+    error: ok ? null : clip(attempt.errorText || attempt.result?.result || `${codex ? "codex" : cursor ? "cursor-agent" : opencode ? "opencode" : "claude"} exited with code ${attempt.exitCode}`, 2000),
     sleptMs: Math.max(0, Math.round(Date.now() - clocks.wall - (performance.now() - clocks.mono))),
     // Where the turn's time went (shared/turnTimings.ts), on the box's clock: the server adds its side.
     timing: attempt.timing ? { ...attempt.timing, preSpawnMs, runnerStartedAt: clocks.wall } : null,
@@ -358,14 +360,14 @@ async function runTurn() {
 
 /** The connectors' MCP servers (docs/connectors.md › Sessions), never one named boxyard. */
 function connectorServers() {
-  const servers = task.agent === "codex" || task.agent === "cursor" ? null : task.connectors?.servers
+  const servers = task.agent !== "claude" && task.agent != null ? null : task.connectors?.servers
   if (!servers || typeof servers !== "object") return {}
   return Object.fromEntries(Object.entries(servers).filter(([name]) => name !== "boxyard"))
 }
 
 /** The values the connectors' ${VAR}s name: in `claude`'s env only, never a file the runner writes. */
 function connectorEnv() {
-  const env = task.agent === "codex" || task.agent === "cursor" ? null : task.connectors?.env
+  const env = task.agent !== "claude" && task.agent != null ? null : task.connectors?.env
   if (!env || typeof env !== "object") return {}
   return Object.fromEntries(Object.entries(env).filter(([k, v]) => /^BOXYARD_CONNECTOR_[A-Z0-9_]+$/.test(k) && typeof v === "string"))
 }
@@ -1664,6 +1666,150 @@ function runCursor({ turn, sessionId, resume, prompt }) {
 
     child.stdin.on("error", () => {})
     child.stdin.end(brief.text)
+  })
+}
+
+// OpenCode v1.19.5: run.ts emits completed text/tool/step parts as JSON lines.
+// All CLI state lives with the task; API auth is supplied in memory, never copied into that state.
+function openCodeEnv() {
+  const env = { ...turnBaseEnv() }
+  const nativeData = env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share")
+  // Ignore inherited CLI routing/config and isolate plugins/MCP, session DB, caches and logs.
+  for (const k of Object.keys(env)) if (k.startsWith("OPENCODE_")) delete env[k]
+  for (const k of ["XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
+    const dir = path.join(taskDir, "opencode", k.slice(4, -5).toLowerCase())
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+    env[k] = dir
+  }
+  const supplied = task.env?.OPENCODE_AUTH_CONTENT
+  if (supplied) env.OPENCODE_AUTH_CONTENT = supplied
+  else if (task.opencodeHostLogin) {
+    const auth = readJson(path.join(nativeData, "opencode", "auth.json"), {})
+    if (!Object.keys(auth).length || Object.values(auth).some((v) => v?.type !== "api" || typeof v.key !== "string" || !v.key)) throw new Error("OpenCode needs provider API logins. OAuth logins are not supported; add API entries in Settings › Credentials › OpenCode API logins.")
+    env.OPENCODE_AUTH_CONTENT = JSON.stringify(auth)
+  } else env.OPENCODE_AUTH_CONTENT = "{}"
+  if (task.env?.OPENCODE_API_KEY) env.OPENCODE_API_KEY = task.env.OPENCODE_API_KEY
+  env.OPENCODE_DISABLE_PROJECT_CONFIG = "1"
+  env.OPENCODE_DISABLE_AUTOUPDATE = "1"
+  env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+    snapshot: false,
+    permission: { "*": "allow", question: "deny", task: "deny", plan_enter: "deny", plan_exit: "deny" },
+    mcp: { boxyard: { type: "local", command: [process.execPath, process.argv[1], "mcp", taskDir], enabled: true } },
+  })
+  env.NO_COLOR = "1"
+  return env
+}
+
+function openCodeArgs(model, session) {
+  const args = ["run", "--format", "json", "--auto", "--pure"]
+  if (model) {
+    if (!/^[a-zA-Z0-9_.-]+\/[^\s/#]+(?:\/[^\s#]+)*(?:#[^\s#]+)?$/.test(model)) throw new Error("OpenCode models use provider/model or provider/model#variant. Run `opencode models` on the runner to list them.")
+    const [id, variant] = model.split("#")
+    args.push("--model", id)
+    if (variant) args.push("--variant", variant)
+  }
+  if (session) args.push("--session", session)
+  return args
+}
+
+function openCodeBinary() {
+  if (task.opencodeBin && task.opencodeBin !== "opencode") return task.opencodeBin
+  const managed = path.join(os.homedir(), ".boxyard-tools", "opencode", "node_modules", ".bin", "opencode")
+  return fs.existsSync(managed) ? managed : "opencode"
+}
+
+async function runOpenCode({ turn, sessionId, resume, prompt }) {
+  const startedAt = Date.now()
+  const failed = (errorText) => ({ exitCode: 1, startedAt, result: { result: "", is_error: true, duration_ms: Date.now() - startedAt }, usage: null, sessionId: null, errorText })
+  let env, args
+  const bin = openCodeBinary()
+  try {
+    env = openCodeEnv()
+    args = openCodeArgs(turn.model || null, resume ? sessionId : null)
+  } catch (e) { return failed(e.message) }
+  const pre = task.opencodeArgs ?? []
+  const version = spawnSync(bin, [...pre, "--version"], { env, encoding: "utf8", timeout: 10_000 })
+  if (version.error?.code === "ENOENT") return failed("OpenCode isn't installed on this runner. Install npm install -g opencode-ai@1.19.5 on this computer or SSH machine, then test it again. Managed sandboxes install it on first use.")
+  if (version.status !== 0 || !/^1\.19\.5(?:\s|$)/.test(version.stdout?.trim() ?? "")) return failed("OpenCode 1.19.5 is required. Other CLI versions, including v2, have not been verified. Install npm install -g opencode-ai@1.19.5, then test again.")
+  // v1 silently ignores unknown variants. Verify its own catalog before any generation request.
+  if (turn.model?.includes("#")) {
+    const [id, variant] = turn.model.split("#")
+    const catalog = spawnSync(bin, [...pre, "models", id.split("/")[0], "--verbose", "--pure"], { cwd: path.join(taskDir, "work"), env, encoding: "utf8", timeout: 20_000, maxBuffer: 16 * 1024 * 1024 })
+    if (catalog.status !== 0) return failed("OpenCode couldn't verify the requested variant. Check the provider API login and `opencode models <provider> --verbose` on this runner; no generation was requested.")
+    // models.ts prints an unindented id line followed by a pretty-printed JSON model object.
+    const lines = catalog.stdout.split("\n")
+    const at = lines.indexOf(id)
+    const end = lines.findIndex((line, i) => i > at && line === "}")
+    let model
+    try { if (at >= 0 && end > at) model = JSON.parse(lines.slice(at + 1, end + 1).join("\n")) } catch {}
+    if (!model || !Object.hasOwn(model.variants ?? {}, variant)) return failed(`OpenCode model ${id} does not list variant ${variant}. Choose one from \`opencode models ${id.split("/")[0]} --verbose\`; no generation was requested.`)
+  }
+  return new Promise((resolve) => {
+    const child = spawn(bin, [...pre, ...args], { cwd: path.join(taskDir, "work"), env, stdio: ["pipe", "pipe", "pipe"] })
+    activeChild = child
+    let buf = "", stderr = "", reply = "", failure = "", nativeSession = null, usage = null
+    let cost = 0, sawStep = false, finishReason = null
+    const totals = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+    const seen = new Set()
+    let pending = Promise.resolve()
+    const queue = (event) => { pending = pending.then(() => emit(event)).catch((e) => { failure = clean(e.message) }) }
+    // Do not echo raw CLI stdout/stderr that may contain credential material.
+    const secrets = [...Object.values(task.env ?? {}), env.OPENCODE_AUTH_CONTENT].filter((v) => typeof v === "string" && v.length > 3)
+    try { for (const v of Object.values(JSON.parse(env.OPENCODE_AUTH_CONTENT || "{}"))) if (v?.key) secrets.push(v.key) } catch {}
+    const clean = (text) => { let out = String(text); for (const secret of secrets) out = out.split(secret).join("[redacted]"); return out }
+    const onLine = (line) => {
+      let ev
+      try { ev = JSON.parse(line) } catch { failure = "OpenCode emitted malformed JSON output"; return }
+      if (typeof ev?.sessionID !== "string" || !/^ses_[A-Za-z0-9]+$/.test(ev.sessionID)) { failure = "OpenCode emitted an invalid session event"; return }
+      if (resume && ev.sessionID !== sessionId) { failure = "OpenCode did not resume the requested session"; return }
+      if (nativeSession && ev.sessionID !== nativeSession) { failure = "OpenCode emitted events for a different session"; return }
+      nativeSession = ev.sessionID
+      const part = ev.part
+      if (part?.id && seen.has(`${ev.type}:${part.id}`)) return
+      if (part?.id) seen.add(`${ev.type}:${part.id}`)
+      if (ev.type === "text" && typeof part?.text === "string") {
+        reply += part.text
+        queue({ t: "assistant", text: clean(part.text) })
+      } else if (ev.type === "tool_use" && typeof part?.tool === "string") {
+        // Box Yard's worker emits its own events for these tools.
+        if (!part.tool.startsWith("boxyard_")) {
+          const names = { bash: "Bash", read: "Read", write: "Write", edit: "Edit", apply_patch: "Edit", glob: "Glob", grep: "Grep", webfetch: "WebFetch" }
+          queue({ t: "tool", name: names[part.tool] || part.tool, input: clip(clean(JSON.stringify(part.state?.input ?? {})), 400) })
+          if (part.state?.status === "error") queue({ t: "tool_error", text: clip(clean(part.state.error || "Tool failed"), 400) })
+        }
+      } else if (ev.type === "error") {
+        failure = clean(ev.error?.data?.message || ev.error?.message || ev.error?.name || "OpenCode reported an error")
+      } else if (ev.type === "step_finish" && part?.tokens) {
+        sawStep = true
+        finishReason = part.reason
+        const n = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0
+        const u = { input_tokens: n(part.tokens.input), output_tokens: n(part.tokens.output) + n(part.tokens.reasoning), cache_read_input_tokens: n(part.tokens.cache?.read), cache_creation_input_tokens: n(part.tokens.cache?.write) }
+        for (const k of Object.keys(totals)) totals[k] += u[k]
+        cost += n(part.cost)
+        usage = { tokens: Object.values(u).reduce((a, b) => a + b, 0), window: null }
+        queue({ t: "usage", ...usage })
+        if (part.reason === "length") failure = "OpenCode reached the model output limit; continue this task to resume."
+      }
+    }
+    child.stdout.setEncoding("utf8").on("data", (chunk) => {
+      buf += chunk
+      const lines = buf.split("\n"); buf = lines.pop() ?? ""
+      for (const line of lines) if (line.trim()) onLine(line)
+    })
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr = (stderr + chunk).slice(-8000) })
+    child.on("error", (e) => { failure = clean(e.message) })
+    child.on("close", (code, signal) => {
+      if (buf.trim()) onLine(buf)
+      pending.then(() => resolve({
+        exitCode: code ?? 1, startedAt, sessionId: nativeSession, usage,
+        // Session lookup fails before emitting native events. A provider/auth error is never a reason to retry.
+        missingSession: !nativeSession && !failure && /session not found/i.test(stderr) && !/401|403|unauth|authenticat|api.key|expired/i.test(stderr),
+        result: { result: clean(reply), is_error: Boolean(failure) || !sawStep || !nativeSession || finishReason !== "stop", total_cost_usd: sawStep ? cost : null, duration_ms: Date.now() - startedAt, usage: totals },
+        errorText: [failure, clean(stderr).trim(), signal ? `OpenCode was killed (${signal})` : "", sawStep && finishReason !== "stop" ? `OpenCode ended with finish reason ${String(finishReason)}; continue the task after checking the provider response.` : "", !sawStep ? "OpenCode ended without a completed step. Check the provider API login and model; run `opencode models` on this runner." : ""].filter(Boolean).join("\n"),
+      }), (e) => resolve(failed(clean(e.message))))
+    })
+    child.stdin.on("error", () => {})
+    child.stdin.end(`<boxyard_instructions>\n${turn.systemPrompt || ""}\n</boxyard_instructions>\n\n${prompt}`)
   })
 }
 

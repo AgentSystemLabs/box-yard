@@ -236,7 +236,7 @@ describe("SSH machines (mock mode: machines are folders)", () => {
     await call(r, "PUT", "/api/machines/settings", { localLabel: "Linux" })
     expect((await coordinator("list_machines")).local_means).toMatch(/runs_on "local" goes to SSH machines labelled "linux"/)
     const local = await coordinator("create_task", { project: p.id, title: "local one", prompt: "write a haiku", runs_on: "local" })
-    expect(local.runs_on).toMatch(/SSH machines labelled "linux": that's what "local" means in Cody's Settings › Machines/)
+    expect(local.runs_on).toMatch(/SSH machines labelled "linux": that's what "local" means in the owner's Settings › Machines/)
     await done(r, local.id)
     expect(getTask(r, local.id)).toMatchObject({ boxId: box, runsOn: "ssh", machineLabel: "linux" })
 

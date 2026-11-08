@@ -225,13 +225,14 @@ export const HARNESS_MODELS: Record<AgentCli, string> = {
   claude: "opus · sonnet · haiku",
   codex: CODEX_MODEL_SUGGESTIONS.slice(0, 2).join(" · "),
   cursor: "auto · composer · any lab's",
+  opencode: "provider/model · optional #variant",
 }
 
-/** The "!" list: Claude Code, Codex and Cursor, each only where it can run the message's tasks. */
+/** The "!" list: registered task harnesses, each only where it can run the message's tasks. */
 export function buildHarnessTargets(s: HarnessSources): RunTarget[] {
   return AGENT_CLIS.flatMap((cli): RunTarget[] => {
     const blocked = s.blocked?.[cli] ?? null
-    if (s.problems[cli] && !blocked) return []
+    if (s.problems[cli] !== null && !blocked) return []
     return [{ token: cli, value: cli, kind: "harness", label: AGENT_CLI_LABEL[cli], detail: HARNESS_MODELS[cli], disabled: blocked }]
   })
 }
@@ -395,7 +396,7 @@ export interface MessagePicks {
 }
 
 // "use Codex", "with cursor", "run it on Claude Code": words that ask for a harness by name.
-const HARNESS_WORDS = /\b(?:use|using|with|via|on|(?:run|runs|running)(?:\s+(?:it|them))?|switch(?:ed)?\s+to)\s+(?:the\s+)?(claude|codex|cursor)\b/gi
+const HARNESS_WORDS = /\b(?:use|using|with|via|on|(?:run|runs|running)(?:\s+(?:it|them))?|switch(?:ed)?\s+to)\s+(?:the\s+)?(claude|codex|cursor|opencode)\b/gi
 // A model id with a version in it ("gpt-6.1-sol", "claude-opus-5-5", "o3"): it names the CLI that runs it.
 const MODEL_WORD = /(?<![\w.-])[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*(?![\w-])/gi
 
@@ -408,6 +409,13 @@ export function harnessesInWords(text: string, placed: Pick<PlacedPick, "start" 
   for (const p of placed) plain = plain.slice(0, p.start) + " ".repeat(p.end - p.start) + plain.slice(p.end)
   const out = new Set<AgentCli>()
   for (const m of plain.matchAll(HARNESS_WORDS)) out.add(m[1]!.toLowerCase() as AgentCli)
+  // A provider prefix changes who runs gpt/Claude/etc. Don't mistake its bare model suffix for another harness.
+  // Ordinary repo/file paths don't themselves name a harness.
+  plain = plain.replace(/(?<![\w/.:~-])[A-Za-z0-9_.-]+\/[A-Za-z0-9][^\s,;!?()<>`"'#]*(?:#[A-Za-z0-9_.-]+)?/g, (id) => {
+    const model = id.slice(id.lastIndexOf("/") + 1).split("#")[0]!
+    if (/\d/.test(model) && cliForModel(model)) out.add("opencode")
+    return " ".repeat(id.length)
+  })
   for (const m of plain.matchAll(MODEL_WORD)) {
     if (!/\d/.test(m[0])) continue
     const cli = cliForModel(m[0])

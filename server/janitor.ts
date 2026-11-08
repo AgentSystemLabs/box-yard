@@ -3,6 +3,7 @@ import type { Hub } from "./hub.js"
 import type { BoxProvider } from "./providers/types.js"
 import { providerOf, q } from "./providers/types.js"
 import { errorMessage } from "./util/retry.js"
+import { withOwner } from "../shared/owner.js"
 import { RESTING_STATUSES } from "../shared/types.js"
 import { mirrorGcScript } from "./gitShare.js"
 import { readableIndexScript } from "./gitFirst.js"
@@ -148,6 +149,9 @@ export function strippedEvent(dirs: string[], why: string): string {
 
 /** What the janitor needs from the task manager. */
 export interface JanitorHost {
+  /** The configured human name, for built-in cleanup text only. */
+  ownerName?: () => string
+
   store: Store
   provider: BoxProvider
   hub: Hub
@@ -240,14 +244,14 @@ export function parkOrder(rows: TaskRow[], boxId: string, hasInputs: (id: string
 }
 
 /** Why a janitor run's builds step removed a task's build output, for the task's log. */
-function buildsWhy(reason: CleanupReason, boxId: string): string {
+function buildsWhy(reason: CleanupReason, boxId: string, ownerName?: string): string {
   switch (reason) {
     case "routine":
       return `by routine upkeep on box ${boxId}, once the task was done`
     case "manual":
-      return `when Cody pressed Clean up now on box ${boxId}`
+      return `${withOwner("when Cody pressed Clean up now", ownerName)} on box ${boxId}`
     case "clear":
-      return `when Cody cleared box ${boxId}`
+      return `${withOwner("when Cody cleared box", ownerName)} ${boxId}`
     default:
       return `to free disk on box ${boxId}, which was low on space`
   }
@@ -601,7 +605,7 @@ export class BoxJanitor {
             const n = dirs.length
             if (n) {
               entry.removed.push(`${row.id}: ${n} ${n === 1 ? "dir" : "dirs"}`)
-              this.host.taskEvent(row.id, strippedEvent(dirs, buildsWhy(opts.reason, boxId)))
+              this.host.taskEvent(row.id, strippedEvent(dirs, buildsWhy(opts.reason, boxId, this.host.ownerName?.())))
             }
           } finally {
             this.busy.delete(candidate.id)
@@ -666,7 +670,7 @@ export class BoxJanitor {
           kept.push(row.id)
           continue
         }
-        await this.host.park(row.id, boxId, `Workspace archived and removed when Cody cleared box ${boxId}. It comes back from the archive on the next message.`)
+        await this.host.park(row.id, boxId, `${withOwner("Workspace archived and removed when Cody cleared box", this.host.ownerName?.())} ${boxId}. It comes back from the archive on the next message.`)
         entry.removed.push(row.id)
       } finally {
         this.busy.delete(candidate.id)

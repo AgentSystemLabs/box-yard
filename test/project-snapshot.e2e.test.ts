@@ -283,7 +283,7 @@ describe("taking a project snapshot", () => {
       ["created", "snapshot", src],
     ])
     const notice = r.yard.store.listCaptainMessages(p.id, 50).find((m) => m.role === "notice" && m.content.startsWith("📦"))
-    expect(notice?.content).toContain(`📦 **alpha** snapshot saved: Cody snapshotted box ${src} (small). New alpha boxes of small or bigger now start from snapshot ${snap.id}`)
+    expect(notice?.content).toContain(`📦 **alpha** snapshot saved: the owner snapshotted box ${src} (small). New alpha boxes of small or bigger now start from snapshot ${snap.id}`)
     expect(r.yard.store.listNotifications().find((n) => n.boxId === src)).toMatchObject({ title: "Snapshot saved for alpha", href: `/projects/${p.id}?tab=settings` })
 
     // A new box for the project (a bigger one now) starts from it: the repo mirror and the browser are already there.

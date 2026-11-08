@@ -386,7 +386,7 @@ describe("Project › Settings › Agent", () => {
     render(project(), { agentCli: "codex" })
     const select = $<HTMLSelectElement>("project-agent-cli")!
     expect(select.value).toBe("")
-    expect([...select.options].map((o) => o.textContent)).toEqual(["Settings default (Codex)", "Claude Code", "Codex", "Cursor"])
+    expect([...select.options].map((o) => o.textContent)).toEqual(["Settings default (Codex)", "Claude Code", "Codex", "Cursor", "OpenCode"])
     expect(document.body.textContent).toContain("Tasks it already has keep theirs.")
     await choose(select, "claude")
     expect(await submit()).toMatchObject({ agentCli: "claude" })

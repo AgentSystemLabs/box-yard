@@ -11,11 +11,12 @@ import { attachFiles, draftAttachments, filesHold, removeFile, retryFile, useDra
 import { primeSendSound } from "../lib/sendSound"
 import { EFFORT_LABEL } from "../../../shared/models"
 import { EffortPicker, ModelPicker } from "./ModelPicker"
+import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
 import { titleFromPrompt } from "../../../shared/taskTitle"
 import { type Effort, type Project } from "../../../shared/types"
 import { LOCAL_UNSANDBOXED, type Runner } from "../../../shared/runner"
-import { AGENT_CLIS, AGENT_CLI_LABEL, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
+import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 import { Modal, focusables } from "./Modal"
 import { formatSize } from "./Attachments"
 import { ComposerAttachments } from "./ComposerAttachments"
@@ -474,7 +475,7 @@ export function NewTaskDialog({
           prompt: prompt.trim(),
           env: parseEnv(env),
           ...(model && { model }),
-          ...(effort && agentCli !== "cursor" && { effort }),
+          ...(effort && hasSeparateEffort(agentCli) && { effort }),
           ...(runsOn !== projectRunner && { runsOn }),
           ...(agentCli !== projectCli && { agentCli }),
           attachments: draftAttachments(files).map((a) => a.id),
@@ -531,7 +532,9 @@ export function NewTaskDialog({
           </Select>
         </Field>
         <Field label="Model">
-          {agentCli === "cursor" ? (
+          {agentCli === "opencode" ? (
+            <OpenCodeModelInput value={model} onChange={setModel} placeholder={`Default (${settings?.agentOpencodeModel || "OpenCode's default"})`} testId="new-task-model" />
+          ) : agentCli === "cursor" ? (
             <CursorModelSelect id="new-task-cursor-model" compact value={model} onChange={setModel} defaultLabel={`Default (${settings?.agentCursorModel || "Cursor's default"})`} testId="new-task-model" />
           ) : agentCli === "codex" ? (
             <Select className="w-full" value={model} onChange={(e) => setModel(e.target.value)} data-testid="new-task-model">
@@ -547,7 +550,11 @@ export function NewTaskDialog({
           )}
         </Field>
         <Field label="Effort">
-          {agentCli === "cursor" ? (
+          {agentCli === "opencode" ? (
+            <Select className="w-full" value="" disabled data-testid="new-task-effort" title="Use provider/model#variant to select a provider-specific variant">
+              <option value="">Provider variant in model</option>
+            </Select>
+          ) : agentCli === "cursor" ? (
             // Cursor's model ids carry their effort (…-high, …-max): there's nothing to set apart from the model.
             <Select className="w-full" value="" disabled data-testid="new-task-effort" title="Cursor's model ids carry their effort (…-high, …-max)">
               <option value="">In the model id</option>

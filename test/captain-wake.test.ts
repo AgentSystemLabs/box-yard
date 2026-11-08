@@ -32,7 +32,7 @@ describe("mustWake", () => {
     expect(mustWake("Task X is stuck on a merge conflict.")).toMatch(/failure/)
     expect(mustWake("It couldn't push the branch.")).toMatch(/failure/)
     expect(mustWake("PR #3 is ready and waiting for your approval.")).toMatch(/decision/)
-    expect(mustWake("Cody needs to pick a name.")).toMatch(/Cody/)
+    expect(mustWake("Cody needs to pick a name.", "Cody")).toMatch(/Cody/)
   })
 
   it("reads the owner's name", () => {

@@ -1,31 +1,31 @@
-// Which coding agent CLI runs a Box Yard agent: Claude Code (the default), OpenAI's Codex or Cursor's CLI. The
+// Which coding agent CLI runs a Box Yard task: Claude Code (the legacy default), Codex, Cursor or OpenCode. The
 // Coordinator and the Captains pick Claude Code or Codex (Settings › Coordinator); each project's task agents pick any
-// of the three (Settings › Box agents, a project's Agent setting); explicit idle continuation can change it (docs/codex.md,
-// docs/cursor.md).
+// registered task harnesses (Settings › Box agents, a project's Agent setting); idle continuation can change it (docs/codex.md,
+// docs/cursor.md, docs/opencode.md).
 import { EFFORTS } from "./types.js"
 
-export const AGENT_CLIS = ["claude", "codex", "cursor"] as const
+export const AGENT_CLIS = ["claude", "codex", "cursor", "opencode"] as const
 export type AgentCli = (typeof AGENT_CLIS)[number]
 export const DEFAULT_AGENT_CLI: AgentCli = "claude"
 
 /**
- * The CLIs the Coordinator and Captains run on. Cursor runs task agents only: a manager acts through Box Yard's tools
+ * The CLIs the Coordinator and Captains run on. Cursor and OpenCode run tasks only: a manager acts through Box Yard's tools
  * with no shell or file reads (status-only projects), and `cursor-agent` has no way to switch its built-in tools off.
  */
 export const MANAGER_CLIS = ["claude", "codex"] as const
 export type ManagerCli = (typeof MANAGER_CLIS)[number]
 export const DEFAULT_MANAGER_CLI: ManagerCli = "claude"
 
-export const AGENT_CLI_LABEL: Record<AgentCli, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor" }
+export const AGENT_CLI_LABEL: Record<AgentCli, string> = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", opencode: "OpenCode" }
 
 /** Short names the UI shows on chips. */
-export const AGENT_CLI_SHORT: Record<AgentCli, string> = { claude: "Claude", codex: "Codex", cursor: "Cursor" }
+export const AGENT_CLI_SHORT: Record<AgentCli, string> = { claude: "Claude", codex: "Codex", cursor: "Cursor", opencode: "OpenCode" }
 
 export const isAgentCli = (v: unknown): v is AgentCli => typeof v === "string" && (AGENT_CLIS as readonly string[]).includes(v)
 export const isManagerCli = (v: unknown): v is ManagerCli => typeof v === "string" && (MANAGER_CLIS as readonly string[]).includes(v)
 
-/** Claude uses streaming stdin; Codex uses app-server turn/steer. Cursor waits for the next turn. */
-export const canSteer = (cli: AgentCli | null | undefined) => (cli ?? DEFAULT_AGENT_CLI) !== "cursor"
+/** Claude uses streaming stdin; Codex uses app-server turn/steer. Cursor and OpenCode wait for the next turn. */
+export const canSteer = (cli: AgentCli | null | undefined) => !(["cursor", "opencode"] as AgentCli[]).includes(cli ?? DEFAULT_AGENT_CLI)
 
 /** A Claude model id or alias (claude-opus-5-5, opus, sonnet[1m], haiku, fable…): Codex can't run it. */
 export function isClaudeModel(model: string | null | undefined): boolean {
@@ -38,7 +38,7 @@ export function isOpenAiModel(model: string | null | undefined): boolean {
 }
 
 /**
- * A model only Cursor's CLI runs among Box Yard's three: Cursor's own (auto, composer-2.5, cursor-grok-4.6-high…) and
+ * A model only Cursor's CLI runs in Box Yard: Cursor's own (auto, composer-2.5, cursor-grok-4.6-high…) and
  * other labs' (Gemini, Grok, Kimi, GLM, DeepSeek, Muse). Cursor runs Claude and GPT models too, under its own names
  * (claude-opus-5-5-high), but those names pick Claude Code or Codex unless the task asks for Cursor.
  */
@@ -48,7 +48,7 @@ export function isCursorOnlyModel(model: string | null | undefined): boolean {
 
 /** The CLI a model belongs to, when its name says; null for a name no CLI owns (a custom alias). */
 export function cliForModel(model: string | null | undefined): AgentCli | null {
-  return isClaudeModel(model) ? "claude" : isOpenAiModel(model) ? "codex" : isCursorOnlyModel(model) ? "cursor" : null
+  return isOpenCodeModel(model) ? "opencode" : isClaudeModel(model) ? "claude" : isOpenAiModel(model) ? "codex" : isCursorOnlyModel(model) ? "cursor" : null
 }
 
 /**
@@ -56,7 +56,7 @@ export function cliForModel(model: string | null | undefined): AgentCli | null {
  * else the Codex model setting. An explicitly saved empty setting keeps the CLI's own default.
  */
 export function codexModel(chosen: string | null | undefined, setting: string | null | undefined): string | null {
-  if (chosen && !isClaudeModel(chosen) && !isCursorOnlyModel(chosen)) return chosen.trim()
+  if (chosen && !isClaudeModel(chosen) && !isCursorOnlyModel(chosen) && !isOpenCodeModel(chosen)) return chosen.trim()
   return setting == null ? DEFAULT_CODEX_MODEL : setting.trim() || null
 }
 
@@ -175,3 +175,10 @@ export function cursorContextWindow(name: string | null | undefined): number | n
   const n = Number(m[1]) * (m[2]!.toUpperCase() === "M" ? 1_000_000 : 1_000)
   return n >= 8_000 ? Math.round(n) : null
 }
+
+// OpenCode's provider/model namespace is distinct from Claude aliases and Codex/Cursor ids.
+export const DEFAULT_OPENCODE_MODEL = ""
+export const isOpenCodeModel = (model: string | null | undefined): boolean => Boolean(model && /^[a-zA-Z0-9_.-]+\/[^\s/#]+(?:\/[^\s#]+)*(?:#[^\s#]+)?$/.test(model.trim()))
+
+/** Effort controls belong only to harnesses that implement Box Yard's generic effort levels. */
+export const hasSeparateEffort = (cli: AgentCli): boolean => cli === "claude" || cli === "codex"

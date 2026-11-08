@@ -128,7 +128,7 @@ describe("Mark done on a slow box", () => {
     r.boxes.release()
     await waitFor(() => !turnOf(r, t.id), "the stopped turn to end", 30_000)
     expect(getTask(r, t.id).status).toBe("done")
-    expect(events(r, t.id)).toContain("Stopped by Cody.")
+    expect(events(r, t.id)).toContain("Stopped by the owner.")
     // Once done, nothing sent it back to idle (the card would come back).
     const after = r.sent.filter((s) => s.id === t.id).map((s) => s.status)
     expect(after.slice(after.indexOf("done"))).toEqual(after.slice(after.indexOf("done")).map(() => "done"))

@@ -61,7 +61,7 @@ Each Claude Code session gets the connectors its [scope](#scope) reaches, as it 
 - **One that can't sign in is left out.** A connector that isn't signed in, has no token, or has a secret env var this server's key can't read isn't in the config. An agent's task says so once, with the reason; Settings shows the status.
 - **Turns may use them.** The Coordinator and Captains run with `dontAsk`, so their turns add `mcp__<name>` to `--allowedTools`. Their summary, compact and context runs list the same servers (for the prompt cache) but allow none. Agents bypass permissions.
 - **Not side threads.** A side thread gets Box Yard's read-only server only.
-- **Claude Code only, for now.** An agent on Codex or Cursor, and a Coordinator or Captain on another CLI than Claude Code, gets no connector (see [Coming next](#coming-next)).
+- **Claude Code only, for now.** An agent on Codex, Cursor or OpenCode, and a Coordinator or Captain on another CLI than Claude Code, gets no connector (see [Coming next](#coming-next)).
 - A change reaches the next session, or the next turn: a connector added, scoped or signed in mid-turn isn't in a running one.
 
 ## Signing in with OAuth
@@ -195,4 +195,4 @@ Every change is broadcast as a `connectors` event with the full list (no values)
 ## Coming next
 
 - **More presets.** Google Calendar (like Gmail: a small server Box Yard ships, given only the Google access token), Notion, Linear and Slack.
-- **Codex and Cursor sessions.** Their MCP configs are their own formats (`config.toml`, `.cursor/mcp.json`); they get no connector yet.
+- **Codex, Cursor and OpenCode sessions.** They get no external connector yet. OpenCode receives only Box Yard’s worker MCP server; see [its supported behavior](opencode.md).

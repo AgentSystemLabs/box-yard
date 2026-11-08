@@ -135,7 +135,7 @@ describe("Settings › Box agents › Cursor", () => {
   it("offers Cursor as an agent, lists its models from the server's CLI by family, and saves the pick without an Effort", async () => {
     settings("agents")
     const cli = $<HTMLSelectElement>("agent-cli")!
-    expect([...cli.options].map((o) => o.textContent)).toEqual(["Claude Code", "Codex", "Cursor"])
+    expect([...cli.options].map((o) => o.textContent)).toEqual(["Claude Code", "Codex", "Cursor", "OpenCode"])
     // Its list is only asked for once Cursor is picked.
     expect(sent("GET", "/api/cursor/models")).toEqual([])
     await choose(cli, "cursor")

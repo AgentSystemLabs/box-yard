@@ -8,7 +8,7 @@ import { Uploads, uploadsDir } from "../server/uploads.js"
 import type { Project, Task, TaskMessage } from "../shared/types.js"
 import { freePort, testConfig, waitFor } from "./helpers.js"
 
-// Only Cody marks a task done. Real worker turns (fake-claude): an agent's finish, a sub-task's report and a parent's
+// Only the owner marks a task done. Real worker turns (fake-claude): an agent's finish, a sub-task's report and a parent's
 // cancel_subtasks leave tasks resting for review, the Captain's and the Coordinator's close_task refuses, and Cody's
 // Mark done (POST /api/tasks/:id/close) is what moves a task, and its sub-tasks, to done. Reopen
 // (POST /api/tasks/:id/reopen) undoes it without a turn.
@@ -135,7 +135,7 @@ describe("only Cody marks a task done", () => {
     const back = await call<Task>(r, "POST", `/api/tasks/${t.id}/reopen`)
     expect(back.status).toBe("idle")
     expect(back.turnCount).toBe(1)
-    expect(transcript(r, t.id).at(-1)!.content).toMatch(/^Reopened by Cody: back to idle\. No turn started\./)
+    expect(transcript(r, t.id).at(-1)!.content).toMatch(/^Reopened by the owner: back to idle\. No turn started\./)
     await pause(1000)
     expect(status(r, t.id)).toBe("idle")
     expect(r.yard.store.getTaskRow(t.id)!.turn_count).toBe(1)
@@ -182,7 +182,7 @@ describe("only Cody marks a task done", () => {
     expect(both.map((k) => k.title)).toEqual(["Slow one", "Other"])
     for (const k of both) await resting(r, k.id, ["idle", "pr_ready", "failed", "done"], `${k.title} to stop`)
     expect(both.map((k) => status(r, k.id))).toEqual(["idle", "idle"])
-    for (const k of both) expect(transcript(r, k.id).some((m) => m.content === "Cancelled by its parent task, Long research: it rests for Cody's review.")).toBe(true)
+    for (const k of both) expect(transcript(r, k.id).some((m) => m.content === "Cancelled by its parent task, Long research: it rests for the owner's review.")).toBe(true)
     expect(transcript(r, parent.id).some((m) => m.role === "event" && m.content === "Cancelled 2 sub-tasks.")).toBe(true)
     // A stopped turn doesn't report: nothing wakes the parent again.
     await pause(1000)
@@ -201,7 +201,7 @@ describe("only Cody marks a task done", () => {
       const tool = await mcpAs(r, caller)
       const res = await tool("close_task", { task: t.id })
       expect(res.isError, caller.kind).toBe(true)
-      expect(res.content[0]!.text).toMatch(/^Only Cody marks a task done/)
+      expect(res.content[0]!.text).toMatch(/^Only the owner marks a task done/)
       expect(res.content[0]!.text).toMatch(/stop_task/)
       expect(status(r, t.id)).toBe("idle")
     }
