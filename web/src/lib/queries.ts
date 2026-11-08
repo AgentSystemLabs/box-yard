@@ -9,7 +9,7 @@ import { STOP_GUARD_MS, keepStopped, staleAfterStop, stopExpired, stopFailed, st
 import { withCleanup } from "./diskCleanup"
 import type { ProjectAutoSize } from "../../../shared/autoSize"
 import type { UsageLedger } from "../../../shared/usageLedger"
-import { DEFAULT_OWNER_NAME } from "../../../shared/owner"
+import { withOwner } from "../../../shared/owner"
 import { BUILTIN_MODELS, type ClaudeModel, type ModelCatalog } from "../../../shared/models"
 import { DEFAULT_IDENTITY_ID, type Identity, type IdentityCheckResult, type IdentityDetection, type IdentityInput, type IdentitySigningInput, type IdentityClaudeKind } from "../../../shared/identities"
 import type { CaptainIconId } from "../../../shared/captainIcons"
@@ -535,7 +535,7 @@ export function useTestCredential() {
   })
 }
 /** What Box Yard calls its human (Settings › Box agents › Your name). */
-export const useOwnerName = () => useAgentSettings().data?.settings.ownerName ?? DEFAULT_OWNER_NAME
+export const useOwnerName = () => withOwner("Cody", useAgentSettings().data?.settings.ownerName)
 /** Settings › Captain icon, every Captain's unless its project picks one (components/CaptainIcon.tsx); only it re-renders a Captain's icon. */
 export const useCaptainIconSetting = () =>
   useQuery({ queryKey: keys.agentSettings, queryFn: () => api<SettingsInfo>("/api/agent-settings"), staleTime: Infinity, select: (s) => s.settings.captainIcon }).data

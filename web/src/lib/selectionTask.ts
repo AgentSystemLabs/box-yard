@@ -1,3 +1,4 @@
+import { withOwner } from "../../../shared/owner"
 import type { Project, Task } from "../../../shared/types"
 
 /** A safety cap well above any chat message, so a whole message (its toolbar's Respond) is quoted in full. */
@@ -40,7 +41,7 @@ export function buildSelectionTaskPrompt(input: { source: SelectionTaskSource; s
     quote(selected),
   ]
   const instructions = input.instructions.trim()
-  if (instructions) lines.push("", `## ${input.ownerName ?? "Cody"}'s additional instructions`, instructions)
+  if (instructions) lines.push("", withOwner("## Cody's additional instructions", input.ownerName), instructions)
   return lines.join("\n")
 }
 

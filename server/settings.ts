@@ -403,7 +403,7 @@ export class SettingsStore {
   info(): SettingsInfo {
     const saved = this.saved()
     const env: Partial<Settings> = {}
-    if (this.c.ownerName) env.ownerName = this.c.ownerName
+    if (this.c.ownerName?.trim()) env.ownerName = this.c.ownerName.trim()
     if (this.c.gitUserName) env.gitUserName = this.c.gitUserName
     if (this.c.gitUserEmail) env.gitUserEmail = this.c.gitUserEmail
     if (this.c.orchestratorModel) env.orchestratorModel = this.c.orchestratorModel

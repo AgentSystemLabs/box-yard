@@ -798,7 +798,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("on")}
                     label="Your name"
-                    help="What the Coordinator, Captains and agents call you in their prompts and labels."
+                    help={'What the Coordinator, Captains and agents call you in their prompts and labels. The default is “the owner” until you save your name.'}
                     hint={hint("ownerName")}
                   >
                     <input id={fid("on")} className={inputClass} value={s.ownerName} maxLength={40} onChange={(e) => set("ownerName", e.target.value)} {...field("ownerName")} />

@@ -31,7 +31,7 @@ import { boxHead, boxSummary, mapLimit } from "./boxDelete.js"
 import type { BoxActor } from "../shared/boxHistory.js"
 import { errorMessage } from "./util/retry.js"
 import { PR_REPORT_FRESH_MS } from "./prs.js"
-import { DEFAULT_OWNER_NAME, withOwner } from "../shared/owner.js"
+import { withOwner } from "../shared/owner.js"
 import { usd } from "./cloudLimit.js"
 import { cleanupSummary, diskLine, rootDiskLine, rootLow } from "../shared/disk.js"
 import { compareSizes, resizeSummary, resizeTitle, sizeSpecLine } from "../shared/boxSizes.js"
@@ -223,7 +223,6 @@ const stayOpenSchema = z
  */
 /** Rewrite tool and parameter descriptions with the configured owner name as tools are registered. */
 function nameOwnerInTools(server: McpServer, ownerName: string | undefined) {
-  if (!ownerName?.trim() || ownerName.trim() === DEFAULT_OWNER_NAME) return
   const register = server.registerTool.bind(server) as (name: string, config: Record<string, unknown>, cb: unknown) => RegisteredTool
   const named = (text: unknown) => (typeof text === "string" ? withOwner(text, ownerName) : text)
   server.registerTool = ((name: string, config: { description?: string; inputSchema?: Record<string, z.ZodType> }, cb: unknown) => {
@@ -257,9 +256,9 @@ function alwaysLoadCore(server: McpServer, core: ReadonlySet<string>) {
  * A side thread's tools: every tool stays listed with its description (so the thread's fork keeps the chat's prompt
  * cache), but only THREAD_TOOLS run; the rest answer READ_ONLY_REFUSAL. The CLI's allowlist refuses them first.
  */
-function readOnlyTools(server: McpServer) {
+function readOnlyTools(server: McpServer, ownerName?: string) {
   const register = server.registerTool.bind(server) as (name: string, config: Record<string, unknown>, cb: unknown) => RegisteredTool
-  const refuse = async () => ({ content: [{ type: "text" as const, text: READ_ONLY_REFUSAL }], isError: true })
+  const refuse = async () => ({ content: [{ type: "text" as const, text: withOwner(READ_ONLY_REFUSAL, ownerName) }], isError: true })
   server.registerTool = ((name: string, config: Record<string, unknown>, cb: unknown) => register(name, config, THREAD_TOOLS.has(name) ? cb : refuse)) as typeof server.registerTool
 }
 
@@ -302,7 +301,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const owner = (text: string) => withOwner(text, ownerName)
   nameOwnerInTools(server, ownerName)
   alwaysLoadCore(server, CORE_TOOLS[caller.kind])
-  if (caller.readOnly) readOnlyTools(server)
+  if (caller.readOnly) readOnlyTools(server, ownerName)
   const scopeId = caller.kind === "captain" ? caller.projectId : null
   const ownProject = (): Project => {
     const p = scopeId ? store.getProject(scopeId) : null

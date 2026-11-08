@@ -25,10 +25,10 @@ const project = {
 } as Project
 
 describe("withOwner", () => {
-  it("leaves text alone for the default or an empty name", () => {
-    expect(withOwner("Ask Cody.", undefined)).toBe("Ask Cody.")
-    expect(withOwner("Ask Cody.", " ")).toBe("Ask Cody.")
-    expect(withOwner("Ask Cody.", DEFAULT_OWNER_NAME)).toBe("Ask Cody.")
+  it("uses a neutral fallback for an unset or blank name", () => {
+    expect(withOwner("Ask Cody.", undefined)).toBe("Ask the owner.")
+    expect(withOwner("Ask Cody.", " ")).toBe("Ask the owner.")
+    expect(withOwner("Ask Cody.", DEFAULT_OWNER_NAME)).toBe("Ask the owner.")
   })
 
   it("swaps whole-word mentions, possessives included", () => {
@@ -39,8 +39,8 @@ describe("withOwner", () => {
 })
 
 describe("ownerName setting", () => {
-  it("defaults to Cody, takes BOXYARD_OWNER_NAME, and the UI value wins", () => {
-    expect(new SettingsStore(memStore(), noEnv).info().settings.ownerName).toBe("Cody")
+  it("defaults to the owner, takes BOXYARD_OWNER_NAME, and the UI value wins", () => {
+    expect(new SettingsStore(memStore(), noEnv).info().settings.ownerName).toBe("the owner")
     const settings = new SettingsStore(memStore(), { ...noEnv, ownerName: "Ana" })
     expect(settings.info().settings.ownerName).toBe("Ana")
     expect(settings.info().sources.ownerName).toBe("env")
@@ -67,9 +67,9 @@ describe("prompts with an owner name", () => {
     expect(prompt.replace(/Fix Cody's bug|Cody's site|Built for Cody/g, "")).not.toMatch(/\bCody\b/)
   })
 
-  it("is unchanged without a name", () => {
+  it("uses the owner when no name was configured", () => {
     const base = { project, task: { id: "task_1", title: "T" }, branch: "b", port: 4000 }
-    expect(workerSystemPrompt({ ...base, ownerName: "Cody" })).toBe(workerSystemPrompt(base))
+    expect(workerSystemPrompt({ ...base, ownerName: "the owner" })).toBe(workerSystemPrompt(base))
   })
 
   it("labels follow-ups and notes with the name, not message content", () => {
@@ -106,14 +106,14 @@ describe("prompts with an owner name", () => {
 
   it("transcript labels use the name", () => {
     expect(userMessageLabel({}, "Ana")).toBe("Ana")
-    expect(userMessageLabel({})).toBe("Cody")
+    expect(userMessageLabel({})).toBe("the owner")
   })
 })
 
 describe("box runner MCP tools", () => {
-  it("name the owner from task.json in tool descriptions", async () => {
+  it.each(["Ana", undefined, " "])("names the owner from task.json (%s) in tool descriptions", async (ownerName) => {
     const dir = tmpDir()
-    fs.writeFileSync(path.join(dir, "task.json"), JSON.stringify({ taskId: "task_1", ownerName: "Ana", env: {} }))
+    fs.writeFileSync(path.join(dir, "task.json"), JSON.stringify({ taskId: "task_1", ownerName, env: {} }))
     const runner = path.resolve(import.meta.dirname, "../runner/box-runner.mjs")
     const child = spawn(process.execPath, [runner, "mcp", dir], { stdio: ["pipe", "pipe", "inherit"] })
     const reply = new Promise<string>((resolve) => {
@@ -127,19 +127,19 @@ describe("box runner MCP tools", () => {
     const text = await reply
     child.kill()
     const tools = JSON.parse(text.split("\n")[0]!).result.tools as { name: string; description: string }[]
-    expect(tools.find((t) => t.name === "ask_user")!.description).toContain("Ask Ana (the human)")
+    expect(tools.find((t) => t.name === "ask_user")!.description).toContain(`Ask ${ownerName?.trim() || "the owner"} (the human)`)
     expect(JSON.stringify(tools)).not.toMatch(/\bCody\b/)
   })
 })
 
 describe("Box Yard MCP tools", () => {
-  it("name the owner in tool and parameter descriptions", () => {
-    const deps = { settings: { get: () => ({ ownerName: "Ana" }) } } as unknown as McpDeps
+  it.each(["Ana", undefined, " "])("names the owner (%s) in tool and parameter descriptions", (ownerName) => {
+    const deps = { settings: { get: () => ({ ownerName }) } } as unknown as McpDeps
     // Registered tools aren't public API; read them to check the descriptions without a transport.
     const tools = Object.values((buildMcpServer(deps) as unknown as { _registeredTools: Record<string, { description?: string; inputSchema?: { shape?: Record<string, { description?: string }> } }> })._registeredTools)
     const text = JSON.stringify(tools.map((t) => [t.description, Object.values(t.inputSchema?.shape ?? {}).map((v) => v.description)]))
-    expect(text).toContain("when Ana explicitly asks")
-    expect(text).toContain("paths Ana attached")
+    expect(text).toContain(`when ${ownerName?.trim() || "the owner"} explicitly asks`)
+    expect(text).toContain(`paths ${ownerName?.trim() || "the owner"} attached`)
     expect(text).not.toMatch(/\bCody\b/)
   })
 })
