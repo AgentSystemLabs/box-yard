@@ -404,6 +404,8 @@ export type QueuedSender = "owner" | "coordinator" | "captain" | "hook" | "agent
  */
 export interface QueuedMessage {
   id: string
+  /** Correlates a browser submission with its queue row and eventual transcript line. */
+  clientMessageId?: string
   taskId: string
   /** The raw input source: cody, cody:merge, orchestrator, captain:<project>, hook:<id>, agent:<task>, system. */
   source: string

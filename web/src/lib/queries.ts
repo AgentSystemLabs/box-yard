@@ -33,7 +33,8 @@ import { setTtsInfo } from "./tts"
 import { settleOptimistic } from "./queued"
 import { playSendSound } from "./sendSound"
 import { prNumber } from "./prState"
-import { fetchLog } from "./liveQueries"
+import { fetchLiveState, fetchLog, liveMessage } from "./liveQueries"
+import { reconcileTaskQueue, submissionId, taskMustWait, taskSubmissionWait } from "./taskSubmissions"
 import type {
   BoxCleanup,
   BoxContents,
@@ -209,7 +210,7 @@ export function useTaskQueue(id: string) {
   const qc = useQueryClient()
   const select = useCallback((list: Task[]) => list.find((t) => t.id === id)?.queueRev ?? "", [id])
   const rev = useQuery({ queryKey: keys.tasks, queryFn: fetchTasks, select }).data ?? ""
-  const queue = useQuery({ queryKey: keys.taskQueue(id), queryFn: () => api<QueuedMessage[]>(`/api/tasks/${id}/queue`) })
+  const queue = useQuery({ queryKey: keys.taskQueue(id), queryFn: async () => reconcileTaskQueue(qc, id, await api<QueuedMessage[]>(`/api/tasks/${id}/queue`)) })
   const seen = useRef<string | null>(null)
   useEffect(() => {
     // The first rev is what the first fetch already reflects.
@@ -356,9 +357,9 @@ function withoutKey(meta: Record<string, unknown> | null, key: string): Record<s
 }
 
 /** A task's transcript, its newest 1000 messages. Also loaded ahead of a click (lib/taskPrefetch.ts). */
-export const fetchTaskMessages = (id: string) => fetchLog(keys.taskMessages(id), () => api<TaskMessage[]>(`/api/tasks/${id}/messages`))
-export const useTaskMessages = (id: string) => useQuery({ queryKey: keys.taskMessages(id), queryFn: () => fetchTaskMessages(id) })
-export const useChat = () => useQuery({ queryKey: keys.chat, queryFn: () => fetchLog(keys.chat, () => api<ChatMessage[]>("/api/chat")) })
+export const fetchTaskMessages = (id: string, qc?: QueryClient) => fetchLog(keys.taskMessages(id), () => api<TaskMessage[]>(`/api/tasks/${id}/messages`), () => qc?.getQueryData(keys.taskMessages(id)))
+export const useTaskMessages = (id: string) => useQuery({ queryKey: keys.taskMessages(id), queryFn: ({ client }) => fetchTaskMessages(id, client) })
+export const useChat = () => useQuery({ queryKey: keys.chat, queryFn: ({ client }) => fetchLog(keys.chat, () => api<ChatMessage[]>("/api/chat"), () => client.getQueryData(keys.chat)) })
 export const useArtifacts = (o?: Quiet) => useQuery({ queryKey: keys.artifacts, queryFn: () => api<Artifact[]>("/api/artifacts"), notifyOnChangeProps: o?.notifyOnChangeProps })
 export const useSchedules = (o?: Quiet) => useQuery({ queryKey: keys.schedules, queryFn: () => api<Schedule[]>("/api/schedules"), notifyOnChangeProps: o?.notifyOnChangeProps })
 export const useScheduleRuns = () => useQuery({ queryKey: keys.scheduleRuns, queryFn: () => api<ScheduleRun[]>("/api/schedule-runs") })
@@ -371,10 +372,10 @@ export const useSettings = () =>
     staleTime: Infinity,
   })
 export const useOrchestratorState = () =>
-  useQuery({ queryKey: keys.orchestrator, queryFn: () => api<OrchestratorState>("/api/orchestrator"), staleTime: Infinity })
+  useQuery({ queryKey: keys.orchestrator, queryFn: ({ client }) => fetchLiveState(client, keys.orchestrator, () => api<OrchestratorState>("/api/orchestrator")), staleTime: Infinity })
 /** `enabled` false: no project yet (the Coordinator chat's bottom panel with "All" picked). */
 export const useCaptainState = (projectId: string, o: { enabled?: boolean } = {}) =>
-  useQuery({ queryKey: keys.captain(projectId), queryFn: () => api<CaptainState>(`/api/projects/${projectId}/captain`), staleTime: Infinity, enabled: o.enabled })
+  useQuery({ queryKey: keys.captain(projectId), queryFn: ({ client }) => fetchLiveState(client, keys.captain(projectId), () => api<CaptainState>(`/api/projects/${projectId}/captain`)), staleTime: Infinity, enabled: o.enabled })
 /** Captains whose cached messages are only the prefetched newest few (lib/captainPrefetch.ts), until the chat opens. */
 const captainTails = new Set<string>()
 export const markCaptainTail = (projectId: string) => void captainTails.add(projectId)
@@ -388,7 +389,7 @@ export const useCaptainMessages = (projectId: string, o: { enabled?: boolean } =
       // A refetch of what's on screen (a prefetched tail's whole history) goes once the chat it opens is painted.
       if (client.getQueryData(queryKey) !== undefined) await afterPaint()
       signal.throwIfAborted()
-      const list = await api<CaptainMessage[]>(`/api/projects/${projectId}/captain/messages`)
+      const list = await fetchLog(keys.captainMessages(projectId), () => api<CaptainMessage[]>(`/api/projects/${projectId}/captain/messages`), () => client.getQueryData(keys.captainMessages(projectId)))
       forgetCaptainTail(projectId)
       return list
     },
@@ -591,9 +592,16 @@ export const useChatStream = () =>
 export const useChatBusy = () =>
   useQuery({
     queryKey: keys.chatBusy,
-    queryFn: async () => (await api<Health>("/api/health")).orchestratorBusy,
+    queryFn: ({ client }) => fetchLiveState(client, keys.chatBusy, async () => (await api<Health>("/api/health")).orchestratorBusy),
     staleTime: Infinity,
   })
+
+/** The health/SSE busy flag updates before the full Coordinator state during a turn's start/stop. */
+export function useCoordinatorStatus() {
+  const busy = useChatBusy().data
+  const state = useOrchestratorState().data
+  return { busy: busy ?? state?.busy ?? false, compacting: state?.compacting ?? false, error: state?.error ?? null }
+}
 
 // ------------------------------------------------------------------ mutations
 
@@ -1220,33 +1228,62 @@ export const refused = (err: unknown) => err instanceof ApiError && err.status >
 export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Error) => boolean } = {}) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: { content: string; attachments?: Attachment[]; taskId?: string }) =>
-      api<Task>(`/api/tasks/${input.taskId ?? taskId}/messages`, { body: { content: input.content, attachments: input.attachments?.map((a) => a.id) } }),
-    onMutate: async ({ content, attachments, taskId: destinationId = taskId }) => {
-      const undoTasks = snapshot<Task[]>(qc, keys.tasks)
-      const undoQueue = snapshot<QueuedMessage[]>(qc, keys.taskQueue(destinationId))
+    mutationFn: async (input: { id?: string; content: string; attachments?: Attachment[]; taskId?: string }): Promise<Task & { inputId?: string }> => {
+      const destinationId = input.taskId ?? taskId
+      try {
+        return await api<Task & { inputId?: string }>(`/api/tasks/${destinationId}/messages`, { body: { id: input.id, content: input.content, attachments: input.attachments?.map((a) => a.id) } })
+      } catch (err) {
+        // The response can be lost after SSE already confirmed storage/delivery. Don't restore a duplicate draft.
+        const confirmed = qc.getQueryData<TaskMessage[]>(keys.taskMessages(destinationId))?.some((m) => submissionId(m) === input.id && !m.meta?.pending)
+          || qc.getQueryData<QueuedMessage[]>(keys.taskQueue(destinationId))?.some((m) => m.clientMessageId === input.id && !m.id.startsWith("tmp-"))
+        const task = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
+        if (confirmed && task) return task
+        throw err
+      }
+    },
+    onMutate: (input) => {
+      const { content, attachments, taskId: destinationId = taskId } = input
+      const id = input.id ??= clientId("chat")
       const task = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
-      const running = task?.status === "working" || task?.status === "starting"
-      patchTask(qc, destinationId, running ? { pendingCount: (task?.pendingCount ?? 0) + 1 } : { status: "queued", question: null })
-      // It shows as a Queued row until a turn delivers it into the transcript.
+      const waiting = taskMustWait(task)
       const now = Date.now()
       qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => [
         ...(list ?? []),
-        { id: `tmp-${now}`, taskId: destinationId, source: "cody", kind: "owner", sender: "", text: content, attachments: attachments ?? [], status: "queued", version: 0, createdAt: now, updatedAt: now },
+        { id: `tmp-${id}`, clientMessageId: id, taskId: destinationId, source: "cody", kind: "owner", sender: "", text: content, attachments: attachments ?? [], status: "queued", version: 1, createdAt: now, updatedAt: now },
       ])
-      return { undo: () => (undoTasks(), undoQueue()) }
+      if (!waiting) qc.setQueryData<TaskMessage[]>(keys.taskMessages(destinationId), (list) => upsert(list, {
+        id, taskId: destinationId, role: "user", content, createdAt: now,
+        meta: { pending: true, source: "cody", clientMessageId: id, ...(attachments?.length ? { attachments } : {}) },
+      }))
+      return { taskAtSend: task }
     },
-    onError: (err, _v, ctx) => {
-      ctx?.undo()
+    onError: (err, input) => {
+      const destinationId = input.taskId ?? taskId
+      // Undo only this send; newer sends and live messages are independent.
+      qc.setQueryData<TaskMessage[]>(keys.taskMessages(destinationId), (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
+      qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => list?.filter((m) => m.id !== `tmp-${input.id}`))
+      void qc.invalidateQueries({ queryKey: keys.tasks })
       if (quiet?.(err)) return
       playSendSound("failed")
       fail("Couldn't send the message")(err)
     },
-    onSuccess: (task, input) => {
+    onSuccess: (task, input, ctx) => {
+      const destinationId = input.taskId ?? taskId
       playSendSound()
-      // Sent right after a Stop: the answer may still be the turn being stopped.
-      if (!staleAfterStop(task)) qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task))
-      void qc.invalidateQueries({ queryKey: keys.taskQueue(input.taskId ?? taskId) })
+      // A newer SSE task (or another send/Stop) is authoritative over this response's snapshot.
+      const current = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
+      if (!staleAfterStop(task) && current === ctx?.taskAtSend) qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task))
+      taskSubmissionWait(qc, current !== ctx?.taskAtSend && current ? current : task)
+      qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => list?.map((m) => m.id === `tmp-${input.id}` && task.inputId ? { ...m, id: task.inputId } : m))
+      // Owner close commands don't enqueue input.
+      if (task.status === "done" && !task.inputId) {
+        qc.setQueryData<TaskMessage[]>(keys.taskMessages(destinationId), (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
+        qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => list?.filter((m) => m.id !== `tmp-${input.id}`))
+      }
+      void qc.invalidateQueries({ queryKey: keys.taskQueue(destinationId) })
+      if (!qc.getQueryData<TaskMessage[]>(keys.taskMessages(destinationId))?.some((m) => submissionId(m) === input.id && !m.meta?.pending)) {
+        void qc.invalidateQueries({ queryKey: keys.taskMessages(destinationId) })
+      }
     },
   })
 }
@@ -1649,15 +1686,25 @@ const pickMeta = (input: ChatSend) => ({
   ...(input.inline?.length ? { inlinePicks: input.inline } : {}),
 })
 
+/** An SSE echo proves storage even if the HTTP response never reaches this browser. */
+async function confirmedSend<T extends ChatMessage>(qc: QueryClient, key: readonly unknown[], id: string, send: () => Promise<T>): Promise<T> {
+  try { return await send() }
+  catch (err) {
+    const stored = qc.getQueryData<T[]>(key)?.find((m) => m.id === id && !m.meta?.pending)
+    if (stored) return stored
+    throw err
+  }
+}
+
 export function useSendChat() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: ChatSend) => api<ChatMessage>("/api/chat", { body: sendBody(input) }),
+    mutationFn: (input: ChatSend) => confirmedSend(qc, keys.chat, input.id, () => api<ChatMessage>("/api/chat", { body: sendBody(input) })),
     onMutate: async (input) => {
       await qc.cancelQueries({ queryKey: keys.chat })
-      const undo = snapshot<ChatMessage[]>(qc, keys.chat)
+      const undo = () => qc.setQueryData<ChatMessage[]>(keys.chat, (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
       // Mid-turn it shows as queued right away; the server's answer says for sure.
-      const queued = Boolean(qc.getQueryData<boolean>(keys.chatBusy))
+      const queued = Boolean(qc.getQueryData<boolean>(keys.chatBusy) ?? qc.getQueryData<OrchestratorState>(keys.orchestrator)?.busy)
       qc.setQueryData<ChatMessage[]>(keys.chat, (list) =>
         upsert(list, {
           id: input.id,
@@ -1667,18 +1714,17 @@ export function useSendChat() {
           createdAt: Date.now(),
         }),
       )
-      qc.setQueryData(keys.chatBusy, true)
       return { undo }
     },
     onError: (err, _v, ctx) => {
       ctx?.undo()
-      qc.setQueryData(keys.chatBusy, false)
       playSendSound("failed")
       fail("Couldn't send to the Coordinator")(err)
     },
     onSuccess: (msg) => {
       playSendSound()
-      qc.setQueryData<ChatMessage[]>(keys.chat, (list) => settleOptimistic(list, msg))
+      const list = qc.setQueryData<ChatMessage[]>(keys.chat, (list) => settleOptimistic(list, msg))
+      liveMessage(keys.chat, list!.find((m) => m.id === msg.id)!)
     },
   })
 }
@@ -1686,11 +1732,11 @@ export function useSendChat() {
 export function useSendCaptainMessage(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: ChatSend & { projectId?: string }) => api<CaptainMessage>(`/api/projects/${input.projectId ?? projectId}/captain/messages`, { body: sendBody(input) }),
+    mutationFn: (input: ChatSend & { projectId?: string }) => confirmedSend(qc, keys.captainMessages(input.projectId ?? projectId), input.id, () => api<CaptainMessage>(`/api/projects/${input.projectId ?? projectId}/captain/messages`, { body: sendBody(input) })),
     onMutate: async (input) => {
       const destinationId = input.projectId ?? projectId
       await qc.cancelQueries({ queryKey: keys.captainMessages(destinationId) })
-      const undo = snapshot<CaptainMessage[]>(qc, keys.captainMessages(destinationId))
+      const undo = () => qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
       const queued = Boolean(qc.getQueryData<CaptainState>(keys.captain(destinationId))?.busy)
       qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) =>
         upsert(list, {
@@ -1712,7 +1758,8 @@ export function useSendCaptainMessage(projectId: string) {
     onSuccess: (msg, input) => {
       const destinationId = input.projectId ?? projectId
       playSendSound()
-      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => settleOptimistic(list, msg))
+      const list = qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => settleOptimistic(list, msg))
+      liveMessage(keys.captainMessages(destinationId), list!.find((m) => m.id === msg.id)!)
     },
     // Sending cancelled the history still loading in above a prefetched tail: load it again.
     onSettled: (_data, _err, input) => {
@@ -1756,10 +1803,10 @@ export function useStopChatTurn(projectId: string | null) {
  */
 export function useChatTurnStop(projectId: string | null, busy: boolean) {
   const { mutate } = useStopChatTurn(projectId)
-  const coordinator = useQuery({ queryKey: keys.orchestrator, queryFn: () => api<OrchestratorState>("/api/orchestrator"), staleTime: Infinity, enabled: busy && !projectId, select: isCompacting })
+  const coordinator = useQuery({ queryKey: keys.orchestrator, queryFn: ({ client }) => fetchLiveState(client, keys.orchestrator, () => api<OrchestratorState>("/api/orchestrator")), staleTime: Infinity, enabled: busy && !projectId, select: isCompacting })
   const captain = useQuery({
     queryKey: keys.captain(projectId ?? ""),
-    queryFn: () => api<CaptainState>(`/api/projects/${projectId}/captain`),
+    queryFn: ({ client }) => fetchLiveState(client, keys.captain(projectId ?? ""), () => api<CaptainState>(`/api/projects/${projectId}/captain`)),
     staleTime: Infinity,
     enabled: busy && projectId !== null,
     select: isCompacting,

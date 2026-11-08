@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { focusManager, onlineManager, QueryClient, QueryClientProvider, QueryObserver, type QueryKey } from "@tanstack/react-query"
-import { LIVE_QUERY_DEFAULTS, STALE_MS, fetchLog, liveMessage } from "../web/src/lib/liveQueries.js"
+import { LIVE_QUERY_DEFAULTS, STALE_MS, fetchLiveState, fetchLog, liveMessage, liveState } from "../web/src/lib/liveQueries.js"
 import { keys, useCreateTask, useTaskMessages } from "../web/src/lib/queries.js"
 import { useServerEvents } from "../web/src/lib/stream.js"
 import type { Task, TaskMessage } from "../shared/types.js"
@@ -101,6 +101,15 @@ describe("fetchLog", () => {
     liveMessage(key, msg("tm_d"))
     expect(await fetchLog(key, async () => [])).toEqual([])
   })
+  it("keeps an unconfirmed send before later SSE output through refetch, without reviving a failed one", async () => {
+    const pending = { ...msg("chat_local", "pending", 2), meta: { pending: true } }
+    const later = msg("tm_later", "output", 3)
+    let cached = [msg("tm_old"), pending, later]
+    expect(await fetchLog(key, async () => [cached[0]!, later], () => cached)).toEqual(cached)
+    cached = [cached[0]!, later]
+    expect(await fetchLog(key, async () => cached, () => cached)).toEqual(cached)
+  })
+
 })
 
 class FakeEventSource {
@@ -203,4 +212,40 @@ describe("a new task's page", () => {
     await answer("GET /api/tasks/task_new001/messages", [msg("tm_prompt", "do it")])
     expect(qc.getQueryData<TaskMessage[]>(keys.taskMessages("task_new001"))?.map((m) => m.content)).toEqual(["do it"])
   })
+})
+
+describe("busy state authority", () => {
+  for (const key of [keys.chatBusy, keys.orchestrator, keys.captain("prj_example01")]) it(`keeps newer SSE state over a late GET for ${key.join(":")}`, async () => {
+    const qc = new QueryClient()
+    qc.setQueryData(key, false)
+    let answer!: (value: boolean) => void
+    const fetching = fetchLiveState(qc, key, () => new Promise<boolean>((r) => answer = r))
+    liveState(qc, key, true)
+    answer(false)
+    expect(await fetching).toBe(true)
+    qc.clear()
+  })
+
+  it("keeps a busy-idle round trip even when its final value equals the initial one", async () => {
+    const qc = new QueryClient()
+    qc.setQueryData(keys.chatBusy, false)
+    let answer!: (value: boolean) => void
+    const fetching = fetchLiveState(qc, keys.chatBusy, () => new Promise<boolean>((r) => answer = r))
+    liveState(qc, keys.chatBusy, true)
+    liveState(qc, keys.chatBusy, false)
+    answer(true)
+    expect(await fetching).toBe(false)
+    qc.clear()
+  })
+})
+
+it("an older Captain prefetch cannot outrank the state GET it races", async () => {
+  const qc = new QueryClient()
+  const key = keys.captain("prj_example01")
+  let answer!: (value: boolean) => void
+  const fetching = fetchLiveState(qc, key, () => new Promise<boolean>((r) => answer = r))
+  qc.setQueryData(key, false) // recent-Captain prefetch seeds an otherwise empty cache
+  answer(true)
+  expect(await fetching).toBe(true)
+  qc.clear()
 })
