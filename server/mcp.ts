@@ -178,7 +178,7 @@ const modelBase = z
   .max(100)
   .regex(/^[A-Za-z0-9._:#\[\]/-]+$/, "Model names have no spaces")
   .optional()
-const modelSchema = modelBase.describe("A harness model id: OpenCode provider/model#variant, Codex id, or Claude/Cursor id; omit it for the harness defaults")
+const modelSchema = modelBase.describe("A harness model id; omit it for the harness defaults (Task options)")
 const routingRuleBase = z.string().trim().min(1).max(120).optional()
 const routingReasonBase = z.string().trim().min(1).max(500).optional()
 const routingRuleSchema = routingRuleBase.describe("Routing rule name/id that selected this model and effort")
