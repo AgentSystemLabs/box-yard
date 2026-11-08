@@ -9,6 +9,7 @@ import { editCount, parseOwners } from "../web/src/components/Identities.js"
 import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
 import { DEFAULT_SETTINGS } from "../server/settings.js"
 import { DEFAULT_IDENTITY_ID, type Identity, type IdentityDetection } from "../shared/identities"
+import type { SettingsSection } from "../web/src/lib/settingsNav"
 import type { Project, Settings, SettingsInfo } from "../shared/types"
 
 // Settings › Identities follows Settings' rule: nothing saves on change. Edits, a pasted token, Add, Delete and the
@@ -87,17 +88,23 @@ const settingsInfo = (values: Partial<Settings> = {}): SettingsInfo => ({
 let root: Root
 let host: HTMLElement
 let qc: QueryClient
+let section: SettingsSection
+let rejectWrite: ((url: string, method: string) => { error: string; fields?: { path: string; message: string }[] } | undefined) | undefined
 let requests: { method: string; url: string; body?: unknown }[]
 
 function render() {
-  act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(SettingsDialog, { section: "identities", onSection: () => {}, onClose: () => {} }))))
+  act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(SettingsDialog, { section, onSection: (next) => { section = next; render() }, onClose: () => {} }))))
 }
 
 beforeEach(() => {
+  vi.stubGlobal("__APP_VERSION__", "test")
+  vi.stubGlobal("__APP_COMMIT__", "")
   requests = []
+  section = "identities"
+  rejectWrite = undefined
   qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
   qc.setQueryData(keys.agentSettings, settingsInfo())
-  qc.setQueryData(keys.health, { provider: "local" })
+  qc.setQueryData(keys.health, { provider: "local", claude: { available: false } })
   qc.setQueryData(keys.identities, [identity(DEFAULT_IDENTITY_ID, "Default", { color: "slate" }), acme()])
   qc.setQueryData(keys.projects, [project("prj_app", "app", "idn_acme"), project("prj_site", "site"), project("prj_blog", "blog")])
   vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
@@ -105,10 +112,14 @@ beforeEach(() => {
     const body = init.body ? JSON.parse(String(init.body)) : undefined
     requests.push({ method, url, body })
     const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } })
+    const failure = rejectWrite?.(url, method)
+    if (failure) return json(failure, 400)
     if (method === "POST" && url === "/api/identities/detect") return json(detection)
     if (method === "POST" && url === "/api/identities/import") return json({ identity: identity("idn_cat", "octocat"), created: true, lines: ["Made the octocat identity for octocat.", "site: now uses the octocat identity."] }, 201)
     if (method === "POST" && url === "/api/identities") return json(identity("idn_new", body.name, body), 201)
     if (method === "PATCH" && url === "/api/identities/idn_acme") return json({ ...acme(), ...body })
+    if (method === "PATCH" && url === "/api/identities/idn_example") return json(identity("idn_example", "Example Git", body))
+    if (method === "PUT" && url === "/api/identities/idn_example/tokens") return json(identity("idn_example", "Example Git"))
     if (method === "PUT" && url === "/api/identities/idn_acme/signing") return json(acme())
     if (method === "PUT" && url === "/api/identities/idn_acme/tokens") return json(acme())
     if (method === "DELETE" && url.startsWith("/api/identities/idn_acme")) return json({ movedProjectIds: ["prj_app"] })
@@ -284,6 +295,177 @@ describe("Settings › Identities", () => {
     await click(saveButton())
     expect(writes()).toEqual([{ method: "PATCH", url: "/api/identities/idn_acme", body: { coordinatorSees: "status" } }])
     expect(unsaved()).toBeNull()
+  })
+
+  it("reveals another identity's collapsed token owner, preserves raw drafts, and preflights before any writes", async () => {
+    qc.setQueryData(keys.identities, [acme(), identity("idn_example", "Example Git", { owners: ["acme-example-daily"] })])
+    render()
+    await settle()
+    await click(card("Example Git").querySelector("[data-testid=identity-edit]"))
+    await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=token]")!, PASTED)
+    const rawOwner = " https://github.com/acme-example/app "
+    await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=tokenOwner]")!, rawOwner)
+    await click(card("Example Git").querySelector("[data-testid=identity-edit]")) // Done collapses the offending field.
+    await click(card("Acme").querySelector("[data-testid=identity-edit]"))
+    await type(card("Acme").querySelector<HTMLInputElement>("[data-identity-field=owners]")!, "acme-corp, acme-example-daily")
+    const search = document.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+    await type(search, "git author") // Search hides the token-owner row, then another category hides all identities.
+    act(() => { section = "orchestrator"; render() })
+    await click(saveButton())
+    expect(writes()).toEqual([])
+    expect(section).toBe("identities")
+    expect(search.value).toBe("")
+    const owner = card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=tokenOwner]")!
+    expect(owner.closest("[hidden]")).toBeNull()
+    expect(document.activeElement).toBe(owner)
+    expect(owner.value).toBe(rawOwner)
+    expect(owner.getAttribute("aria-invalid")).toBe("true")
+    expect(document.getElementById(owner.getAttribute("aria-describedby")!)?.textContent).toContain("one GitHub user or org")
+    expect(document.querySelector('[role=alert]')?.textContent).toContain("Example Git: Token owner")
+    expect(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=token]")!.value).toBe(PASTED)
+    expect(card("Acme").querySelector<HTMLInputElement>("[data-identity-field=owners]")!.value).toBe("acme-corp, acme-example-daily")
+    expect(card("Acme").querySelector("[aria-invalid=true]")).toBeNull()
+    await type(owner, " Acme-Example ")
+    expect(owner.hasAttribute("aria-invalid")).toBe(false)
+    await click(saveButton())
+    expect(writes()).toEqual(expect.arrayContaining([
+      { method: "PATCH", url: "/api/identities/idn_acme", body: { owners: ["acme-corp", "acme-example-daily"] } },
+      { method: "PUT", url: "/api/identities/idn_example/tokens", body: { owner: "acme-example", token: PASTED } },
+    ]))
+    expect(unsaved()).toBeNull()
+  })
+
+  it("preserves an owner entered before the token, and accepts a blank every-owner token", async () => {
+    render()
+    await settle()
+    await click(card("Acme").querySelector("[data-testid=identity-edit]"))
+    const owner = card("Acme").querySelector<HTMLInputElement>("[data-identity-field=tokenOwner]")!
+    await type(owner, " Acme-Example ")
+    expect(owner.value).toBe(" Acme-Example ")
+    await click(saveButton())
+    expect(writes()).toEqual([])
+    const token = card("Acme").querySelector<HTMLInputElement>("[data-identity-field=token]")!
+    expect(document.activeElement).toBe(token)
+    await type(token, PASTED)
+    await click(saveButton())
+    expect(writes()[0]?.body).toEqual({ owner: "acme-example", token: PASTED })
+    await type(token, PASTED)
+    await type(owner, "   ")
+    await click(saveButton())
+    expect(writes().at(-1)?.body).toEqual({ owner: "", token: PASTED })
+  })
+
+  it.each([
+    ["token", "owner", "tokenOwner", "Token owner"],
+    ["fields", "owners.0", "owners", "Owners"],
+    ["fields", "author.email", "authorEmail", "Author email"],
+  ])("routes a server %s error for %s to the right hidden field without losing rejected input", async (operation, path, field, label) => {
+    qc.setQueryData(keys.identities, [acme(), identity("idn_example", "Example Git")])
+    let release!: () => void
+    const original = globalThis.fetch
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    rejectWrite = (url, method) => url.startsWith("/api/identities/idn_example") && method !== "GET" ? { error: `${path}: rejected`, fields: [{ path, message: "Check this example field." }] } : undefined
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+      if (url.startsWith("/api/identities/idn_example") && init.method !== "GET") await gate
+      return original(url, init)
+    })
+    render()
+    await settle()
+    await click(card("Example Git").querySelector("[data-testid=identity-edit]"))
+    if (operation === "token") {
+      await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=tokenOwner]")!, " acme-example ")
+      await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=token]")!, PASTED)
+    } else if (field === "owners") {
+      await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=owners]")!, " Acme-Example ")
+    } else {
+      await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=author]")!, "Example Agent")
+      await type(card("Example Git").querySelector<HTMLInputElement>("[data-identity-field=authorEmail]")!, "agent@example.com")
+    }
+    await click(saveButton())
+    await click(card("Example Git").querySelector("[data-testid=identity-edit]"))
+    act(() => { section = "orchestrator"; render() })
+    await act(async () => { release(); await new Promise((r) => setTimeout(r, 30)) })
+    expect(section).toBe("identities")
+    const offending = card("Example Git").querySelector<HTMLInputElement>(`[data-identity-field=${field}]`)!
+    expect(document.activeElement).toBe(offending)
+    expect(offending.closest("[hidden]")).toBeNull()
+    expect(offending.getAttribute("aria-invalid")).toBe("true")
+    expect(offending.value).toBe(field === "authorEmail" ? "agent@example.com" : field === "owners" ? " Acme-Example " : " acme-example ")
+    expect(document.querySelector('[role=alert]')?.textContent).toContain(`Example Git: ${label}:`)
+    expect(card("Acme").querySelector("[aria-invalid=true]")).toBeNull()
+    expect(buttons("Discard")).toHaveLength(1)
+    rejectWrite = undefined
+    await type(offending, field === "authorEmail" ? "new@example.com" : "acme-other")
+    expect(offending.hasAttribute("aria-invalid")).toBe(false)
+    await click(saveButton())
+    expect(unsaved()).toBeNull()
+  })
+
+  it("keeps a token after a successful field PATCH and routes an unstructured token rejection to its own field", async () => {
+    rejectWrite = (url, method) => method === "PUT" && url.endsWith("/tokens") ? { error: "GitHub rejected this token (401)." } : undefined
+    render()
+    await settle()
+    await click(card("Acme").querySelector("[data-testid=identity-edit]"))
+    await type(card("Acme").querySelector<HTMLInputElement>("[data-identity-field=name]")!, "Example Renamed")
+    const token = card("Acme").querySelector<HTMLInputElement>("[data-identity-field=token]")!
+    await type(token, PASTED)
+    await click(saveButton())
+    expect(writes().map((w) => w.method)).toEqual(["PATCH", "PUT"])
+    expect(token.value).toBe(PASTED)
+    expect(document.activeElement).toBe(token)
+    expect(token.getAttribute("aria-invalid")).toBe("true")
+    expect(document.querySelector('[role=alert]')?.textContent).toContain("Example Renamed: GitHub token: GitHub rejected")
+    expect(buttons("Discard")).toHaveLength(1)
+    rejectWrite = undefined
+    await click(saveButton())
+    expect(writes().map((w) => w.method)).toEqual(["PATCH", "PUT", "PUT"])
+    expect(unsaved()).toBeNull()
+    expect(token.value).toBe("")
+  })
+
+  it("finds an invalid new identity before creating any cards and preserves all new-card drafts", async () => {
+    render()
+    await settle()
+    await click(document.querySelector("[data-testid=identity-add]"))
+    await type(card("new").querySelector<HTMLInputElement>("[data-identity-field=name]")!, "Example New")
+    await type(card("new").querySelector<HTMLInputElement>("[data-identity-field=token]")!, PASTED)
+    await type(card("new").querySelector<HTMLInputElement>("[data-identity-field=tokenOwner]")!, "acme/app")
+    await click(saveButton())
+    expect(writes()).toEqual([])
+    const owner = card("new").querySelector<HTMLInputElement>("[data-identity-field=tokenOwner]")!
+    expect(document.activeElement).toBe(owner)
+    expect(owner.value).toBe("acme/app")
+    expect(card("new").querySelector<HTMLInputElement>("[data-identity-field=name]")!.value).toBe("Example New")
+    expect(card("new").querySelector<HTMLInputElement>("[data-identity-field=token]")!.value).toBe(PASTED)
+  })
+
+  it("ignores unchanged saved identities while saving a different card's draft", async () => {
+    qc.setQueryData(keys.identities, [acme(), identity("idn_example", "Example Legacy", { owners: ["legacy/shape"] })])
+    render()
+    await settle()
+    await click(card("Acme").querySelector("[data-testid=identity-edit]"))
+    await type(card("Acme").querySelector<HTMLInputElement>("[data-identity-field=name]")!, "Acme Updated")
+    await click(saveButton())
+    expect(writes()).toEqual([{ method: "PATCH", url: "/api/identities/idn_acme", body: { name: "Acme Updated" } }])
+    expect(document.querySelector('[role=alert]')).toBeNull()
+    expect(unsaved()).toBeNull()
+  })
+
+  it("routes a new identity's server name rejection to that card and keeps its token draft", async () => {
+    rejectWrite = (url, method) => method === "POST" && url === "/api/identities" ? { error: "Name already exists.", fields: [{ path: "name", message: "Choose a different name." }] } : undefined
+    render()
+    await settle()
+    await click(document.querySelector("[data-testid=identity-add]"))
+    await type(card("new").querySelector<HTMLInputElement>("[data-identity-field=name]")!, "Example New")
+    await type(card("new").querySelector<HTMLInputElement>("[data-identity-field=token]")!, PASTED)
+    await click(saveButton())
+    const name = card("new").querySelector<HTMLInputElement>("[data-identity-field=name]")!
+    expect(document.activeElement).toBe(name)
+    expect(name.getAttribute("aria-invalid")).toBe("true")
+    expect(document.getElementById(name.getAttribute("aria-describedby")!)?.textContent).toBe("Choose a different name.")
+    expect(name.value).toBe("Example New")
+    expect(card("new").querySelector<HTMLInputElement>("[data-identity-field=token]")!.value).toBe(PASTED)
+    expect(writes()).toHaveLength(1)
   })
 
   it("counts a draft's changes and reads owners as GitHub does", () => {

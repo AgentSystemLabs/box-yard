@@ -15,12 +15,8 @@ const KV = "credentials"
  */
 const CODEX_REFRESHED_KV = "codex_auth_refreshed"
 
-export const credentialValue = z
-  .string()
-  .trim()
-  .min(8, "That looks too short to be a key or token")
-  .max(2000, "That's too long to be a key or token")
-  .regex(/^[\x21-\x7e]+$/, "Keys and tokens have no spaces or special characters")
+import { credentialValue } from "../shared/credentialValidation.js"
+export { credentialValue } from "../shared/credentialValidation.js"
 
 /** The Codex login file (~/.codex/auth.json): JSON, so it has spaces; kept minified. */
 export const codexAuthValue = z

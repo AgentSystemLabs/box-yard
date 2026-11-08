@@ -47,6 +47,24 @@ async function start() {
 }
 
 describe("identity routes", () => {
+  it("returns endpoint-relative validation paths, without token values or settings writes", async () => {
+    const r = await start()
+    const i = r.yard.identities.create({ name: "Example Git", owners: ["acme-example-daily"], author: { name: "Example Agent", email: "agent@example.com" } })
+    const token = "ghp_example_disposable_token"
+    const rejected = await r.raw("PUT", `/api/identities/${i.id}/tokens`, { owner: "acme-example/app", token })
+    expect(rejected.status).toBe(400)
+    expect(rejected.json()).toMatchObject({ error: expect.stringContaining("owner: A GitHub owner"), fields: [{ path: "owner", message: expect.stringContaining("A GitHub owner") }] })
+    expect(rejected.text).not.toContain(token)
+    expect(r.yard.identities.require(i.id)).toEqual(i)
+    const owners = await r.raw("PATCH", `/api/identities/${i.id}`, { owners: ["https://github.com/acme-example"] })
+    expect(owners.status).toBe(400)
+    expect(owners.json()).toMatchObject({ fields: [{ path: "owners.0" }] })
+    expect(r.yard.identities.require(i.id)).toEqual(i)
+    const duplicate = await r.raw("POST", "/api/identities", { name: "Example Git" })
+    expect(duplicate.status).toBe(400)
+    expect(duplicate.json()).toMatchObject({ fields: [{ path: "name" }] })
+  })
+
   it("detects without changing anything, imports a proposal with its projects, and tests it", async () => {
     const r = await start()
     expect((await r.raw("POST", "/api/identities/detect", { online: false })).json<IdentityDetection>().online).toBe(false)
