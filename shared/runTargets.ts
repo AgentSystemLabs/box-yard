@@ -409,6 +409,13 @@ export function harnessesInWords(text: string, placed: Pick<PlacedPick, "start" 
   for (const p of placed) plain = plain.slice(0, p.start) + " ".repeat(p.end - p.start) + plain.slice(p.end)
   const out = new Set<AgentCli>()
   for (const m of plain.matchAll(HARNESS_WORDS)) out.add(m[1]!.toLowerCase() as AgentCli)
+  // A provider prefix changes who runs gpt/Claude/etc. Don't mistake its bare model suffix for another harness.
+  // Ordinary repo/file paths don't themselves name a harness.
+  plain = plain.replace(/(?<![\w/.:~-])[A-Za-z0-9_.-]+\/[A-Za-z0-9][^\s,;!?()<>`"'#]*(?:#[A-Za-z0-9_.-]+)?/g, (id) => {
+    const model = id.slice(id.lastIndexOf("/") + 1).split("#")[0]!
+    if (/\d/.test(model) && cliForModel(model)) out.add("opencode")
+    return " ".repeat(id.length)
+  })
   for (const m of plain.matchAll(MODEL_WORD)) {
     if (!/\d/.test(m[0])) continue
     const cli = cliForModel(m[0])

@@ -200,6 +200,14 @@ describe("task agents on OpenCode", () => {
     expect((await said(r, task.id, "event")).join()).toContain("OpenCode session was missing on this box")
     expect(runs().at(-1).prompt).toContain("Remember this fixture")
     await r.yard.tasks.archive(task.id)
+    const count = runs().length
+    await r.call("POST", `/api/tasks/${task.id}/messages`, { content: "[opencode-auth-session]" })
+    const authError = await resting(r, task.id)
+    expect(authError.status).toBe("failed")
+    expect(authError.error).toContain("401")
+    expect(authError.sessionId).toBe(next.sessionId)
+    expect(runs()).toHaveLength(count + 1) // a provider's missing session is not a lost CLI session
+    await r.yard.tasks.archive(task.id)
   })
 
   it("stops a running OpenCode turn and queues follow-up input instead of pretending to steer it", async () => {

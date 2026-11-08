@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { AGENT_CLIS, AGENT_CLI_LABEL, canSteer, cliForModel, codexModel, hasSeparateEffort, isManagerCli, isOpenCodeModel } from "../shared/agentCli.js"
 import { harnessDefaults } from "../shared/harnessDefaults.js"
 import { harnessModelTargets, modelToken } from "../shared/harnessPicks.js"
-import { buildHarnessTargets } from "../shared/runTargets.js"
+import { buildHarnessTargets, harnessesInWords } from "../shared/runTargets.js"
 import { SettingsStore, settingsPatch } from "../server/settings.js"
 import { CredentialStore } from "../server/credentials.js"
 import { parseOpenCodeAuth, openCodeArgs } from "../server/opencode.js"
@@ -64,6 +64,9 @@ describe("OpenCode's verified task contract", () => {
     expect(cliForModel("opus")).toBe("claude")
     expect(cliForModel("gpt-6.1-sol")).toBe("codex")
     expect(codexModel("example/model", "gpt-6.1-sol")).toBe("gpt-6.1-sol")
+    expect([...harnessesInWords("use OpenCode openai/gpt-6.1-sol#high")]).toEqual(["opencode"])
+    expect([...harnessesInWords("try anthropic/claude-opus-5-5")]).toEqual(["opencode"])
+    expect([...harnessesInWords("edit acme/app using Claude")]).toEqual(["claude"])
     expect(openCodeArgs("example/model#high", "ses_example")).toEqual(["run", "--format", "json", "--auto", "--pure", "--model", "example/model", "--variant", "high", "--session", "ses_example"])
     expect(openCodeArgs(null, null)).toEqual(["run", "--format", "json", "--auto", "--pure"])
     for (const id of ["opus", "--bad", "example/", "example/model#", "example/model#x#y", "example/model with spaces"]) expect(isOpenCodeModel(id), id).toBe(false)

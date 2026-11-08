@@ -308,7 +308,7 @@ async function runTurn() {
   // The session file can go missing (fresh box, lost archive), or a Codex thread can't open on the login this turn
   // was handed (its saved reasoning is encrypted for the account that wrote it). Start a new session that carries a
   // recap instead of failing the task.
-  if (!stopping && !attempt.steerSubmitted && attempt.exitCode !== 0 && turn.resume && /no conversation found|session.*not found|no rollout found|invalid_encrypted_content|encrypted content\b.{0,60}\bcould not be (?:verified|decrypted)/i.test(attempt.errorText)) {
+  if (!stopping && !attempt.steerSubmitted && attempt.exitCode !== 0 && turn.resume && (!opencode || attempt.missingSession) && /no conversation found|session.*not found|no rollout found|invalid_encrypted_content|encrypted content\b.{0,60}\bcould not be (?:verified|decrypted)/i.test(attempt.errorText)) {
     sessionId = randomUUID()
     await emit({ t: "session_reset", sessionId, reason: `Previous ${harness} session was not found on this box.` })
     attempt = await runAgent({ turn, sessionId, resume: false, prompt: `${turn.recap ?? ""}\n\n---\n\n${prompt}`.trim(), mcpConfigFile })
@@ -1802,6 +1802,8 @@ async function runOpenCode({ turn, sessionId, resume, prompt }) {
       if (buf.trim()) onLine(buf)
       pending.then(() => resolve({
         exitCode: code ?? 1, startedAt, sessionId: nativeSession, usage,
+        // Session lookup fails before emitting native events. A provider/auth error is never a reason to retry.
+        missingSession: !nativeSession && !failure && /session not found/i.test(stderr) && !/401|403|unauth|authenticat|api.key|expired/i.test(stderr),
         result: { result: clean(reply), is_error: Boolean(failure) || !sawStep || !nativeSession || finishReason !== "stop", total_cost_usd: sawStep ? cost : null, duration_ms: Date.now() - startedAt, usage: totals },
         errorText: [failure, clean(stderr).trim(), signal ? `OpenCode was killed (${signal})` : "", sawStep && finishReason !== "stop" ? `OpenCode ended with finish reason ${String(finishReason)}; continue the task after checking the provider response.` : "", !sawStep ? "OpenCode ended without a completed step. Check the provider API login and model; run `opencode models` on this runner." : ""].filter(Boolean).join("\n"),
       }), (e) => resolve(failed(clean(e.message))))

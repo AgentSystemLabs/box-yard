@@ -33,6 +33,7 @@ if (process.env.FAKE_OPENCODE_LOG) fs.appendFileSync(process.env.FAKE_OPENCODE_L
 const emit = (type, data) => process.stdout.write(JSON.stringify({ type, timestamp: Date.now(), sessionID, ...data }) + "\n")
 if (prompt.includes("[opencode-empty]")) process.exit(0)
 if (prompt.includes("[opencode-error]")) { emit("error", { error: { name: "ProviderAuthError", data: { message: "OpenCode provider authentication required; check API login" } } }); process.exit(0) }
+if (prompt.includes("[opencode-auth-session]")) { emit("error", { error: { name: "APIError", data: { message: "OpenCode authentication failed: provider session not found (401)" } } }); process.exit(1) }
 if (prompt.includes("[opencode-secret-error]")) {
   const key = Object.values(JSON.parse(process.env.OPENCODE_AUTH_CONTENT || "{}"))[0]?.key || "fixture"
   process.stderr.write(key.slice(0, 4))
