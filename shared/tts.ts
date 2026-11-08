@@ -2,7 +2,7 @@
 // the browser's own voices by default; ElevenLabs and OpenAI are opt-in and need an API key that
 // stays on the server (the browser only ever sees "set" or "unset").
 import type { SettingSource } from "./types.js"
-import { withOwner } from "./owner.js"
+import { DEFAULT_OWNER_NAME, withOwner } from "./owner.js"
 
 export const TTS_PROVIDERS = ["browser", "elevenlabs", "openai"] as const
 export type TtsProvider = (typeof TTS_PROVIDERS)[number]
@@ -145,7 +145,8 @@ export interface TtsVoiceList {
 
 /** What a voice preview says when the provider has no sample of its own. */
 export function previewLine(voiceName: string, owner: string | undefined): string {
-  return withOwner(`Hi Cody, this is ${voiceName}.`, owner)
+  const name = withOwner("Cody", owner)
+  return `Hi${name === DEFAULT_OWNER_NAME ? "" : ` ${name}`}, this is ${voiceName}.`
 }
 
 /** The provider and voice a POST /api/tts body may override (the Test and ▶ preview buttons try unsaved choices). */

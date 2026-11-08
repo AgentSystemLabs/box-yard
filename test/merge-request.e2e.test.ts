@@ -99,8 +99,8 @@ describe("merge request message", () => {
     expect(text).toContain("gh pr merge 12 --squash --delete-branch --match-head-commit <tested sha>")
     expect(text).toMatch(/If anything fails, don't merge: comment the exact error on the PR/)
     expect(text).toContain("Reply with the merge SHA or the error.")
-    expect(followupPrompt([{ source: "cody:merge", content: "x" }])).toBe("Message from Cody (Merge button):\n\nx")
-    expect(userMessageLabel({ source: "cody:merge" })).toBe("Cody (Merge button)")
+    expect(followupPrompt([{ source: "cody:merge", content: "x" }])).toBe("Message from the owner (Merge button):\n\nx")
+    expect(userMessageLabel({ source: "cody:merge" })).toBe("the owner (Merge button)")
   })
 })
 
@@ -135,7 +135,7 @@ describe("POST /api/tasks/:id/merge", () => {
     expect(user).toHaveLength(1)
     expect(user[0]!.content).toBe(mergeRequestPrompt(12))
     expect(done.mergeRequest).toBeNull()
-    expect(workerPrompt(r, done)).toContain(`Message from Cody (Merge button):\n\n${mergeRequestPrompt(12)}`)
+    expect(workerPrompt(r, done)).toContain(`Message from the owner (Merge button):\n\n${mergeRequestPrompt(12)}`)
     expect((await merge(r, t.id)).status).toBe(200)
   })
 

@@ -113,7 +113,7 @@ describe("queued messages API", () => {
 
     const list = await queue(r, t.id)
     expect(list.map((m) => m.text)).toEqual(["first: use blue", "second: add a footer", "third: ship it"])
-    expect(list[0]).toMatchObject({ taskId: t.id, source: "cody", kind: "owner", sender: "Cody", status: "queued", version: 1 })
+    expect(list[0]).toMatchObject({ taskId: t.id, source: "cody", kind: "owner", sender: "the owner", status: "queued", version: 1 })
     expect(list[0]!.createdAt).toBeLessThanOrEqual(list[1]!.createdAt)
     expect((await getTask(r, t.id)).pendingCount).toBe(3)
     // Not in the transcript until a turn delivers them.

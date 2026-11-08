@@ -218,7 +218,7 @@ describe("notes budget", () => {
     await add("two")
     expect(captainNotices(r, a.id, "notes_budget")).toHaveLength(0)
     const p = await add("three")
-    expect(p.notes.map((n) => n.author)).toEqual(["Cody", "Cody", "Cody"])
+    expect(p.notes.map((n) => n.author)).toEqual(["the owner", "the owner", "the owner"])
     const notices = captainNotices(r, a.id, "notes_budget")
     expect(notices).toHaveLength(1)
     expect(notices[0]!.content).toMatch(/^📝 Project notes are over budget \(3 of 2 notes, ~\d+ of 4k tokens\)\. Agents only get the newest notes that fit, so 1 note is left out/)
@@ -274,7 +274,7 @@ describe("notes budget", () => {
     r.yard.captains.tuning.wakeDebounceMs = 50
     await call(r, "POST", `/api/projects/${a.id}/captain/messages`, { content: "status" })
     await waitFor(() => (fs.existsSync(log) && fs.readFileSync(log, "utf8").includes("You are the Box Yard Captain") && !r.yard.captains.anyBusy()) || null, "the Captain's turn", 30_000)
-    expect(fs.readFileSync(log, "utf8")).toContain("Their budget is 2 notes or about 1k tokens (Max notes in Cody's Settings, or this project's own)")
+    expect(fs.readFileSync(log, "utf8")).toContain("Their budget is 2 notes or about 1k tokens (Max notes in the owner's Settings, or this project's own)")
 
     // Cleared, it's Settings' budget again; out of range is refused.
     expect(await call<Project>(r, "PATCH", `/api/projects/${a.id}`, { notesMaxCount: null, notesMaxTokens: null })).toMatchObject({ notesMaxCount: null, notesMaxTokens: null })

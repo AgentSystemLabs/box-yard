@@ -274,7 +274,7 @@ describe("pace and the fan-out question", () => {
     await waitFor(() => r.provider.starts.length === 5, "the other 3 creates")
     expect(held()).toHaveLength(0)
     expect((await r.yard.tasks.cloudStatus()).fanout).toMatchObject({ wanted: 0, allowedUntil: expect.any(Number) })
-    expect(notices(r).at(-1)).toBe("⚙️ **New boxes** allowed: Cody let Box Yard make more than 2 boxes in the next hour (3 boxes were waiting).")
+    expect(notices(r).at(-1)).toBe("⚙️ **New boxes** allowed: the owner let Box Yard make more than 2 boxes in the next hour (3 boxes were waiting).")
     await finish(r, 5)
     await waitFor(() => working(r) === 5, "5 agents")
     expect(tasks).toHaveLength(5)

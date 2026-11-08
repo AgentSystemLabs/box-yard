@@ -2,6 +2,7 @@
 // when a task event happens, e.g. "when a PR is ready, ask its agent to merge it". The server and the
 // web app share these rules: what each trigger and action means, how a prompt template is rendered,
 // and which events a hook's filters let through. The engine is server/hooks.ts.
+import { DEFAULT_OWNER_NAME, withOwner } from "./owner.js"
 import type { PrState, TaskStatus } from "./types.js"
 
 export const HOOK_TRIGGERS = ["task.finished", "task.pr_ready", "task.failed", "task.needs_input", "pr.merged", "schedule.run_finished"] as const
@@ -31,10 +32,10 @@ export const HOOK_SOURCES = ["cody", "captain", "coordinator", "schedule"] as co
 export type HookSource = (typeof HOOK_SOURCES)[number]
 export type TaskSource = HookSource | "hook"
 
-export const SOURCE_INFO: Record<HookSource, string> = { cody: "Cody", captain: "Captain", coordinator: "Coordinator", schedule: "Schedule" }
+export const SOURCE_INFO: Record<HookSource, string> = { cody: DEFAULT_OWNER_NAME, captain: "Captain", coordinator: "Coordinator", schedule: "Schedule" }
 
 /** How the "started by" filter names a source; "cody" is the owner, by their configured name (Settings.ownerName). */
-export const sourceLabel = (s: HookSource, ownerName?: string) => (s === "cody" && ownerName?.trim() ? ownerName.trim() : SOURCE_INFO[s])
+export const sourceLabel = (s: HookSource, ownerName?: string) => (s === "cody" ? withOwner("Cody", ownerName) : SOURCE_INFO[s])
 
 export interface HookFilters {
   /** Global hooks only: just this project's tasks. */

@@ -125,7 +125,7 @@ describe("On PR ready → merge, end to end", () => {
     const sessionId = r.yard.store.getTaskRow(task.id)!.session_id!
     const session = JSON.parse(fs.readFileSync(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".fake-claude"), "fake-sessions", `${sessionId}.json`), "utf8")) as { turns: { prompt: string }[] }
     const turn = session.turns.at(-1)!
-    expect(turn.prompt).toMatch(/^Message from the Box Yard hook "On PR ready → merge" \(an automation that runs on "PR ready", set up by Cody; not a new message from Cody\):/)
+    expect(turn.prompt).toMatch(/^Message from the Box Yard hook "On PR ready → merge" \(an automation that runs on "PR ready", set up by the owner; not a new message from the owner\):/)
     expect(turn.prompt).toContain(mergeRequestPrompt(7))
 
     // Both the Captain and the Coordinator were told, so neither merges it in parallel.

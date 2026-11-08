@@ -191,8 +191,8 @@ describe("Steer", () => {
     expect(users.map((m) => m.content)).toEqual(["first: use blue", "second: add a footer"])
     for (const m of users) expect(m.meta).toMatchObject({ steered: true })
     const events = said(r, t.id, "event")
-    expect(events.some((e) => /^Cody requested steering all 2 queued messages into the running turn; delivery has not been acknowledged yet/.test(e))).toBe(true)
-    expect(events.some((e) => /Stopped by Cody|didn't reach the agent/.test(e))).toBe(false)
+    expect(events.some((e) => /^the owner requested steering all 2 queued messages into the running turn; delivery has not been acknowledged yet/.test(e))).toBe(true)
+    expect(events.some((e) => /Stopped by the owner|didn't reach the agent/.test(e))).toBe(false)
     expect(steerFiles(r, done)).toEqual([])
   }, 60_000)
 
@@ -253,7 +253,7 @@ describe("Steer", () => {
     const res = await steer(r, t.id)
     expect(res).toMatchObject({ delivery: "after_turn", queued: 1 })
     expect(res.note).toMatch(/Cursor can't take a message in the middle of a turn/)
-    expect(said(r, t.id, "event").some((e) => /^Cody asked to steer the queued message into the running turn, but Cursor can't/.test(e))).toBe(true)
+    expect(said(r, t.id, "event").some((e) => /^the owner asked to steer the queued message into the running turn, but Cursor can't/.test(e))).toBe(true)
     // Never a silent stop: the turn still runs, and the message is still queued (and editable).
     expect(await getTask(r, t.id)).toMatchObject({ status: "working", pendingCount: 1 })
     expect(r.yard.tasks.listQueue(t.id).map((m) => m.status)).toEqual(["queued"])
@@ -271,7 +271,7 @@ describe("Steer", () => {
     const res = await steer(r, t.id)
     expect(res).toMatchObject({ delivery: "after_turn", queued: 1 })
     expect(res.note).toMatch(/Cursor can't take a message in the middle of a turn/)
-    expect(said(r, t.id, "event").some((e) => /^Cody asked to steer the queued message into the running turn, but Cursor can't/.test(e))).toBe(true)
+    expect(said(r, t.id, "event").some((e) => /^the owner asked to steer the queued message into the running turn, but Cursor can't/.test(e))).toBe(true)
     expect(await getTask(r, t.id)).toMatchObject({ status: "working", pendingCount: 1 })
 
     await r.yard.tasks.stopTask(t.id)

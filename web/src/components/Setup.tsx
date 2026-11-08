@@ -7,6 +7,7 @@ import { AppLink, Button, LineIcon, NewTabLink, TimeAgo, cx, inputClass } from "
 import { Loading } from "./Loading"
 import { MoreLogins } from "./MoreLogins"
 import type { LoginHarness } from "../../../shared/agentLogins"
+import { ownerNameProblem } from "../lib/settingsValidation"
 import { localFlag } from "../lib/localFlag"
 import { Panel, Row, SourceHint } from "./SettingsBlocks"
 import { SearchHighlight } from "../lib/settingsSearch"
@@ -654,14 +655,15 @@ function Step({ n, done, title, tag, help, children }: { n: number; done: boolea
 function OwnerNameField({ id }: { id: string }) {
   const info = useAgentSettings()
   const save = useSaveSettings()
-  const name = info.data?.settings.ownerName ?? ""
+  const name = info.data?.sources.ownerName === "default" ? "" : (info.data?.settings.ownerName ?? "")
   const source = info.data?.sources.ownerName
   const [value, setValue] = useState<string | null>(null)
   const draft = value ?? name
   const changed = value !== null && value.trim() !== name
+  const problem = value !== null ? ownerNameProblem(draft) : null
   if (source === "env")
     return <p className="text-xs text-zinc-500">{name}: set on the server by BOXYARD_OWNER_NAME.</p>
-  const submit = () => changed && save.mutate({ ownerName: draft.trim() }, { onSuccess: () => setValue(null) })
+  const submit = () => changed && !problem && save.mutate({ ownerName: draft.trim() }, { onSuccess: () => setValue(null) })
   return (
     <div className="space-y-2">
       <input
@@ -676,9 +678,14 @@ function OwnerNameField({ id }: { id: string }) {
             submit()
           }
         }}
+        aria-invalid={Boolean(problem)}
+        aria-describedby={problem ? `${id}-problem` : undefined}
+        placeholder="Enter your name"
         aria-label="Your name"
       />
-      <Button type="button" size="sm" variant={changed ? "primary" : "subtle"} disabled={!changed || !draft.trim()} loading={save.isPending} onClick={submit}>
+      {problem && <p id={`${id}-problem`} className="text-xs text-red-300" role="alert">{problem}</p>}
+      {save.error && <p className="text-xs text-red-300" role="alert">{save.error.message}</p>}
+      <Button type="button" size="sm" variant={changed ? "primary" : "subtle"} disabled={!changed || Boolean(problem)} loading={save.isPending} onClick={submit}>
         Save
       </Button>
     </div>
@@ -767,7 +774,7 @@ export function SetupCard({ status, className }: { status: SetupStatus; classNam
         <Step n={++n} done={set("githubToken")} title={CREDENTIAL_INFO.githubToken.label} tag="Recommended" help={<CredentialHelp k="githubToken" />}>
           <CredentialField k="githubToken" status={status.credentials.githubToken} id={`${id}-gh`} />
         </Step>
-        <Step n={++n} done={owner !== undefined && owner !== "default"} title="Your name" tag="Optional" help="What the Coordinator, Captains and agents call you.">
+        <Step n={++n} done={owner !== undefined && owner !== "default"} title="Your name" tag="Optional" help={'What the Coordinator, Captains and agents call you. Without a name, they use “the owner”. Change it later in Settings › Box agents.'}>
           <OwnerNameField id={`${id}-owner`} />
         </Step>
       </ol>

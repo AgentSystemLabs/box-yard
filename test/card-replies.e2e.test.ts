@@ -87,14 +87,14 @@ describe("reply in a card", () => {
     await call(r, "POST", `/api/tasks/${t.id}/messages`, { content: "now one about pineapples", inChat: true })
     const sent = await waitFor(async () => (await chat(r)).find((m) => m.meta?.sent), "the sent line")
     expect(sent.role).toBe("notice")
-    expect(sent.content).toBe("✉️ **Haiku** got a message from Cody: now one about pineapples")
+    expect(sent.content).toBe("✉️ **Haiku** got a message from the owner: now one about pineapples")
     expect(sent.meta).toMatchObject({ taskId: t.id, projectId: p.id, sent: true })
     expect(seenByCoordinator(r, sent.id)).toBe(1)
 
     // The task runs a turn on it; the Coordinator isn't asked about the line.
     await waitFor(() => (lines().slice(turns).some((l) => l.prompt.includes("now one about pineapples")) ? true : null), "the task's turn")
     await settled(r, t.id)
-    expect(lines().filter((l) => l.prompt.includes("got a message from Cody"))).toEqual([])
+    expect(lines().filter((l) => l.prompt.includes("got a message from the owner"))).toEqual([])
 
     // From the task page (no inChat), the chat stays as it was.
     const before = (await chat(r)).filter((m) => m.meta?.sent).length
@@ -109,7 +109,7 @@ describe("reply in a card", () => {
     const t = await call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Haiku", prompt: "write a haiku" })
     await settled(r, t.id)
     const msg = r.yard.tasks.sentFromChat(t.id, "  ", [{ id: "upl_1", name: "a.png", path: "/tmp/a.png", mime: "image/png", size: 1 } as never])
-    expect(msg.content).toBe("✉️ **Haiku** got a message from Cody: a file")
+    expect(msg.content).toBe("✉️ **Haiku** got a message from the owner: a file")
     expect(msg.meta).toMatchObject({ attachments: [{ id: "upl_1" }] })
   })
 
@@ -143,7 +143,7 @@ describe("reply in a card", () => {
     expect(first!.content).toContain("You asked: is it any good?")
     const session = r.yard.store.sideThreadSession(thread.id)!
     const prompt = fakeSession(session.sessionId).turns.at(-1)!.prompt
-    expect(prompt).toContain('[Box Yard side thread] Cody is asking you about a task, from the card of the task "Haiku" in the Coordinator chat.')
+    expect(prompt).toContain('[Box Yard side thread] the owner is asking you about a task, from the card of the task "Haiku" in the Coordinator chat.')
     expect(prompt).toContain(`${TASK_THREAD_HEADING}\n- ${t.id} "Haiku" [demo] idle`)
     expect(prompt).toMatch(/Its updates in the chat, oldest first:\n- .*\*\*Haiku\*\*/)
     expect(prompt).toContain("This thread is read-only")

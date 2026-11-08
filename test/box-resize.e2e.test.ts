@@ -267,7 +267,7 @@ describe("running agents", () => {
     const after = await getTask(r, t.id)
     expect(after.status).not.toBe("working")
     expect(after.boxId).toBe(rep.newBoxId)
-    expect(r.yard.store.listTaskMessages(t.id, 200).some((m) => m.content === `Stopped so Cody could resize box ${boxId}.`)).toBe(true)
+    expect(r.yard.store.listTaskMessages(t.id, 200).some((m) => m.content === `Stopped so the owner could resize box ${boxId}.`)).toBe(true)
   })
 })
 
@@ -355,7 +355,7 @@ describe("resize_box over MCP", () => {
     await call(r, "PUT", "/api/agent-settings", { autoResizeEnabled: false })
     const off = await coordinator("resize_box", { box: t.boxId, size: "medium", reason: "more room" })
     expect(off.isError).toBe(true)
-    expect(off.content[0]!.text).toContain("Cody has turned off automatic box resizing")
+    expect(off.content[0]!.text).toContain("the owner has turned off automatic box resizing")
     expect(r.yard.tasks.resizeReport(t.boxId!)).toBeNull()
 
     await call(r, "PUT", "/api/agent-settings", { autoResizeEnabled: true })
