@@ -6,7 +6,7 @@ The Coordinator, each Captain and each task can browse to the beginning of retai
 
 The opening Coordinator/Captain response still contains at most 500 messages; tasks retain their existing 1,000-message opening response. A separate, small date index supplies every retained visible day in the reader's timezone. New dates from SSE appear immediately, even before the date index is refreshed.
 
-Days summaries open only after explicit activation: click, tap, Enter or Space. Hovering or focusing a date leaves the summary closed. Activate the open date again, or use Jump to day, to navigate; Escape and Close dismiss the summary and restore focus to its date.
+Days summaries open only after explicit activation: click, tap, Enter or Space. Hovering or focusing a date leaves the summary closed. Repeated activation, including a double-click, leaves the transcript in place. The summary opens at the top of the panel with explicit Jump to start, Jump to end and Jump to day controls; Escape and Close dismiss it and restore focus to its date.
 
 Scrolling back first reveals cached rows, then requests older pages. Archived reading windows keep at most 200 messages, and the rendered tail keeps at most 200 logical rows. Groups and day separators add their own markup. The day rail renders at most 80 buttons; scrolling, arrows, Home/End and Tab reach the rest. Newer-message controls move forward without fetching the intervening transcript all at once. Return to latest, sending a message and Jump to latest return to the current live cache.
 
@@ -27,6 +27,8 @@ Without a cursor, these return the latest 100 messages. Supply exactly one of `b
 `?days=1&tz=America%2FNew_York` returns `{ days: [{ at, messageId }], oldestId }`: one entry per visible local date plus the oldest raw message id, without transcript bodies. Indexed timestamp seeks find its first message and the first message beyond its next local midnight. Timezone boundary lookup handles 23/25-hour dates and fractional-hour offsets. There is no per-message formatting or transcript-body scan for a busy date. The existing chat timestamp, Captain/project timestamp and task timestamp indexes serve both day seeks and cursor pages; no schema migration is required.
 
 These routes sit behind browser authentication and the existing Host/Origin boundary. They add no MCP tools. Coordinator status-only restrictions and Captain project scoping remain enforced by the existing agent history tools. Tests cover both those privacy rules and rejection of cross-project/task browser cursors.
+
+The measurements below are historical implementation evidence; later navigation changes above were not re-benchmarked for this audit.
 
 ## Reproduction and methodology
 
@@ -124,7 +126,7 @@ The WebKit zoom check initially exposed 1.3–1.4px drift: WebKit floors fractio
 
 ### Explicit-activation follow-up
 
-After merging public main `16faea2`, runtime `73038b1` removes hover/focus opening and uses the same explicit-activation behavior for mouse, touch, pen and keyboard. The 16-case Chromium/WebKit layout matrix was repeated at 320/400/560/800px and 100%/125% CSS zoom. Every case verifies that hover and focus leave the summary closed, Enter and Space open it, Escape and Close dismiss it with focus restored, and a second activation reaches `cm_example-0`. The matrix exercises both mouse-click and Enter jumps. Headers remain visible, clipped ancestors stay at zero scroll, date targets remain at least 44px, and no horizontal page overflow appears.
+After merging public main `16faea2`, runtime `73038b1` removes hover/focus opening and uses the same explicit-activation behavior for mouse, touch, pen and keyboard. The 16-case Chromium/WebKit layout matrix was repeated at 320/400/560/800px and 100%/125% CSS zoom. At that revision, every case verified that hover and focus left the summary closed, Enter and Space opened it, Escape and Close dismissed it with focus restored, and a second activation reached `cm_example-0`. The current UI requires an explicit jump control instead. The matrix exercises both mouse-click and Enter jumps. Headers remain visible, clipped ancestors stay at zero scroll, date targets remain at least 44px, and no horizontal page overflow appears.
 
 The matched-history script now opens the summary before starting its jump timer, retaining the earlier operation's measurement boundary. The primary before/after medians above remain the recorded `ec92dac`/`ae301db` comparison; they exclude the user-controlled pause between opening a summary and choosing to jump. The interaction follow-up changes no pagination, cursor, retention, streaming or scroll-anchor logic.
 

@@ -19,7 +19,7 @@ Hidden entries `gpt-reserve` and `codex-auto-review` are excluded. The cache's d
 
 [Official Codex models documentation](https://learn.chatgpt.com/docs/models) confirms 6.1 Sol, Astra, 6.1 Terra and Luna CLI names, the `--model`/`-m` argument, and model-dependent Max/Ultra availability. Terra requires CLI 0.159.0+. [The public API Sol page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents low, medium, high, xhigh and max. Ultra is a **Codex delegation mode**, not a public API reasoning value.
 
-The cached 5.6 names are account/CLI catalog entries; this discovery does **not** establish their public API IDs or alias targets. They are labeled as CLI catalog choices. No alias targets are guessed. A cached list is a dated snapshot, not a guarantee of another account's entitlement or a remote box's installed version. No live authenticated model request or token refresh was attempted; remote authentication is under repair. The app ships this snapshot and does not query credentials to refresh it.
+The cached 5.6 names are account/CLI catalog entries; this discovery does **not** establish their public API IDs or alias targets. They are labeled as CLI catalog choices. No alias targets are guessed. A cached list is a dated snapshot, not a guarantee of another account's entitlement or a remote box's installed version. No live authenticated model request or token refresh was attempted; this snapshot does not establish the current health of remote authentication. The app ships this snapshot and does not query credentials to refresh it.
 
 ## Saved choices and routing
 

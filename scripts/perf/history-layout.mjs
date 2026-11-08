@@ -46,8 +46,11 @@ try {
       await popup.waitFor()
       if (width === 400 && zoom === 1) await page.screenshot({ path: `${output}/${label}-click-400-1.png` })
     }
-    if (dates && (width === 320 || width === 560)) await first.press('Enter')
-    else await first.click()
+    // Current summaries have an explicit jump control. Keep old revisions usable for comparisons.
+    const jump = page.locator('[data-testid="captain-chat"] [role="region"]').getByRole('button', { name: 'Jump to day', exact: true })
+    const activation = await jump.count() ? jump : first
+    if (dates && (width === 320 || width === 560)) await activation.press('Enter')
+    else await activation.click()
     if (dates) await page.waitForFunction((id) => document.activeElement?.getAttribute('data-day-start') === id, dates.days[0].messageId)
     else await page.waitForFunction(() => document.activeElement?.hasAttribute('data-day-start'))
     await page.waitForTimeout(100)

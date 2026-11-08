@@ -12,7 +12,7 @@ Upstash uses the same picker: `@box:small`, `@box:medium`, `@box:large` (or `@bo
 
 ## Daytona's GPUs
 
-Per GPU-hour, from [daytona.io/pricing](https://www.daytona.io/pricing) (October 2026; `DAYTONA_GPU_GUIDE` in `shared/daytona.ts`):
+Box Yard’s GPU-hour estimate table (`DAYTONA_GPU_GUIDE` in `shared/daytona.ts`) matches these entries on [Daytona’s pricing page](https://www.daytona.io/pricing), checked 2026-11-08. It is a shipped snapshot, not live billing or the full current catalog:
 
 | GPU (`gpuType`) | VRAM | On demand | Spot | Good for |
 | --- | --- | --- | --- | --- |
@@ -27,31 +27,31 @@ Per GPU-hour, from [daytona.io/pricing](https://www.daytona.io/pricing) (October
 
 CPU, memory and disk cost $0.0504 per vCPU-hour, $0.0162 per GiB-hour of memory and $0.000108 per GiB-hour of disk (the first 5 GiB free).
 
-What Daytona's docs say about GPU sandboxes:
+Current [Daytona GPU documentation](https://www.daytona.io/docs/en/gpu-sandboxes/) describes these provider capabilities (checked 2026-11-08); Box Yard has not validated them with a live sandbox:
 
 - **Ephemeral.** A GPU sandbox must be made with `autoDeleteInterval: 0`, so stopping it deletes it. There is no stop and start, archive or fork, and nothing stays on its disk.
 - **Size.** Up to 8 GPUs, and up to 16 vCPUs, 192 GiB memory and 512 GiB disk per GPU. They all run in Daytona's shared region (`earth`).
-- **Quota.** On-demand GPUs have their own organization quota, which a new organization may not have yet ("Total GPU limit exceeded"). Free credits don't pay for GPUs: they need paid credit.
-- **Stock.** With no free GPU of the asked-for types, an on-demand sandbox waits in `pending_build` until one is free. Spot (Tier 2 and up: a card and a $25 top-up) fails right away instead, and Daytona can take a spot GPU back without warning.
+- **Quota and credit.** On-demand GPUs have an organization GPU quota. Current docs require GPU credits for on-demand GPUs and GPU or spot GPU credits for spot capacity; check the dashboard Wallet before provisioning.
+- **Stock.** With no free GPU of the asked-for types, an on-demand sandbox waits in `pending_build` until one is free. Spot fails right away instead, and Daytona can take a spot GPU back without warning.
 - **Availability.** The docs present GPU sandboxes as a normal feature, with no beta or waitlist label. Box Yard hasn't checked this live.
 
-CPU sandboxes come out of the organization's pooled tier limits (Tier 1: 10 vCPUs, 10 GiB memory (20 in one of Daytona's tables) and 30 GiB disk across all running sandboxes) and a default per-sandbox limit of 4 vCPUs, 8 GiB memory and 10 GiB disk. A GPU sandbox's vCPUs, memory and disk don't count against the pool.
+Account and tier quotas change; check [Daytona limits](https://www.daytona.io/docs/en/limits/) and the dashboard. The CPU sizes below are Box Yard’s requested resources, not a guarantee that the account permits that size.
 
 ## Setup (once per Box Yard install)
 
-1. **Credit.** Add credit in the Daytona dashboard (app.daytona.io) under Billing. GPUs need paid credit; the free credits don't cover them.
-2. **API key.** Make one at [app.daytona.io › Keys](https://app.daytona.io/dashboard/keys) with only the **write:sandboxes** and **delete:sandboxes** permissions, and an expiry if you like. Box Yard needs nothing else. Paste it in **Settings › Box providers › Daytona › Daytona API key**, where **Test** lists this install's sandboxes with it, or set `DAYTONA_API_KEY` in Box Yard's environment. Box Yard only uses the key from the server; it never reaches an agent or a sandbox.
+1. **Credit.** Check the Daytona dashboard Wallet and the GPU-credit requirements above before starting a sandbox.
+2. **API key.** Make one at [app.daytona.io › Keys](https://app.daytona.io/dashboard/keys) with **write:sandboxes** and **delete:sandboxes**, and an expiry if you like. Those cover the client’s sandbox operations; [Daytona’s API-key documentation](https://www.daytona.io/docs/api-keys) explains that sandbox reads/toolbox access are also granted. These permissions are not a per-sandbox restriction on a stolen key. Paste it in **Settings › Box providers › Daytona › Daytona API key**, where **Test** lists this install's sandboxes with it, or set `DAYTONA_API_KEY` in Box Yard's environment. The provider uses this key on the server and does not deliberately send it to sandbox tasks. This is not isolation from local agents: they run as the server’s OS user, and the current local env filter does not remove `DAYTONA_API_KEY`.
 3. **Settings › Box providers › Daytona.** The defaults suit browser and WebGL game testing:
 
    | Setting | Default | What it does |
    | --- | --- | --- |
    | GPU types | RTX 4090, RTX 5090 | Daytona's `gpuType`s in order of preference; Daytona gives the first one it has free. **CPU only** instead makes sandboxes with no GPU |
    | GPUs per sandbox | 1 | Each one is billed |
-   | Spot GPUs | off | Cheaper, Tier 2 and up, and a spot GPU can be taken back at any moment, with the sandbox and its work. The workspace comes back from Box Yard's last archive |
+   | Spot GPUs | off | Preemptible; check current account eligibility and credits. A spot GPU can be taken back at any moment, with the sandbox and its work. The workspace comes back from Box Yard's last archive |
    | GPU sandbox image | RunPod's | Empty: the image built in Settings › Box providers › GPU clouds › RunPod GPU, else RunPod's stock CUDA image |
    | CPU sandbox image | `ubuntu:24.04` | What CPU-only sandboxes start from |
    | GPU sandbox vCPUs / memory / disk | 8 / 32 GB / 60 GB | A project's own Min vCPUs and Min RAM replace the first two |
-   | CPU sandbox vCPUs / memory / disk | 4 / 8 GB / 10 GB | Daytona's default per-sandbox limit |
+   | CPU sandbox vCPUs / memory / disk | 4 / 8 GB / 10 GB | Box Yard’s default CPU request; account limits still apply |
    | Delete when idle | 10 min | Time with no task working or waiting before a sandbox is deleted |
    | Tasks running at once per sandbox | 3 | Unless the project sets its own |
    | Max per project | $3/hr | Most one project's sandboxes may cost together, unless the project sets its own GPU cap |
@@ -81,7 +81,7 @@ CPU sandboxes come out of the organization's pooled tier limits (Tier 1: 10 vCPU
   - **Keep warm** (1h/4h in Settings › Box providers › Daytona) holds one up for follow-ups; it also lengthens Daytona's auto-stop to match.
   - **Terminate** ends one now.
   - `delete_box` and `delete_idle_boxes` do the same safety checks as for RunPod pods: no running agent, every workspace archived first.
-- **Dead-man switch.** Daytona's auto-stop deletes a sandbox that hears nothing for Settings' Auto-stop time. Box Yard touches each running sandbox every 5 minutes, and a running turn's long toolbox call counts as contact too. So the auto-stop only fires when the computer running Box Yard sleeps or quits. Nothing in the sandbox holds a key.
+- **Dead-man switch.** Daytona's auto-stop deletes a sandbox that hears nothing for Settings' Auto-stop time. Box Yard touches each running sandbox every 5 minutes, and a running turn's long toolbox call counts as contact too. So the auto-stop only fires when the computer running Box Yard sleeps or quits. This watchdog needs no Daytona API key inside the sandbox; task/model credentials still reach the task normally.
 - **Previews.** Each port gets its own signed URL.
   - It opens only that port and lapses after a day; Box Yard signs a new one an hour before then.
   - Box Yard never uses Daytona's plain preview token, which opens every port and the sandbox's toolbox and can't be revoked.
@@ -91,7 +91,7 @@ CPU sandboxes come out of the organization's pooled tier limits (Tier 1: 10 vCPU
 ## Spend
 
 - **Caps.** Max per project and Max for all sandboxes are checked before every start. A project's own GPU cap (Project › Settings › Boxes) replaces Max per project. Only GPU types that fit under the room left are asked for.
-- **Estimates.** Daytona doesn't price a sandbox, so Box Yard counts each one at its worst. That is its dearest requested GPU type times its GPUs, plus its vCPUs, memory and disk at the CPU rates. The pricing page doesn't say whether a GPU's price includes the machine around it, so the estimate may be high, never low.
+- **Estimates.** Daytona doesn't price a sandbox, so Box Yard counts each one at its worst. That is its dearest requested GPU type times its GPUs, plus its vCPUs, memory and disk at the CPU rates. The pricing page doesn't say whether a GPU's price includes the machine around it, so the estimate can differ from the bill. It is not a guaranteed upper bound if provider prices or billing rules change.
 - **Daily cloud limit.** Unlike RunPod and Vast.ai, Daytona's sandboxes count toward **Settings › Usage › Daily cloud limit** and its other cloud limits.
   - Box Yard meters each running sandbox's estimate into the box usage every minute.
   - While a limit is reached, no new sandbox starts: the task waits with a **Raise the cloud limit** fix.
@@ -106,7 +106,7 @@ CPU sandboxes come out of the organization's pooled tier limits (Tier 1: 10 vCPU
   - sign one port's preview URL;
   - run commands and move files in a sandbox.
 - It never calls Daytona's account-wide endpoints: API keys, organizations, regions, runners, registries, secrets, warm pools, webhooks, users, or SSH access.
-- The key is a credential (Settings › Box providers › Daytona, `DAYTONA_API_KEY`). It's read on the server only. It isn't in any prompt, image, Dockerfile or sandbox env, and the error messages carry only the API path, never the host or key.
+- The key is a credential (Settings › Box providers › Daytona, `DAYTONA_API_KEY`). The provider reads it on the server and does not add it to prompts, images, Dockerfiles or sandbox env. Its errors report the API path without the host or key. Local agents remain unsandboxed and can inherit server env or read its files; these provider-delivery rules are not a host credential boundary.
 
 ## Not done yet
 
@@ -136,7 +136,7 @@ The unit tests use a fake Daytona. These come from Daytona's docs and haven't be
 - a two-minute command and a detached process;
 - the signed preview URL, and the auto-stop.
 
-It spends money: about ten minutes of a GPU sandbox, roughly $0.50. `--cpu` tries a CPU-only sandbox instead. `--keep` leaves the sandbox up, and Daytona's auto-stop deletes it 20 minutes after the last contact. `SMOKE_IMAGE=<your image>` tries a built image.
+It spends money; duration and cost depend on current rates, stock and build time. Run only with the owner’s approval. `--cpu` tries a CPU-only sandbox instead. `--keep` leaves the sandbox up, and Daytona's auto-stop deletes it 20 minutes after the last contact. `SMOKE_IMAGE=<your image>` tries a built image.
 
 The tests (`test/daytona.test.ts`, `test/daytona-pods.e2e.test.ts`) never call Daytona.
 
