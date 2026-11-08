@@ -1,0 +1,340 @@
+{
+  "phase": "after",
+  "results": [
+    {
+      "mode": "normal",
+      "first": [
+        {
+          "animation": "pulse",
+          "opacity": 0.980909,
+          "dot": "none"
+        },
+        {
+          "animation": "pulse",
+          "opacity": 0.980909,
+          "dot": "none"
+        },
+        {
+          "animation": "pulse",
+          "opacity": 0.980909,
+          "dot": "none"
+        },
+        {
+          "animation": "pulse",
+          "opacity": 0.992607,
+          "dot": "none"
+        }
+      ],
+      "second": [
+        {
+          "animation": "pulse",
+          "opacity": 0.550791,
+          "dot": "none"
+        },
+        {
+          "animation": "pulse",
+          "opacity": 0.550791,
+          "dot": "none"
+        },
+        {
+          "animation": "pulse",
+          "opacity": 0.550791,
+          "dot": "none"
+        },
+        {
+          "animation": "pulse",
+          "opacity": 0.576914,
+          "dot": "none"
+        }
+      ],
+      "titles": [
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Update the example docs",
+          "color": "oklch(0.871 0.006 286.286)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Build the example app",
+          "color": "oklch(0.985 0 none)",
+          "parentColor": "oklch(0.985 0 none)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Review dependencies",
+          "color": "oklch(0.871 0.006 286.286)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Update the example docs",
+          "color": "oklch(0.871 0.006 286.286)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Review dependencies",
+          "color": "rgb(252, 211, 77)",
+          "parentColor": "rgb(252, 211, 77)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "rgb(252, 211, 77)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        }
+      ]
+    },
+    {
+      "mode": "reduced",
+      "icons": [
+        {
+          "animation": "none",
+          "opacity": 1,
+          "dot": "block"
+        },
+        {
+          "animation": "none",
+          "opacity": 1,
+          "dot": "block"
+        },
+        {
+          "animation": "none",
+          "opacity": 1,
+          "dot": "block"
+        },
+        {
+          "animation": "none",
+          "opacity": 1,
+          "dot": "block"
+        }
+      ],
+      "titles": [
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Update the example docs",
+          "color": "oklch(0.871 0.006 286.286)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Build the example app",
+          "color": "oklch(0.985 0 none)",
+          "parentColor": "oklch(0.985 0 none)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Review dependencies",
+          "color": "oklch(0.871 0.006 286.286)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Update the example docs",
+          "color": "oklch(0.871 0.006 286.286)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Review dependencies",
+          "color": "rgb(252, 211, 77)",
+          "parentColor": "rgb(252, 211, 77)",
+          "animation": "none",
+          "background": "none",
+          "failed": false
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "rgb(252, 211, 77)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        }
+      ]
+    },
+    {
+      "theme": "light",
+      "failedTitles": [
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.577 0.245 27.325)",
+          "parentColor": "oklab(0.871 0.00168259 -0.00575924)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.577 0.245 27.325)",
+          "parentColor": "oklab(0.871 0.00168259 -0.00575924)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.577 0.245 27.325)",
+          "parentColor": "rgb(133, 77, 14)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        }
+      ]
+    },
+    {
+      "theme": "dark",
+      "failedTitles": [
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "oklch(0.871 0.006 286.286)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        },
+        {
+          "text": "Fix the example build",
+          "color": "oklch(0.704 0.191 22.216)",
+          "parentColor": "rgb(252, 211, 77)",
+          "animation": "none",
+          "background": "none",
+          "failed": true
+        }
+      ]
+    },
+    {
+      "width": 320,
+      "zoom": 1,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 320,
+      "zoom": 1.25,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 400,
+      "zoom": 1,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 400,
+      "zoom": 1.25,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 560,
+      "zoom": 1,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 560,
+      "zoom": 1.25,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 800,
+      "zoom": 1,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    },
+    {
+      "width": 800,
+      "zoom": 1.25,
+      "layout": {
+        "overflow": 0,
+        "inline": true,
+        "done": true
+      }
+    }
+  ],
+  "errors": []
+}
