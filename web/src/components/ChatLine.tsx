@@ -523,7 +523,7 @@ function ChatLineBody({
   }
   if (m.role === "user") {
     const bubble = (
-      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE, m.meta?.pending ? "opacity-70" : "")}>
+      <div className={cx(MESSAGE_BLOCK, USER_BUBBLE)} aria-busy={m.meta?.pending === true || undefined}>
         {m.content}
         <AttachmentList files={m.meta?.attachments} />
         <PickChips meta={m.meta} />
