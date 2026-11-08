@@ -354,7 +354,7 @@ function SwitcherMenu({
               onBlur={() => setInFilter(false)}
               onKeyDown={onFilterKeyDown}
               // 16px on phones, so iOS doesn't zoom in.
-              className="h-8 w-full rounded-md border border-zinc-800 bg-zinc-900/60 pr-2 pl-7 text-base text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-700 focus:outline-none sm:text-sm pointer-coarse:h-11"
+              className="h-8 w-full rounded-md border border-control bg-zinc-900/60 pr-2 pl-7 text-base text-zinc-100 placeholder:text-zinc-500 focus:border-yard-500 focus:outline-none sm:text-sm pointer-coarse:h-11"
             />
           </div>
         </div>
