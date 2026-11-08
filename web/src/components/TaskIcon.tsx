@@ -220,8 +220,8 @@ export function CueDot({ cue }: { cue: IconCue }) {
 /**
  * A task's tile that says its state (the sidebar's rows, a task's header): its glyph pulses while
  * the task works (WORKING_PULSE) and it wears a still CueDot. Drawn from the task itself, so it
- * shows before the tile store has it. `label`: its state in words, which a screen reader reads as the icon's name;
- * without it the icon is decorative. `muted`: a resting row's neutral tile.
+ * shows before the tile store has it. `label` overrides the active cue's accessible name/tooltip; a resting icon
+ * without a label is decorative. `muted`: a resting row's neutral tile.
  */
 export const TaskStatusIcon = memo(function TaskStatusIcon({ task, size = "md", muted = false, label, className }: {
   task: Pick<Task, "id" | "title" | "icon" | "projectId" | "status">

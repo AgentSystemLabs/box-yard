@@ -207,7 +207,7 @@ function SwitcherMenu({
   const [, navigate] = useLocation()
   const projects = useProjects().data
   const coordinator = useCoordinatorStatus()
-  // Captains' busy flags as the live stream left them in the cache: never fetched here, so a Captain nobody has
+  // Captains' states as the live stream left them in the cache: never fetched here, so a Captain nobody has
   // opened since the page loaded just has no dot.
   const captains = useQueries({
     queries: (projects ?? []).map((p) => ({
@@ -405,4 +405,3 @@ function SwitcherItem({ menuId, item, current, active, onPick }: { menuId: strin
     </button>
   )
 }
-
