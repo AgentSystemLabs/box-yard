@@ -689,7 +689,7 @@ describe("PR numbers below a task title in the project tree", () => {
     expect(row(audit).querySelector("a")!.getAttribute("href")).toBe(audit.prUrl)
     expect(row(audit).querySelector("[data-task-row-title]")!.textContent).toBe(audit.title)
     expect(row(audit).querySelector(".task-title-working")).toBeNull()
-    expect(row(audit).querySelector<HTMLElement>('[data-testid="task-status-icon"]')!.className).toContain("motion-safe:animate-pulse")
+    expect(row(audit).querySelector<HTMLElement>('[data-testid="task-status-icon"] svg')!.getAttribute("class")!).toContain("motion-safe:animate-pulse")
     expect(itemName(row(audit))).not.toContain("working")
     const link = row(child).querySelector<HTMLAnchorElement>("a")!
     expect(link).not.toBeNull()

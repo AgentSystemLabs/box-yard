@@ -149,7 +149,7 @@ const buttons = (controls: HTMLElement) => [...controls.querySelectorAll("button
 const panelIds = () => [params().get("session") ?? (params().get("captain") ? chatRef(params().get("captain")) : null), ...(params().get("stack")?.split(",") ?? [])].filter(Boolean)
 /** The crumbs in the header of the panel showing `ref`, by their labels. */
 const crumbs = (ref: string) => [...column(ref).querySelectorAll<HTMLButtonElement>("[data-testid=task-crumbs] button")]
-const crumb = (ref: string, label: string) => crumbs(ref).find((b) => b.getAttribute("aria-label") === label)!
+const crumb = (ref: string, label: string) => crumbs(ref).find((b) => b.getAttribute("aria-label") === label || b.getAttribute("aria-label")?.startsWith(`${label}, `))!
 
 beforeEach(() => {
   localStorage.clear()
@@ -372,7 +372,7 @@ describe("Columns, rule 2: a sub-task opens alone, and its crumbs lead up", () =
     await settle()
     expect(panelIds()).toEqual([RATER.id])
     // No Coordinator crumb on a desktop: the sidebar has it (#376).
-    expect(crumbs(RATER.id).map((b) => b.getAttribute("aria-label"))).toEqual(["box-yard Captain", LOGO.title, `Up to ${DESIGNER.title}`])
+    expect(crumbs(RATER.id).map((b) => b.getAttribute("aria-label"))).toEqual(["box-yard Captain", `${LOGO.title}, Working`, `Up to ${DESIGNER.title}, Working`])
     for (const b of crumbs(RATER.id)) expect(b.className).toContain("h-11")
 
     await click(crumb(RATER.id, `Up to ${DESIGNER.title}`))
@@ -607,7 +607,7 @@ describe("Columns, rules 5 and 6: strips only with the sidebar folded, for the l
     for (const b of railItems(logo)) expect(b.className).toContain("h-11 w-11")
     // Each item is the task's own tile saying its state: pulsing while it works, a still dot when it asks.
     const tile = (b: HTMLElement) => b.querySelector<HTMLElement>("[data-testid=task-status-icon]")!
-    expect(tile(railItems(logo)[0]!).className).toContain("motion-safe:animate-pulse")
+    expect(tile(railItems(logo)[0]!).querySelector("svg")!.getAttribute("class")!).toContain("motion-safe:animate-pulse")
     expect(tile(railItems(logo)[1]!).className).not.toContain("animate-pulse")
     expect(tile(railItems(logo)[1]!).querySelector("[data-cue]")!.getAttribute("data-cue")).toBe("asks")
     expect(railItems(levelStrip(DESIGNER.id)).map((b) => b.dataset.task)).toEqual([RATER.id])

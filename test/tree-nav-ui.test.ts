@@ -93,11 +93,29 @@ function render(path = APP_HOME) {
   for (const t of [PANS, FRENCH, AMERICAN]) qc.setQueryData(keys.taskMessages(t.id), [{ id: `tm_${t.id}`, role: "assistant", content: `Notes on ${t.title}`, meta: null, createdAt: now }])
   for (const k of [keys.artifacts, keys.schedules, keys.boxes, keys.notifications, keys.scheduleRuns]) qc.setQueryData(k, [])
   act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(App))))
+  return qc
 }
 
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)))
 const panel = (t: Task) => document.querySelector<HTMLElement>(`[data-testid=column][data-view='session:${t.id}']`)!
+
+it("keeps manager and ancestor task status live in a narrow task's breadcrumbs", async () => {
+  viewport(400)
+  const qc = render(taskSessionHref(FRENCH.id))
+  await act(async () => {
+    qc.setQueryData(keys.captain(YARD.id), { busy: true, compacting: false, error: "Run failed", usage: { tokens: 0, window: null, updatedAt: null } })
+    qc.setQueryData(keys.orchestrator, { busy: false, compacting: true, error: null, usage: { tokens: 0, window: null, updatedAt: null } })
+    qc.setQueryData(keys.tasks, TASKS.map((t) => t.id === CLASSIC.id ? { ...t, status: "needs_input" } : t))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  })
+  const crumbs = panel(FRENCH).querySelector('[data-testid="task-crumbs"]')!
+  expect(crumbs.querySelector('[data-testid="captain-crumb"] [data-cue="failed"]')).not.toBeNull()
+  expect(crumbs.querySelector('[data-testid="captain-crumb"] [title="Error"]')!.getAttribute("aria-label")).toBe("Error")
+  expect(crumbs.querySelector('[data-cue="working"]')).not.toBeNull()
+  expect(crumbs.querySelector('[data-status="needs_input"] [data-cue="asks"]')).not.toBeNull()
+  expect(crumbs.querySelector('[data-status="waiting"] [data-cue]')).toBeNull()
+})
 const header = (t: Task) => panel(t).querySelector<HTMLElement>("[data-testid=task-header]")!
 const crumbs = (t: Task) => [...header(t).querySelectorAll<HTMLButtonElement>("[data-testid=task-crumbs] button")]
 const crumb = (t: Task, label: string) => crumbs(t).find((b) => b.getAttribute("aria-label") === label)!
@@ -280,7 +298,7 @@ describe("a chat's header on a phone", () => {
     expect(head.querySelector("[data-testid=chat-switcher]")).toBeNull()
     expect(head.querySelector("h1")!.textContent).toBe("box-yard Captain")
     expect(head.querySelector("button[aria-label='Search tasks']")).not.toBeNull()
-    const bot = head.querySelector("[data-testid=agent-icon]")!
+    const bot = head.querySelector("[data-testid=agent-icon][data-captain-icon]")!
     expect(bot.getAttribute("class")).toContain("text-(--pc)")
     expect((bot.parentElement as HTMLElement).style.getPropertyValue("--pc")).not.toBe("")
   })

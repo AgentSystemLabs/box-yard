@@ -2,7 +2,7 @@
 // dot, and a project's own icon (shared/projectIcons.ts) where it has one. The same tile marks a task in a chat link,
 // an update chip, a "from:" line and the project bar, so a task reads the same wherever it shows up. In the sidebar and
 // a task's header the tile also says the task's state (TaskStatusIcon): it pulses while the task works, and a still
-// dot in its corner says it asks Cody or failed.
+// dot in its corner says it is working, asks Cody or failed.
 import { memo, useState, type CSSProperties, type ReactNode } from "react"
 import {
   Anchor,
@@ -72,7 +72,7 @@ import {
 import { useProjectColor, useProjectIcon, useTaskTile } from "../lib/taskTiles"
 import { PROJECT_COLOR_HEX, type ProjectColor } from "../../../shared/projectColors"
 import { taskIcon, type TaskIconName } from "../../../shared/taskIcons"
-import type { Task, TaskStatus } from "../../../shared/types"
+import type { CaptainState, Task, TaskStatus } from "../../../shared/types"
 
 // Not ui.tsx's cx: ui.tsx draws task links with TaskTile, so importing it here would be a cycle.
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ")
@@ -179,8 +179,9 @@ export const TaskTile = memo(function TaskTile({ id, size = "sm", bare = false, 
   )
 })
 
-/** What an icon says about its state: it pulses while at work; asking Cody or failed, a still dot in its corner. */
+/** A still corner dot, with the working icon's pulse as an additional cue. */
 export type IconCue = "working" | "asks" | "failed" | null
+type ManagerIconState = Partial<Pick<CaptainState, "busy" | "compacting" | "error">> | null | undefined
 
 export function iconCue(status: TaskStatus): IconCue {
   if (status === "working" || status === "starting") return "working"
@@ -189,21 +190,32 @@ export function iconCue(status: TaskStatus): IconCue {
   return null
 }
 
+/** Managers have no needs-input state. Never infer one from their tasks, queued work or chat text. */
+export function agentIconCue(state: ManagerIconState): IconCue {
+  if (state?.error) return "failed"
+  if (state?.busy || state?.compacting) return "working"
+  return null
+}
+
+export function agentIconLabel(state: ManagerIconState): string | undefined {
+  return state?.error ? "Error" : state?.compacting ? "Compacting…" : state?.busy ? "Working…" : undefined
+}
+
 /**
  * The one animation (Cody's): an icon at work (a task's, a Captain's, the Coordinator's) fades gently out and back,
- * Tailwind's pulse, every 2s. Never under prefers-reduced-motion, where CueDot's still sky dot says it instead.
+ * Tailwind's pulse, every 2s. Never under prefers-reduced-motion. CueDot stays still and opaque in either mode.
  */
 export const WORKING_PULSE = "motion-safe:animate-pulse"
 
 const CUE_DOT: Record<NonNullable<IconCue>, string> = {
   asks: "bg-amber-400",
   failed: "bg-red-500",
-  working: "hidden bg-sky-400 motion-reduce:block",
+  working: "bg-sky-400",
 }
 
 /**
  * The still dot at an icon's bottom right corner (its box is `relative`): amber when it asks Cody, red when it failed
- * (or a Captain's turn errored), and sky while it works only under prefers-reduced-motion, which stops the pulse.
+ * (or a manager errored), and sky while it works. The themed surface ring separates it from any project icon/image.
  */
 export function CueDot({ cue }: { cue: IconCue }) {
   if (!cue) return null
@@ -211,10 +223,10 @@ export function CueDot({ cue }: { cue: IconCue }) {
 }
 
 /**
- * A task's tile that says its state, in place of a status dot (the sidebar's rows, a task's header): it pulses while
- * the task works (WORKING_PULSE) and wears a still CueDot when it asks Cody or failed. Drawn from the task itself, so it
- * shows before the tile store has it. `label`: its state in words, which a screen reader reads as the icon's name;
- * without it the icon is decorative. `muted`: a resting row's neutral tile.
+ * A task's tile that says its state (the sidebar's rows, a task's header): its glyph pulses while
+ * the task works (WORKING_PULSE) and it wears a still CueDot. Drawn from the task itself, so it
+ * shows before the tile store has it. `label` overrides the active cue's accessible name/tooltip; a resting icon
+ * without a label is decorative. `muted`: a resting row's neutral tile.
  */
 export const TaskStatusIcon = memo(function TaskStatusIcon({ task, size = "md", muted = false, label, className }: {
   task: Pick<Task, "id" | "title" | "icon" | "projectId" | "status">
@@ -227,18 +239,20 @@ export const TaskStatusIcon = memo(function TaskStatusIcon({ task, size = "md", 
   const icon = taskIcon(task)
   const Icon = TASK_ICON_COMPONENTS[icon]
   const cue = iconCue(task.status)
+  const stateLabel = label ?? (cue === "working" ? "Working" : cue === "asks" ? "Needs you" : cue === "failed" ? "Failed" : undefined)
   return (
     <span
-      role={label ? "img" : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
+      role={stateLabel ? "img" : undefined}
+      aria-label={stateLabel}
+      aria-hidden={stateLabel ? undefined : true}
+      title={stateLabel}
       data-testid="task-status-icon"
       data-status={task.status}
       data-icon={icon}
       style={muted || !color ? MUTED : projectColorStyle(color)}
-      className={cx("relative inline-grid shrink-0 place-items-center bg-(--pc)/15 text-(--pc)", TILE_SIZE[size], cue === "working" && WORKING_PULSE, className)}
+      className={cx("relative inline-grid shrink-0 place-items-center bg-(--pc)/15 text-(--pc)", TILE_SIZE[size], className)}
     >
-      <Icon aria-hidden />
+      <Icon aria-hidden className={cue === "working" ? WORKING_PULSE : undefined} />
       <CueDot cue={cue} />
     </span>
   )
