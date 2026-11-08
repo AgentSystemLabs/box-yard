@@ -10,13 +10,13 @@ const CRATE_Y = [
   { d: "M730 0 730 730 442 730 442 451 478 451 681.5 0Z", fill: "#b45309" },
 ]
 
-/** The crate Y, drawn in the text it sits in: as tall as a capital (0.73em in Sora) and on its baseline. */
+/** The crate Y sits on the text's baseline, with a 10% optical enlargement around its center to balance the letters. */
 function CrateY() {
   return (
     <svg
       viewBox="0 0 730 730"
       aria-hidden
-      className="mx-[0.04em] inline-block h-[0.73em] w-[0.73em] align-baseline [clip-path:inset(0_round_27.34%)]"
+      className="mx-[0.04em] inline-block h-[0.73em] w-[0.73em] scale-110 align-baseline [clip-path:inset(0_round_27.34%)]"
     >
       {CRATE_Y.map((piece) => (
         <path key={piece.fill} d={piece.d} fill={piece.fill} />
