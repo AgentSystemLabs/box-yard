@@ -204,12 +204,7 @@ export function IdentitiesPanel({ fid }: { fid: (k: string) => string }) {
   const [news, setNews] = useDraft<NewIdentity[]>("identities-new", "identities", NO_NEW, async (list) => {
     for (const n of list) {
       const name = n.edit.name?.trim() ?? ""
-      let made: Identity
-      try {
-        made = await identityApi.create({ ...fieldsOf(n.edit), name })
-      } catch (err) {
-        failNew(n, err)
-      }
+      const made = await identityApi.create({ ...fieldsOf(n.edit), name }).catch((err: unknown) => failNew(n, err))
       try {
         const { name: _n, color: _c, owners: _o, author: _a, runners: _r, coordinatorSees: _s, ...secrets } = n.edit
         await writeEdit(made.id, secrets, () => {})
