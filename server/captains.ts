@@ -1242,6 +1242,8 @@ class Captain {
    * `upward` for a turn answering messages.
    */
   private async runPrompt(body: string, auto = false, ask: RunAsk = {}, upward?: (reply: TurnReply) => void): Promise<RunResult> {
+    this.lastError = null
+    this.publishState()
     let relayed = false
     const relay = (reply: TurnReply) => {
       if (relayed) return
@@ -1287,6 +1289,8 @@ class Captain {
     if (result.ok) this.store.setKv(notesSeenKey(this.project.id), now.notesHash)
     if (result.ok && recapFile) this.store.setKv(recapKey(this.project.id), null)
     this.stopping = false
+    this.lastError = !result.ok && !result.stopped ? result.error : null
+    this.publishState()
     if (result.ok && stoppedNote) this.store.setKv(stoppedKey(this.project.id), null)
     if (result.stopped) {
       this.store.setKv(stoppedKey(this.project.id), "1")
