@@ -106,6 +106,7 @@ export const DEFAULT_SETTINGS: Settings = {
   agentCodexModel: DEFAULT_CODEX_MODEL,
   agentCodexEffort: DEFAULT_CODEX_EFFORT,
   agentCursorModel: DEFAULT_CURSOR_MODEL,
+  agentOpencodeModel: "",
   agentEffort: DEFAULT_EFFORT,
   agentRoutingConfig: "",
   // Off means the CLI's own default (compact near the model's window) applies.
@@ -268,6 +269,7 @@ export const settingsPatch = z
     agentCli: z.enum(AGENT_CLIS).describe('The CLI new tasks run on unless their project or the task picks one: "claude", "codex" or "cursor"'),
     agentModel: model,
     agentCodexModel: codexModelSetting,
+    agentOpencodeModel: z.string().trim().refine((v) => !v || /^[a-zA-Z0-9_.-]+\/[^\s#]+(?:#[^\s#]+)?$/.test(v), "Use provider/model or provider/model#variant").describe("OpenCode provider/model, optionally #variant; empty uses its configured default"),
     agentCursorModel: z
       .union([z.literal(""), model])
       .describe('Box agents\' model on Cursor: an id from `cursor-agent models` (its effort is part of it, e.g. claude-opus-5-5-high, gpt-5.6-sol-high, composer-2.5), default "auto"; "" is the CLI\'s own default'),

@@ -48,8 +48,8 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   {
     key: "agents",
     label: "Box agents",
-    description: "Defaults for the agents (Claude Code, Codex or Cursor) that work on tasks inside boxes.",
-    fields: ["ownerName", "agentCli", "agentModel", "agentCodexModel", "agentCursorModel", "agentCodexEffort", "agentEffort", "agentRoutingConfig", "agentAutoCompact", "subtaskMaxDepth", "subtaskMaxChildren"],
+    description: "Defaults for the agents (Claude Code, Codex, Cursor or OpenCode) that work on tasks inside boxes.",
+    fields: ["ownerName", "agentCli", "agentModel", "agentCodexModel", "agentCursorModel", "agentOpencodeModel", "agentCodexEffort", "agentEffort", "agentRoutingConfig", "agentAutoCompact", "subtaskMaxDepth", "subtaskMaxChildren"],
   },
   {
     key: "runners",

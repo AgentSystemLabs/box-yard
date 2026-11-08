@@ -225,6 +225,7 @@ export const HARNESS_MODELS: Record<AgentCli, string> = {
   claude: "opus · sonnet · haiku",
   codex: CODEX_MODEL_SUGGESTIONS.slice(0, 2).join(" · "),
   cursor: "auto · composer · any lab's",
+  opencode: "provider/model · optional #variant",
 }
 
 /** The "!" list: Claude Code, Codex and Cursor, each only where it can run the message's tasks. */
@@ -395,7 +396,7 @@ export interface MessagePicks {
 }
 
 // "use Codex", "with cursor", "run it on Claude Code": words that ask for a harness by name.
-const HARNESS_WORDS = /\b(?:use|using|with|via|on|(?:run|runs|running)(?:\s+(?:it|them))?|switch(?:ed)?\s+to)\s+(?:the\s+)?(claude|codex|cursor)\b/gi
+const HARNESS_WORDS = /\b(?:use|using|with|via|on|(?:run|runs|running)(?:\s+(?:it|them))?|switch(?:ed)?\s+to)\s+(?:the\s+)?(claude|codex|cursor|opencode)\b/gi
 // A model id with a version in it ("gpt-6.1-sol", "claude-opus-5-5", "o3"): it names the CLI that runs it.
 const MODEL_WORD = /(?<![\w.-])[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*(?![\w-])/gi
 
