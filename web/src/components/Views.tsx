@@ -24,7 +24,7 @@ export function HealthBanner() {
           set up
         </button>
       )}
-      <button className="-my-3 grid min-h-11 place-items-center rounded-lg px-2 text-amber-400/70 hover:text-amber-200 sm:-my-1 sm:min-h-0" onClick={() => setHidden(true)}>
+      <button className="-my-3 grid min-h-11 place-items-center rounded-lg px-2 text-amber-400 hover:text-amber-200 sm:-my-1 sm:min-h-0" onClick={() => setHidden(true)}>
         dismiss
       </button>
     </div>
