@@ -150,7 +150,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
     - `"this_computer"`: always the computer running Box Yard;
     - `"box"`, `"gpu"` or `"docker"`.
   - `machine_label`: used with `runs_on: "ssh"`, or alone.
-- **Projects.** `update_project {machine_label}` changes which machines a project already on SSH machines uses. Moving a project onto SSH machines is Cody's choice, in its Settings. `pool_status` lists the machines under `ssh_machines`.
+- **Projects.** `update_project {machine_label}` changes which machines a project already on SSH machines uses. Moving a project onto SSH machines is the owner’s choice, in its Settings. `pool_status` lists the machines under `ssh_machines`.
 
 `machine` takes a machine's id or name. A machine is in `machine_label` and `runs_on` by its labels or its name.
 

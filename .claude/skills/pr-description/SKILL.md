@@ -115,7 +115,7 @@ beats a new shape — the archive is easier to read when the PRs rhyme.
 For web UI changes, run the app or an existing preview and capture the screen after the change. A
 before shot from `origin/main` is useful only when the template asks for a pair. In Cursor Cloud,
 prefer walkthrough artifacts and reference the artifact path in the PR body; the PR tool uploads it.
-In Box Yard, `publish_artifact` the PNG for Cody, then put it on the public repository’s orphan
+In Box Yard, `publish_artifact` the PNG for the owner, then put it on the public repository’s orphan
 `pr-assets` branch under `<task_id>/`. Fast-forward only; never force-push or touch `boxyard-assets`.
 Link its `blob/pr-assets/…?raw=true` URL in the body. Include no private project names, credentials
 or personal data in screenshots. Remove any “Opened by a Box Yard agent” footer.
