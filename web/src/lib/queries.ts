@@ -595,6 +595,13 @@ export const useChatBusy = () =>
     staleTime: Infinity,
   })
 
+/** The health/SSE busy flag updates before the full Coordinator state during a turn's start/stop. */
+export function useCoordinatorStatus() {
+  const busy = useChatBusy().data
+  const state = useOrchestratorState().data
+  return { busy: busy ?? state?.busy ?? false, compacting: state?.compacting ?? false, error: state?.error ?? null }
+}
+
 // ------------------------------------------------------------------ mutations
 
 const fail = (title: string) => (err: Error) => toast.error(title, err.message)

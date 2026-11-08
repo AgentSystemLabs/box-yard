@@ -28,9 +28,9 @@ import {
 import { RepoContext, repoScopeKey, resolveRepoScope, useRepoScopeKey } from "../lib/repoScope"
 import { liveMarkdown, type LiveMarkdown, type RenderMarkdown } from "../lib/liveMarkdown"
 import { FileLink, PREVIEW_GROUP, galleryFor } from "./FileLink"
-import { CueDot, TaskTile, WORKING_PULSE, projectColorStyle } from "./TaskIcon"
+import { CueDot, TaskTile, WORKING_PULSE, agentIconCue, projectColorStyle } from "./TaskIcon"
 import { Helm } from "./ShipIcons"
-import { CaptainIcon } from "./CaptainIcon"
+import { CaptainIcon, CaptainTile } from "./CaptainIcon"
 import { clickImage, imageTarget, openLightbox } from "../lib/lightbox"
 import { openPreview } from "../lib/preview"
 import { previewKind } from "../lib/filePreview"
@@ -81,33 +81,43 @@ export function LineIcon({ icon: Icon, className, box, label }: { icon: LucideIc
  * The icon at the top left of the Coordinator's chat (its helm, in the yard's yellow) and a Captain's (its icon, the
  * cap unless its project or Settings picks another, in its project's colour, as everywhere a Captain shows), as in
  * their boxes (ChatIcons.tsx, CaptainIcon.tsx). It is the header's status: while the agent works (or a Captain
- * compacts) it pulses gently (WORKING_PULSE; under prefers-reduced-motion a still sky dot instead), and a Captain whose
- * last turn errored wears a still red dot. The tooltip says it in words, and screen readers hear it through the live
- * region.
+ * compacts) it pulses gently (WORKING_PULSE), with a still sky dot in either motion mode. An error takes precedence
+ * over working for the dot; the glyph keeps pulsing if still busy. Tooltips and screen readers say the state too.
  */
-export function AgentIcon({ busy, compacting = false, error = false, kind = "captain", color, projectId }: {
+export function AgentIcon({ busy, compacting = false, error = false, kind = "captain", color, projectId, tile = false, announce = true }: {
   busy: boolean
   compacting?: boolean
   error?: boolean
   kind?: "coordinator" | "captain"
   color?: ProjectColor | null
   projectId?: string | null
+  /** Sidebar/rail tile instead of a bare header/menu glyph; images retain their own shape. */
+  tile?: boolean
+  /** Headers announce transitions; repeated navigation icons expose an accessible name instead. */
+  announce?: boolean
 }) {
   const tint = kind === "coordinator" ? "text-yard-400" : color ? "text-(--pc)" : "text-zinc-300"
   const working = busy || compacting
+  const cue = agentIconCue({ busy, compacting, error: error ? "error" : null })
   const state = error ? "Error" : compacting ? "Compacting…" : busy ? "Working…" : undefined
   const className = cx("h-4 w-4", tint, working && WORKING_PULSE)
   return (
-    <span className="relative flex shrink-0" title={state} style={kind === "captain" ? projectColorStyle(color) : undefined}>
-      {kind === "captain" ? (
-        <CaptainIcon projectId={projectId} data-testid="agent-icon" data-busy={working || undefined} className={className} />
-      ) : (
-        <Helm data-testid="agent-icon" data-busy={working || undefined} className={className} aria-hidden />
-      )}
-      <CueDot cue={error ? "failed" : working ? "working" : null} />
-      <span className="sr-only" aria-live="polite">
+    <span data-testid="agent-status-icon" className="relative flex shrink-0" title={state} role={!announce && state ? "img" : undefined} aria-label={!announce ? state : undefined} style={kind === "captain" ? projectColorStyle(color) : undefined}>
+      {tile ? (
+        <span data-testid="agent-icon" data-busy={working || undefined} className={cx("grid h-5 w-5 place-items-center", working && WORKING_PULSE)}>
+          {kind === "captain" && projectId ? (
+            <CaptainTile projectId={projectId} className="h-5 w-5" glyph="h-3.5 w-3.5" />
+          ) : (
+            <span className="grid h-5 w-5 place-items-center rounded-md bg-yard-500/15 text-yard-400"><Helm className="h-3.5 w-3.5" aria-hidden /></span>
+          )}
+        </span>
+      ) : kind === "captain" ? (
+        <CaptainIcon projectId={projectId} data-testid="agent-icon" data-busy={working || undefined} data-color={color ?? undefined} className={className} rounded="rounded-[4px]" />
+      ) : <Helm data-testid="agent-icon" data-busy={working || undefined} className={className} aria-hidden />}
+      <CueDot cue={cue} />
+      {announce && <span className="sr-only" aria-live="polite">
         {state ?? ""}
-      </span>
+      </span>}
     </span>
   )
 }

@@ -141,18 +141,18 @@ describe("the sidebar", () => {
       // own among the tasks. Screen readers hear each status (the task's icon names it, after its title; a meta that is
       // the same word stays quiet), and that the Captain is working.
       "Hide box-yard tasks",
-      "box-yard, Captain, working",
+      "Working… box-yard, Captain",
       "box-yard project settings",
       "Pin box-yard",
       "Check SSH into the bench Needs you asks",
       "Three-pane layout Working",
     ])
-    // No status dots: each task leads with its own icon, which pulses while it works and has a still dot when it asks.
+    // Each task leads with its own icon and a still corner dot; only the working glyph pulses.
     const icons = [...yard.querySelectorAll<HTMLElement>('[data-testid="task-status-icon"]')]
     expect(icons.map((i) => [i.dataset.status, i.getAttribute("aria-label")])).toEqual([["needs_input", "Needs you"], ["working", "Working"]])
-    expect(icons[0]!.className).not.toContain("animate-pulse")
+    expect(icons[0]!.querySelector("svg")!.getAttribute("class")!).not.toContain("animate-pulse")
     expect(icons[0]!.querySelector("[data-cue]")!.getAttribute("data-cue")).toBe("asks")
-    expect(icons[1]!.className).toContain("motion-safe:animate-pulse")
+    expect(icons[1]!.querySelector("svg")!.getAttribute("class")!).toContain("motion-safe:animate-pulse")
     expect(section("box-yard")!.querySelector(".task-title-working")).toBeNull()
     expect(section("marketing-site")!.textContent).toContain("#19")
     expect(section("photo-tools")).toBeNull()
@@ -184,7 +184,7 @@ describe("the sidebar", () => {
     expect(current()).toBe("Coordinator")
     expect(section("box-yard")!.textContent).not.toContain("Three-pane layout")
     // Folded, the row says how many tasks it holds, with an amber dot because one asks.
-    expect(projectRow("box-yard").textContent).toBe("box-yard, Captain, working2 tasks, 1 asking you")
+    expect(projectRow("box-yard").textContent).toBe("box-yard, Captain2 tasks, 1 asking you")
     expect(projectRow("box-yard").querySelector(".bg-amber-400")).not.toBeNull()
     expect(JSON.parse(localStorage.getItem("box-yard:sidebar-folds")!)).toEqual({ [YARD.id]: true })
     click(fold)
@@ -194,7 +194,7 @@ describe("the sidebar", () => {
   it("exactly one row looks selected: an open task takes it; a pinned chat beside it gets only a mark, a hidden one none", () => {
     render()
     click(projectRow("box-yard"))
-    expect(selected()).toEqual([["page", "box-yard, Captain, working"]])
+    expect(selected()).toEqual([["page", "Working… box-yard, Captain"]])
     click(button(section("box-yard")!, "Three-pane layout"))
     expect(new URLSearchParams(location.search).get("session")).toBe(RUN.id)
     expect(selected()).toEqual([["page", "Three-pane layout Working"]])
@@ -262,7 +262,7 @@ describe("the sidebar", () => {
     expect(row.textContent).not.toContain("working")
     expect(row.querySelector("[data-task-row-title]")!.textContent).toBe(PR.title)
     expect(row.querySelector(".task-title-working")).toBeNull()
-    expect(row.querySelector<HTMLElement>('[data-testid="task-status-icon"]')!.className).toContain("motion-safe:animate-pulse")
+    expect(row.querySelector<HTMLElement>('[data-testid="task-status-icon"] svg')!.getAttribute("class")!).toContain("motion-safe:animate-pulse")
     expect(row.querySelector('[aria-label="Working"]')).not.toBeNull()
     expect(row.querySelector("a[data-pr-state]")!.getAttribute("href")).toBe(PR.prUrl)
   })
@@ -328,7 +328,7 @@ describe("the sidebar", () => {
     expect(title()).toBe("box-yard Captain")
     expect(new URLSearchParams(location.search).get("session")).toBeNull()
     expect(inline()!.dataset.rail).toBeUndefined()
-    expect(current()).toBe("box-yard, Captain, working")
+    expect(current()).toBe("box-yard, Captain")
   })
 
   it("the folded rail's Waiting on you shows its count and widens the sidebar on that section, unfolded and scrolled into view", () => {
@@ -554,7 +554,7 @@ describe("the Coordinator or a Captain picked in the sidebar takes the whole wid
     expect(panel(RUN)).toBeNull()
     expect(document.querySelector("[data-testid=side-thread]")).toBeNull()
     expect(title()).toBe("box-yard Captain")
-    expect(current()).toBe("box-yard, Captain, working")
+    expect(current()).toBe("box-yard, Captain")
     // A step in history of its own: Back brings the task back beside its Captain, and Forward closes it again.
     act(() => history.back())
     await settle()
@@ -759,7 +759,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
 
   it("a single click opens the Captain and leaves the rail folded; the tooltip says what a double click does", () => {
     folded()
-    expect(railIcon("box-yard").title).toBe("box-yard Captain, 1 asking (double-click to expand)")
+    expect(railIcon("box-yard").title).toBe("box-yard Captain (double-click to expand)")
     clickAt(railIcon("box-yard"), 1000)
     expect(title()).toBe("box-yard Captain")
     expect(inline()!.dataset.rail).toBe("true")
@@ -783,7 +783,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
     expect(inline()!.dataset.rail).toBeUndefined()
     expect(localStorage.getItem("box-yard:sidebar-collapsed")).toBe("false")
     expect(title()).toBe("box-yard Captain")
-    expect(current()).toBe("box-yard, Captain, working")
+    expect(current()).toBe("box-yard, Captain")
     expect(chevron("box-yard").getAttribute("aria-expanded")).toBe("true")
     expect(section("box-yard")!.textContent).toContain("Three-pane layout")
     // Scrolled just enough to show the whole group.

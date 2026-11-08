@@ -6,6 +6,7 @@ import {
   newClientId,
   useChat,
   useChatBusy,
+  useCoordinatorStatus,
   useChatTurnStop,
   useChatStream,
   useProjects,
@@ -76,6 +77,7 @@ function pickHere(chat: string) {
 export const ChatPanel = memo(function ChatPanel({ conversation }: { conversation?: ReactNode }) {
   const chat = useChat()
   const busy = useChatBusy()
+  const coordinatorStatus = useCoordinatorStatus()
   const send = useSendChat()
   const openSettings = useOpenSettings()
   // Settings › Usage: off by default, since not everyone uses boxes.
@@ -187,7 +189,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
           >
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {!sidebarInline && <SidebarMenuButton />}
-              <AgentIcon busy={talking} kind="coordinator" />
+              <AgentIcon {...coordinatorStatus} error={Boolean(coordinatorStatus.error)} kind="coordinator" />
               {/* The title takes what's left (flex-1 from 0), so it gives way before the cloud meter's text does. */}
               {/* The title opens the chat switcher: the Coordinator, then every project's Captain (on a phone the title is
                   plain text, and ☰ switches: ChatName). Too narrow for the word beside the three controls (under 280px:
