@@ -39,7 +39,7 @@ try {
       await section.scrollIntoViewIfNeeded()
       const state = await section.getAttribute('data-audit')
       await capture(state)
-      if (['controls','icons','markdown','folded-message'].includes(state)) await page.screenshot({path:path.join(output, `${theme}-${width}-${state}.png`)})
+      if ((['controls','markdown','folded-message'].includes(state) || state.startsWith('icons-'))) await page.screenshot({path:path.join(output, `${theme}-${width}-${state}.png`)})
     }
     if (!process.env.ONLY) {
     // Verify both hover and keyboard focus without submitting anything.
