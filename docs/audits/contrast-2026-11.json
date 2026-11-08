@@ -1,0 +1,955 @@
+{
+  "assessedOn": "2026-11-08",
+  "sourceHead": "7ded5dc",
+  "mainIncluded": "2e62e84 (#31)",
+  "browser": "Chromium 158.0.8127.18",
+  "playwright": "1.65.0",
+  "axe": "4.14.0",
+  "scope": "See contrast-2026-11.md. Counts are repeated observations, not unique elements. Manual records and axe incomplete are not automatic passes.",
+  "suites": {
+    "routes": {
+      "caseNames": [
+        "coordinator",
+        "captain",
+        "task",
+        "subtask",
+        "failed-task",
+        "asking-task",
+        "project-settings",
+        "schedules",
+        "schedule-detail",
+        "new-schedule",
+        "usage",
+        "settings-orchestrator",
+        "settings-projects",
+        "settings-agents",
+        "settings-runners",
+        "settings-local",
+        "settings-upstash",
+        "settings-credentials",
+        "settings-identities",
+        "settings-connectors",
+        "settings-docker",
+        "settings-daytona",
+        "settings-machines",
+        "settings-runpod",
+        "settings-vast",
+        "settings-hooks",
+        "settings-limits",
+        "settings-costs",
+        "settings-notifications",
+        "settings-voice",
+        "settings-appearance",
+        "settings-about"
+      ],
+      "widths": [
+        1440,
+        400
+      ],
+      "zoom": 1,
+      "touch": false,
+      "errors": [],
+      "byTheme": {
+        "light": {
+          "cases": 64,
+          "snapshots": 183,
+          "measurements": 7838,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 369,
+          "exemptObservations": 278,
+          "axeIncomplete": {
+            "pseudoContent": 14,
+            "shortTextContent": 20,
+            "bgImage": 154,
+            "elmPartiallyObscuring": 80
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 5452,
+              "minimum": 4.5,
+              "lowestRatio": 4.7340717087838415,
+              "example": "0"
+            },
+            "value": {
+              "observations": 442,
+              "minimum": 4.5,
+              "lowestRatio": 14.894588477600598,
+              "example": "min-w-0 flex-1 accent-yard-500"
+            },
+            "placeholder": {
+              "observations": 218,
+              "minimum": 4.5,
+              "lowestRatio": 5.465017038174299,
+              "example": "Ask the Coordinator…"
+            },
+            "field-boundary": {
+              "observations": 431,
+              "minimum": 3,
+              "lowestRatio": 3.914138474554286,
+              "example": "2"
+            },
+            "field-boundary-outside": {
+              "observations": 569,
+              "minimum": 3,
+              "lowestRatio": 4.192773877568885,
+              "example": "Break down by"
+            },
+            "icon": {
+              "observations": 395,
+              "minimum": 3,
+              "lowestRatio": 5.465017038174299,
+              "example": "lucide lucide-x h-3.5 w-3.5"
+            },
+            "status-dot": {
+              "observations": 17,
+              "minimum": 3,
+              "lowestRatio": 6.4700447145121895,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            },
+            "focus-outline": {
+              "observations": 168,
+              "minimum": 3,
+              "lowestRatio": 7.596808355344004,
+              "example": "Search settings"
+            },
+            "chart-fill": {
+              "observations": 142,
+              "minimum": 3,
+              "lowestRatio": 3.8727386239252364,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse"
+            },
+            "switch-thumb": {
+              "observations": 4,
+              "minimum": 3,
+              "lowestRatio": 13.9625500239581,
+              "example": "relative h-5 w-9 rounded-full transition border border-control bg-zinc-800 group-hover:bg-zinc-700"
+            }
+          }
+        },
+        "dark": {
+          "cases": 64,
+          "snapshots": 183,
+          "measurements": 7839,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 369,
+          "exemptObservations": 278,
+          "axeIncomplete": {
+            "pseudoContent": 14,
+            "shortTextContent": 20,
+            "bgImage": 154,
+            "elmPartiallyObscuring": 80
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 5453,
+              "minimum": 4.5,
+              "lowestRatio": 4.956965986351576,
+              "example": "0"
+            },
+            "value": {
+              "observations": 442,
+              "minimum": 4.5,
+              "lowestRatio": 15.679494834599106,
+              "example": "min-w-0 flex-1 accent-yard-500"
+            },
+            "placeholder": {
+              "observations": 218,
+              "minimum": 4.5,
+              "lowestRatio": 5.3207030075078885,
+              "example": "Ask the Coordinator…"
+            },
+            "field-boundary": {
+              "observations": 431,
+              "minimum": 3,
+              "lowestRatio": 4.594838131308078,
+              "example": "2"
+            },
+            "field-boundary-outside": {
+              "observations": 569,
+              "minimum": 3,
+              "lowestRatio": 5.027067564519729,
+              "example": "Break down by"
+            },
+            "icon": {
+              "observations": 395,
+              "minimum": 3,
+              "lowestRatio": 5.293390893163918,
+              "example": "lucide lucide-moon"
+            },
+            "status-dot": {
+              "observations": 17,
+              "minimum": 3,
+              "lowestRatio": 5.225266648447232,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            },
+            "focus-outline": {
+              "observations": 168,
+              "minimum": 3,
+              "lowestRatio": 10.612883560521828,
+              "example": "Search settings"
+            },
+            "chart-fill": {
+              "observations": 142,
+              "minimum": 3,
+              "lowestRatio": 4.010712412968351,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse"
+            },
+            "switch-thumb": {
+              "observations": 4,
+              "minimum": 3,
+              "lowestRatio": 13.550818000872297,
+              "example": "relative h-5 w-9 rounded-full transition border border-control bg-zinc-800 group-hover:bg-zinc-700"
+            }
+          }
+        }
+      }
+    },
+    "interactions": {
+      "caseNames": [
+        "chat-switcher",
+        "chat-switcher-search",
+        "palette-selected",
+        "palette-search",
+        "composer-projects",
+        "composer-runners",
+        "composer-harnesses",
+        "composer-tags",
+        "selected-draft",
+        "date-summary",
+        "boxes-sheet",
+        "notice-hover",
+        "new-project",
+        "pr-checks-review-sheet",
+        "task-details",
+        "confirmation",
+        "identity-test-error",
+        "identity-draft",
+        "identity-save-error",
+        "usage-selected-day",
+        "connector-sign-in",
+        "markdown-preview",
+        "image-preview",
+        "image-gallery",
+        "image-gallery-hover",
+        "image-gallery-focus",
+        "field-hover",
+        "field-keyboard-focus",
+        "sidebar-row-hover",
+        "sidebar-row-focus",
+        "sidebar-failed-selected",
+        "sidebar-drawer",
+        "composer-more"
+      ],
+      "widths": [
+        1440,
+        400
+      ],
+      "zoom": 1,
+      "touch": false,
+      "errors": [],
+      "byTheme": {
+        "light": {
+          "cases": 122,
+          "snapshots": 122,
+          "measurements": 8602,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 229,
+          "exemptObservations": 306,
+          "axeIncomplete": {
+            "pseudoContent": 413,
+            "shortTextContent": 246,
+            "nonBmp": 8,
+            "bgOverlap": 12,
+            "equalRatio": 4,
+            "bgImage": 70,
+            "elmPartiallyObscuring": 43
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 4973,
+              "minimum": 4.5,
+              "lowestRatio": 4.7340717087838415,
+              "example": "acme/example-app"
+            },
+            "value": {
+              "observations": 128,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Ask the Coordinator…"
+            },
+            "placeholder": {
+              "observations": 81,
+              "minimum": 4.5,
+              "lowestRatio": 5.465017038174299,
+              "example": "Ask the Coordinator…"
+            },
+            "field-boundary": {
+              "observations": 128,
+              "minimum": 3,
+              "lowestRatio": 3.914138474554286,
+              "example": "2"
+            },
+            "field-boundary-outside": {
+              "observations": 197,
+              "minimum": 3,
+              "lowestRatio": 4.157589984688283,
+              "example": "Acme"
+            },
+            "icon": {
+              "observations": 2588,
+              "minimum": 3,
+              "lowestRatio": 4.7340717087838415,
+              "example": "lucide lucide-check h-3.5 w-3.5"
+            },
+            "status-dot": {
+              "observations": 355,
+              "minimum": 3,
+              "lowestRatio": 6.4700447145121895,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            },
+            "focus-outline": {
+              "observations": 94,
+              "minimum": 3,
+              "lowestRatio": 7.596808355344004,
+              "example": "%"
+            },
+            "selected-text": {
+              "observations": 4,
+              "minimum": 4.5,
+              "lowestRatio": 10.887885036742084,
+              "example": "%Example !codex @box Example draft"
+            },
+            "switch-thumb": {
+              "observations": 2,
+              "minimum": 3,
+              "lowestRatio": 13.9625500239581,
+              "example": "relative h-4 w-7 shrink-0 rounded-full border border-control bg-zinc-800"
+            },
+            "chart-fill": {
+              "observations": 52,
+              "minimum": 3,
+              "lowestRatio": 3.3332394449933997,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse bg-zinc-700/30"
+            }
+          }
+        },
+        "dark": {
+          "cases": 122,
+          "snapshots": 122,
+          "measurements": 8602,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 229,
+          "exemptObservations": 306,
+          "axeIncomplete": {
+            "pseudoContent": 413,
+            "shortTextContent": 246,
+            "nonBmp": 8,
+            "bgOverlap": 12,
+            "equalRatio": 4,
+            "bgImage": 70,
+            "elmPartiallyObscuring": 43
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 4973,
+              "minimum": 4.5,
+              "lowestRatio": 4.956965986351576,
+              "example": "acme/example-app"
+            },
+            "value": {
+              "observations": 128,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Ask the Coordinator…"
+            },
+            "placeholder": {
+              "observations": 81,
+              "minimum": 4.5,
+              "lowestRatio": 5.3207030075078885,
+              "example": "Ask the Coordinator…"
+            },
+            "field-boundary": {
+              "observations": 128,
+              "minimum": 3,
+              "lowestRatio": 4.594838131308078,
+              "example": "2"
+            },
+            "field-boundary-outside": {
+              "observations": 197,
+              "minimum": 3,
+              "lowestRatio": 4.951455215207774,
+              "example": "Acme"
+            },
+            "icon": {
+              "observations": 2588,
+              "minimum": 3,
+              "lowestRatio": 3.968014400678394,
+              "example": "lucide lucide-tent"
+            },
+            "status-dot": {
+              "observations": 355,
+              "minimum": 3,
+              "lowestRatio": 5.225266648447232,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            },
+            "focus-outline": {
+              "observations": 94,
+              "minimum": 3,
+              "lowestRatio": 10.612883560521828,
+              "example": "%"
+            },
+            "selected-text": {
+              "observations": 4,
+              "minimum": 4.5,
+              "lowestRatio": 8.667205348318019,
+              "example": "%Example !codex @box Example draft"
+            },
+            "switch-thumb": {
+              "observations": 2,
+              "minimum": 3,
+              "lowestRatio": 13.550818000872297,
+              "example": "relative h-4 w-7 shrink-0 rounded-full border border-control bg-zinc-800"
+            },
+            "chart-fill": {
+              "observations": 52,
+              "minimum": 3,
+              "lowestRatio": 3.5056725834600413,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse bg-zinc-700/30"
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "caseNames": [
+        "health",
+        "controls",
+        "statuses",
+        "prs",
+        "icons-0",
+        "icons-1",
+        "icons-2",
+        "palettes",
+        "meters",
+        "pending",
+        "markdown",
+        "folded-message",
+        "new-task",
+        "toasts",
+        "hover",
+        "keyboard-focus",
+        "new-task-popover",
+        "new-task-options",
+        "confirmation",
+        "login-focus",
+        "login-error"
+      ],
+      "widths": [
+        1440,
+        400
+      ],
+      "zoom": 1,
+      "touch": false,
+      "errors": [],
+      "byTheme": {
+        "light": {
+          "cases": 148,
+          "snapshots": 148,
+          "measurements": 15381,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 246,
+          "exemptObservations": 448,
+          "axeIncomplete": {
+            "bgImage": 150,
+            "elmPartiallyObscured": 4057,
+            "elmPartiallyObscuring": 145,
+            "bgOverlap": 360
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 5589,
+              "minimum": 3,
+              "lowestRatio": 4.709973587805611,
+              "example": "Merged #2"
+            },
+            "value": {
+              "observations": 217,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Helpful placeholder"
+            },
+            "placeholder": {
+              "observations": 96,
+              "minimum": 4.5,
+              "lowestRatio": 5.465017038174299,
+              "example": "Helpful placeholder"
+            },
+            "field-boundary": {
+              "observations": 217,
+              "minimum": 3,
+              "lowestRatio": 3.914138474554286,
+              "example": "Helpful placeholder"
+            },
+            "field-boundary-outside": {
+              "observations": 340,
+              "minimum": 3,
+              "lowestRatio": 3.914138474554286,
+              "example": "Helpful placeholder"
+            },
+            "icon": {
+              "observations": 5351,
+              "minimum": 3,
+              "lowestRatio": 3.7237374859047474,
+              "example": "lucide lucide-helm h-3.5 w-3.5"
+            },
+            "status-dot": {
+              "observations": 3000,
+              "minimum": 3,
+              "lowestRatio": 6.4700447145121895,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            },
+            "switch-thumb": {
+              "observations": 240,
+              "minimum": 3,
+              "lowestRatio": 9.263725506380636,
+              "example": "relative h-5 w-9 rounded-full transition bg-action"
+            },
+            "chart-fill": {
+              "observations": 216,
+              "minimum": 3,
+              "lowestRatio": 3.1321279896277607,
+              "example": "flex gap-2 p-2 bg-zinc-700/30"
+            },
+            "focus-outline": {
+              "observations": 111,
+              "minimum": 3,
+              "lowestRatio": 7.596808355344004,
+              "example": ""
+            },
+            "selected-text": {
+              "observations": 4,
+              "minimum": 4.5,
+              "lowestRatio": 10.887885036742084,
+              "example": "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
+            }
+          }
+        },
+        "dark": {
+          "cases": 148,
+          "snapshots": 148,
+          "measurements": 15381,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 246,
+          "exemptObservations": 448,
+          "axeIncomplete": {
+            "bgImage": 150,
+            "elmPartiallyObscured": 4057,
+            "elmPartiallyObscuring": 145,
+            "bgOverlap": 360
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 5589,
+              "minimum": 3,
+              "lowestRatio": 4.825261425728659,
+              "example": "Readable tag"
+            },
+            "value": {
+              "observations": 217,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Helpful placeholder"
+            },
+            "placeholder": {
+              "observations": 96,
+              "minimum": 4.5,
+              "lowestRatio": 5.3207030075078885,
+              "example": "Helpful placeholder"
+            },
+            "field-boundary": {
+              "observations": 217,
+              "minimum": 3,
+              "lowestRatio": 4.594838131308078,
+              "example": "Helpful placeholder"
+            },
+            "field-boundary-outside": {
+              "observations": 340,
+              "minimum": 3,
+              "lowestRatio": 4.594838131308078,
+              "example": "Helpful placeholder"
+            },
+            "icon": {
+              "observations": 5351,
+              "minimum": 3,
+              "lowestRatio": 3.0978648493444627,
+              "example": "lucide lucide-wrench motion-safe:animate-pulse"
+            },
+            "status-dot": {
+              "observations": 3000,
+              "minimum": 3,
+              "lowestRatio": 5.225266648447232,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            },
+            "switch-thumb": {
+              "observations": 240,
+              "minimum": 3,
+              "lowestRatio": 9.263725506380636,
+              "example": "relative h-5 w-9 rounded-full transition bg-action"
+            },
+            "chart-fill": {
+              "observations": 216,
+              "minimum": 3,
+              "lowestRatio": 3.1351584789459155,
+              "example": "flex gap-2 p-2 bg-zinc-700/30"
+            },
+            "focus-outline": {
+              "observations": 111,
+              "minimum": 3,
+              "lowestRatio": 10.612883560521828,
+              "example": ""
+            },
+            "selected-text": {
+              "observations": 4,
+              "minimum": 4.5,
+              "lowestRatio": 8.667205348318019,
+              "example": "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
+            }
+          }
+        }
+      }
+    },
+    "narrow": {
+      "caseNames": [
+        "coordinator",
+        "captain",
+        "task",
+        "usage",
+        "settings-identities"
+      ],
+      "widths": [
+        320,
+        560,
+        800
+      ],
+      "zoom": 1.25,
+      "touch": false,
+      "errors": [],
+      "byTheme": {
+        "light": {
+          "cases": 15,
+          "snapshots": 43,
+          "measurements": 1905,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 106,
+          "exemptObservations": 83,
+          "axeIncomplete": {
+            "elmPartiallyObscured": 11,
+            "shortTextContent": 32,
+            "elmPartiallyObscuring": 16,
+            "bgImage": 17,
+            "pseudoContent": 10
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 1491,
+              "minimum": 4.5,
+              "lowestRatio": 5.256246983020515,
+              "example": "Waiting on you"
+            },
+            "icon": {
+              "observations": 145,
+              "minimum": 3,
+              "lowestRatio": 5.535355049933163,
+              "example": "lucide lucide-helm h-3.5 w-3.5"
+            },
+            "focus-outline": {
+              "observations": 26,
+              "minimum": 3,
+              "lowestRatio": 7.596808355344004,
+              "example": "Search settings"
+            },
+            "chart-fill": {
+              "observations": 162,
+              "minimum": 3,
+              "lowestRatio": 3.8727386239252364,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse"
+            },
+            "field-boundary-outside": {
+              "observations": 30,
+              "minimum": 3,
+              "lowestRatio": 4.192773877568885,
+              "example": "Break down by"
+            },
+            "value": {
+              "observations": 13,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Search settings"
+            },
+            "placeholder": {
+              "observations": 13,
+              "minimum": 4.5,
+              "lowestRatio": 5.465017038174299,
+              "example": "Search settings"
+            },
+            "field-boundary": {
+              "observations": 13,
+              "minimum": 3,
+              "lowestRatio": 4.478997367645592,
+              "example": "flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 focus-within:border-yard-500 focus-within:ring-2 focus-within:ring-yard-500/20"
+            },
+            "status-dot": {
+              "observations": 12,
+              "minimum": 3,
+              "lowestRatio": 6.4700447145121895,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            }
+          }
+        },
+        "dark": {
+          "cases": 15,
+          "snapshots": 43,
+          "measurements": 1905,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 106,
+          "exemptObservations": 83,
+          "axeIncomplete": {
+            "elmPartiallyObscured": 10,
+            "shortTextContent": 32,
+            "elmPartiallyObscuring": 16,
+            "bgImage": 17,
+            "pseudoContent": 10
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 1491,
+              "minimum": 4.5,
+              "lowestRatio": 5.642110319816118,
+              "example": "Published"
+            },
+            "icon": {
+              "observations": 145,
+              "minimum": 3,
+              "lowestRatio": 5.293390893163918,
+              "example": "lucide lucide-moon"
+            },
+            "focus-outline": {
+              "observations": 26,
+              "minimum": 3,
+              "lowestRatio": 10.612883560521828,
+              "example": "Search settings"
+            },
+            "chart-fill": {
+              "observations": 162,
+              "minimum": 3,
+              "lowestRatio": 4.010712412968351,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse"
+            },
+            "field-boundary-outside": {
+              "observations": 30,
+              "minimum": 3,
+              "lowestRatio": 5.027067564519729,
+              "example": "Break down by"
+            },
+            "value": {
+              "observations": 13,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Search settings"
+            },
+            "placeholder": {
+              "observations": 13,
+              "minimum": 4.5,
+              "lowestRatio": 5.3207030075078885,
+              "example": "Search settings"
+            },
+            "field-boundary": {
+              "observations": 13,
+              "minimum": 3,
+              "lowestRatio": 8.249323856125582,
+              "example": "flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 focus-within:border-yard-500 focus-within:ring-2 focus-within:ring-yard-500/20"
+            },
+            "status-dot": {
+              "observations": 12,
+              "minimum": 3,
+              "lowestRatio": 5.225266648447232,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            }
+          }
+        }
+      }
+    },
+    "touch": {
+      "caseNames": [
+        "coordinator",
+        "captain",
+        "task",
+        "usage",
+        "settings-identities"
+      ],
+      "widths": [
+        320,
+        400,
+        560,
+        800
+      ],
+      "zoom": 1,
+      "touch": true,
+      "errors": [],
+      "byTheme": {
+        "light": {
+          "cases": 20,
+          "snapshots": 47,
+          "measurements": 2798,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 116,
+          "exemptObservations": 114,
+          "axeIncomplete": {
+            "shortTextContent": 36,
+            "elmPartiallyObscuring": 12,
+            "bgImage": 18,
+            "bgOverlap": 1,
+            "pseudoContent": 20
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 2026,
+              "minimum": 4.5,
+              "lowestRatio": 5.256246983020515,
+              "example": "Waiting on you"
+            },
+            "value": {
+              "observations": 34,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Ask the Coordinator…"
+            },
+            "placeholder": {
+              "observations": 34,
+              "minimum": 4.5,
+              "lowestRatio": 5.465017038174299,
+              "example": "Ask the Coordinator…"
+            },
+            "field-boundary": {
+              "observations": 34,
+              "minimum": 3,
+              "lowestRatio": 3.914138474554286,
+              "example": "2"
+            },
+            "field-boundary-outside": {
+              "observations": 52,
+              "minimum": 3,
+              "lowestRatio": 4.192773877568885,
+              "example": "Break down by"
+            },
+            "icon": {
+              "observations": 290,
+              "minimum": 3,
+              "lowestRatio": 5.465017038174299,
+              "example": "lucide lucide-copy h-3.5 w-3.5"
+            },
+            "focus-outline": {
+              "observations": 31,
+              "minimum": 3,
+              "lowestRatio": 7.596808355344004,
+              "example": "Search settings"
+            },
+            "chart-fill": {
+              "observations": 285,
+              "minimum": 3,
+              "lowestRatio": 3.8727386239252364,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse"
+            },
+            "status-dot": {
+              "observations": 12,
+              "minimum": 3,
+              "lowestRatio": 6.4700447145121895,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            }
+          }
+        },
+        "dark": {
+          "cases": 20,
+          "snapshots": 47,
+          "measurements": 2794,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 116,
+          "exemptObservations": 114,
+          "axeIncomplete": {
+            "shortTextContent": 36,
+            "elmPartiallyObscuring": 12,
+            "bgImage": 18,
+            "bgOverlap": 1,
+            "pseudoContent": 20
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 2022,
+              "minimum": 4.5,
+              "lowestRatio": 5.642110319816118,
+              "example": "Published"
+            },
+            "value": {
+              "observations": 34,
+              "minimum": 4.5,
+              "lowestRatio": 16.118381484528566,
+              "example": "Ask the Coordinator…"
+            },
+            "placeholder": {
+              "observations": 34,
+              "minimum": 4.5,
+              "lowestRatio": 5.3207030075078885,
+              "example": "Ask the Coordinator…"
+            },
+            "field-boundary": {
+              "observations": 34,
+              "minimum": 3,
+              "lowestRatio": 4.594838131308078,
+              "example": "2"
+            },
+            "field-boundary-outside": {
+              "observations": 52,
+              "minimum": 3,
+              "lowestRatio": 5.027067564519729,
+              "example": "Break down by"
+            },
+            "icon": {
+              "observations": 290,
+              "minimum": 3,
+              "lowestRatio": 5.293390893163918,
+              "example": "lucide lucide-moon"
+            },
+            "focus-outline": {
+              "observations": 31,
+              "minimum": 3,
+              "lowestRatio": 10.612883560521828,
+              "example": "Search settings"
+            },
+            "chart-fill": {
+              "observations": 285,
+              "minimum": 3,
+              "lowestRatio": 4.010712412968351,
+              "example": "relative flex h-full min-w-0 flex-1 cursor-pointer flex-col-reverse"
+            },
+            "status-dot": {
+              "observations": 12,
+              "minimum": 3,
+              "lowestRatio": 5.225266648447232,
+              "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            }
+          }
+        }
+      }
+    }
+  }
+}
