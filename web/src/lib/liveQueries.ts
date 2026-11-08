@@ -69,11 +69,22 @@ export function liveMessage(key: QueryKey, m: Message) {
   collectors.get(hashKey(key))?.forEach((collect) => collect(m))
 }
 
-/** A busy/state GET can predate an SSE update even when its response arrives later. Count writes rather
- * than compare values: busy -> idle -> busy may end at the value we started with. */
+const stateRevisions = new WeakMap<QueryClient, Map<string, number>>()
+
+/** Only the live stream is authoritative over a state GET. An older prefetch may seed an empty cache
+ * while that GET is out, so counting every cache write would incorrectly prefer the prefetched state. */
+export function liveState<T>(client: QueryClient, key: QueryKey, state: T) {
+  const revisions = stateRevisions.get(client) ?? new Map<string, number>()
+  stateRevisions.set(client, revisions)
+  const hash = hashKey(key)
+  revisions.set(hash, (revisions.get(hash) ?? 0) + 1)
+  client.setQueryData(key, state)
+}
+
+/** Preserve SSE authority even across a busy -> idle -> busy round trip during a delayed GET. */
 export async function fetchLiveState<T>(client: QueryClient, key: QueryKey, fetch: () => Promise<T>): Promise<T> {
-  const writes = client.getQueryState(key)?.dataUpdateCount
+  const revision = stateRevisions.get(client)?.get(hashKey(key))
   const answer = await fetch()
-  const current = client.getQueryState<T>(key)
-  return current?.data !== undefined && current.dataUpdateCount !== writes ? current.data : answer
+  const current = client.getQueryData<T>(key)
+  return current !== undefined && stateRevisions.get(client)?.get(hashKey(key)) !== revision ? current : answer
 }

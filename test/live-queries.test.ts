@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { focusManager, onlineManager, QueryClient, QueryClientProvider, QueryObserver, type QueryKey } from "@tanstack/react-query"
-import { LIVE_QUERY_DEFAULTS, STALE_MS, fetchLiveState, fetchLog, liveMessage } from "../web/src/lib/liveQueries.js"
+import { LIVE_QUERY_DEFAULTS, STALE_MS, fetchLiveState, fetchLog, liveMessage, liveState } from "../web/src/lib/liveQueries.js"
 import { keys, useCreateTask, useTaskMessages } from "../web/src/lib/queries.js"
 import { useServerEvents } from "../web/src/lib/stream.js"
 import type { Task, TaskMessage } from "../shared/types.js"
@@ -220,7 +220,7 @@ describe("busy state authority", () => {
     qc.setQueryData(key, false)
     let answer!: (value: boolean) => void
     const fetching = fetchLiveState(qc, key, () => new Promise<boolean>((r) => answer = r))
-    qc.setQueryData(key, true)
+    liveState(qc, key, true)
     answer(false)
     expect(await fetching).toBe(true)
     qc.clear()
@@ -231,10 +231,21 @@ describe("busy state authority", () => {
     qc.setQueryData(keys.chatBusy, false)
     let answer!: (value: boolean) => void
     const fetching = fetchLiveState(qc, keys.chatBusy, () => new Promise<boolean>((r) => answer = r))
-    qc.setQueryData(keys.chatBusy, true)
-    qc.setQueryData(keys.chatBusy, false)
+    liveState(qc, keys.chatBusy, true)
+    liveState(qc, keys.chatBusy, false)
     answer(true)
     expect(await fetching).toBe(false)
     qc.clear()
   })
+})
+
+it("an older Captain prefetch cannot outrank the state GET it races", async () => {
+  const qc = new QueryClient()
+  const key = keys.captain("prj_example01")
+  let answer!: (value: boolean) => void
+  const fetching = fetchLiveState(qc, key, () => new Promise<boolean>((r) => answer = r))
+  qc.setQueryData(key, false) // recent-Captain prefetch seeds an otherwise empty cache
+  answer(true)
+  expect(await fetching).toBe(true)
+  qc.clear()
 })

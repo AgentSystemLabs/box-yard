@@ -16,7 +16,7 @@ import { reportOnline, reportStream, setReconnectHandler } from "./connection"
 import { applyThreadEvent } from "./threads"
 import { staleAfterClose } from "./closedTasks"
 import { staleAfterStop } from "./stoppedTasks"
-import { liveMessage } from "./liveQueries"
+import { liveMessage, liveState } from "./liveQueries"
 import { afterBoot, alignWithBoot, takeEarlyStream } from "./boot"
 import { noteServerBuild } from "./appUpdate"
 import { applyTaskPatch, type TaskPatchEvent } from "../../../shared/taskPatch"
@@ -253,12 +253,12 @@ export function useServerEvents(enabled: boolean): Connection {
           qc.setQueryData<string>(keys.chatStream, (prev) => (prev ?? "") + ev.text)
           break
         case "chat.busy":
-          qc.setQueryData(keys.chatBusy, ev.busy)
+          liveState(qc, keys.chatBusy, ev.busy)
           if (!ev.busy) qc.setQueryData(keys.chatStream, "")
           voiceChatBusy(ev.busy)
           break
         case "orchestrator.state":
-          qc.setQueryData(keys.orchestrator, ev.state)
+          liveState(qc, keys.orchestrator, ev.state)
           break
         case "captain.message":
           liveMessage(keys.captainMessages(ev.message.projectId), ev.message)
@@ -276,7 +276,7 @@ export function useServerEvents(enabled: boolean): Connection {
           })
           break
         case "captain.state":
-          qc.setQueryData(keys.captain(ev.state.projectId), ev.state)
+          liveState(qc, keys.captain(ev.state.projectId), ev.state)
           break
         case "logins":
           qc.setQueryData(keys.logins, ev.logins)
