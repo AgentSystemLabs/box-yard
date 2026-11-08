@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { openDb } from "../server/db.js"
+import Database from "better-sqlite3"
+import { openDb, migrate, MIGRATIONS } from "../server/db.js"
 import { Store } from "../server/store.js"
 import { TaskEnvironment } from "../server/taskEnvironment.js"
 import type { BoxProvider } from "../server/providers/types.js"
@@ -57,7 +58,7 @@ describe("immutable physical task environments", () => {
       expect(() => f.policy.runner(type, "gpu", type === "runpod" ? "vast" : "runpod")).toThrow(/forbidden/)
     }
     f.active("local")
-    expect(() => f.policy.runner("upstash", "box", "runpod")).toThrow(/requested local/)
+    f.policy.runner("upstash", "box", "runpod") // Actual placement still cannot use AutoProvider's local fallback.
   })
 
   it("rejects unavailable, unknown, cyclic, forged and cross-project lineage", () => {
@@ -72,10 +73,33 @@ describe("immutable physical task environments", () => {
     expect(() => f.policy.inherited(f.row(child.id))).toThrow(/cyclic/)
     f.store.db.prepare("UPDATE tasks SET parent_task_id = 'task_missing' WHERE id = ?").run(child.id)
     expect(() => f.policy.inherited(f.row(child.id))).toThrow(/missing or cross-project/)
+    const other = f.store.createProject({ name: "another-example" })
+    const outsider = f.store.createTask({ projectId: other.id, title: "Other", prompt: "Example" })
+    f.store.db.prepare("UPDATE tasks SET parent_task_id = ? WHERE id = ?").run(outsider.id, child.id)
+    expect(() => f.policy.inherited(f.row(child.id))).toThrow(/cross-project/)
     f.routes.set("unknown", "unknown")
     expect(() => f.policy.physical("unknown")).toThrow(/authoritative physical provider/)
     f.routes.set("first", "local")
     expect(() => f.policy.physical("first")).toThrow(/authoritative physical provider/)
+  })
+
+  it("migrates existing rows without inventing origins, then pins a verifiable legacy lineage", () => {
+    const db = new Database(":memory:")
+    migrate(db, MIGRATIONS.findIndex(m => m.includes("ALTER TABLE tasks ADD COLUMN environment_type")))
+    const store = new Store(db)
+    stores.push(store)
+    const project = store.createProject({ name: "example" })
+    const root = store.createTask({ projectId: project.id, title: "Legacy", prompt: "Example" })
+    store.upsertBox({ id: "legacy-upstash", provider: "upstash", status: "ready", created_at: 1, last_used_at: 1 })
+    store.startTaskTurn({ id: "turn_legacy", taskId: root.id, turnIndex: 1, model: null, effort: null, routingRule: null, routingReason: null, boxId: "legacy-upstash" })
+    store.updateTask(root.id, { sessionStarted: true, boxId: "legacy-upstash" })
+    const child = store.createTask({ projectId: project.id, title: "Legacy child", prompt: "Example", subtask: { parentId: root.id, rootId: root.id, depth: 1, withParent: true } })
+    migrate(db)
+    expect(store.getTaskRow(root.id)?.environment_type).toBeNull()
+    const policy = new TaskEnvironment(store, { name: "upstash" } as BoxProvider)
+    expect(policy.inherited(store.getTaskRow(child.id)!)).toBe("upstash")
+    expect(store.getTaskRow(root.id)?.environment_type).toBe("upstash")
+    expect(store.getTaskRow(child.id)?.environment_type).toBe("upstash")
   })
 
   it("resolves legacy original turns, but never guesses from mutable runner metadata", () => {

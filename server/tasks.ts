@@ -10,6 +10,7 @@ import { harnessHandoffKey, type HarnessHandoff, type TaskContinuation } from ".
 import type { Hub } from "./hub.js"
 import type { BoxRow, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
 import { BadRequestError, ConflictError, NotFoundError, cloneUrl, githubSlug, boxRowCost, meterTick, normalizeBoxSize, sourceOf, taskAgentCli, taskGpuPick } from "./store.js"
+import { TaskEnvironment, TaskEnvironmentError, environmentRunner, environmentGpu } from "./taskEnvironment.js"
 import type { BoxProvider, BoxUsageProbe, ExecResult } from "./providers/types.js"
 import { providerOf, q, tasksRootOf } from "./providers/types.js"
 import { THIN_DIR, THIN_MARK, archiveOutcome, archiveScript, ArchiveDecoder, errorTail, thinRestoreScript, type ArchiveKind, type ArchiveOutcome } from "./archive.js"
@@ -592,6 +593,7 @@ const slugify = (s: string) =>
 export class TaskManager {
   private readonly c: Config
   private readonly store: Store
+  private readonly environment: TaskEnvironment
   private readonly provider: BoxProvider
   private readonly hub: Hub
   private readonly redis: Redis | null
@@ -800,6 +802,7 @@ export class TaskManager {
     this.cursorModels = new CursorModels({ bin: this.c.cursorBin, dataDir: this.c.dataDir, key: () => this.settings.credentials.get("cursorApiKey") })
     this.store = deps.store
     this.provider = deps.provider
+    this.environment = new TaskEnvironment(this.store, this.provider)
     this.hub = deps.hub
     this.redis = deps.redis
     this.artifacts = deps.artifacts
@@ -1053,6 +1056,18 @@ export class TaskManager {
   private async reattach(row: TaskRow) {
     const { box_id: boxId, current_turn_id: turnId } = row
     if (!boxId || !turnId) return
+    try {
+      this.environment.placement(row, boxId)
+    } catch (err) {
+      // Existing incompatible turns predate this boundary. Request their stop rather than reattach/continue them;
+      // retain the turn id until polling observes the stop, including when the old provider is unreachable.
+      this.stopRequested.add(row.id)
+      const problem = errorMessage(err)
+      this.setWaitReason(row.id, problem)
+      this.addEvent(row.id, `Cannot resume this turn: ${problem} Requested its stop; future placement remains blocked.`)
+      await this.killTurn(row).catch(() => null)
+      return
+    }
     const health = isLocalRunnerBox(boxId) ? "running" : await this.provider.health(boxId).catch(() => "unknown" as const)
     const probe = health === "running" ? await this.turnProcess(boxId, row.id).catch(() => null) : null
     const fresh = this.store.getTaskRow(row.id)
@@ -1168,6 +1183,10 @@ export class TaskManager {
    */
   setRunsOn(taskId: string, runner: Runner, machineLabel: string | null = null, gpuPick: GpuPick | null = null, boxSize: BoxSize | null = null) {
     const row = this.requireRow(taskId)
+    const inherited = this.environment.inherited(row)
+    if (inherited) this.environment.runner(inherited, runner, gpuPick?.provider ?? environmentGpu(inherited) ?? this.gpuCloudFor(row))
+    // A null GPU selection must not start following a different project/global cloud next turn.
+    if (inherited && runner === "gpu" && !gpuPick) gpuPick = { provider: environmentGpu(inherited)!, type: null }
     const label = runner === "ssh" ? normalizeLabel(machineLabel) : null
     const gpu = runner === "gpu" && gpuPick ? this.gpuPickOf(gpuPick) : null
     const had = taskGpuPick(row)
@@ -1188,6 +1207,24 @@ export class TaskManager {
    * per call. Two or more share a batch id (Task.batchId), which the Coordinator's cards view keeps together.
    */
   createTasks(inputs: NewTask[]): Task[] {
+    // Normalize and validate lineage server-side for all callers, including managers, before any child exists.
+    // Null runner selections inherit the immutable physical type, never a mutable project default.
+    const environments = inputs.map((input) => {
+      if (!input.subtask) return null
+      const parent = this.requireRow(input.subtask.parentId)
+      if (parent.project_id !== input.projectId) throw new BadRequestError("Subtask environment restriction: cross-project parent is forbidden.")
+      const type = this.environment.forChild(parent)
+      if (input.subtask.rootId !== (parent.root_task_id ?? parent.id) || input.subtask.depth !== (parent.subtask_depth ?? 0) + 1) throw new BadRequestError("Subtask environment restriction: inconsistent parent lineage.")
+      return type
+    })
+    inputs = inputs.map((input, i) => {
+      const type = environments[i]
+      if (!type) return input
+      const runsOn = input.runsOn ?? environmentRunner(type)
+      const gpu = runsOn === "gpu" ? input.gpu ?? { provider: environmentGpu(type)!, type: null } : null
+      this.environment.runner(type, runsOn, gpu?.provider ?? this.gpuCloudOf(input.projectId))
+      return { ...input, runsOn, gpu }
+    })
     const projects = inputs.map((input) => {
       const project = this.store.getProject(input.projectId)
       if (!project) throw new NotFoundError(`Project ${input.projectId} not found`)
@@ -1215,6 +1252,8 @@ export class TaskManager {
           gpu: input.runsOn === "gpu" && input.gpu ? this.gpuPickOf(input.gpu) : null,
           branch: projects[i]!.repo ? branchName({ title: input.title, prompt: input.prompt, occupied: this.taskBranches(projects[i]!.repo!) }) : null,
         })
+        const inherited = environments[i]
+        if (inherited) this.store.db.prepare("UPDATE tasks SET environment_type = ? WHERE id = ?").run(inherited, task.id)
         // Only these newly created tasks may resolve a convention before their first checkout. Existing tasks,
         // including legacy boxyard/* branches and archive/recap restores, never enter the naming path.
         if (task.branch) this.store.setKv(`branch_naming:${task.id}`, task.branch)
@@ -2889,6 +2928,7 @@ export class TaskManager {
         const kept: string[] = []
         const fromGitHub: string[] = []
         const rows = this.store.listTaskRows({ boxId: r.boxId })
+        for (const row of rows) this.environment.placement(row, r.newBoxId!)
         for (const row of rows) {
           if (await this.skipArchiveIfPushed(row.id, r.boxId, `move to the ${r.to} box`)) {
             fromGitHub.push(row.id)
@@ -3555,7 +3595,13 @@ export class TaskManager {
       // this computer (their own runs_on, else their project's) only count against Settings › Local agents (place).
       const cap = this.limits().maxAgents
       const local = this.store.taskRunner(listed) !== "box" || Boolean(this.parentBox(listed))
-      const boxId = !local && cap > 0 && this.runningTotal() >= cap ? null : await this.place(listed)
+      let boxId: string | null
+      try {
+        boxId = !local && cap > 0 && this.runningTotal() >= cap ? null : await this.place(listed)
+      } catch (err) {
+        this.setWaitReason(listed.id, errorMessage(err))
+        continue
+      }
       if (this.stopped) return
       // Placement awaits: the task may have moved on meanwhile (its last queued message cancelled, stopped, started).
       const row = this.store.getTaskRow(listed.id)
@@ -3565,6 +3611,13 @@ export class TaskManager {
           this.store.updateTask(row.id, { status: "queued" })
           this.emitTask(row.id)
         }
+        continue
+      }
+      try {
+        this.checkEnvironmentRunner(row)
+        this.environment.placement(row, boxId)
+      } catch (err) {
+        this.setWaitReason(row.id, errorMessage(err))
         continue
       }
       // Placement awaited: the box it picked may have gone meanwhile (the idle sweep, a delete, a lost box). The task
@@ -3816,8 +3869,23 @@ export class TaskManager {
     return Math.min(slots, this.store.projectBoxLimits(projectId).agentsPerBox ?? slots)
   }
 
+  /** Pin inherited choices once for legacy descendants; explicit conflicting choices always fail closed. */
+  private checkEnvironmentRunner(row: TaskRow): TaskRow {
+    const type = this.environment.inherited(row)
+    if (!type) return row
+    const runner = parseRunsOn(row.runs_on) ?? environmentRunner(type)
+    const cloud = taskGpuPick(row)?.provider ?? environmentGpu(type) ?? this.gpuCloudFor(row)
+    this.environment.runner(type, runner, cloud)
+    if (!parseRunsOn(row.runs_on) || (runner === "gpu" && !taskGpuPick(row))) {
+      this.store.updateTask(row.id, { runsOn: runner, ...(runner === "gpu" ? { gpuProvider: cloud } : {}) })
+      return this.requireRow(row.id)
+    }
+    return row
+  }
+
   /** Pick a box for a task's next turn, or null to wait. */
   private async place(row: TaskRow): Promise<string | null> {
+    row = this.checkEnvironmentRunner(row)
     // A cleanup step is working in its folder right now.
     if (this.janitor.isBusy(row.id) || this.ownCleanup.isBusy(row.id)) return null
     const op = row.box_id ? this.boxOps.get(row.box_id) : undefined
@@ -5154,6 +5222,7 @@ export class TaskManager {
   private async pickBox(taskId: string, exclude?: string, busyHere: Wait | null = null, waitHere: string | null = null): Promise<string | null> {
     this.pickedHow.delete(taskId)
     const row = this.store.getTaskRow(taskId)
+    const inherited = row ? this.environment.inherited(row) : null
     const projectId = row?.project_id
     const preferred = projectId ? this.store.getKv(projectBoxKey(projectId)) : null
     const min = this.minBoxSize(projectId, row?.box_size)
@@ -5162,6 +5231,7 @@ export class TaskManager {
     const fitting = this.store
       .listBoxes()
       .filter((b) => b.status === "ready" && b.id !== exclude && !this.boxOps.has(b.id) && sizeFits(b.size, min) && (!cap?.full || cap.used.has(b.id)))
+      .filter((b) => !inherited || this.environment.physical(b.id) === inherited)
     // The box wall: only boxes of its project's credential set.
     const walled = fitting.some((b) => this.boxCreds(b.id) !== creds)
     const candidates = fitting
@@ -5184,7 +5254,7 @@ export class TaskManager {
     // Boxes with a free slot that a project's Agents per box or memory rule out, why (the first one is the wait reason).
     const busy: Wait[] = busyHere ? [busyHere] : []
     // A new box may be made for it: the pool has room, and so does its project (its own Max boxes).
-    const canGrow = this.poolHasRoom() && !cap?.full
+    const canGrow = this.poolHasRoom() && !cap?.full && (!inherited || this.provider.name === inherited)
     // How the box it lands on was picked: a new one made while it waited, or a slot beside another project.
     const how = (b: { id: string; rank: number }): BoxPick | null => (b.rank === 2 ? "shared" : this.madeFor.get(b.id)?.has(taskId) ? "new" : null)
     let reuseTried = false
@@ -5241,6 +5311,10 @@ export class TaskManager {
         return cleaned.id
       }
       // No box of the project's size has a free slot and the pool (or the project) can't grow.
+      if (inherited && this.provider.name !== inherited && !candidates.length) {
+        this.setWaitReason(taskId, `Subtask environment restriction: waiting for a ${inherited} placement; the active pool provider cannot create that type. No fallback is allowed.`)
+        return null
+      }
       if (min && !candidates.length && row) {
         await this.ensureSizedBox(row, min, cap?.full ? cap : null)
         return null
@@ -5773,6 +5847,7 @@ export class TaskManager {
 
   /** Give a task a home on a box, with its own block of preview ports. */
   private assign(taskId: string, boxId: string, opts: { touch?: boolean } = {}): string {
+    this.environment.placement(this.requireRow(taskId), boxId)
     const used = new Set(
       this.store
         .listTaskRows({ boxId })
@@ -5979,6 +6054,8 @@ export class TaskManager {
     /** And codex-auth.json, the Codex login for this turn. */
     let codexWaiting = false
     try {
+      this.checkEnvironmentRunner(row)
+      this.environment.launching(row, boxId)
       await this.provider.wake(boxId)
       const project = this.store.getProject(row.project_id)
       if (!project) throw new Error("Project was deleted")
@@ -6116,6 +6193,8 @@ export class TaskManager {
       // setsid (where it exists; on macOS the runner makes its own session) + nohup: the turn survives a dropped
       // exec connection and a Box Yard restart. Any half-started runner is stopped first, by its run record, so a
       // pid someone else holds now is never hit. The runner writes run.json and turn.pid itself.
+      this.checkEnvironmentRunner(this.requireRow(taskId))
+      this.environment.placement(this.requireRow(taskId), boxId)
       const start = await this.provider.exec(
         boxId,
         `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 50); do [ -f turn.pid ] && break; sleep 0.2; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
@@ -6581,6 +6660,7 @@ export class TaskManager {
    * checkout (`fallback`), so a broken archive can't fail every start.
    */
   private async prepareWorkspace(row: TaskRow, boxId: string, dir: string): Promise<PreparedWorkspace> {
+    this.environment.placement(this.requireRow(row.id), boxId)
     const project = this.store.getProject(row.project_id)!
     const mirror = project.repo ? this.mirrorSpec(boxId, project) : null
     if (row.archive_path && fs.existsSync(row.archive_path)) {
@@ -6591,7 +6671,7 @@ export class TaskManager {
         } catch (err) {
           failure = err
           // Out of disk has its own retry once the box is cleaned up (retryAfterOutOfSpace); shutting down isn't the archive's fault.
-          if (this.stopped || isOutOfSpace(errorMessage(err))) throw err
+          if (err instanceof TaskEnvironmentError || this.stopped || isOutOfSpace(errorMessage(err))) throw err
           console.warn(`[box-yard] restoring ${row.id} on ${boxId} failed (attempt ${attempt} of ${RESTORE_ATTEMPTS}): ${errorMessage(err)}`)
           if (isUploadTooBig(err)) break
         }
@@ -6608,6 +6688,7 @@ export class TaskManager {
   private async restoreArchive(row: TaskRow, project: NonNullable<ReturnType<Store["getProject"]>>, boxId: string, dir: string, mirror: ReturnType<TaskManager["mirrorSpec"]> | null): Promise<PreparedWorkspace> {
     const root = this.provider.root(boxId)
     const tasks = tasksRootOf(this.provider, boxId)
+    this.environment.placement(this.requireRow(row.id), boxId)
     const remote = `${root}/.boxyard/restore-${row.id}.tgz`
     let from: "git" | "partial" | null = null
     try {
@@ -7794,6 +7875,8 @@ export class TaskManager {
     if (!row.with_parent || !row.parent_task_id) return null
     const boxId = this.store.getTaskRow(row.parent_task_id)?.box_id ?? null
     if (!boxId || this.boxOps.has(boxId)) return null
+    // "same" shares a slot only inside the inherited type. A moved parent does not move its descendants.
+    try { this.environment.placement(row, boxId) } catch { return null }
     if (isLocalRunnerBox(boxId) || ownRunnerOf(boxId)) return boxId
     return this.store.getBox(boxId)?.status === "ready" ? boxId : null
   }
@@ -7828,10 +7911,12 @@ export class TaskManager {
     if (problem) return refuse(problem)
     const env = this.store.taskEnv(parent.id)
     const agentCli = taskAgentCli(parent)
-    const own = parseRunsOn(parent.runs_on)
+    let type: ReturnType<TaskEnvironment["forChild"]>
     try {
+      type = this.environment.forChild(this.requireRow(parent.id))
+      for (const ask of asks) if (ask.runsOn !== "same") this.environment.runner(type, ask.runsOn, environmentGpu(type) ?? this.gpuCloudFor(parent))
       for (const runner of new Set(asks.map((a) => a.runsOn).filter((r): r is Runner => r !== "same"))) {
-        await this.requireRunner(runner, parent.project_id, env, { agentCli, model: parent.model })
+        await this.requireRunner(runner, parent.project_id, env, { agentCli, model: parent.model, ...(runner === "gpu" ? { gpu: { provider: environmentGpu(type)!, type: null } } : {}) })
       }
     } catch (err) {
       return refuse(errorMessage(err))
@@ -7850,9 +7935,9 @@ export class TaskManager {
           agentCli,
           model: parent.model,
           effort: parent.effort,
-          runsOn: a.runsOn === "same" ? own : a.runsOn,
+          runsOn: a.runsOn === "same" ? null : a.runsOn,
           machineLabel: a.runsOn === "same" ? parent.machine_label : null,
-          gpu: a.runsOn === "same" ? taskGpuPick(parent) : null,
+          gpu: a.runsOn === "same" && taskGpuPick(parent)?.provider === environmentGpu(type) ? taskGpuPick(parent) : null,
           boxSize: a.runsOn === "same" && isBoxSize(parent.box_size) ? parent.box_size : null,
           subtask: { parentId: parent.id, rootId: parent.root_task_id ?? parent.id, depth: (parent.subtask_depth ?? 0) + 1, withParent: a.runsOn === "same" },
         })),

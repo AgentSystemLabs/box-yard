@@ -12,12 +12,14 @@ const environmentType = (value: unknown): EnvironmentType | null => ENVIRONMENT_
 export const environmentRunner = (type: EnvironmentType): Runner => type === "upstash" ? "box" : type === "runpod" || type === "vast" || type === "daytona" ? "gpu" : type
 export const environmentGpu = (type: EnvironmentType): GpuProvider | null => environmentRunner(type) === "gpu" ? type as GpuProvider : null
 
+export class TaskEnvironmentError extends BadRequestError {}
+
 /** Server-owned lineage and provider routing are the authority. Nothing here reads a worker file or event. */
 export class TaskEnvironment {
   constructor(private readonly store: Store, private readonly provider: BoxProvider) {}
 
   private reject(detail: string): never {
-    throw new BadRequestError(`Subtask environment restriction: ${detail}`)
+    throw new TaskEnvironmentError(`Subtask environment restriction: ${detail}`)
   }
 
   physical(boxId: string): EnvironmentType {
@@ -33,6 +35,11 @@ export class TaskEnvironment {
   }
 
   private remember(row: TaskRow, type: EnvironmentType): EnvironmentType {
+    const existing = this.saved(row)
+    if (existing) {
+      if (existing !== type) this.reject("persisted lineage conflicts with the original environment type.")
+      return existing
+    }
     // Write once, outside updateTask/TaskPatch: APIs, manager tools and worker events cannot replace this value.
     this.store.db.prepare("UPDATE tasks SET environment_type = ? WHERE id = ? AND environment_type IS NULL").run(type, row.id)
     const saved = this.saved(this.store.getTaskRow(row.id)!)
@@ -93,7 +100,9 @@ export class TaskEnvironment {
   }
 
   runner(type: EnvironmentType, runner: Runner, gpu: GpuProvider): void {
-    const target = runner === "box" ? environmentType(this.provider.name) : runner === "gpu" ? gpu : runner
+    // A box selection may reuse an existing Upstash box even if AutoProvider currently creates local folders.
+    // Pool growth and every actual destination are checked separately.
+    const target = runner === "box" ? (type === "upstash" ? "upstash" : environmentType(this.provider.name)) : runner === "gpu" ? gpu : runner
     if (target !== type) this.reject(`descendants of ${type} tasks must remain in ${type}; requested ${target ?? "unknown"} placement is forbidden.`)
   }
 

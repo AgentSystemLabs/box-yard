@@ -1952,7 +1952,7 @@ const TOOLS = [
     description:
       "Start sub-agents: each sub-task is a task of its own (its own session and transcript, shown nested under yours) that works on its prompt and reports back to you when it finishes. " +
       "Use it when the work splits into independent parts, or when asked to use N sub-agents (start exactly N, in one call). Returns each sub-task's id and link. " +
-      "Then call wait_for_subtasks, or end your turn: their reports arrive as your next message. Sub-tasks can start their own, down to the depth limit.",
+      "Then call wait_for_subtasks, or end your turn: their reports arrive as your next message. Sub-tasks can start their own, down to the depth limit. Every descendant must stay in the original physical environment type; the server rejects other types.",
     inputSchema: {
       type: "object",
       properties: {
