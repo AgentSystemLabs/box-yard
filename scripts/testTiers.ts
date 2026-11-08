@@ -54,6 +54,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/connector-routes.test.ts": "Full Box Yard server/task-manager fixture",
   "test/context.e2e.test.ts": "End-to-end runner/server integration",
   "test/create-tasks.test.ts": "Full Box Yard server/task-manager fixture",
+  "test/opencode-task.e2e.test.ts": "End-to-end OpenCode worker/server and archive integration",
   "test/cursor-task.e2e.test.ts": "End-to-end runner/server integration",
   "test/daytona-pods.e2e.test.ts": "End-to-end runner/server integration",
   "test/daytona.test.ts": "Provider archive-stream transport and shell integration (mock cloud)",

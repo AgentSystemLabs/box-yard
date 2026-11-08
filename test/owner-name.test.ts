@@ -14,7 +14,7 @@ import { boxActorLabel } from "../shared/boxHistory.js"
 import { sourceLabel } from "../shared/hooks.js"
 import { previewLine } from "../shared/tts.js"
 import { buildSelectionTaskPrompt } from "../web/src/lib/selectionTask.js"
-import { projectNote, inlinePicksNote } from "../server/runTargets.js"
+import { projectNote, inlinePicksNote, harnessNote } from "../server/runTargets.js"
 import { routeRules, taskThreadPrompt } from "../server/sideThreads.js"
 import { userMessageLabel } from "../shared/sender.js"
 import type { Project } from "../shared/types.js"
@@ -156,6 +156,11 @@ describe("generated output boundaries", () => {
     expect(routeRules({ task: { id: "task_1", title: "Cody" }, ownerName: "Ana" })).toContain('task "Cody"')
     expect(taskThreadPrompt({ title: "Cody", state: "idle", notices: "Cody", question: "Cody?", context: null, ownerName: "Ana" })).toContain('task "Cody"')
     expect(routingInstructions(tmpDir(), { agentRoutingConfig: "", agentCodexModel: "Cody", ownerName: "Ana" })).toContain("Codex model Cody")
+    expect(routingInstructions(tmpDir(), { agentRoutingConfig: "", agentOpencodeModel: "example/Cody#high", ownerName: "Ana" })).toContain("OpenCode model example/Cody#high")
+    const harness = harnessNote({ token: "opencode:Cody", label: "Cody model", value: "opencode", model: "example/Cody#high" }, "Ana", false)
+    expect(harness).toContain("Ana picked the harness")
+    expect(harness).toContain('!opencode:Cody (Cody model), agent "opencode"')
+    expect(harness).toContain('Model "example/Cody#high" with any provider variant included in its model ID')
     expect(projectNote({ token: "Cody", label: "Cody", value: "prj_1" }, "Ana")).toContain('project "Cody"')
     expect(inlinePicksNote([{ kind: "project", token: "Cody", label: "Cody", value: "prj_1", where: 'item 1 ("Cody")', reason: "item" }], "Ana", false)).toContain('item 1 ("Cody")')
     const selection = buildSelectionTaskPrompt({ source: { kind: "orchestrator" }, selectedText: "Cody said hello", instructions: "Ask Cody", ownerName: "Ana" })

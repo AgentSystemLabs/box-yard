@@ -293,11 +293,13 @@ describe('chat "!" harness picks', () => {
       ["claude", null],
       ["codex", null],
       ["cursor", null],
+      ["opencode", null],
     ])
     await addMachine(r)
     const onAir = await call<RunTarget[]>(r, "GET", "/api/harness-targets?runsOn=label%3Astudio-mac")
     expect(onAir.find((t) => t.token === "codex")?.disabled).toBeNull()
     expect(onAir.find((t) => t.token === "claude")?.disabled).toBeNull()
+    expect(onAir.find((t) => t.token === "opencode")?.disabled).toBeNull()
   })
 
   it("refuses a harness that isn't on the list or can't go with the @ pick, and keeps a good one", async () => {

@@ -78,6 +78,7 @@ describe("GET /api/setup", () => {
       codexAuthJson: { state: "unset", source: null },
       codexApiKey: { state: "unset", source: null },
       cursorApiKey: { state: "unset", source: null },
+      opencodeAuthJson: { state: "unset", source: null },
       githubToken: { state: "unset", source: null },
       runpodApiKey: { state: "unset", source: null },
       vastApiKey: { state: "unset", source: null },

@@ -183,7 +183,7 @@ describe("turnPick", () => {
 })
 
 describe('"!" harness picks', () => {
-  const both = buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null } })
+  const both = buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null, opencode: "not set up" } })
 
   it("lists only the CLIs that can run there; a blocked CLI stays visible", () => {
     expect(both.map((t) => [t.token, t.value, t.label, t.disabled])).toEqual([
@@ -262,7 +262,7 @@ describe("what Default means in a Captain's chat", () => {
   })
 
   it("names the project's agent, and says so when it isn't set up where the tasks run", () => {
-    const both = buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null } })
+    const both = buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null, opencode: "not set up" } })
     expect(projectHarnessTarget(both, "codex")).toMatchObject({ token: "codex", label: "Codex", disabled: null })
     expect(projectHarnessTarget(undefined, "claude")).toMatchObject({ token: "claude", label: "Claude Code", disabled: null })
     const claudeOnly = buildHarnessTargets({ problems: { claude: null, codex: "not signed in", cursor: "not signed in" } })
@@ -328,7 +328,7 @@ describe('the Coordinator\'s "%" project picks', () => {
 
 describe("picks for only part of a message (scopePicks)", () => {
   const places = buildRunTargets(base)
-  const harnesses = buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null } })
+  const harnesses = buildHarnessTargets({ problems: { claude: null, codex: null, cursor: null, opencode: "not set up" } })
   const projects = buildProjectTargets([
     { id: "prj_yard", name: "Box Yard" },
     { id: "prj_castle", name: "Keep the Castle" },

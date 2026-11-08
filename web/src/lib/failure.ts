@@ -51,8 +51,8 @@ const API_ERROR = /\bAPI Error:\s*(\d{3})/i
 export function explainFailure(error: string, ctx: FailureContext = {}): Failure {
   const text = error.trim()
   // A toast doesn't know the task's agent: Codex's errors point at OpenAI, Cursor's at cursor-agent.
-  const cli = ctx.agentCli ?? (/\bcodex\b|openai|chatgpt/i.test(text) ? "codex" : /cursor-agent|\bcursor\b/i.test(text) ? "cursor" : "claude")
-  const agent = cli === "codex" ? "Codex" : cli === "cursor" ? "Cursor" : "Claude"
+  const cli = ctx.agentCli ?? (/\bopencode\b/i.test(text) ? "opencode" : /\bcodex\b|openai|chatgpt/i.test(text) ? "codex" : /cursor-agent|\bcursor\b/i.test(text) ? "cursor" : "claude")
+  const agent = cli === "codex" ? "Codex" : cli === "cursor" ? "Cursor" : cli === "opencode" ? "OpenCode" : "Claude"
   const now = ctx.now ?? Date.now()
   const status = Number(API_ERROR.exec(text)?.[1] ?? 0)
 
@@ -94,7 +94,7 @@ export function explainFailure(error: string, ctx: FailureContext = {}): Failure
   const github = githubAuth(text)
   if (github) return github
 
-  if (status === 401 || status === 403 || /authentication_error|permission_error|invalid (x-)?api[ -]?key|please run \/login|not logged in|oauth token (has )?(expired|been revoked)|invalid bearer token|\bunauthori[sz]ed\b|provided api key is invalid|authentication required\. please run '(cursor-)?agent login'/i.test(text))
+  if (status === 401 || status === 403 || /OpenCode.*authentication required|authentication_error|permission_error|invalid (x-)?api[ -]?key|please run \/login|not logged in|oauth token (has )?(expired|been revoked)|invalid bearer token|\bunauthori[sz]ed\b|provided api key is invalid|authentication required\. please run '(cursor-)?agent login'/i.test(text))
     return {
       kind: "agent_auth",
       title: `${agent} didn't accept its login`,

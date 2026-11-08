@@ -176,6 +176,8 @@ export class MachineService {
       test.claudeLogin = true
       test.codexLogin = true
       test.cursorLogin = true
+      test.tools.opencode = { found: true, version: "1.19.5", path: "opencode" }
+      test.opencodeLogin = true
       test.problems = test.problems.filter((p) => !/^(claude|neither claude)/.test(p))
       test.notes = test.notes.filter((n) => !/^(claude|codex|cursor-agent)/.test(n))
     }

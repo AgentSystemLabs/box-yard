@@ -138,7 +138,7 @@ function safe<A>(fn: (args: A) => Promise<ToolResult> | ToolResult) {
 const STATUS_ONLY_FIELD = "(status only: ask the project's Captain)"
 
 const STEER_DESCRIPTION =
-  "true: steer it into a mid-turn agent's running turn, with every other queued message, in send order. Requests delivery without stopping; the result is not confirmation that the model processed them. Use it when the message changes what it's doing right now. A Cursor agent can't take messages mid-turn; theirs wait for the turn's end (the delivery field says so). To stop the turn instead, call stop_task: the queued messages are kept and start its next turn."
+  "true: steer it into a mid-turn agent's running turn, with every other queued message, in send order. Requests delivery without stopping; the result is not confirmation that the model processed them. Use it when the message changes what it's doing right now. Cursor and OpenCode agents can't take messages mid-turn; theirs wait for the turn's end (the delivery field says so). To stop the turn instead, call stop_task: the queued messages are kept and start its next turn."
 const INTERRUPT_DESCRIPTION = "Old name for steer, with the same effect: it no longer stops the turn (stop_task does)."
 
 /** What steerQueued did, for the MCP reply. */
@@ -176,9 +176,9 @@ const modelBase = z
   .trim()
   .min(1)
   .max(100)
-  .regex(/^[A-Za-z0-9._:\[\]/-]+$/, "Model names have no spaces")
+  .regex(/^[A-Za-z0-9._:#\[\]/-]+$/, "Model names have no spaces")
   .optional()
-const modelSchema = modelBase.describe("Any id or alias `claude --model` takes; omit it for the defaults (Task options)")
+const modelSchema = modelBase.describe("A harness model id; omit it for the harness defaults (Task options)")
 const routingRuleBase = z.string().trim().min(1).max(120).optional()
 const routingReasonBase = z.string().trim().min(1).max(500).optional()
 const routingRuleSchema = routingRuleBase.describe("Routing rule name/id that selected this model and effort")
@@ -202,7 +202,7 @@ const machineLabelBase = z.string().max(MACHINE_LIMITS.labelLength).optional()
 const machineLabelSchema = machineLabelBase.describe('An SSH machine label or name, e.g. "gpu" (list_machines lists them); alone it means runs_on "ssh" (Task options)')
 const envSchema = z.record(z.string(), z.string()).optional().describe("Env vars as NAME: value")
 const agentBase = z.enum(AGENT_CLIS).optional()
-const agentSchema = agentBase.describe('"claude", "codex" or "cursor"; omit it to follow the project\'s Agent (Task options)')
+const agentSchema = agentBase.describe('"claude", "codex", "cursor" or "opencode"; omit it to follow the project\'s Agent (Task options)')
 const iconSchema = z
   .enum(TASK_ICONS)
   .optional()
@@ -439,14 +439,14 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   })
   /**
    * The message's harness/model/effort wins over tool arguments. Plain !harness leaves model and effort unset so
-   * the task follows that harness's Settings defaults. Cursor carries effort in its model id.
+   * the task follows that harness's Settings defaults. Cursor carries effort in its model id; OpenCode uses provider/model#variant and rejects generic effort.
    */
   const pickedAgent = (agent: AgentCli | undefined, model: string | undefined, effort?: Effort): { agent: AgentCli | undefined; model: string | undefined; effort: Effort | undefined; note: { agent_pick?: string } } => {
     const pick = picksNow().agent
     if (!pick) return { agent, model, effort, note: {} }
     const cli = pick.value as AgentCli
     const owned = cliForModel(model)
-    return { agent: cli, model: pick.model, effort: cli === "cursor" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
+    return { agent: cli, model: pick.model, effort: cli === "cursor" || cli === "opencode" ? undefined : pick.effort, note: agentPickNote(pick, (agent !== undefined && agent !== cli) || (model !== undefined && model !== pick.model) || (effort !== undefined && effort !== pick.effort) || (owned !== null && owned !== cli)) }
   }
   const agentPickNote = (pick: RunTargetPick, overridden: boolean) => ({
     agent_pick: overridden ? `${owner("Cody")} picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): ${owner("Cody")}'s pick for this prompt`,
@@ -857,7 +857,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           repo: z.string().optional(),
           base_branch: z.string().optional(),
           env: envSchema,
-          agent: agentBase.describe('The agent CLI its tasks run on: "claude", "codex" or "cursor"; omit it for Settings › Box agents'),
+          agent: agentBase.describe('The agent CLI its tasks run on: "claude", "codex", "cursor" or "opencode"; omit it for Settings › Box agents'),
           ...boxSettingsInput,
         },
       },
@@ -892,7 +892,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
               .enum(AGENT_CLIS)
               .nullable()
               .optional()
-              .describe('The agent CLI its new tasks run on: "claude", "codex" or "cursor"; null goes back to Settings › Box agents. Its existing tasks keep theirs.'),
+              .describe('The agent CLI its new tasks run on: "claude", "codex", "cursor" or "opencode"; null goes back to Settings › Box agents. Its existing tasks keep theirs.'),
             ...boxSettingsInput,
             notes_max: z
               .number()
@@ -1595,7 +1595,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     {
       description:
         "Steer: hand the messages queued for a task to its agent in the turn it's running now, without stopping it. Delivery is requested in send order; Codex acceptance is recorded separately and does not confirm model processing. " +
-        "Use it when a queued message changes what the agent is doing and waiting for the turn to end would waste work. If no turn is running, the messages simply go out with the next turn. A Cursor agent can't take messages mid-turn: they wait for the turn's end, and the delivery field says so. " +
+        "Use it when a queued message changes what the agent is doing and waiting for the turn to end would waste work. If no turn is running, the messages simply go out with the next turn. Cursor and OpenCode agents can't take messages mid-turn: they wait for the turn's end, and the delivery field says so. " +
         "To stop the turn instead, call stop_task: the queued messages are kept and start the next turn.",
       inputSchema: { task: z.string() },
     },
@@ -1808,7 +1808,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         task: z.string(),
         agent: z.enum([...AGENT_CLIS, "default"]).optional(),
         model: z.string().trim().min(1).max(100).nullable().optional().describe("Compatible model for subsequent turns; null clears the pin. Omit on a harness switch to use its defaults/routing."),
-        effort: z.enum([...EFFORTS, "ultra"]).nullable().optional().describe("Effort pin for subsequent turns; null clears it. Cursor carries effort in its model id."),
+        effort: z.enum([...EFFORTS, "ultra"]).nullable().optional().describe("Effort pin for subsequent turns; null clears it. Cursor carries effort in its model id; OpenCode uses provider/model#variant and rejects generic effort."),
         message: z.string().trim().min(1).max(50_000).optional().describe("Optional continuation instructions; existing queued messages are kept too."),
       },
     },
@@ -2401,6 +2401,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
                 node: toolLine(t.tools.node),
                 claude: t.tools.claude.found ? `${toolLine(t.tools.claude)}, ${loginLine(t.claudeLogin)}` : "not installed: no Claude Code tasks here",
                 codex: t.tools.codex.found ? `${toolLine(t.tools.codex)}, ${loginLine(t.codexLogin)}` : "not installed: no Codex tasks here (Box Yard never installs it on a machine)",
+                opencode: t.tools.opencode?.found ? `${toolLine(t.tools.opencode)}, API login ${t.opencodeLogin ? "present" : "not found"}` : "not installed: no OpenCode tasks here (Box Yard never installs it on a machine)",
                 cursor: t.tools.cursor?.found ? `${toolLine(t.tools.cursor)}, ${loginLine(t.cursorLogin ?? null)}` : "not installed: no Cursor tasks here (Box Yard never installs it on a machine)",
                 ...(t.problems.length ? { problems: t.problems } : {}),
                 ...(t.notes.length ? { notes: t.notes } : {}),
@@ -2475,7 +2476,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         {
           description:
             "Add one of Cody's own computers as an SSH machine agents can run on, when Cody asks to and gives its address, user and SSH key reference; then Box Yard tests the connection (OS, CPUs, memory, disk, git, node, claude and codex with their logins) and the reply shows the result. " +
-            "Never ask Cody to paste a private key: ssh_key is a reference (file:~/.ssh/<key> or the SSH agent). The machine needs node 18+, git, and Claude Code, Codex or Cursor's CLI (Box Yard never installs them there; a task goes only to a machine with its agent), each with a login on it or one Box Yard forwards (Settings › Credentials or the project's identity); docs/machines.md is the setup guide. Agents there are not sandboxed: they run as that user.",
+            "Never ask Cody to paste a private key: ssh_key is a reference (file:~/.ssh/<key> or the SSH agent). The machine needs node 18+, git, and Claude Code, Codex, Cursor or OpenCode 1.19.5 (Box Yard never installs them there; a task goes only to a machine with its agent), each with a login on it or one Box Yard forwards (Settings › Credentials or the project's identity); docs/machines.md is the setup guide. Agents there are not sandboxed: they run as that user.",
           inputSchema: { ...machineInput, test: z.boolean().optional().describe("false: add it without testing (default: test now)") },
         },
         safe(async (a: MachineArgs & { name: string; host: string; user: string; ssh_key: string; test?: boolean }) => {

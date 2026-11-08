@@ -72,13 +72,14 @@ export interface MachineTest {
   /** Folders the machine's login shell has node, claude or git in (nvm and the like), put first on PATH for agents. */
   pathDirs: string[]
   /** `cursor` (cursor-agent) is missing from tests made before Box Yard ran Cursor. */
-  tools: { git: MachineTool; node: MachineTool; claude: MachineTool; codex: MachineTool; cursor?: MachineTool }
+  tools: { git: MachineTool; node: MachineTool; claude: MachineTool; codex: MachineTool; cursor?: MachineTool; opencode?: MachineTool }
   /** `claude auth status` on the machine: its own Claude login. Null: claude isn't there, or it didn't say. */
   claudeLogin: boolean | null
   /** `codex login status` on the machine: its own Codex login. Null (or missing, from before Codex): codex isn't there, or it didn't say. */
   codexLogin?: boolean | null
   /** `cursor-agent status` on the machine: its own Cursor login. Null (or missing): cursor-agent isn't there, or it didn't say. */
   cursorLogin?: boolean | null
+  opencodeLogin?: boolean | null
   /** A folder in memory (a tmpfs) for each turn's task.json, or null: they're on disk in the task folder for the turn. */
   secretsDir: string | null
   /** Problems that stop tasks from running there (no node, no git, …); empty when it's ready. */
@@ -306,6 +307,11 @@ const AGENT_NEEDS = {
     install: "npm install -g @openai/codex",
     login: (where: string) =>
       `run codex login on ${where} and test it again, or add an OpenAI API key for Codex in Settings › Credentials (Box Yard's ChatGPT login only goes to Linux machines, which keep it in memory)`,
+  },
+  opencode: {
+    name: "OpenCode",
+    install: "npm install -g opencode-ai@1.19.5",
+    login: (where: string) => `add provider API logins on ${where} and test it again, or paste API auth.json in Settings › Credentials › OpenCode API logins (OAuth is not supported)`,
   },
   cursor: {
     name: "Cursor's CLI",

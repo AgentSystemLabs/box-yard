@@ -3,7 +3,7 @@
 import type { SettingSource } from "./types.js"
 import type { DefaultProvider, Runner, SetupRunner } from "./runner.js"
 
-export const CREDENTIAL_KEYS = ["upstashBoxApiKey", "claudeOauthToken", "anthropicApiKey", "codexAuthJson", "codexApiKey", "cursorApiKey", "githubToken", "runpodApiKey", "vastApiKey", "daytonaApiKey"] as const
+export const CREDENTIAL_KEYS = ["upstashBoxApiKey", "claudeOauthToken", "anthropicApiKey", "codexAuthJson", "codexApiKey", "cursorApiKey", "opencodeAuthJson", "githubToken", "runpodApiKey", "vastApiKey", "daytonaApiKey"] as const
 export type CredentialKey = (typeof CREDENTIAL_KEYS)[number]
 
 /**
@@ -110,7 +110,7 @@ export interface LocalTool {
   version: string | null
 }
 
-export const LOCAL_TOOL_KEYS = ["node", "claude", "codex", "cursor", "gh", "chrome"] as const
+export const LOCAL_TOOL_KEYS = ["node", "claude", "codex", "cursor", "opencode", "gh", "chrome"] as const
 export type LocalToolKey = (typeof LOCAL_TOOL_KEYS)[number]
 
 /** The local runner's prerequisites (#120), as the setup card and Settings › Credentials list them. */
@@ -133,6 +133,12 @@ export const LOCAL_TOOL_INFO: Record<LocalToolKey, { label: string; required: bo
     required: false,
     help: "Only for agents set to run on Cursor. Signed in (cursor-agent login), it needs no key here.",
     link: { href: "https://cursor.com/docs/cli/installation", label: "Install the Cursor CLI" },
+  },
+  opencode: {
+    label: "OpenCode",
+    required: false,
+    help: "Task agents only. Uses provider API logins; OAuth is not supported. Requires OpenCode 1.19.5.",
+    link: { href: "https://opencode.ai/docs/", label: "Install OpenCode" },
   },
   gh: {
     label: "GitHub CLI",
@@ -157,6 +163,7 @@ export interface LocalCheck {
   codexLogin?: boolean | null
   /** `cursor-agent status` says this computer's Cursor CLI is signed in; null when it couldn't tell (not installed, mock). */
   cursorLogin?: boolean | null
+  opencodeLogin?: boolean | null
   /** `gh auth status` succeeded. */
   ghLogin: boolean
   checkedAt: number
@@ -228,6 +235,13 @@ export const CREDENTIAL_INFO: Record<
     placeholder: "key_…",
     help: "Signs in agents that run on Cursor, billed to your Cursor plan. This computer can use its own cursor-agent login instead.",
     link: { href: "https://cursor.com/dashboard?tab=integrations", label: "Create one in the Cursor dashboard" },
+  },
+  opencodeAuthJson: {
+    label: "OpenCode API logins",
+    env: "OPENCODE_AUTH_CONTENT",
+    placeholder: '{"anthropic":{"type":"api","key":"…"}}',
+    help: "API entries from ~/.local/share/opencode/auth.json. OAuth logins are not supported. The Test button validates the format without a model request.",
+    link: { href: "https://opencode.ai/docs/providers/", label: "OpenCode providers" },
   },
   githubToken: {
     label: "GitHub token",

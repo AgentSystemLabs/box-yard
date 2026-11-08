@@ -6,9 +6,9 @@
 import { q } from "../providers/types.js"
 import type { MachineTest, MachineTool } from "../../shared/machines.js"
 
-const TOOLS = ["git", "node", "claude", "codex", "cursor-agent"] as const
+const TOOLS = ["git", "node", "claude", "codex", "cursor-agent", "opencode"] as const
 /** A tool's key in the probe's lines and in MachineTest.tools: its command, less cursor-agent's "-agent". */
-type ToolName = "git" | "node" | "claude" | "codex" | "cursor"
+type ToolName = "git" | "node" | "claude" | "codex" | "cursor" | "opencode"
 
 /** The oldest Node the runner (runner/box-runner.mjs) works with. */
 export const MIN_NODE_MAJOR = 18
@@ -46,7 +46,7 @@ login=""
 for t in ${TOOLS.join(" ")}; do command -v "$t" >/dev/null 2>&1 || login=1; done
 if [ -n "$login" ] && [ -n "$SHELL" ] && [ -x "$SHELL" ]; then
   T=""; command -v timeout >/dev/null 2>&1 && T="timeout 20"
-  $T "$SHELL" -lic 'command -v node; command -v claude; command -v git; command -v codex; command -v cursor-agent' </dev/null 2>/dev/null | while IFS= read -r l; do
+  $T "$SHELL" -lic 'command -v node; command -v claude; command -v git; command -v codex; command -v cursor-agent; command -v opencode' </dev/null 2>/dev/null | while IFS= read -r l; do
     case "$l" in /*) p login "$l";; esac
   done
 fi
@@ -82,6 +82,10 @@ if [ -n "$c" ]; then
   T=""; command -v timeout >/dev/null 2>&1 && T="timeout 20"
   a=$(NO_COLOR=1 $T "$c" status </dev/null 2>/dev/null | grep -oiE '(not )?logged in' | head -n 1)
   p cursor_auth "$a"
+fi
+if command -v opencode >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+  a=$(node -e 'try { const fs = require("fs"), path = require("path"), os = require("os"); const a = JSON.parse(fs.readFileSync(path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "opencode", "auth.json"), "utf8")); console.log(Object.keys(a).length > 0 && Object.values(a).every(v => v.type === "api" && typeof v.key === "string" && v.key.length > 0) ? "yes" : "no") } catch { console.log("no") }' </dev/null 2>/dev/null)
+  p opencode_auth "$a"
 fi
 if [ "$(uname -s)" = Linux ] && grep -qs '^[^ ]* /dev/shm tmpfs' /proc/mounts && [ -w /dev/shm ]; then p shm "/dev/shm/boxyard-$(id -u)"; fi
 `.trim()
@@ -123,7 +127,7 @@ export function testFromProbe(i: { first: Map<string, string[]>; tools: Map<stri
     const p = one(tools, `path_${t}`)
     return { found: Boolean(p), path: p, version: p ? one(tools, `version_${t}`) : null }
   }
-  const all = { git: tool("git"), node: tool("node"), claude: tool("claude"), codex: tool("codex"), cursor: tool("cursor") }
+  const all = { git: tool("git"), node: tool("node"), claude: tool("claude"), codex: tool("codex"), cursor: tool("cursor"), opencode: tool("opencode") }
   const disk = one(first, "disk")?.split(" ") ?? []
   const auth = one(tools, "claude_auth")
   const claudeLogin = !all.claude.found || !auth ? null : /true$/.test(auth)
@@ -131,6 +135,7 @@ export function testFromProbe(i: { first: Map<string, string[]>; tools: Map<stri
   const codexAuth = one(tools, "codex_auth")
   const codexLogin = !all.codex.found ? null : codexAuth === "0" ? true : codexAuth === "1" ? false : null
   // `cursor-agent status` prints "Logged in as …" or "Not logged in" (and exits 0 either way).
+  const opencodeLogin = all.opencode.found ? one(tools, "opencode_auth") === "yes" : null
   const cursorAuth = one(tools, "cursor_auth")?.toLowerCase()
   const cursorLogin = !all.cursor.found || !cursorAuth ? null : cursorAuth === "logged in"
   const problems: string[] = []
@@ -141,13 +146,15 @@ export function testFromProbe(i: { first: Map<string, string[]>; tools: Map<stri
   else if (nodeMajor(all.node.version) < MIN_NODE_MAJOR) problems.push(`node ${all.node.version} is too old (Node ${MIN_NODE_MAJOR} or later)`)
   if (!all.git.found) problems.push("git isn't installed")
   const installClaude = "npm install -g @anthropic-ai/claude-code, or curl -fsSL https://claude.ai/install.sh | bash"
-  if (!all.claude.found && !all.codex.found && !all.cursor.found) problems.push(`neither claude (Claude Code), codex nor cursor-agent is installed: ${installClaude}`)
+  if (!all.claude.found && !all.codex.found && !all.cursor.found && !all.opencode.found) problems.push(`neither claude (Claude Code), codex, cursor-agent nor opencode is installed: ${installClaude}`)
   const missing = first.get("missing") ?? []
   if (missing.length) problems.push(`${missing.join(", ")} ${missing.length === 1 ? "isn't" : "aren't"} installed`)
   if (all.claude.found && claudeLogin === false) notes.push("claude isn't logged in on it: its tasks need a Claude key from Box Yard (Settings › Credentials or the project's identity), or run claude there once and /login")
-  if (!all.claude.found && (all.codex.found || all.cursor.found)) notes.push(`claude (Claude Code) isn't installed, so only ${all.codex.found && all.cursor.found ? "Codex and Cursor" : all.codex.found ? "Codex" : "Cursor"} tasks run on it: ${installClaude}`)
+  if (!all.claude.found && (all.codex.found || all.cursor.found || all.opencode.found)) notes.push(`claude (Claude Code) isn't installed, so only ${[all.codex.found && "Codex", all.cursor.found && "Cursor", all.opencode.found && "OpenCode"].filter(Boolean).join(" and ")} tasks run on it: ${installClaude}`)
   if (all.codex.found && codexLogin === false) notes.push("codex isn't logged in on it: its Codex tasks need an OpenAI API key from Box Yard (Settings › Credentials), Box Yard's ChatGPT login (Linux machines only, kept in memory), or run codex login there")
   if (all.cursor.found && cursorLogin === false) notes.push("cursor-agent isn't logged in on it: its Cursor tasks need a Cursor API key from Box Yard (Settings › Credentials), or run cursor-agent login there")
+  if (all.opencode.found && !/^1\.19\.5(?:\s|$)/.test(all.opencode.version ?? "")) notes.push("OpenCode 1.19.5 is required for OpenCode tasks; install npm install -g opencode-ai@1.19.5 and test again")
+  if (all.opencode.found && !opencodeLogin) notes.push("OpenCode tasks need provider API credentials from Settings › Credentials › OpenCode API logins, or an API-only auth.json on this machine; OAuth is not supported")
   const free = num(disk[0] ?? null)
   if (free !== null && free < 2 * 1024 ** 3) notes.push("under 2 GB free in its work folder's disk")
   return {
@@ -169,6 +176,7 @@ export function testFromProbe(i: { first: Map<string, string[]>; tools: Map<stri
     claudeLogin,
     codexLogin,
     cursorLogin,
+    opencodeLogin,
     secretsDir: one(tools, "shm"),
     problems,
     notes,
@@ -193,10 +201,11 @@ export function failedTest(error: string, at: number, latencyMs: number | null =
     home: null,
     workDir: null,
     pathDirs: [],
-    tools: { git: none, node: none, claude: none, codex: none, cursor: none },
+    tools: { git: none, node: none, claude: none, codex: none, cursor: none, opencode: none },
     claudeLogin: null,
     codexLogin: null,
     cursorLogin: null,
+    opencodeLogin: null,
     secretsDir: null,
     problems: [],
     notes: [],

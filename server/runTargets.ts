@@ -106,7 +106,7 @@ export async function listHarnessTargets(d: RunTargetDeps, projectId: string | n
 export async function resolveHarnessPick(d: RunTargetDeps, value: string, projectId: string | null, runsOn: string | null): Promise<RunTargetPick> {
   const token = value.trim().toLowerCase()
   const cli = AGENT_CLIS.find((c) => c === token.split(":")[0])
-  if (!cli) throw new BadRequestError(`"${value}" isn't a harness: pick !claude, !codex or !cursor.`)
+  if (!cli) throw new BadRequestError(`"${value}" isn't a harness: pick !claude, !codex, !cursor or !opencode.`)
   const { problems } = await harnessProblems(d, projectId, runsOn)
   const t = buildHarnessTargets({ problems }).find((x) => x.value === cli)
   if (!t) throw new BadRequestError(`!${cli} can't run this message's tasks: ${problems[cli]}`)
@@ -137,7 +137,7 @@ export function runTargetNote(pick: RunTargetPick, ownerName: string | undefined
 export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, relay: boolean): string {
   return (
     `[${withOwner("Cody", ownerName)} picked the harness for this message: !${pick.token} (${pick.label}), agent "${pick.value}".` +
-      (pick.model !== undefined ? ` Model "${pick.model}"${pick.effort ? `, effort "${pick.effort}"` : pick.value === "cursor" ? " with effort included in its model ID" : " with the harness's Settings effort"}.` : " Use this harness's model and effort defaults in Settings.") + " " +
+      (pick.model !== undefined ? ` Model "${pick.model}"${pick.effort ? `, effort "${pick.effort}"` : pick.value === "opencode" ? " with any provider variant included in its model ID" : pick.value === "cursor" ? " with effort included in its model ID" : " with the harness's Settings effort"}.` : " Use this harness's model and effort defaults in Settings.") + " " +
       `Every task you create for it gets agent "${pick.value}": Box Yard applies it to create_task and create_tasks during this turn` +
       (relay ? ", and a Captain you message this turn gets the same pick." : ".") +
       ` send_to_task keeps the saved harness. To continue the same work on ${pick.label}, wait for it to stop and finish saving, then call continue_task with the same task and agent "${pick.value}" (and this pick's model/effort if specified); do not create a replacement task.]`
@@ -226,7 +226,7 @@ export async function resolveInlinePicks(
       // Its "!" token: a harness, or one with a model and effort (shared/harnessPicks.ts), unchecked for availability.
       const token = p.value.trim().toLowerCase()
       const cli = AGENT_CLIS.find((c) => c === token.split(":")[0])
-      if (!cli) throw new BadRequestError(`"${p.value}" isn't a harness: pick !claude, !codex or !cursor.`)
+      if (!cli) throw new BadRequestError(`"${p.value}" isn't a harness: pick !claude, !codex, !cursor or !opencode.`)
       const plain: RunTarget = { token: cli, value: cli, kind: "harness", label: AGENT_CLI_LABEL[cli], detail: null, disabled: null }
       const chosen = token === cli ? plain : d.harnessModels ? harnessModelTargets([plain], await d.harnessModels(cli)).find((x) => x.token.toLowerCase() === token) : undefined
       if (!chosen) throw new BadRequestError(`"!${p.value}" isn't a model and effort this harness offers. Pick one from the !${cli} list.`)
