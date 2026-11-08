@@ -128,6 +128,8 @@ export interface SubtaskPromptInfo {
   maxChildren: number
   /** The task that started this one, for a sub-task. */
   parent: { id: string; title: string } | null
+  /** Server-resolved physical providers that cannot create sub-tasks. */
+  spawnUnsupported?: string | null
 }
 
 /** The sub-task tools in a worker's system prompt (server/subtasks.ts). */
@@ -141,7 +143,9 @@ function subtaskLines(info: SubtaskPromptInfo | undefined): string[] {
       `- You are a sub-task of "${info.parent.title}" (task id ${info.parent.id}), depth ${depth} of at most ${maxDepth}. Its agent started you and reads your report: your final message of each turn goes to it as your report, so make it complete and self-contained (findings, links, anything it needs to merge your part). message_parent sends it an update mid-turn (fyi: true for log only). When you ask_user, your parent gets the question too and may answer it before Cody does.`,
     )
   }
-  if (canSpawn) {
+  if (info?.spawnUnsupported) {
+    lines.push(`- ${info.spawnUnsupported} If asked to use sub-agents, explain this limitation to Cody and do the work yourself.`)
+  } else if (canSpawn) {
     lines.push(
       `- spawn_subtasks: split your work across sub-agents. Each sub-task is a task of its own (its own session and transcript; Cody sees it nested under yours) and reports back to you when it finishes. Use it when the work splits into independent parts, or when you're asked to use N sub-agents: then start exactly that many in one call. At most ${info?.maxChildren ?? 10} per task, nesting ${maxDepth - depth} more level${maxDepth - depth === 1 ? "" : "s"} below you. Give each a title and a self-contained prompt. runs_on "same" (the default) runs it where you run, sharing your slot; or name a runner of the same physical environment type (box, local, docker, gpu, ssh). Every descendant keeps the original type; the server rejects other environments.`,
       `  Then call wait_for_subtasks to wait for their reports (or end your turn: they arrive as your next message), and write your answer from them, linking each sub-task. cancel_subtasks stops ones you no longer need. Don't call finish while sub-tasks still run.`,

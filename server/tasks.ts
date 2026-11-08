@@ -10,7 +10,7 @@ import { harnessHandoffKey, type HarnessHandoff, type TaskContinuation } from ".
 import type { Hub } from "./hub.js"
 import type { BoxRow, QueuedInputRow, Store, TaskRow, TurnFlags } from "./store.js"
 import { BadRequestError, ConflictError, NotFoundError, cloneUrl, githubSlug, boxRowCost, meterTick, normalizeBoxSize, sourceOf, taskAgentCli, taskGpuPick } from "./store.js"
-import { TaskEnvironment, TaskEnvironmentError, environmentRunner, environmentGpu } from "./taskEnvironment.js"
+import { TaskEnvironment, TaskEnvironmentError, environmentRunner, environmentGpu, subtaskProviderProblem } from "./taskEnvironment.js"
 import type { BoxProvider, BoxUsageProbe, ExecResult } from "./providers/types.js"
 import { providerOf, q, tasksRootOf } from "./providers/types.js"
 import { THIN_DIR, THIN_MARK, archiveOutcome, archiveScript, ArchiveDecoder, errorTail, thinRestoreScript, type ArchiveKind, type ArchiveOutcome } from "./archive.js"
@@ -6151,7 +6151,7 @@ export class TaskManager {
           resume: !firstTurn && !recapped && !handoff,
           compact,
           ...agent,
-          systemPrompt: workerSystemPrompt({ project, task: row, branch: row.branch, port: row.port_base ?? PORT_BASE, ownerName, pushAtTurnEnd: this.pushAtTurnEnd(project), box: this.boxPromptInfo(boxId, project), agent: taskAgentCli(row), subtasks: this.subtaskPromptInfo(row), compactionHistory: compactionIndexPrompt(new CompactionIndex(this.store, `task:${row.id}`)) }),
+          systemPrompt: workerSystemPrompt({ project, task: row, branch: row.branch, port: row.port_base ?? PORT_BASE, ownerName, pushAtTurnEnd: this.pushAtTurnEnd(project), box: this.boxPromptInfo(boxId, project), agent: taskAgentCli(row), subtasks: this.subtaskPromptInfo(row, boxId), compactionHistory: compactionIndexPrompt(new CompactionIndex(this.store, `task:${row.id}`)) }),
           directory,
           notes: notes.map((n) => ({ author: n.author, content: n.content })),
           recap: recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { handoff: handoff ?? undefined }),
@@ -7861,10 +7861,10 @@ export class TaskManager {
     return { maxDepth: s.subtaskMaxDepth ?? SUBTASK_MAX_DEPTH.default, maxChildren: s.subtaskMaxChildren ?? SUBTASK_MAX_CHILDREN.default }
   }
 
-  /** Where the task sits in its sub-task tree, for its system prompt. Stable from turn to turn (the prompt is cached). */
-  private subtaskPromptInfo(row: TaskRow): SubtaskPromptInfo {
+  /** Tree position and current physical provider support, refreshed when launching the turn. */
+  private subtaskPromptInfo(row: TaskRow, boxId: string): SubtaskPromptInfo {
     const parent = row.parent_task_id ? this.store.getTaskRow(row.parent_task_id) : null
-    return { ...this.subtaskLimits(), depth: row.subtask_depth ?? 0, parent: parent ? { id: parent.id, title: parent.title } : null }
+    return { ...this.subtaskLimits(), depth: row.subtask_depth ?? 0, parent: parent ? { id: parent.id, title: parent.title } : null, spawnUnsupported: subtaskProviderProblem(this.environment.physical(boxId)) }
   }
 
   /**

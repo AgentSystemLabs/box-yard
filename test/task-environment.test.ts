@@ -25,7 +25,7 @@ function fixture() {
 }
 
 describe("immutable physical task environments", () => {
-  it.each(["docker", "upstash"])("keeps %s children and grandchildren in type across instances and restarts", (type) => {
+  it.each(["docker", "upstash", "daytona"])("keeps %s children and grandchildren in type across instances and restarts", (type) => {
     const f = fixture()
     const first = f.place("first", type)
     f.store.updateTask(f.root.id, { boxId: first })
@@ -59,6 +59,18 @@ describe("immutable physical task environments", () => {
     }
     f.active("local")
     f.policy.runner("upstash", "box", "runpod") // Actual placement still cannot use AutoProvider's local fallback.
+  })
+
+  it.each(["runpod", "vast"])("blocks spawning after a top-level task moves onto %s without changing its origin", (type) => {
+    const f = fixture()
+    const original = f.place("original", "docker")
+    f.store.updateTask(f.root.id, { boxId: original })
+    f.policy.launching(f.row(), original)
+    f.store.updateTask(f.root.id, { boxId: f.place("gpu-target", type), runsOn: "gpu" })
+    expect(() => f.policy.forChild(f.row())).toThrow(/Subtasks are not supported on .* GPU boxes/)
+    expect(f.row().environment_type).toBe("docker")
+    f.store.updateTask(f.root.id, { boxId: original, runsOn: "docker" })
+    expect(f.policy.forChild(f.row())).toBe("docker")
   })
 
   it("rejects unavailable, unknown, cyclic, forged and cross-project lineage", () => {

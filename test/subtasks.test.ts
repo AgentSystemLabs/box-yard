@@ -71,4 +71,12 @@ describe("the worker prompt", () => {
     expect(deepest).toContain('You are a sub-task of "Omelette" (task id task_aaaaaaaaaaaa), depth 3 of at most 3.')
     expect(deepest).not.toContain("spawn_subtasks")
   })
+
+  it.each(["RunPod", "Vast.ai"])("tells %s agents to explain the unsupported subtask request", (provider) => {
+    const reason = `Subtasks are not supported on ${provider} GPU boxes.`
+    const unsupported = prompt({ depth: 0, maxDepth: 3, maxChildren: 10, parent: null, spawnUnsupported: reason })
+    expect(unsupported).toContain(reason)
+    expect(unsupported).toContain("explain this limitation to Cody and do the work yourself")
+    expect(unsupported).not.toContain("spawn_subtasks")
+  })
 })

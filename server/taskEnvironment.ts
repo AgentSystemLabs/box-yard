@@ -11,6 +11,9 @@ export type EnvironmentType = typeof ENVIRONMENT_TYPES[number]
 const environmentType = (value: unknown): EnvironmentType | null => ENVIRONMENT_TYPES.includes(value as EnvironmentType) ? value as EnvironmentType : null
 export const environmentRunner = (type: EnvironmentType): Runner => type === "upstash" ? "box" : type === "runpod" || type === "vast" || type === "daytona" ? "gpu" : type
 export const environmentGpu = (type: EnvironmentType): GpuProvider | null => environmentRunner(type) === "gpu" ? type as GpuProvider : null
+export const subtaskProviderProblem = (type: EnvironmentType): string | null => type === "runpod" || type === "vast"
+  ? `Subtasks are not supported on ${type === "runpod" ? "RunPod" : "Vast.ai"} GPU boxes.`
+  : null
 
 export class TaskEnvironmentError extends BadRequestError {}
 
@@ -98,7 +101,10 @@ export class TaskEnvironment {
   /** Creation needs a placed parent whose physical type agrees with the original, even after runner changes. */
   forChild(parent: TaskRow): EnvironmentType {
     const type = this.inherited(parent) ?? this.original(parent)
-    if (!parent.box_id || this.physical(parent.box_id) !== type) this.reject(`the parent must be physically running in its original ${type} environment to spawn children.`)
+    const actual = parent.box_id ? this.physical(parent.box_id) : null
+    const unsupported = actual ? subtaskProviderProblem(actual) : null
+    if (unsupported) this.reject(unsupported)
+    if (actual !== type) this.reject(`the parent must be physically running in its original ${type} environment to spawn children.`)
     return type
   }
 

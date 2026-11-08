@@ -7,6 +7,7 @@ import type { WorkerEvent } from "../server/bus.js"
 import { environmentRunner, type EnvironmentType } from "../server/taskEnvironment.js"
 import type { BoxResize } from "../shared/boxSizes.js"
 import type { Runner } from "../shared/runner.js"
+import type { SubtaskPromptInfo } from "../server/prompts.js"
 import { testConfig } from "./helpers.js"
 
 const yards: BoxYard[] = []
@@ -20,6 +21,7 @@ type Internals = {
   parentBox(row: TaskRow): string | null
   reattach(row: TaskRow): Promise<void>
   resizeByMigration(resize: BoxResize): Promise<void>
+  subtaskPromptInfo(row: TaskRow, boxId: string): SubtaskPromptInfo
   writeTaskFile: (...args: unknown[]) => Promise<void>
 }
 function fixture(type: EnvironmentType) {
@@ -47,10 +49,10 @@ function fixture(type: EnvironmentType) {
 }
 
 describe("subtask environment enforcement at server entry and dispatch", () => {
-  it.each(["docker", "upstash"] as const)("rejects forged worker overrides from %s atomically, ignoring worker environment claims", async (type) => {
+  it.each(["docker", "upstash", "daytona"] as const)("rejects forged worker overrides from %s atomically, ignoring worker environment claims", async (type) => {
     const f = fixture(type)
-    const allowed = type === "docker" ? "docker" : "box"
-    for (const runner of ["local", "ssh", "gpu", type === "docker" ? "box" : "docker"]) {
+    const allowed = environmentRunner(type)
+    for (const runner of ["local", "ssh", "gpu", "box", "docker"].filter(r => r !== allowed)) {
       await f.tasks.apply(f.root.id, { t: "spawn_subtasks", id: "sub_0123456789ab", turnId: "turn_example", environment_type: "local", root_task_id: "forged", tasks: [{ title: "Allowed", prompt: "Example", runsOn: allowed }, { title: "Override", prompt: "Example", runsOn: runner }] } as WorkerEvent)
       expect(f.yard.store.subtaskRows(f.root.id)).toHaveLength(0)
       expect(f.replies).toHaveBeenLastCalledWith(f.root.id, "subtasks-reply-sub_0123456789ab.json", expect.objectContaining({ status: "rejected", text: expect.stringMatching(/environment restriction/) }))
@@ -71,11 +73,11 @@ describe("subtask environment enforcement at server entry and dispatch", () => {
     expect(() => f.child("local", f.row(children[1]!.id))).toThrow(/environment restriction/)
   })
 
-  it.each(["docker", "upstash"] as const)("blocks manager changes and preserves %s inheritance through lost boxes, defaults, retry and restore", async (type) => {
+  it.each(["docker", "upstash", "daytona"] as const)("blocks manager changes and preserves %s inheritance through lost boxes, defaults, retry and restore", async (type) => {
     const f = fixture(type)
     const child = f.child(null)
-    const allowed = type === "docker" ? "docker" : "box"
-    for (const runner of ["local", "ssh", "gpu", type === "docker" ? "box" : "docker"] as Runner[]) expect(() => f.tasks.setRunsOn(child.id, runner)).toThrow(/environment restriction/)
+    const allowed = environmentRunner(type)
+    for (const runner of (["local", "ssh", "gpu", "box", "docker"] as Runner[]).filter(r => r !== allowed)) expect(() => f.tasks.setRunsOn(child.id, runner)).toThrow(/environment restriction/)
     f.tasks.setRunsOn(child.id, allowed)
     f.yard.store.updateProject(f.project.id, { runner: "local" })
     f.yard.store.updateTask(f.root.id, { boxId: "this-computer", runsOn: "local" })
@@ -184,13 +186,13 @@ describe("subtask environment enforcement at server entry and dispatch", () => {
     expect(f.row(child.id).current_turn_id).toBe("turn_legacy")
   })
 
-  it.each(["local", "ssh", "runpod", "vast", "daytona"] as const)("pins %s descendants and rejects other physical types", (type) => {
+  it.each(["local", "ssh", "daytona"] as const)("pins %s descendants and rejects other physical types", (type) => {
     const f = fixture(type)
     const child = f.child(null)
     expect(f.row(child.id).runs_on).toBe(environmentRunner(type))
-    if (["runpod", "vast", "daytona"].includes(type)) {
+    if (type === "daytona") {
       expect(f.row(child.id).gpu_provider).toBe(type)
-      const other = type === "runpod" ? "vast" : "runpod"
+      const other = "runpod"
       expect(() => f.tasks.setRunsOn(child.id, "gpu", null, { provider: other, type: null })).toThrow(/environment restriction/)
       f.yard.store.updateProject(f.project.id, { gpuProvider: other })
       f.tasks.setRunsOn(child.id, "gpu")
@@ -198,6 +200,40 @@ describe("subtask environment enforcement at server entry and dispatch", () => {
     }
     expect(() => f.tasks.assign(child.id, f.box("example-wrong", "docker"))).toThrow(/physical target conflicts/)
     expect(f.tasks.assign(child.id, f.box("example-same"))).toBe("example-same")
+  })
+
+  it.each(["runpod", "vast"] as const)("refuses all %s subtask creation paths and tells the agent the provider is unsupported", async (type) => {
+    const f = fixture(type)
+    const reason = `Subtasks are not supported on ${type === "runpod" ? "RunPod" : "Vast.ai"} GPU boxes.`
+    const availability = vi.spyOn(f.tasks, "requireRunner").mockResolvedValue(undefined)
+    // Mutable selections and forged worker claims cannot disguise the physical provider.
+    f.yard.store.updateTask(f.root.id, { runsOn: "local", gpuProvider: "daytona" })
+    f.yard.store.updateProject(f.project.id, { runner: "docker", gpuProvider: "daytona" })
+    expect(f.tasks.subtaskPromptInfo(f.row(), "example-parent").spawnUnsupported).toBe(reason)
+    for (const runsOn of ["same", "gpu", null, "local", "ssh", "docker", "box"]) {
+      await f.tasks.apply(f.root.id, { t: "spawn_subtasks", id: "sub_0123456789ab", environment_type: "daytona", tasks: [{ title: "Child", prompt: "Example", runsOn }] } as WorkerEvent)
+      expect(f.replies).toHaveBeenLastCalledWith(f.root.id, "subtasks-reply-sub_0123456789ab.json", { status: "rejected", text: `Subtask environment restriction: ${reason}` })
+      expect(f.yard.store.subtaskRows(f.root.id)).toHaveLength(0)
+    }
+    for (const runsOn of [null, "gpu", "local"] as const) expect(() => f.child(runsOn)).toThrow(reason)
+    expect(() => f.tasks.createTasks([
+      { projectId: f.project.id, title: "Top level", prompt: "Example" },
+      { projectId: f.project.id, title: "Child", prompt: "Example", subtask: { parentId: f.root.id, rootId: f.root.id, depth: 1, withParent: true } },
+    ])).toThrow(reason)
+    expect(f.yard.store.listTaskRows({ projectId: f.project.id })).toHaveLength(1)
+
+    // Existing compatible descendants may continue, but cannot spawn another generation.
+    const legacy = f.yard.store.createTask({ projectId: f.project.id, title: "Legacy child", prompt: "Example", subtask: { parentId: f.root.id, rootId: f.root.id, depth: 1, withParent: true } })
+    f.tasks.assign(legacy.id, f.box("example-legacy"))
+    expect(() => f.child(null, f.row(legacy.id))).toThrow(reason)
+    await f.tasks.apply(legacy.id, { t: "spawn_subtasks", id: "sub_0123456789ab", tasks: [{ title: "Grandchild", prompt: "Example", runsOn: "same" }] } as WorkerEvent)
+    expect(f.replies).toHaveBeenLastCalledWith(legacy.id, "subtasks-reply-sub_0123456789ab.json", { status: "rejected", text: `Subtask environment restriction: ${reason}` })
+    expect(f.yard.store.subtaskRows(legacy.id)).toHaveLength(0)
+    expect(availability).not.toHaveBeenCalled()
+    expect(f.io.exec).not.toHaveBeenCalled()
+    // The restriction applies to subtask creation, not intentional top-level GPU selection.
+    const top = f.tasks.createTask({ projectId: f.project.id, title: "Top level GPU", prompt: "Example", runsOn: "gpu", gpu: { provider: type, type: null } })
+    expect(f.row(top.id).gpu_provider).toBe(type)
   })
 
   it("keeps intentional top-level choices and rejects malformed manager-supplied lineage", () => {
