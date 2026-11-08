@@ -5,7 +5,7 @@ Settings › Credentials › **More Claude logins** and **More Codex logins** ta
 ## Adding a login
 
 - **Claude.** Run `claude setup-token` on each account and paste the token with a name ("Work Max"). API keys aren't accepted here: they bill per call. An API key in Settings › Credentials is still part of the rotation, as its first login.
-- **Codex.** Paste the whole `auth.json` of a ChatGPT login. To sign in to another account without signing out of the one on your computer, run `CODEX_HOME=$(mktemp -d) codex login` and paste the `auth.json` it writes in that folder. The server keeps the copy Codex refreshes, as it does for Settings' own login, so sign in once and don't use that copy anywhere else.
+- **Codex.** Paste the whole `auth.json` of a ChatGPT login. To sign in to another account without signing out of the one on your computer, create a temporary folder (`codex_login_dir="$(mktemp -d)"`), run `CODEX_HOME="$codex_login_dir" codex login`, then select the `auth.json` in that folder. Keep that file private; it contains the account’s login. The server keeps the copy Codex refreshes, as it does for Settings' own login, so sign in once and don't use that copy anywhere else.
 - **One account, one login.** A login already in the list, or the account Settings › Credentials already uses, is refused. A Codex login is known by its ChatGPT account, so a refreshed file of the same account is the same login.
 - **Test** runs one tiny prompt with the CLI agents use, on that login alone: a pasted value before it's added, or a saved one.
 - Adding, renaming and removing are drafts the Settings dialog's Save writes, like every other setting. Test runs at once.

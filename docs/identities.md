@@ -152,7 +152,7 @@ It's a view, not a wall. What remains:
 
 ## Set up from this computer
 
-The Coordinator (or a project's Captain) can set identities up from what this computer already uses, so nobody has to work out which token, email and key go with which repo. It's how the Coordinator answers a clone, fetch or push that fails with 401, 403 or 404, or a question about GitHub accounts: it runs `detect_identities`, proposes the whole setup to Cody in one message, and imports only what the owner agrees to.
+The Coordinator (or a project's Captain) can set identities up from what this computer already uses, so nobody has to work out which token, email and key go with which repo. It's how the Coordinator answers a clone, fetch or push that fails with 401, 403 or 404, or a question about GitHub accounts: it runs `detect_identities`, proposes the whole setup to the owner in one message, and imports only what the owner agrees to.
 
 **What detection reads.** Read-only; it changes nothing:
 
