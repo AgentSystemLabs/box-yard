@@ -8,6 +8,7 @@ import { announceCleanup, withCleanup } from "./diskCleanup"
 import { announceResize, withResize } from "./boxResize"
 import { announceSnapshot } from "./projectSnapshot"
 import { placeMessage } from "./queued"
+import { placeTaskMessage, submissionId, taskSubmissionWait } from "./taskSubmissions"
 import { voiceCaptainMessage, voiceChatBusy, voiceChatMessage, voiceChatTurn } from "./speech"
 import { loadTtsInfo, setTtsInfo } from "./tts"
 import { onResume } from "./resume"
@@ -15,11 +16,11 @@ import { reportOnline, reportStream, setReconnectHandler } from "./connection"
 import { applyThreadEvent } from "./threads"
 import { staleAfterClose } from "./closedTasks"
 import { staleAfterStop } from "./stoppedTasks"
-import { liveMessage } from "./liveQueries"
+import { liveMessage, liveState } from "./liveQueries"
 import { afterBoot, alignWithBoot, takeEarlyStream } from "./boot"
 import { noteServerBuild } from "./appUpdate"
 import { applyTaskPatch, type TaskPatchEvent } from "../../../shared/taskPatch"
-import type { AppNotification, Artifact, BoxInfo, CaptainMessage, ChatMessage, Project, Schedule, ScheduleRun, Task, TaskMessage, UiEvent } from "../../../shared/types"
+import type { AppNotification, Artifact, BoxInfo, CaptainMessage, ChatMessage, Project, Schedule, ScheduleRun, Task, TaskMessage, QueuedMessage, UiEvent } from "../../../shared/types"
 import type { StreamHello } from "../../../shared/boot"
 import type { RunPodStatus } from "../../../shared/runpod"
 import type { DockerStatus } from "../../../shared/docker"
@@ -182,6 +183,7 @@ export function useServerEvents(enabled: boolean): Connection {
           if (staleAfterClose(ev.task) || staleAfterStop(ev.task)) break
           qc.setQueryData<Task[]>(keys.tasks, (list) => (list ? upsert(list, ev.task) : list))
           refreshUsage()
+          taskSubmissionWait(qc, ev.task)
           break
         case "task.deleted":
           qc.setQueryData<Task[]>(keys.tasks, (list) => list?.filter((t) => t.id !== ev.taskId))
@@ -192,6 +194,7 @@ export function useServerEvents(enabled: boolean): Connection {
           liveMessage(keys.taskMessages(ev.message.taskId), ev.message)
           qc.setQueryData<TaskMessage[]>(keys.taskMessages(ev.message.taskId), (list) => {
             if (!list) return list
+            if (ev.message.meta?.clientMessageId) return placeTaskMessage(list, ev.message)
             // An update (a queued message delivered) may move it.
             if (list.some((m) => m.id === ev.message.id)) return placeMessage(list, ev.message)
             // Replace the optimistic copy of a message we sent.
@@ -203,6 +206,7 @@ export function useServerEvents(enabled: boolean): Connection {
             }
             return [...list, ev.message]
           })
+          if (ev.message.meta?.clientMessageId) qc.setQueryData<QueuedMessage[]>(keys.taskQueue(ev.message.taskId), (list) => list?.filter((m) => m.clientMessageId !== submissionId(ev.message) || (ev.message.meta?.steerAccepted === true && !m.id.startsWith("tmp-"))))
           // Cards of tasks without a summary yet show the latest activity line.
           qc.setQueryData<Task[]>(keys.tasks, (list) => withActivity(list, ev.message))
           break
@@ -249,14 +253,15 @@ export function useServerEvents(enabled: boolean): Connection {
           qc.setQueryData<string>(keys.chatStream, (prev) => (prev ?? "") + ev.text)
           break
         case "chat.busy":
-          qc.setQueryData(keys.chatBusy, ev.busy)
+          liveState(qc, keys.chatBusy, ev.busy)
           if (!ev.busy) qc.setQueryData(keys.chatStream, "")
           voiceChatBusy(ev.busy)
           break
         case "orchestrator.state":
-          qc.setQueryData(keys.orchestrator, ev.state)
+          liveState(qc, keys.orchestrator, ev.state)
           break
         case "captain.message":
+          liveMessage(keys.captainMessages(ev.message.projectId), ev.message)
           voiceCaptainMessage(ev.message)
           qc.setQueryData<CaptainMessage[]>(keys.captainMessages(ev.message.projectId), (list) => {
             if (!list) return list
@@ -271,7 +276,7 @@ export function useServerEvents(enabled: boolean): Connection {
           })
           break
         case "captain.state":
-          qc.setQueryData(keys.captain(ev.state.projectId), ev.state)
+          liveState(qc, keys.captain(ev.state.projectId), ev.state)
           break
         case "logins":
           qc.setQueryData(keys.logins, ev.logins)

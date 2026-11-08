@@ -1311,8 +1311,8 @@ export class TaskManager {
   }
 
   /** sendInput that also says which queued message it made (the MCP tools hand it back for cancel/edit). */
-  send(taskId: string, content: string, source: InputSource = "cody", attachments: StoredUpload[] = [], route?: Parameters<TaskManager["sendInput"]>[4], hook?: Parameters<TaskManager["sendInput"]>[5]): { task: Task; inputId: string } {
-    const inputId = this.enqueue(this.requireRow(taskId), content, source, attachments, route, hook)
+  send(taskId: string, content: string, source: InputSource = "cody", attachments: StoredUpload[] = [], route?: Parameters<TaskManager["sendInput"]>[4], hook?: Parameters<TaskManager["sendInput"]>[5], clientMessageId?: string): { task: Task; inputId: string } {
+    const inputId = this.enqueue(this.requireRow(taskId), content, source, attachments, route, hook, clientMessageId)
     this.emitTask(taskId)
     this.schedule()
     return { task: this.store.getTask(taskId)!, inputId }
@@ -1393,7 +1393,7 @@ export class TaskManager {
 
   private queuedMessage(r: QueuedInputRow): QueuedMessage {
     const [kind, ref] = r.source.split(/:(.*)/s) as [string, string | undefined]
-    const meta = r.message ?? (kind === "captain" && ref ? captainMeta(this.store, ref) : kind === "hook" ? { source: "hook" } : { source: r.source })
+    const meta: Record<string, unknown> = r.message ?? (kind === "captain" && ref ? captainMeta(this.store, ref) : kind === "hook" ? { source: "hook" } : { source: r.source })
     const owner = this.owner()
     const sender: { kind: QueuedSender; label: string } =
       kind === "agent"
@@ -1414,6 +1414,7 @@ export class TaskManager {
     })
     return {
       id: r.id,
+      ...(typeof meta.clientMessageId === "string" ? { clientMessageId: meta.clientMessageId } : {}),
       taskId: r.taskId,
       source: r.source,
       kind: sender.kind,
@@ -1435,6 +1436,7 @@ export class TaskManager {
     attachments: StoredUpload[],
     route?: Parameters<TaskManager["sendInput"]>[4],
     hook?: Parameters<TaskManager["sendInput"]>[5],
+    clientMessageId?: string,
   ): string {
     this.checkOpenCodeRoute(row, route)
     if (!content.trim() && !attachments.length) throw new BadRequestError("message is empty")
@@ -1443,7 +1445,7 @@ export class TaskManager {
     // until then the task page shows them as Queued rows (editable, cancellable).
     const shown = source === "cody" || source === MERGE_BUTTON_SOURCE || source === "orchestrator" || source.startsWith("captain:") || hook
     const from = hook ? hook.meta : source.startsWith("captain:") ? captainMeta(this.store, source.slice("captain:".length)) : { source }
-    const message = shown ? { ...from, ...(attachments.length ? { attachments: publicFiles(attachments) } : {}) } : undefined
+    const message = shown ? { ...from, ...(clientMessageId ? { clientMessageId } : {}), ...(attachments.length ? { attachments: publicFiles(attachments) } : {}) } : undefined
     const inputId = this.store.queueInput(row.id, source, content.trim(), attachments.map((f) => f.id), { prefix: hook?.prefix, message })
     // The project's Captain answering an agent that waits mid-turn (message_captain): hand it over now.
     if (source === `captain:${row.project_id}` && !hook && !attachments.length && content.trim()) this.handToWaitingAgent(row, inputId, content.trim())

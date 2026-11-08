@@ -482,9 +482,10 @@ describe("navigation", () => {
     const send = dialog.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!
     expect(send.disabled).toBe(false)
     await act(async () => { click(send); await new Promise((r) => setTimeout(r, 0)) })
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("/api/tasks/task_app001/messages", expect.objectContaining({
-      body: JSON.stringify({ content: "Please check the preview again", attachments: [] }),
-    }))
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/tasks/task_app001/messages")
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      id: expect.stringMatching(/^chat_[a-f0-9]{12}$/), content: "Please check the preview again", attachments: [],
+    })
   })
 
   it("keeps an idle task's popup title and status muted with Mark done still available", async () => {

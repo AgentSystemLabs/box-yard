@@ -3,7 +3,7 @@
 // network returns or a view mounts downloads what's already there (the task thread and the Coordinator chat are
 // hundreds of KB each). A stream that may have missed events (it reconnected, or the page was away STALE_STREAM_MS)
 // invalidates every query itself, so they refetch then, and only then.
-import { hashKey, type Query, type QueryKey } from "@tanstack/react-query"
+import { hashKey, type Query, type QueryKey, type QueryClient } from "@tanstack/react-query"
 import { placeMessage } from "./queued"
 
 /** First key segments of the lists stream.ts keeps current. */
@@ -29,7 +29,7 @@ export const LIVE_QUERY_DEFAULTS = {
   refetchOnReconnect: refetchUnlessStreamed,
 }
 
-type Message = { id: string; createdAt: number }
+type Message = { id: string; createdAt: number; meta?: Record<string, unknown> | null }
 const collectors = new Map<string, Set<(m: Message) => void>>()
 
 /**
@@ -37,7 +37,7 @@ const collectors = new Map<string, Set<(m: Message) => void>>()
  * it, and it either found no cached list to go into or went into the one the answer replaces. Those messages are
  * placed into the answer, as stream.ts places them into the cache.
  */
-export async function fetchLog<T extends Message>(key: QueryKey, fetch: () => Promise<T[]>): Promise<T[]> {
+export async function fetchLog<T extends Message>(key: QueryKey, fetch: () => Promise<T[]>, current?: () => T[] | undefined): Promise<T[]> {
   const hash = hashKey(key)
   const arrived: T[] = []
   const collect = (m: Message) => void arrived.push(m as T)
@@ -45,7 +45,19 @@ export async function fetchLog<T extends Message>(key: QueryKey, fetch: () => Pr
   collectors.set(hash, set.add(collect))
   try {
     const list = await fetch()
-    return arrived.reduce((out, m) => placeMessage(out, m), list)
+    const merged = arrived.reduce((out, m) => placeMessage(out, m), list)
+    const ids = new Set(merged.flatMap((m) => [m.id, m.meta?.clientMessageId]))
+    // A reconnect/refetch must not erase a submission whose POST or agent startup is still pending.
+    const cached = current?.() ?? []
+    for (const [i, m] of cached.entries()) {
+      if (!m.meta?.pending || ids.has(m.id)) continue
+      // Retain its place before any later cached row the fetch knows about, even with a slow POST.
+      const following = cached.slice(i + 1).find((next) => ids.has(next.id))
+      const at = following ? merged.findIndex((next) => next.id === following.id || next.meta?.clientMessageId === following.id) : -1
+      merged.splice(at < 0 ? merged.length : at, 0, m)
+      ids.add(m.id)
+    }
+    return merged
   } finally {
     set.delete(collect)
     if (!set.size) collectors.delete(hash)
@@ -55,4 +67,24 @@ export async function fetchLog<T extends Message>(key: QueryKey, fetch: () => Pr
 /** stream.ts: a message for the log under `key` arrived. */
 export function liveMessage(key: QueryKey, m: Message) {
   collectors.get(hashKey(key))?.forEach((collect) => collect(m))
+}
+
+const stateRevisions = new WeakMap<QueryClient, Map<string, number>>()
+
+/** Only the live stream is authoritative over a state GET. An older prefetch may seed an empty cache
+ * while that GET is out, so counting every cache write would incorrectly prefer the prefetched state. */
+export function liveState<T>(client: QueryClient, key: QueryKey, state: T) {
+  const revisions = stateRevisions.get(client) ?? new Map<string, number>()
+  stateRevisions.set(client, revisions)
+  const hash = hashKey(key)
+  revisions.set(hash, (revisions.get(hash) ?? 0) + 1)
+  client.setQueryData(key, state)
+}
+
+/** Preserve SSE authority even across a busy -> idle -> busy round trip during a delayed GET. */
+export async function fetchLiveState<T>(client: QueryClient, key: QueryKey, fetch: () => Promise<T>): Promise<T> {
+  const revision = stateRevisions.get(client)?.get(hashKey(key))
+  const answer = await fetch()
+  const current = client.getQueryData<T>(key)
+  return current !== undefined && stateRevisions.get(client)?.get(hashKey(key)) !== revision ? current : answer
 }

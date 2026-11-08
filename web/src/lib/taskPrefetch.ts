@@ -36,7 +36,7 @@ export function openingMarkdown(messages: readonly TaskMessage[]): string[] {
 
 /** Load a task's messages unless they're in memory and fresh, then parse what it opens on in idle time. */
 export function warmTask(qc: QueryClient, id: string): Promise<void> {
-  return qc.prefetchQuery({ queryKey: keys.taskMessages(id), queryFn: () => fetchTaskMessages(id) }).then(() => {
+  return qc.prefetchQuery({ queryKey: keys.taskMessages(id), queryFn: () => fetchTaskMessages(id, qc) }).then(() => {
     const messages = qc.getQueryData<TaskMessage[]>(keys.taskMessages(id))
     const index = currentEntityIndex()
     // In the task's repo, as its page's <InRepo> links it.
