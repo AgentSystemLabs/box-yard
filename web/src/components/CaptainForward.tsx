@@ -288,7 +288,7 @@ export const ToCaptainLine = memo(function ToCaptainLine({ m }: { m: TaskMessage
   const queued = typeof m.meta?.queued === "number" ? m.meta.queued : 0
   const pid = typeof m.meta?.captainProjectId === "string" ? m.meta.captainProjectId : null
   return (
-    <div data-testid="to-captain" className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 border-dashed border-yard-500/70 bg-yard-500/5 px-3 py-2", m.meta?.pending ? "opacity-60" : "")}>
+    <div data-testid="to-captain" className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 border-dashed border-yard-500/70 bg-yard-500/5 px-3 py-2")}>
       <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] font-semibold text-yard-400">
         <span className="min-w-0 truncate">
           {ownerName} → {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}

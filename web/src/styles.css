@@ -34,7 +34,7 @@
   --color-yard-600: #d97706;
   /* Filled primary actions stay gold with dark ink in either theme. */
   --color-control: #81818b;
-  --color-focus: var(--color-yard-400);
+  --animate-pulse: readable-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --color-action: #f59e0b;
   --color-action-hover: #fbbf24;
   --color-on-action: #09090b;
@@ -48,7 +48,7 @@
    tokens here, including opacity utilities, so dialogs, chats and lazy panels agree without
    changing their layout or rerendering transcripts. Dark keeps its surfaces and accents;
    muted ink is lifted enough to read on the chat and composer. */
-:root { color-scheme: dark; }
+:root { color-scheme: dark; --focus-ink: var(--color-yard-400); }
 :root.dark {
   --color-zinc-500: #94949e;
   --color-zinc-600: #8c8c96;
@@ -160,13 +160,13 @@ body {
 /* A solid indicator supplements the many translucent focus rings. The offset separates it
    from gold primary actions; both themes meet 3:1 on the adjacent app surfaces. */
 :where(button, a, input, textarea, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-focus);
+  outline: 2px solid var(--focus-ink);
   outline-offset: 2px;
 }
 
 /* Keep WORKING_PULSE timing and reduced-motion behavior. A 50% trough washed out
    meaningful status icons; 75% keeps the project's indigo glyph above 3:1 on its tint. */
-@keyframes pulse { 50% { opacity: .75; } }
+@keyframes readable-pulse { 50% { opacity: .75; } }
 
 ::selection {
   @apply bg-yard-500/30;
@@ -370,7 +370,7 @@ body.resizing iframe {
 /* Project/harness colors originate in inline styles. Darken the ink on light surfaces while
    keeping the project's hue and the original chip tint. These selectors touch individual icons/tags. */
 :root:not(.dark) [class~="text-(--pc)"] {
-  color: color-mix(in srgb, var(--pc) 42%, #18181b);
+  color: color-mix(in srgb, var(--pc) 28%, #18181b);
 }
 :root:not(.dark) .composer-tag {
   color: color-mix(in srgb, var(--tag) 38%, #18181b);

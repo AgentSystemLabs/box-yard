@@ -211,7 +211,7 @@ export const PR_STYLE: Record<PrState, { icon: LucideIcon; chip: string; link: s
   open: { icon: GitPullRequest, chip: "border-emerald-900/60 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20", link: "text-emerald-400" },
   draft: { icon: GitPullRequestDraft, chip: "border-zinc-700 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-800", link: "text-zinc-400" },
   merged: { icon: GitMerge, chip: "border-merged/50 bg-merged/15 text-merged-fg hover:bg-merged/25", link: "text-merged-fg" },
-  closed: { icon: GitPullRequestClosed, chip: "border-red-900/60 bg-red-500/10 text-red-300/80 hover:bg-red-500/15", link: "text-red-400/80" },
+  closed: { icon: GitPullRequestClosed, chip: "border-red-900/60 bg-red-500/10 text-red-300 hover:bg-red-500/15", link: "text-red-400" },
 }
 
 /**
@@ -260,7 +260,7 @@ export function PrChip({
     >
       {variant !== "number" && <>{activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}</>}
       <span className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
-      {activity && <span className={cx("font-normal opacity-80", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
+      {activity && <span className={cx("font-normal", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
     </NewTabLink>
   )
 }

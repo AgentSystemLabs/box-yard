@@ -325,7 +325,7 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
       // A hook's message (server/hooks.ts) is an automation's, not Cody's: its own colour and icon.
       const hook = m.meta?.source === "hook"
       return (
-        <div className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 px-3 py-2", hook ? "border-teal-500 bg-teal-500/5" : "border-yard-500 bg-yard-500/5", m.meta?.pending ? "opacity-60" : "")} data-testid={hook ? "hook-message" : undefined}>
+        <div className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 px-3 py-2", hook ? "border-teal-500 bg-teal-500/5" : "border-yard-500 bg-yard-500/5")} data-testid={hook ? "hook-message" : undefined}>
           <div className={cx("mb-0.5 flex items-center gap-1 text-[11px] font-semibold", hook ? "text-teal-300" : "text-yard-400")}>
             {hook && <Webhook className="h-3 w-3" />}
             {userMessageLabel(m.meta, ownerName)}
