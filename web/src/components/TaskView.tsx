@@ -343,7 +343,7 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
           <AttachmentList files={m.meta?.attachments} />
           {m.meta?.undelivered === true && <div className="mt-1 text-[11px] text-zinc-500">Not delivered: the task was stopped or marked done first.</div>}
           {m.meta?.deliveryUncertain === true && <div className="mt-1 text-[11px] text-zinc-500">Delivery uncertain: this may already have reached Codex. Removing it from the queue does not undo delivery.</div>}
-          <MessageActions text={m.content} />
+          {!m.meta?.pending && <MessageActions text={m.content} />}
         </div>
       )
     }

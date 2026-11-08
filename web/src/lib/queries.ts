@@ -1239,8 +1239,6 @@ export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Er
       const id = input.id ??= clientId("chat")
       const task = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
       const waiting = taskMustWait(task)
-      patchTask(qc, destinationId, task?.status === "working" || task?.status === "starting" ? { pendingCount: (task.pendingCount ?? 0) + 1 } : { status: "queued", question: null })
-      const optimisticTask = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
       const now = Date.now()
       qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => [
         ...(list ?? []),
@@ -1250,14 +1248,13 @@ export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Er
         id, taskId: destinationId, role: "user", content, createdAt: now,
         meta: { pending: true, source: "cody", clientMessageId: id, ...(attachments?.length ? { attachments } : {}) },
       }))
-      return { task, optimisticTask }
+      return { taskAtSend: task }
     },
-    onError: (err, input, ctx) => {
+    onError: (err, input) => {
       const destinationId = input.taskId ?? taskId
       // Undo only this send; newer sends and live messages are independent.
       qc.setQueryData<TaskMessage[]>(keys.taskMessages(destinationId), (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
       qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => list?.filter((m) => m.id !== `tmp-${input.id}`))
-      if (ctx?.task) qc.setQueryData<Task[]>(keys.tasks, (list) => list?.map((t) => t === ctx.optimisticTask ? ctx.task! : t))
       void qc.invalidateQueries({ queryKey: keys.tasks })
       if (quiet?.(err)) return
       playSendSound("failed")
@@ -1268,8 +1265,8 @@ export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Er
       playSendSound()
       // A newer SSE task (or another send/Stop) is authoritative over this response's snapshot.
       const current = qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === destinationId)
-      if (!staleAfterStop(task) && current === ctx?.optimisticTask) qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task))
-      taskSubmissionWait(qc, current !== ctx?.optimisticTask && current ? current : task)
+      if (!staleAfterStop(task) && current === ctx?.taskAtSend) qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task))
+      taskSubmissionWait(qc, current !== ctx?.taskAtSend && current ? current : task)
       qc.setQueryData<QueuedMessage[]>(keys.taskQueue(destinationId), (list) => list?.map((m) => m.id === `tmp-${input.id}` && task.inputId ? { ...m, id: task.inputId } : m))
       // Owner close commands don't enqueue input.
       if (task.status === "done" && !task.inputId) {

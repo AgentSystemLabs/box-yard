@@ -8,6 +8,8 @@ import { useServerEvents } from "../web/src/lib/stream.js"
 import { TaskThread } from "../web/src/components/TaskView.js"
 import { ChatLine } from "../web/src/components/ChatLine.js"
 import { InboundMessage } from "../web/src/components/CaptainTab.js"
+import { ThreadChatProvider } from "../web/src/components/SideThread.js"
+import { COORDINATOR_CHAT } from "../web/src/lib/threads.js"
 import { Composer } from "../web/src/components/Composer.js"
 import { readDraft, resetDrafts, setDraftFiles } from "../web/src/lib/composerDraft.js"
 import { currentToasts } from "../web/src/lib/toast.js"
@@ -51,11 +53,11 @@ function Harness() {
   // Scope is fixed for each mount. The actual row components and task transcript render the cached submissions.
   const send = scope === "coordinator" ? useSendChat() : scope === "captain" ? useSendCaptainMessage(PROJECT) : useSendTaskMessage(TASK)
   const messages = scope === "coordinator" ? useChat() : scope === "captain" ? useCaptainMessages(PROJECT) : null
-  return h("section", { ref: panel },
+  return h(ThreadChatProvider, { value: scope === "coordinator" ? COORDINATOR_CHAT : scope === "captain" ? PROJECT : null }, h("section", { ref: panel },
     messages ? messages.data?.map((m) => scope === "captain" ? h(InboundMessage, { key: m.id, m: m as any }) : h(ChatLine, { key: m.id, m, onFollowUp: noop }))
       : h(TaskThread, { id: TASK, handle: null, working: null, selectionSource: null, onStartFromSelection: noop, onFollowUp: noop }),
     h(Composer, { panelRef: panel, placeholder: "Send feedback", draftKey: draftKey(), onSubmit: (content: string, attachments: Attachment[]) => send.mutateAsync({ id: `chat_${crypto.randomUUID()}`, content, attachments }) }),
-  )
+  ))
 }
 function mount(kind: Scope, busy = false) {
   scope = kind
@@ -105,6 +107,8 @@ for (const kind of ["task", "subtask", "captain", "coordinator"] as const) descr
     const bubble = host.querySelector('[aria-busy="true"]')!
     expect(bubble.textContent).toContain("Follow this up")
     expect(bubble.className).not.toMatch(/opacity-/)
+    expect(host.querySelector('[data-testid="message-reply"]')).toBeNull()
+    expect(qc.getQueryData<Task[]>(keys.tasks)![0]!.status).toBe("idle")
     expect(qc.getQueryData(keys.chatBusy)).toBe(false)
     expect(qc.getQueryData<CaptainState>(keys.captain(PROJECT))?.busy).toBe(false)
     const m = kind === "task" || kind === "subtask" ? delivered() : stored()
@@ -118,6 +122,7 @@ for (const kind of ["task", "subtask", "captain", "coordinator"] as const) descr
     expect(lines()).toHaveLength(1)
     expect(host.contains(bubble)).toBe(true)
     expect(bubble.hasAttribute("aria-busy")).toBe(false)
+    if (kind === "captain" || kind === "coordinator") expect(host.querySelector('[data-testid="message-reply"]')).not.toBeNull()
   })
 
   it("keeps genuine busy sends queued, with actions only after storage is confirmed", async () => {
@@ -233,4 +238,16 @@ for (const kind of ["captain", "coordinator"] as const) it(`${kind}: a fresh idl
   await emit(busyEvent(false))
   await send("second")
   expect(lines().find((m) => m.content === "second")?.meta?.queued).toBeUndefined()
+})
+
+it("two failed idle sends leave no invented queued task state", async () => {
+  mount("task")
+  await send("first"); await send("second")
+  await act(async () => posts[0]!.answer({ error: "Unavailable" }, 503))
+  await flush()
+  await act(async () => posts[1]!.answer({ error: "Unavailable" }, 503))
+  await flush()
+  expect(lines()).toHaveLength(0)
+  expect(qc.getQueryData<QueuedMessage[]>(keys.taskQueue(TASK))).toEqual([])
+  expect(qc.getQueryData<Task[]>(keys.tasks)![0]!.status).toBe("idle")
 })

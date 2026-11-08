@@ -397,7 +397,7 @@ export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMe
       {m.content && <CollapsibleMarkdown>{m.content}</CollapsibleMarkdown>}
       <AttachmentList files={m.meta?.attachments} />
       <PickChips meta={m.meta} />
-      {m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
+      {!m.meta?.pending && m.meta?.queued !== true && <MessageActions text={m.content} anchorId={m.id} />}
     </div>
   )
   // Queued (sent mid-turn): the bubble, then the Queued label with Edit and Delete under it.
