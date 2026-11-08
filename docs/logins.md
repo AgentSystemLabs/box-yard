@@ -54,3 +54,5 @@ The rotation also reads each login's subscription limits (docs/limits.md) before
 ## Data
 
 `agent_logins` holds added logins (encrypted value, name, last 4, fingerprint). `agent_login_status` holds each login's state, last Test and the name it ran under (Settings › Credentials' login too). `agent_login_holds` is which login each task, the Coordinator and each Captain last ran on, and when. `task_turns`, `turn_timings` and `claude_usage` have a `login_id`. Settings › Credentials' own login has the id `lgn_cred-<harness>-<fp8>`, the one its limit readings are kept under (docs/limits.md › Logins), so a new value there is a new login.
+
+[OpenCode task agents](opencode.md) use API-only provider logins in their own Credentials field. They do not join the Claude/Codex subscription rotation or report subscription windows.

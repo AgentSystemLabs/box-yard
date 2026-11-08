@@ -71,6 +71,7 @@ git clone https://github.com/AgentSystemLabs/box-yard && cd box-yard
 | --- | --- |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code login for the Coordinator, Captains and every agent. Run `claude setup-token` to get one. `ANTHROPIC_API_KEY` works too. Optional while agents run on this computer (the default) and its own `claude` is logged in. Settings › Credentials › More Claude logins adds more subscriptions, taken round robin: see [docs/logins.md](docs/logins.md). |
 | `CODEX_AUTH_JSON` / `CODEX_API_KEY` | Optional. A Codex login, for whatever you set to run on Codex instead of Claude Code: your `~/.codex/auth.json` (ChatGPT plan) or an OpenAI API key. Settings › Credentials takes them too. See [docs/codex.md](docs/codex.md). |
+| `OPENCODE_AUTH_CONTENT` | Optional. API-only OpenCode provider login JSON for task agents. Settings › Credentials accepts it too; OAuth is not supported. See [docs/opencode.md](docs/opencode.md). |
 | `CURSOR_API_KEY` | Optional. A Cursor API key, for task agents set to run on Cursor's CLI. Agents on this computer can use its own `cursor-agent login` instead. Settings › Credentials takes it too. See [docs/cursor.md](docs/cursor.md). |
 | `UPSTASH_BOX_API_KEY` | Optional. Upstash worker boxes, for projects set to run on them. Agents run on this computer by default, so a fresh install needs none. |
 | `GITHUB_TOKEN` | Clone private repos, push branches, open PRs. A fine-grained token with Contents and Pull requests (read/write) is enough. |
@@ -259,6 +260,8 @@ A project whose box has all its slots busy gets a second box while there's room.
 
 **Cursor.** A project's task agents can run on Cursor's CLI (`cursor-agent`): Project › Settings › Agent, Settings › Box agents, `!cursor` in the composer, or `agent: "cursor"` on one task. Settings lists the models your Cursor account has, read live from `cursor-agent models`. Boxes sign in with a Cursor API key; this computer can use its own login. See [docs/cursor.md](docs/cursor.md).
 
+**OpenCode.** Task agents can use OpenCode 1.19.5 from Settings, a project, a new task, `!opencode`, or same-task continuation. It has an independent provider/model default and API logins; manager chats and OAuth are unsupported. See [docs/opencode.md](docs/opencode.md).
+
 **Subscription limits.** Settings › Usage shows each Claude subscription's and Codex plan's 5-hour and weekly windows, per login: how much is used and when each resets, from what the CLIs report on every run (Claude Code's `rate_limit_event`, Codex's rollout file). Settings › Credentials and Identities show their own login's in a line. See [docs/limits.md](docs/limits.md).
 
 **Identities.** One Box Yard can work for several GitHub accounts: each project has an identity (an account's tokens, the git author its commits carry, an SSH signing key, a Claude login, the runners it may use), and every project starts on Default, which is Settings › Credentials. The Coordinator sets them up from this computer: `detect_identities` reads `gh`'s accounts, git's global and `includeIf` authors and the signing keys here, asks GitHub which account can push to each repo, and proposes a setup; `import_detected_identity` makes it once Cody agrees. Tokens and keys go by reference (`gh:<login>`, `file:~/.ssh/<key>`), so no value passes through the model. Or do it in Settings › Identities (Import from this computer, Add, Test) and pick each project's identity in its settings. See [docs/identities.md](docs/identities.md).
@@ -346,3 +349,5 @@ ship's helm, which are Box Yard's own: see [licenses/lucide.txt](licenses/lucide
 <br>
 <sub>If Box Yard saves you a tab, a ⭐ helps other people find it.</sub>
 </div>
+
+Task harnesses: [Claude Code](https://code.claude.com/docs/en/overview), [Codex](docs/codex.md), [Cursor](docs/cursor.md), and [OpenCode](docs/opencode.md). New adapters must cover the [harness integration inventory](docs/harness-integration.md).

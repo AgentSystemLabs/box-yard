@@ -100,3 +100,5 @@ Settings shows only the selected harness's model and effort controls, and keeps 
 ```sh
 CODEX_BIN="node scripts/fake-codex.mjs" npm run dev
 ```
+
+[OpenCode](opencode.md) is also available for task agents, with a separate model default and provider API logins. See its version contract and supported differences before switching a task.

@@ -178,3 +178,7 @@ A Codex task (a project's Agent set to Codex, or `agent: "codex"`, [docs/codex.m
 
   A machine with none of these isn't picked. The task waits and says what to do.
 - **Its Codex home.** With Box Yard's ChatGPT login, the turn uses a task-specific Codex home in tmpfs (`<secrets>/<task>.codex`), including while Codex atomically refreshes its login. Sessions link to `<task>/codex/sessions`, so archives keep the conversation, and `<task>/codex/auth.json` links back to memory for the server to read refreshed tokens. With an API key, the home is `<task>/codex`, as on boxes. With the machine's own login, it uses `~/.codex`.
+
+## OpenCode
+
+SSH machines can also run [OpenCode task agents](opencode.md). Install `npm install -g opencode-ai@1.19.5` as the SSH user and test the machine again. Placement checks the version and API login availability; old probe results do not imply support. Box Yard never installs OpenCode on an SSH machine. Forward OpenCode API logins from Settings or provide an API-only native auth file; OAuth is unsupported. Sessions use the task profile and travel in archives.
