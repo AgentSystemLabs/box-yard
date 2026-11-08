@@ -222,7 +222,7 @@ export const PR_STYLE: Record<PrState, { icon: LucideIcon; chip: string; link: s
   open: { icon: GitPullRequest, chip: "border-emerald-900/60 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20", link: "text-emerald-400" },
   draft: { icon: GitPullRequestDraft, chip: "border-zinc-700 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-800", link: "text-zinc-400" },
   merged: { icon: GitMerge, chip: "border-merged/50 bg-merged/15 text-merged-fg hover:bg-merged/25", link: "text-merged-fg" },
-  closed: { icon: GitPullRequestClosed, chip: "border-red-900/60 bg-red-500/10 text-red-300/80 hover:bg-red-500/15", link: "text-red-400/80" },
+  closed: { icon: GitPullRequestClosed, chip: "border-red-900/60 bg-red-500/10 text-red-300 hover:bg-red-500/15", link: "text-red-400" },
 }
 
 /**
@@ -271,7 +271,7 @@ export function PrChip({
     >
       {variant !== "number" && <>{activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}</>}
       <span className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
-      {activity && <span className={cx("font-normal opacity-80", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
+      {activity && <span className={cx("font-normal", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
     </NewTabLink>
   )
 }
@@ -624,7 +624,7 @@ export function ExternalMark({ className }: { className?: string }) {
       role="img"
       aria-label="(opens in a new tab)"
       aria-hidden={false}
-      className={cx("ml-px inline-block h-[0.95em] w-[0.95em] shrink-0 align-[-0.125em] opacity-70", className)}
+      className={cx("ml-px inline-block h-[0.95em] w-[0.95em] shrink-0 align-[-0.125em]", className)}
     />
   )
 }
@@ -1003,7 +1003,7 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
 }
 
 export const inputClass =
-  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500/70 sm:min-h-0 sm:text-sm"
+  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
 
 const SELECT_SIZE = {
   md: "min-h-11 rounded-lg py-2 pr-9 pl-3 text-base sm:min-h-0 sm:text-sm",
@@ -1016,7 +1016,7 @@ export function Select({ size = "md", className, ...props }: Omit<ComponentProps
     <select
       {...props}
       className={cx(
-        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-700 focus:border-yard-500 focus:ring-2 focus:ring-yard-500/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-500 focus:border-yard-500 focus:ring-2 focus:ring-yard-500/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
         SELECT_SIZE[size],
         className,
       )}

@@ -3,7 +3,7 @@
 // Tapping a bar segment, a legend item, a day's line or a table row narrows everything to it, and the table goes one
 // level finer each time, down to tasks and boxes. One request per range: filters fold the ledger in the browser
 // (shared/usageLedger.ts), and every number on screen adds up to the totals above it. Estimates wear "≈".
-import { useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
+import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { X } from "lucide-react"
 import { Modal } from "./Modal"
@@ -95,7 +95,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
               <Loading kind="rows" label="Loading usage" />
             )
           ) : (
-            <div aria-busy={q.isPlaceholderData} className={cx("space-y-4", q.isPlaceholderData && "opacity-60")}>
+            <div aria-busy={q.isPlaceholderData} className="space-y-4">
               {view.totals.turns === 0 && view.totals.computeHours === 0 && view.totals.costUsd === 0 && view.totals.tokens.total === 0 && (
                 <p className="text-sm text-zinc-400" data-testid="usage-empty">No recorded usage in this range{Object.keys(filter).length ? " for these filters" : ""}.</p>
               )}
@@ -339,8 +339,8 @@ function StackedBars({
                         key={s.key}
                         data-series={s.key}
                         onClick={() => pickSegment(i, s)}
-                        className={cx("w-full shrink-0 border-t border-zinc-950 first:border-t-0", last && "rounded-t-[2px]")}
-                        style={{ height: `${(v / top) * 100}%`, background: s.color, minHeight: 1 }}
+                        className={cx("usage-fill w-full shrink-0 border-t border-zinc-950 first:border-t-0", last && "rounded-t-[2px]")}
+                        style={{ height: `${(v / top) * 100}%`, "--series-color": s.color, minHeight: 1 } as CSSProperties}
                       />
                     )
                   })}
@@ -385,7 +385,7 @@ function Readout({ id, days, day, stacks, byDay, total, format, noun }: { id: st
       ) : (
         parts.map(({ s, v }) => (
           <span key={s.key} className="inline-flex min-w-0 items-center gap-1">
-            <span aria-hidden className="h-2 w-2 shrink-0 rounded-[2px]" style={{ background: s.color }} />
+            <span aria-hidden className="usage-fill h-2 w-2 shrink-0 rounded-[2px]" style={{ "--series-color": s.color } as CSSProperties} />
             <span className="min-w-0 truncate">{s.label}</span> {format(v)}
           </span>
         ))
@@ -401,7 +401,7 @@ function Legend({ stacks, format }: { stacks: Stack[]; format: (n: number) => st
       {stacks.map((s) => {
         const body = (
           <>
-            <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: s.color }} />
+            <span aria-hidden className="usage-fill h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ "--series-color": s.color } as CSSProperties} />
             <span className="min-w-0 truncate text-zinc-200">{s.label}</span>
             <span className="text-zinc-500 tabular-nums">{s.estimated ? "≈ " : ""}{format(s.total)}</span>
           </>

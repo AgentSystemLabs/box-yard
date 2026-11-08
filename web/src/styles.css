@@ -33,7 +33,8 @@
   --color-yard-500: #f59e0b;
   --color-yard-600: #d97706;
   /* Filled primary actions stay gold with dark ink in either theme. */
-  --color-control: var(--color-zinc-800);
+  --color-control: #81818b;
+  --animate-pulse: readable-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --color-action: #f59e0b;
   --color-action-hover: #fbbf24;
   --color-on-action: #09090b;
@@ -47,14 +48,14 @@
    tokens here, including opacity utilities, so dialogs, chats and lazy panels agree without
    changing their layout or rerendering transcripts. Dark keeps its surfaces and accents;
    muted ink is lifted enough to read on the chat and composer. */
-:root { color-scheme: dark; }
+:root { color-scheme: dark; --focus-ink: var(--color-yard-400); }
 :root.dark {
   --color-zinc-500: #94949e;
   --color-zinc-600: #8c8c96;
 }
 :root:not(.dark) {
   color-scheme: light;
-  --color-control: #85858f;
+  --color-control: #797984;
   --color-zinc-950: #ffffff;
   --color-zinc-900: #f4f4f5;
   --color-zinc-800: #e4e4e7;
@@ -69,8 +70,8 @@
   --color-yard-50: #713f12;
   --color-yard-100: #713f12;
   --color-yard-200: #78350f;
-  --color-yard-300: #854d0e;
-  --color-yard-400: #854d0e;
+  --color-yard-300: #713f12;
+  --color-yard-400: #783f0c;
   --color-yard-500: #a16207;
   --color-yard-600: #92400e;
   --color-merged-fg: #6d28d9;
@@ -152,8 +153,23 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Default browser placeholders mix the ink with transparency. Keep instructions readable,
+   including search fields that don't use inputClass. Disabled controls remain exempt. */
+::placeholder { color: var(--color-zinc-600); opacity: 1; }
+
+/* A solid indicator supplements the many translucent focus rings. The offset separates it
+   from gold primary actions; both themes meet 3:1 on the adjacent app surfaces. */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ink);
+  outline-offset: 2px;
+}
+
+/* Keep WORKING_PULSE timing and reduced-motion behavior. A 50% trough washed out
+   meaningful status icons; 80% keeps the project's indigo glyph above 3:1 on a hovered row. */
+@keyframes readable-pulse { 50% { opacity: .8; } }
+
 ::selection {
-  @apply bg-yard-500/30;
+  @apply bg-yard-500/30 text-zinc-100;
 }
 
 /* Custom chevron for <Select> (ui.tsx): the native arrow sits flush against the border */
@@ -215,12 +231,11 @@ body {
 .prose-chat .code-block {
   @apply my-2 flex max-w-full flex-wrap rounded-lg bg-zinc-900;
 }
-/* A long block folds to its first 12 lines (CodeBlock's CODE_FOLD_LINES), fading out into its "Show all N lines" row.
+/* A long block folds to its first 12 lines, followed by its "Show all N lines" row.
    It still scrolls sideways. */
 .prose-chat .code-block[data-folded] > pre {
   max-height: calc(12lh + 0.75rem);
   overflow-y: hidden;
-  mask-image: linear-gradient(to bottom, black calc(100% - 3lh), transparent);
 }
 /* A document in the file preview shows its code whole: folding is for chat. */
 .prose-doc .code-block[data-folded] > pre {
@@ -355,7 +370,7 @@ body.resizing iframe {
 /* Project/harness colors originate in inline styles. Darken the ink on light surfaces while
    keeping the project's hue and the original chip tint. These selectors touch individual icons/tags. */
 :root:not(.dark) [class~="text-(--pc)"] {
-  color: color-mix(in srgb, var(--pc) 42%, #18181b);
+  color: color-mix(in srgb, var(--pc) 28%, #18181b);
 }
 :root:not(.dark) .composer-tag {
   color: color-mix(in srgb, var(--tag) 38%, #18181b);
@@ -366,4 +381,8 @@ body.resizing iframe {
 }
 
 .task-title-failed { color: var(--color-red-400); }
-:root:not(.dark) .task-title-failed { color: var(--color-red-600); }
+:root:not(.dark) .task-title-failed { color: var(--color-red-500); }
+
+/* Match bars and legend swatches, including the selected day's tinted surface. */
+.usage-fill { background: var(--series-color); }
+:root:not(.dark) .usage-fill { background: color-mix(in srgb, var(--series-color) 85%, #18181b); }

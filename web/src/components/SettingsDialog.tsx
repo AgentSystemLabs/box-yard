@@ -465,7 +465,7 @@ export function SettingsDialog({
     >
       <SettingsSearchProvider value={searchRegistry}>
       <div className="shrink-0 border-b border-zinc-900 p-3">
-        <div className="flex min-h-11 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 focus-within:border-yard-500/60 focus-within:ring-2 focus-within:ring-yard-500/20">
+        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 focus-within:border-yard-500 focus-within:ring-2 focus-within:ring-yard-500/20">
           <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-zinc-500" />
           <input
             ref={searchRef} type="search" aria-label="Search settings" placeholder="Search settings…" value={query}

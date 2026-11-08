@@ -405,7 +405,7 @@ export const ThreadLine = memo(function ThreadLine({ m }: { m: SideThreadMessage
   if (m.role === "user")
     return (
       <div className="flex justify-end">
-        <div className={cx("max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-yard-500/15 px-3 py-2 text-sm whitespace-pre-wrap wrap-anywhere text-zinc-100", m.meta?.pending ? "opacity-70" : "")}>{m.content}</div>
+        <div className={cx("max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-yard-500/15 px-3 py-2 text-sm whitespace-pre-wrap wrap-anywhere text-zinc-100")}>{m.content}</div>
       </div>
     )
   if (m.role === "tool")

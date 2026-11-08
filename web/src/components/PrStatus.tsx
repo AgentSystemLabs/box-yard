@@ -59,7 +59,7 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
         </span>
         <span className={HEADER_FOLD.label}>{prLabel(task)}</span>
         {activity ? (
-          <span className={cx("font-normal opacity-80", HEADER_FOLD.label)}>· {MERGE_CHIP_LABEL[activity]}</span>
+          <span className={cx("font-normal", HEADER_FOLD.label)}>· {MERGE_CHIP_LABEL[activity]}</span>
         ) : (
           SignalIcon && <SignalIcon aria-hidden data-testid="pr-signal" className={cx("h-3.5 w-3.5 shrink-0 @max-[36rem]/head:hidden", TONE_TEXT[signal!.tone])} />
         )}

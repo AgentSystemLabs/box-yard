@@ -226,8 +226,8 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
       onClick={() => onChange(!checked)}
       className="group grid h-11 w-12 shrink-0 place-items-center rounded-lg disabled:opacity-50 sm:h-7 sm:w-10"
     >
-      <span className={cx("relative h-5 w-9 rounded-full transition", checked ? "bg-yard-500" : "bg-zinc-700 group-hover:bg-zinc-600")}>
-        <span className={cx("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", checked ? "left-[1.125rem]" : "left-0.5")} />
+      <span className={cx("relative h-5 w-9 rounded-full transition", checked ? "bg-action" : "border border-control bg-zinc-800 group-hover:bg-zinc-700")}>
+        <span className={cx("absolute top-0.5 h-4 w-4 rounded-full shadow transition-all", checked ? "left-[1.125rem] bg-on-action" : "left-0.5 bg-zinc-100")} />
       </span>
     </button>
   )
@@ -282,7 +282,7 @@ function HookRow({ hook: h, enabled, onEnabled, onEdit }: { hook: HookWithLastRu
   const chips = filterChips(h.filters, projectName, ownerName)
   const last = h.lastRun
   return (
-    <div id={h.id} className={cx("rounded-xl border bg-zinc-900/40 p-3 sm:p-4", enabled ? "border-zinc-800/80" : "border-zinc-900 opacity-75")} data-testid="hook-row">
+    <div id={h.id} className={cx("rounded-xl border bg-zinc-900/40 p-3 sm:p-4", enabled ? "border-zinc-800/80" : "border-zinc-900")} data-testid="hook-row">
       <div className="flex items-start gap-2 sm:gap-3">
         <div className="-my-2 -ml-1 sm:-my-0.5">
           <Switch checked={enabled} onChange={onEnabled} label={enabled ? `Turn off ${h.name}` : `Turn on ${h.name}`} />
