@@ -69,7 +69,7 @@ flowchart LR
 - **Mechanism.** <Three or four sentences: what was cached, skipped, batched or moved, and who owns it now.>
 - **Files.** `server/<file>.ts or web/src/<file>.tsx` — <clause>; `server/<file>.ts or web/src/<file>.tsx` — <clause>.
 - **How the numbers were taken.** <Machine, build profile, the exact command, how many runs.>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 📝 Notes <a id="notes"></a>
 

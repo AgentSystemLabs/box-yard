@@ -21,9 +21,10 @@ never "feat(tasks): add retention settings").
    `#user-content-…` — see *GitHub anchors* below; a dead TOC is worse than none.
 2. **Screenshots or terminal proof of the change.** A web UI change without a picture is a claim.
    Include at least one screenshot of the screen after the change; use a before/after pair when the
-   change replaces something visible. In Box Yard, publish each image with `publish_artifact` and put
-   its `/artifacts/…` link in the body: `create_pull_request` copies it to the repo's `pr-assets`
-   branch and rewrites the link so GitHub shows it. In Cursor Cloud, reference walkthrough artifact
+   change replaces something visible. In Box Yard, publish each image with `publish_artifact`, then
+   commit the PNG to the orphan `pr-assets` branch under `<task_id>/` with a fast-forward push.
+   Link `https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/<task_id>/<image>.png?raw=true`;
+   never leave a server-local `/artifacts/…` link in a public PR. In Cursor Cloud, reference walkthrough artifact
    paths directly in the PR body so the PR tool can upload them. A change with no screen (server retention,
    scheduler logic, CLI/deploy scripts) shows its terminal output in a fenced block *and* a diagram,
    and says why there is no screenshot.
@@ -41,7 +42,7 @@ never "feat(tasks): add retention settings").
    technical overview.
 5. **A technical overview section**, last before the notes, for the reviewer: the mechanism in a
    few sentences, the files that matter with a clause each, the rejected approach they would ask
-   about, the gate ("`npm test` and `npm run typecheck` green"). Everything above it stays high level.
+   about, the gate ("`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD"). Everything above it stays high level.
 6. **A risk section**, directly above the technical overview: the author's own read of what merging
    could break, in the PR REVIEWER SKILL's order — 🔒 security and production-merge risk, ⚡ performance
    cost, 🧩 fit with the codebase's patterns — one table row each, rated Low / Medium / High with a
@@ -61,8 +62,9 @@ never "feat(tasks): add retention settings").
    a blank line, unless the PR tool appends its own metadata outside the body.
 
 Every fact comes from the diff and the commits; do not add a claim
-the code does not make. A gate that did not run is stated as such ("`npm test` could not be
-run in this headless session — please run the test suite before merging"), never implied.
+the code does not make. A gate that did not run is stated as such, never implied. Follow `AGENTS.md`: iterate with affected
+tests; commit, then run `npm run typecheck`, `npm run build` and `npm run test:fast` on stable HEAD.
+The Captain owns the daily full suite; `npm test` / `test:full` and `test:slow` are not merge gates.
 
 ## The house style
 
@@ -113,10 +115,10 @@ beats a new shape — the archive is easier to read when the PRs rhyme.
 For web UI changes, run the app or an existing preview and capture the screen after the change. A
 before shot from `origin/main` is useful only when the template asks for a pair. In Cursor Cloud,
 prefer walkthrough artifacts and reference the artifact path in the PR body; the PR tool uploads it.
-In Box Yard, `publish_artifact` the PNG and link its `/artifacts/…` URL from the body.
-`create_pull_request` copies files this task published to the `pr-assets` branch and points the
-links there; its reply names any it couldn't copy (another task's artifact, or a deleted file).
-Re-publish those, then call it again, which also replaces the open PR's title and body.
+In Box Yard, `publish_artifact` the PNG for Cody, then put it on the public repository’s orphan
+`pr-assets` branch under `<task_id>/`. Fast-forward only; never force-push or touch `boxyard-assets`.
+Link its `blob/pr-assets/…?raw=true` URL in the body. Include no private project names, credentials
+or personal data in screenshots. Remove any “Opened by a Box Yard agent” footer.
 For local-only work, use a repo-appropriate assets workflow or leave a terminal proof block instead
 of pretending a screenshot exists.
 
@@ -153,7 +155,8 @@ zsh.
 In Cursor Cloud, use the PR tool configured for the run after the branch is pushed. For local work,
 `gh pr create --title "<title>" --body-file <scratchpad>/pr-body.md` or
 `gh pr edit <number> --body-file <scratchpad>/pr-body.md` is fine when write access is available.
-Add draft status when the gate has not run. Put `Closes #N` in the body, not the title, so GitHub
+Complete the required gate before requesting merge. Follow the current task’s PR/merge instructions;
+Box Yard tasks use ready PRs, not drafts. Never imply an unrun or failing gate is green. Put `Closes #N` in the body, not the title, so GitHub
 links the issue. After it lands, print the PR URL.
 
 ## GitHub anchors
