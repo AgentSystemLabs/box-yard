@@ -1,0 +1,68 @@
+[
+  {
+    "version": "before",
+    "scope": "task",
+    "busy": false,
+    "initialQueueRows": 1,
+    "errors": []
+  },
+  {
+    "version": "before",
+    "scope": "captain",
+    "busy": false,
+    "initialQueueRows": 0,
+    "errors": []
+  },
+  {
+    "version": "before",
+    "scope": "coordinator",
+    "busy": false,
+    "initialQueueRows": 0,
+    "errors": []
+  },
+  {
+    "version": "after",
+    "scope": "task",
+    "busy": false,
+    "initialQueueRows": 0,
+    "errors": [],
+    "failedDraftRestored": true
+  },
+  {
+    "version": "after",
+    "scope": "captain",
+    "busy": false,
+    "initialQueueRows": 0,
+    "errors": [],
+    "failedDraftRestored": true
+  },
+  {
+    "version": "after",
+    "scope": "coordinator",
+    "busy": false,
+    "initialQueueRows": 0,
+    "errors": [],
+    "failedDraftRestored": true
+  },
+  {
+    "version": "after",
+    "scope": "task",
+    "busy": true,
+    "initialQueueRows": 1,
+    "errors": []
+  },
+  {
+    "version": "after",
+    "scope": "captain",
+    "busy": true,
+    "initialQueueRows": 1,
+    "errors": []
+  },
+  {
+    "version": "after",
+    "scope": "coordinator",
+    "busy": true,
+    "initialQueueRows": 1,
+    "errors": []
+  }
+]
