@@ -169,7 +169,7 @@ export const TaskThread = memo(function TaskThread({
     for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === "assistant") return list[i]!.id
     return null
   }, [history.items])
-  const shown = useMemo(() => history.items.filter((m) => m.role !== "tool" && !(m.meta?.pending && m.meta.queued)), [history.items])
+  const shown = useMemo(() => history.items.filter((m) => m.role !== "tool"), [history.items])
   const days = useMemo(() => chatDays(shown), [shown])
   // Opening a task paints its newest rows first, then the rest of the tail right after.
   const tail = useTail(shown, id, { first: firstPaintCount(shown), max: 200 })

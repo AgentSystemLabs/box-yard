@@ -224,6 +224,49 @@ it("discovers a genuine task scheduler wait after the optimistic idle send", asy
   expect(queued()).not.toBeNull()
 })
 
+for (const kind of ["task", "subtask"] as const) it(`${kind}: rapid sends left behind by a starting turn become actionable queue rows`, async () => {
+  mount(kind)
+  await send("first"); await send("second")
+  expect(queued()).toBeNull()
+  const first = delivered(0)
+  serverQueue = [queueRow(1)]
+  // The runner claims inputs before launch; another prompt can arrive after that claim but before working.
+  await emit(messageEvent(first), busyEvent(true))
+  expect(lines().find((m) => m.content === "first")).toEqual(first)
+  expect(lines().find((m) => m.content === "second")).toBeUndefined()
+  expect(queued()).not.toBeNull()
+  serverMessages = [first]
+  await act(async () => posts[1]!.answer({ ...task({ status: "working" }), inputId: serverQueue[0]!.id }))
+  await flush()
+  expect(host.querySelector('[aria-label="Edit queued message"]')).not.toBeNull()
+  expect(host.textContent?.match(/first/g)).toHaveLength(1)
+  expect(host.textContent?.match(/second/g)).toHaveLength(1)
+  await act(async () => posts[0]!.answer({ ...task({ status: "queued" }), inputId: queueRow(0).id }))
+  await flush()
+  expect(queued()).not.toBeNull()
+})
+
+it("corrects a stale idle prediction when HTTP confirms an already running task", async () => {
+  mount("task")
+  await send()
+  serverQueue = [queueRow()]
+  await act(async () => posts[0]!.answer({ ...task({ status: "working" }), inputId: serverQueue[0]!.id }))
+  await flush()
+  expect(queued()).not.toBeNull()
+  expect(lines()).toHaveLength(0)
+})
+
+it("a task wait leaves an independently pending Captain forward alone", async () => {
+  mount("task")
+  const forward = { id: "tmp-forward", taskId: TASK, role: "event", content: "Ask the Captain", createdAt: 1, meta: { pending: true, kind: "to_captain" } }
+  act(() => qc.setQueryData(keys.taskMessages(TASK), [forward]))
+  await send()
+  await emit(busyEvent(true))
+  expect(lines()).toEqual([forward])
+  await act(async () => posts[0]!.answer({ error: "Unavailable" }, 503))
+  await flush()
+})
+
 for (const state of [{ waitReason: "Waiting for a free slot" }, { compacting: true }, { compactPending: true }]) it(`keeps task sends queued for ${JSON.stringify(state)}`, async () => {
   mount("task")
   act(() => qc.setQueryData(keys.tasks, [task(state)]))

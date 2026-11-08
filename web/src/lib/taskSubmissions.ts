@@ -15,10 +15,12 @@ export function placeTaskMessage(list: TaskMessage[], message: TaskMessage): Tas
   return placeMessage(pending ? list.map((m) => m === pending ? { ...m, id: message.id } : m) : list, message)
 }
 
-/** A newly discovered scheduler/compaction wait turns the provisional transcript line into a queue row. */
+/** Delivery events precede the working task event, so any still-pending input waits for another turn. */
 export function taskSubmissionWait(qc: QueryClient, task: Task) {
-  if (!task.waitReason && !task.compacting && !task.compactPending) return
-  qc.setQueryData<TaskMessage[]>(keys.taskMessages(task.id), (list) => list?.map((m) => m.meta?.pending && !m.meta.queued ? { ...m, meta: { ...m.meta, queued: true } } : m))
+  if (task.status !== "working" && !task.waitReason && !task.compacting && !task.compactPending) return
+  // Its queue row already exists. Drop the provisional line rather than retaining a hidden pending
+  // copy after an edit/cancel; forwarding to the Captain has a separate lifecycle and stays put.
+  qc.setQueryData<TaskMessage[]>(keys.taskMessages(task.id), (list) => list?.filter((m) => !m.meta?.pending || !m.meta.clientMessageId))
 }
 
 /** Queue fetches can race a POST or delivery. Keep only still-unconfirmed local rows, once each. */
