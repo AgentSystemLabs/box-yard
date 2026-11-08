@@ -1289,7 +1289,7 @@ class Captain {
     if (result.ok) this.store.setKv(notesSeenKey(this.project.id), now.notesHash)
     if (result.ok && recapFile) this.store.setKv(recapKey(this.project.id), null)
     this.stopping = false
-    this.lastError = !result.ok && !result.stopped ? result.error : null
+    this.lastError = !result.ok && !result.stopped ? result.error.slice(0, 1500) : null
     this.publishState()
     if (result.ok && stoppedNote) this.store.setKv(stoppedKey(this.project.id), null)
     if (result.stopped) {

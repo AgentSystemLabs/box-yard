@@ -14,6 +14,7 @@ afterEach(() => {
 })
 
 type Result = { ok: boolean; error: string; text: string; raw: string; sessionId: string | null; stopped?: boolean }
+const failure = "Model run failed " + "x".repeat(2000)
 const success: Result = { ok: true, error: "", text: "Ready.", raw: "", sessionId: null }
 
 describe.each(["coordinator", "captain"] as const)("%s status source", (kind) => {
@@ -37,15 +38,15 @@ describe.each(["coordinator", "captain"] as const)("%s status source", (kind) =>
     })
     // Keep the real send/drain/runPrompt/state plumbing; replace only the model process.
     const run = vi.spyOn(runner as unknown as { run(...args: unknown[]): Promise<Result> }, "run")
-      .mockResolvedValue({ ...success, ok: false, error: "Model run failed" })
+      .mockResolvedValue({ ...success, ok: false, error: failure })
     const send = (text: string) => kind === "coordinator" ? coordinator.send(text) : captains.send(project.id, text, { source: "cody" })
     const idle = () => vi.waitFor(() => expect(runner.state().busy).toBe(false))
 
     send("Build the preview")
     await idle()
     expect(run).toHaveBeenCalledOnce()
-    expect(runner.state().error).toBe("Model run failed")
-    expect(states.at(-1)).toMatchObject({ busy: false, error: "Model run failed" })
+    expect(runner.state().error).toBe(failure.slice(0, 1500))
+    expect(states.at(-1)).toMatchObject({ busy: false, error: failure.slice(0, 1500) })
 
     let complete!: (result: Result) => void
     run.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))

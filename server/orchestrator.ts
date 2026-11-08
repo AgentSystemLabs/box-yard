@@ -830,7 +830,7 @@ export class Orchestrator {
     }
     this.turnKey = null
     this.stopping = false
-    this.lastError = !result.ok && !result.stopped ? result.error : null
+    this.lastError = !result.ok && !result.stopped ? result.error.slice(0, 1500) : null
     this.publishState()
     if (result.ok && recapFile) this.store.setKv(RECAP_KEY, null)
     if (result.ok && stoppedNote) this.store.setKv(STOPPED_KEY, null)
