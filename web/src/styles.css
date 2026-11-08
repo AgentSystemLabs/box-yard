@@ -165,8 +165,8 @@ body {
 }
 
 /* Keep WORKING_PULSE timing and reduced-motion behavior. A 50% trough washed out
-   meaningful status icons; 75% keeps the project's indigo glyph above 3:1 on its tint. */
-@keyframes readable-pulse { 50% { opacity: .75; } }
+   meaningful status icons; 80% keeps the project's indigo glyph above 3:1 on a hovered row. */
+@keyframes readable-pulse { 50% { opacity: .8; } }
 
 ::selection {
   @apply bg-yard-500/30 text-zinc-100;
