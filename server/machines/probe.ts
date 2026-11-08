@@ -150,9 +150,11 @@ export function testFromProbe(i: { first: Map<string, string[]>; tools: Map<stri
   const missing = first.get("missing") ?? []
   if (missing.length) problems.push(`${missing.join(", ")} ${missing.length === 1 ? "isn't" : "aren't"} installed`)
   if (all.claude.found && claudeLogin === false) notes.push("claude isn't logged in on it: its tasks need a Claude key from Box Yard (Settings › Credentials or the project's identity), or run claude there once and /login")
-  if (!all.claude.found && (all.codex.found || all.cursor.found)) notes.push(`claude (Claude Code) isn't installed, so only ${all.codex.found && all.cursor.found ? "Codex and Cursor" : all.codex.found ? "Codex" : "Cursor"} tasks run on it: ${installClaude}`)
+  if (!all.claude.found && (all.codex.found || all.cursor.found || all.opencode.found)) notes.push(`claude (Claude Code) isn't installed, so only ${[all.codex.found && "Codex", all.cursor.found && "Cursor", all.opencode.found && "OpenCode"].filter(Boolean).join(" and ")} tasks run on it: ${installClaude}`)
   if (all.codex.found && codexLogin === false) notes.push("codex isn't logged in on it: its Codex tasks need an OpenAI API key from Box Yard (Settings › Credentials), Box Yard's ChatGPT login (Linux machines only, kept in memory), or run codex login there")
   if (all.cursor.found && cursorLogin === false) notes.push("cursor-agent isn't logged in on it: its Cursor tasks need a Cursor API key from Box Yard (Settings › Credentials), or run cursor-agent login there")
+  if (all.opencode.found && !/^1\.19\.5(?:\s|$)/.test(all.opencode.version ?? "")) notes.push("OpenCode 1.19.5 is required for OpenCode tasks; install npm install -g opencode-ai@1.19.5 and test again")
+  if (all.opencode.found && !opencodeLogin) notes.push("OpenCode tasks need provider API credentials from Settings › Credentials › OpenCode API logins, or an API-only auth.json on this machine; OAuth is not supported")
   const free = num(disk[0] ?? null)
   if (free !== null && free < 2 * 1024 ** 3) notes.push("under 2 GB free in its work folder's disk")
   return {

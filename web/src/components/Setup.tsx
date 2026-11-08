@@ -928,11 +928,13 @@ export function CredentialsPanel({ fid }: { fid: (k: string) => string }) {
           <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500" data-testid="cursor-credentials-intro">
             Only for agents set to run on Cursor (a project's Agent, or Settings › Box agents). {s.local?.cursorLogin === true ? "Agents on this computer can use its cursor-agent login; boxes and containers need this key." : "Boxes and containers need this key."}
           </p>
-          <Row id={fid("cred-opencodeAuthJson")} label={CREDENTIAL_INFO.opencodeAuthJson.label} help={<CredentialHelp k="opencodeAuthJson" />}>
-            <CredentialField k="opencodeAuthJson" status={s.credentials.opencodeAuthJson ?? UNSET} id={fid("cred-opencodeAuthJson")} />
-          </Row>
           <Row id={fid("cred-cursorApiKey")} label={CREDENTIAL_INFO.cursorApiKey.label} help={<CredentialHelp k="cursorApiKey" />}>
             <CredentialField k="cursorApiKey" status={s.credentials.cursorApiKey ?? UNSET} id={fid("cred-cursorApiKey")} />
+          </Row>
+          <h4 className="mt-6 border-t border-zinc-900 pt-5 text-sm font-semibold text-zinc-100">OpenCode</h4>
+          <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500">Task agents on OpenCode 1.19.5 use provider API logins. OAuth and manager chats are not supported. Test validates the JSON format without contacting a model provider.</p>
+          <Row id={fid("cred-opencodeAuthJson")} label={CREDENTIAL_INFO.opencodeAuthJson.label} help={<CredentialHelp k="opencodeAuthJson" />}>
+            <CredentialField k="opencodeAuthJson" status={s.credentials.opencodeAuthJson ?? UNSET} id={fid("cred-opencodeAuthJson")} />
           </Row>
           {s.restart.map((r) => (
             <p key={r} className="mt-4 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-xs leading-relaxed text-amber-200">

@@ -8,7 +8,7 @@ import { withOwner } from "../shared/owner.js"
 
 export const ROUTING_FILENAMES = ["routing.yaml", "routing.yml"] as const
 
-const model = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._:\[\]/-]+$/, "Model names have no spaces")
+const model = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._:#\[\]/-]+$/, "Model names have no spaces")
 const target = z
   .object({
     model: model.optional(),
@@ -208,7 +208,7 @@ export function isCopiedDefaultRoute(
 
 export function routingInstructions(
   dataDir: string,
-  settings: Pick<Settings, "agentRoutingConfig"> & Partial<Pick<Settings, "ownerName" | "agentModel" | "agentEffort" | "agentCli" | "agentCodexModel" | "agentCursorModel">>,
+  settings: Pick<Settings, "agentRoutingConfig"> & Partial<Pick<Settings, "ownerName" | "agentModel" | "agentEffort" | "agentCli" | "agentCodexModel" | "agentCursorModel" | "agentOpencodeModel">>,
 ): string {
   const loaded = loadRouting(dataDir, settings)
   const owner = (text: string) => withOwner(text, settings.ownerName)
@@ -223,7 +223,7 @@ export function routingInstructions(
   if (coordinatorEffort) parts.push(owner("Settings › Box agents › Effort is \"Let the Coordinator decide\": pass an effort on create_task (low for one-command chores, high for real coding). Without one, the routing config or the built-in default applies."))
   parts.push(
     owner(
-      `Agent CLI: a task runs on Claude Code, Codex or Cursor, and keeps its saved harness until explicitly changed with continue_task while idle/failed/PR ready. For usage or token limits, continue the SAME task with an explicit agent rather than creating a replacement; its workspace and branch stay with it. Changing project/Settings defaults affects new tasks only. It's the task's agent param on create_task/create_tasks, else what its model names (gpt-* and o* models are Codex's; auto, composer-* and other Cursor-only ids are Cursor's), else its project's Agent (list_projects shows it), else Settings › Box agents (now ${settings.agentCli ?? "claude"}${settings.agentCodexModel ? `, Codex model ${settings.agentCodexModel}` : ""}${settings.agentCursorModel ? `, Cursor model ${settings.agentCursorModel}` : ""}). A task's agent field (create_task's and create_tasks' replies, get_task, list_tasks) says which one it got. Pass agent "codex" only when Cody asks for Codex, GPT or OpenAI, and "cursor" only when Cody asks for Cursor or Composer, or a routing rule says so; continue_task rejects known incompatible model pins and clears old model/effort/routing pins when switching harness. Cursor's model ids carry their effort (e.g. claude-opus-5-5-high), so effort doesn't apply to it, and Cursor agents can't be steered mid-turn or compacted.`,
+      `Agent CLI: a task runs on Claude Code, Codex, Cursor or OpenCode, and keeps its saved harness until explicitly changed with continue_task while idle/failed/PR ready. For usage or token limits, continue the SAME task with an explicit agent rather than creating a replacement; its workspace and branch stay with it. Changing project/Settings defaults affects new tasks only. It's the task's agent param on create_task/create_tasks, else what its model names (gpt-* and o* models are Codex's; auto, composer-* and other Cursor-only ids are Cursor's; provider/model IDs are OpenCode's), else its project's Agent (list_projects shows it), else Settings › Box agents (now ${settings.agentCli ?? "claude"}${settings.agentCodexModel ? `, Codex model ${settings.agentCodexModel}` : ""}${settings.agentCursorModel ? `, Cursor model ${settings.agentCursorModel}` : ""}${settings.agentOpencodeModel ? `, OpenCode model ${settings.agentOpencodeModel}` : ""}). A task's agent field (create_task's and create_tasks' replies, get_task, list_tasks) says which one it got. Pass agent "codex" only when Cody asks for Codex, GPT or OpenAI, and "cursor" only when Cody asks for Cursor or Composer, and "opencode" only when requested or selected by a provider/model ID, or a routing rule says so; continue_task rejects known incompatible model pins and clears old model/effort/routing pins when switching harness. Cursor's model ids carry their effort (e.g. claude-opus-5-5-high), so effort doesn't apply to it, and Cursor agents can't be steered mid-turn or compacted. OpenCode uses provider/model#variant, with no generic effort or Box Yard compaction threshold, and cannot be steered mid-turn. Omit effort for Cursor and OpenCode even when the Coordinator chooses efforts for other harnesses.`,
     ),
   )
   if (settings.agentModel || settings.agentEffort) parts.push(`Settings › Box agents now: model ${settings.agentModel ?? DEFAULT_MODEL}, effort ${coordinatorEffort ? "chosen by you" : (settings.agentEffort ?? DEFAULT_EFFORT)}.`)

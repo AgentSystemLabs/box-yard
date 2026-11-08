@@ -66,6 +66,7 @@ const ICON: Record<string, LucideIcon> = {
   claude: Asterisk,
   codex: SquareTerminal,
   cursor: MousePointer2,
+  opencode: SquareTerminal,
 }
 const iconOf = (t: Pick<RunTarget, "kind" | "token">): LucideIcon =>
   t.kind === "machine" ? Server : t.kind === "label" ? Tag : t.kind === "project" ? FolderGit2 : t.kind === "gpu" || t.token.startsWith("gpu:") ? Cpu : (ICON[t.token.split(":")[0]!] ?? MapPin)
@@ -232,7 +233,7 @@ export function useChatPicks({
     defaults: harnessDefaults(settings),
     claude: claudeModels.data?.models,
     cursor: cursorModels.data?.models ?? CURSOR_FALLBACK_MODELS,
-  }), [availableHarnesses, settings?.agentModel, settings?.agentEffort, settings?.agentCodexModel, settings?.agentCodexEffort, settings?.agentCursorModel, claudeModels.data?.models, cursorModels.data?.models])
+  }), [availableHarnesses, settings?.agentModel, settings?.agentEffort, settings?.agentCodexModel, settings?.agentCodexEffort, settings?.agentCursorModel, settings?.agentOpencodeModel, claudeModels.data?.models, cursorModels.data?.models])
   const projects = useProjectTargets(projectOn)
   const refreshPicker = useRefreshPicker(projectId)
   const bangPlaced = useMemo(() => (hasBang && harnesses ? placedIn(value, harnesses, "!", "agent") : NONE), [hasBang, harnesses, value])

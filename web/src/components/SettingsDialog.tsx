@@ -46,7 +46,7 @@ import { CursorModelSelect } from "./CursorModelSelect"
 import { Button, LineIcon, NewTabLink, Select, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { BOX_SIZE_SPECS } from "../../../shared/boxSizes"
-import { AGENT_CLIS, AGENT_CLI_LABEL, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
+import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
 import { NOTE_BUDGET_LIMITS } from "../../../shared/notes"
 import { LOCAL_AGENTS_LIMITS, LOCAL_UNSANDBOXED } from "../../../shared/runner"
 import {
@@ -834,7 +834,7 @@ export function SettingsDialog({
                       <ModelPicker id={fid("am")} value={s.agentModel} onChange={(v) => set("agentModel", v)} testId="agent-model" customInputProps={field("agentModel")} />
                     </Row>
                   )}
-                  {s.agentCli !== "cursor" && s.agentCli !== "opencode" && (
+                  {hasSeparateEffort(s.agentCli) && (
                     <Row
                       id={fid("ae")}
                       label="Effort"

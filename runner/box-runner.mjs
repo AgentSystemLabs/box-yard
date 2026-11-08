@@ -1720,7 +1720,7 @@ function openCodeBinary() {
 
 async function runOpenCode({ turn, sessionId, resume, prompt }) {
   const startedAt = Date.now()
-  const failed = (errorText) => ({ exitCode: 1, startedAt, result: null, usage: null, sessionId: null, errorText })
+  const failed = (errorText) => ({ exitCode: 1, startedAt, result: { result: "", is_error: true, duration_ms: Date.now() - startedAt }, usage: null, sessionId: null, errorText })
   let env, args
   const bin = openCodeBinary()
   try {
@@ -1731,23 +1731,37 @@ async function runOpenCode({ turn, sessionId, resume, prompt }) {
   const version = spawnSync(bin, [...pre, "--version"], { env, encoding: "utf8", timeout: 10_000 })
   if (version.error?.code === "ENOENT") return failed("OpenCode isn't installed on this runner. Install npm install -g opencode-ai@1.19.5 on this computer or SSH machine, then test it again. Managed sandboxes install it on first use.")
   if (version.status !== 0 || !/^1\.19\.5(?:\s|$)/.test(version.stdout?.trim() ?? "")) return failed("OpenCode 1.19.5 is required. Other CLI versions, including v2, have not been verified. Install npm install -g opencode-ai@1.19.5, then test again.")
+  // v1 silently ignores unknown variants. Verify its own catalog before any generation request.
+  if (turn.model?.includes("#")) {
+    const [id, variant] = turn.model.split("#")
+    const catalog = spawnSync(bin, [...pre, "models", id.split("/")[0], "--verbose", "--pure"], { cwd: path.join(taskDir, "work"), env, encoding: "utf8", timeout: 20_000, maxBuffer: 16 * 1024 * 1024 })
+    if (catalog.status !== 0) return failed("OpenCode couldn't verify the requested variant. Check the provider API login and `opencode models <provider> --verbose` on this runner; no generation was requested.")
+    // models.ts prints an unindented id line followed by a pretty-printed JSON model object.
+    const lines = catalog.stdout.split("\n")
+    const at = lines.indexOf(id)
+    const end = lines.findIndex((line, i) => i > at && line === "}")
+    let model
+    try { if (at >= 0 && end > at) model = JSON.parse(lines.slice(at + 1, end + 1).join("\n")) } catch {}
+    if (!model || !Object.hasOwn(model.variants ?? {}, variant)) return failed(`OpenCode model ${id} does not list variant ${variant}. Choose one from \`opencode models ${id.split("/")[0]} --verbose\`; no generation was requested.`)
+  }
   return new Promise((resolve) => {
     const child = spawn(bin, [...pre, ...args], { cwd: path.join(taskDir, "work"), env, stdio: ["pipe", "pipe", "pipe"] })
     activeChild = child
     let buf = "", stderr = "", reply = "", failure = "", nativeSession = null, usage = null
-    let cost = 0, sawStep = false
+    let cost = 0, sawStep = false, finishReason = null
     const totals = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
     const seen = new Set()
     let pending = Promise.resolve()
-    const queue = (event) => { pending = pending.then(() => emit(event)) }
+    const queue = (event) => { pending = pending.then(() => emit(event)).catch((e) => { failure = clean(e.message) }) }
     // Do not echo raw CLI stdout/stderr that may contain credential material.
     const secrets = [...Object.values(task.env ?? {}), env.OPENCODE_AUTH_CONTENT].filter((v) => typeof v === "string" && v.length > 3)
     try { for (const v of Object.values(JSON.parse(env.OPENCODE_AUTH_CONTENT || "{}"))) if (v?.key) secrets.push(v.key) } catch {}
     const clean = (text) => { let out = String(text); for (const secret of secrets) out = out.split(secret).join("[redacted]"); return out }
     const onLine = (line) => {
       let ev
-      try { ev = JSON.parse(line) } catch { return }
-      if (typeof ev.sessionID !== "string" || !/^ses_[A-Za-z0-9]+$/.test(ev.sessionID)) return
+      try { ev = JSON.parse(line) } catch { failure = "OpenCode emitted malformed JSON output"; return }
+      if (typeof ev?.sessionID !== "string" || !/^ses_[A-Za-z0-9]+$/.test(ev.sessionID)) { failure = "OpenCode emitted an invalid session event"; return }
+      if (resume && ev.sessionID !== sessionId) { failure = "OpenCode did not resume the requested session"; return }
       if (nativeSession && ev.sessionID !== nativeSession) { failure = "OpenCode emitted events for a different session"; return }
       nativeSession = ev.sessionID
       const part = ev.part
@@ -1767,6 +1781,7 @@ async function runOpenCode({ turn, sessionId, resume, prompt }) {
         failure = clean(ev.error?.data?.message || ev.error?.message || ev.error?.name || "OpenCode reported an error")
       } else if (ev.type === "step_finish" && part?.tokens) {
         sawStep = true
+        finishReason = part.reason
         const n = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0
         const u = { input_tokens: n(part.tokens.input), output_tokens: n(part.tokens.output) + n(part.tokens.reasoning), cache_read_input_tokens: n(part.tokens.cache?.read), cache_creation_input_tokens: n(part.tokens.cache?.write) }
         for (const k of Object.keys(totals)) totals[k] += u[k]
@@ -1781,14 +1796,14 @@ async function runOpenCode({ turn, sessionId, resume, prompt }) {
       const lines = buf.split("\n"); buf = lines.pop() ?? ""
       for (const line of lines) if (line.trim()) onLine(line)
     })
-    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr = (stderr + clean(chunk)).slice(-8000) })
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr = (stderr + chunk).slice(-8000) })
     child.on("error", (e) => { failure = clean(e.message) })
     child.on("close", (code, signal) => {
       if (buf.trim()) onLine(buf)
       pending.then(() => resolve({
         exitCode: code ?? 1, startedAt, sessionId: nativeSession, usage,
-        result: { result: reply, is_error: Boolean(failure) || !sawStep || !nativeSession, total_cost_usd: cost, duration_ms: Date.now() - startedAt, usage: totals },
-        errorText: [failure, clean(stderr).trim(), signal ? `OpenCode was killed (${signal})` : "", !sawStep ? "OpenCode ended without a completed step. Check the provider API login and model; run `opencode models` on this runner." : ""].filter(Boolean).join("\n"),
+        result: { result: clean(reply), is_error: Boolean(failure) || !sawStep || !nativeSession || finishReason !== "stop", total_cost_usd: sawStep ? cost : null, duration_ms: Date.now() - startedAt, usage: totals },
+        errorText: [failure, clean(stderr).trim(), signal ? `OpenCode was killed (${signal})` : "", sawStep && finishReason !== "stop" ? `OpenCode ended with finish reason ${String(finishReason)}; continue the task after checking the provider response.` : "", !sawStep ? "OpenCode ended without a completed step. Check the provider API login and model; run `opencode models` on this runner." : ""].filter(Boolean).join("\n"),
       }), (e) => resolve(failed(clean(e.message))))
     })
     child.stdin.on("error", () => {})

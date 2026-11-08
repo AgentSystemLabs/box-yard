@@ -228,11 +228,11 @@ export const HARNESS_MODELS: Record<AgentCli, string> = {
   opencode: "provider/model · optional #variant",
 }
 
-/** The "!" list: Claude Code, Codex and Cursor, each only where it can run the message's tasks. */
+/** The "!" list: registered task harnesses, each only where it can run the message's tasks. */
 export function buildHarnessTargets(s: HarnessSources): RunTarget[] {
   return AGENT_CLIS.flatMap((cli): RunTarget[] => {
     const blocked = s.blocked?.[cli] ?? null
-    if (s.problems[cli] && !blocked) return []
+    if (s.problems[cli] !== null && !blocked) return []
     return [{ token: cli, value: cli, kind: "harness", label: AGENT_CLI_LABEL[cli], detail: HARNESS_MODELS[cli], disabled: blocked }]
   })
 }

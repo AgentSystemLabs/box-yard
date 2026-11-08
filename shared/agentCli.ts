@@ -1,7 +1,7 @@
-// Which coding agent CLI runs a Box Yard agent: Claude Code (the default), OpenAI's Codex or Cursor's CLI. The
+// Which coding agent CLI runs a Box Yard task: Claude Code (the legacy default), Codex, Cursor or OpenCode. The
 // Coordinator and the Captains pick Claude Code or Codex (Settings › Coordinator); each project's task agents pick any
-// of the three (Settings › Box agents, a project's Agent setting); explicit idle continuation can change it (docs/codex.md,
-// docs/cursor.md).
+// registered task harnesses (Settings › Box agents, a project's Agent setting); idle continuation can change it (docs/codex.md,
+// docs/cursor.md, docs/opencode.md).
 import { EFFORTS } from "./types.js"
 
 export const AGENT_CLIS = ["claude", "codex", "cursor", "opencode"] as const
@@ -9,7 +9,7 @@ export type AgentCli = (typeof AGENT_CLIS)[number]
 export const DEFAULT_AGENT_CLI: AgentCli = "claude"
 
 /**
- * The CLIs the Coordinator and Captains run on. Cursor runs task agents only: a manager acts through Box Yard's tools
+ * The CLIs the Coordinator and Captains run on. Cursor and OpenCode run tasks only: a manager acts through Box Yard's tools
  * with no shell or file reads (status-only projects), and `cursor-agent` has no way to switch its built-in tools off.
  */
 export const MANAGER_CLIS = ["claude", "codex"] as const
@@ -24,7 +24,7 @@ export const AGENT_CLI_SHORT: Record<AgentCli, string> = { claude: "Claude", cod
 export const isAgentCli = (v: unknown): v is AgentCli => typeof v === "string" && (AGENT_CLIS as readonly string[]).includes(v)
 export const isManagerCli = (v: unknown): v is ManagerCli => typeof v === "string" && (MANAGER_CLIS as readonly string[]).includes(v)
 
-/** Claude uses streaming stdin; Codex uses app-server turn/steer. Cursor waits for the next turn. */
+/** Claude uses streaming stdin; Codex uses app-server turn/steer. Cursor and OpenCode wait for the next turn. */
 export const canSteer = (cli: AgentCli | null | undefined) => !(["cursor", "opencode"] as AgentCli[]).includes(cli ?? DEFAULT_AGENT_CLI)
 
 /** A Claude model id or alias (claude-opus-5-5, opus, sonnet[1m], haiku, fable…): Codex can't run it. */
@@ -38,7 +38,7 @@ export function isOpenAiModel(model: string | null | undefined): boolean {
 }
 
 /**
- * A model only Cursor's CLI runs among Box Yard's three: Cursor's own (auto, composer-2.5, cursor-grok-4.6-high…) and
+ * A model only Cursor's CLI runs in Box Yard: Cursor's own (auto, composer-2.5, cursor-grok-4.6-high…) and
  * other labs' (Gemini, Grok, Kimi, GLM, DeepSeek, Muse). Cursor runs Claude and GPT models too, under its own names
  * (claude-opus-5-5-high), but those names pick Claude Code or Codex unless the task asks for Cursor.
  */

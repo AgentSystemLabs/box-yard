@@ -16,7 +16,7 @@ import { CursorModelSelect } from "./CursorModelSelect"
 import { titleFromPrompt } from "../../../shared/taskTitle"
 import { type Effort, type Project } from "../../../shared/types"
 import { LOCAL_UNSANDBOXED, type Runner } from "../../../shared/runner"
-import { AGENT_CLIS, AGENT_CLI_LABEL, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
+import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 import { Modal, focusables } from "./Modal"
 import { formatSize } from "./Attachments"
 import { ComposerAttachments } from "./ComposerAttachments"
@@ -475,7 +475,7 @@ export function NewTaskDialog({
           prompt: prompt.trim(),
           env: parseEnv(env),
           ...(model && { model }),
-          ...(effort && agentCli !== "cursor" && agentCli !== "opencode" && { effort }),
+          ...(effort && hasSeparateEffort(agentCli) && { effort }),
           ...(runsOn !== projectRunner && { runsOn }),
           ...(agentCli !== projectCli && { agentCli }),
           attachments: draftAttachments(files).map((a) => a.id),

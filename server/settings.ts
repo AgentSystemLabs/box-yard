@@ -37,7 +37,7 @@ import { DEFAULT_NOTE_BUDGET, NOTE_BUDGET_LIMITS, projectNoteBudget, type NoteBu
 import { DEFAULT_MEMORY_POLICY } from "../shared/memory.js"
 import { LOCAL_AGENTS_LIMITS } from "../shared/runner.js"
 import { DEFAULT_GPU_PROVIDER, GPU_PROVIDERS, legacyGpuProvider, type GpuProvider } from "../shared/gpu.js"
-import { AGENT_CLIS, CODEX_EFFORTS, DEFAULT_AGENT_CLI, DEFAULT_MANAGER_CLI, DEFAULT_CODEX_MODEL, DEFAULT_CODEX_EFFORT, DEFAULT_CURSOR_MODEL, MANAGER_CLIS, isClaudeModel, isOpenAiModel } from "../shared/agentCli.js"
+import { AGENT_CLIS, CODEX_EFFORTS, DEFAULT_AGENT_CLI, DEFAULT_MANAGER_CLI, DEFAULT_CODEX_MODEL, DEFAULT_CODEX_EFFORT, DEFAULT_CURSOR_MODEL, MANAGER_CLIS, isClaudeModel, isOpenAiModel, isOpenCodeModel } from "../shared/agentCli.js"
 import {
   ELEVENLABS_SPEED,
   MAX_INSTRUCTIONS,
@@ -248,7 +248,7 @@ export const settingsPatch = z
     subtaskMaxChildren: z.number().int().min(SUBTASK_MAX_CHILDREN.min).max(SUBTASK_MAX_CHILDREN.max),
     autoDoneOnMerge: z.boolean(),
     closeIssuesOnMerge: z.boolean(),
-    orchestratorCli: z.enum(MANAGER_CLIS).describe('"claude" or "codex": Cursor runs task agents only'),
+    orchestratorCli: z.enum(MANAGER_CLIS).describe('"claude" or "codex": Cursor and OpenCode run task agents only'),
     orchestratorModel: model,
     orchestratorCodexModel: codexModelSetting,
     orchestratorEffort: z.enum(CODEX_EFFORTS),
@@ -257,7 +257,7 @@ export const settingsPatch = z
       .object({ enabled: z.boolean(), model, effort: z.enum(EFFORTS) })
       .strict()
       .describe("The Coordinator's relay-only turns (task updates, no message from Cody) on this model and effort when enabled. Off by default: another model or effort starts each such turn with a cold prompt cache."),
-    captainCli: z.enum(MANAGER_CLIS).describe('"claude" or "codex": Cursor runs task agents only'),
+    captainCli: z.enum(MANAGER_CLIS).describe('"claude" or "codex": Cursor and OpenCode run task agents only'),
     captainModel: model,
     captainCodexModel: codexModelSetting,
     captainEffort: z.enum(CODEX_EFFORTS),
@@ -266,10 +266,10 @@ export const settingsPatch = z
       .union([z.literal(""), model.refine((m) => !isOpenAiModel(m), "Quick questions run on Claude: pick a Claude model (a chat on Codex keeps its own)")])
       .describe('The Claude model side threads (a task\'s side questions, Reply and Ask on the Coordinator\'s and Captains\' messages) run on, e.g. claude-haiku-5-5. "" (default): each runs on its chat\'s model. A chat on Codex keeps its own.'),
     quickQuestionEffort: z.union([z.literal(""), z.enum(EFFORTS)]).describe('The effort side threads run at. "" (default): its chat\'s effort.'),
-    agentCli: z.enum(AGENT_CLIS).describe('The CLI new tasks run on unless their project or the task picks one: "claude", "codex" or "cursor"'),
+    agentCli: z.enum(AGENT_CLIS).describe('The CLI new tasks run on unless their project or the task picks one: "claude", "codex", "cursor" or "opencode"'),
     agentModel: model,
     agentCodexModel: codexModelSetting,
-    agentOpencodeModel: z.string().trim().refine((v) => !v || /^[a-zA-Z0-9_.-]+\/[^\s#]+(?:#[^\s#]+)?$/.test(v), "Use provider/model or provider/model#variant").describe("OpenCode provider/model, optionally #variant; empty uses its configured default"),
+    agentOpencodeModel: z.string().trim().max(100).refine((v) => !v || isOpenCodeModel(v), "Use provider/model or provider/model#variant").describe("OpenCode provider/model, optionally #variant; empty uses its configured default"),
     agentCursorModel: z
       .union([z.literal(""), model])
       .describe('Box agents\' model on Cursor: an id from `cursor-agent models` (its effort is part of it, e.g. claude-opus-5-5-high, gpt-5.6-sol-high, composer-2.5), default "auto"; "" is the CLI\'s own default'),

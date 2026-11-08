@@ -138,7 +138,7 @@ export function runTargetNote(pick: RunTargetPick, ownerName: string | undefined
 export function harnessNote(pick: RunTargetPick, ownerName: string | undefined, relay: boolean): string {
   return withOwner(
     `[Cody picked the harness for this message: !${pick.token} (${pick.label}), agent "${pick.value}".` +
-      (pick.model !== undefined ? ` Model "${pick.model}"${pick.effort ? `, effort "${pick.effort}"` : pick.value === "cursor" || pick.value === "opencode" ? " with effort included in its model ID" : " with the harness's Settings effort"}.` : " Use this harness's model and effort defaults in Settings.") + " " +
+      (pick.model !== undefined ? ` Model "${pick.model}"${pick.effort ? `, effort "${pick.effort}"` : pick.value === "opencode" ? " with any provider variant included in its model ID" : pick.value === "cursor" ? " with effort included in its model ID" : " with the harness's Settings effort"}.` : " Use this harness's model and effort defaults in Settings.") + " " +
       `Every task you create for it gets agent "${pick.value}": Box Yard applies it to create_task and create_tasks during this turn` +
       (relay ? ", and a Captain you message this turn gets the same pick." : ".") +
       ` send_to_task keeps the saved harness. To continue the same work on ${pick.label}, wait for it to stop and finish saving, then call continue_task with the same task and agent "${pick.value}" (and this pick's model/effort if specified); do not create a replacement task.]`,

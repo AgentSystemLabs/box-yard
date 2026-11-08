@@ -1436,6 +1436,7 @@ export class TaskManager {
     route?: Parameters<TaskManager["sendInput"]>[4],
     hook?: Parameters<TaskManager["sendInput"]>[5],
   ): string {
+    this.checkOpenCodeRoute(row, route)
     if (!content.trim() && !attachments.length) throw new BadRequestError("message is empty")
     // The files are copied into the box when the next turn starts, so this works while the agent is mid-turn.
     // Messages from Cody, the Coordinator, a Captain or a hook get their transcript line when a turn delivers them;
@@ -1518,6 +1519,7 @@ export class TaskManager {
 
   setTaskModel(taskId: string, route: { model?: string | null; effort?: Effort | null; routingRule?: string | null; routingReason?: string | null }): Task {
     const row = this.requireRow(taskId)
+    this.checkOpenCodeRoute(row, route)
     const patch: Parameters<Store["updateTask"]>[1] = {}
     if (route.model !== undefined) patch.model = route.model
     if (route.effort !== undefined) patch.effort = route.effort
@@ -1527,6 +1529,12 @@ export class TaskManager {
     this.addEvent(row.id, `Routing updated for subsequent turns: ${this.routeLabel({ model: route.model ?? row.model, effort: route.effort ?? row.effort, routingRule: route.routingRule ?? row.routing_rule, routingReason: route.routingReason ?? row.routing_reason })}.`)
     this.emitTask(row.id)
     return this.store.getTask(row.id)!
+  }
+
+  private checkOpenCodeRoute(row: TaskRow, route?: Parameters<TaskManager["sendInput"]>[4]) {
+    if (taskAgentCli(row) !== "opencode") return
+    if (route?.model && !isOpenCodeModel(route.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant.")
+    if (route?.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
   }
 
   /**
@@ -4123,11 +4131,12 @@ export class TaskManager {
     return codexTurnLogin({ ...this.store.projectEnv(projectId), ...taskEnv }, global)
   }
 
-  /** What a Cursor turn of this project logs in with: its own CURSOR_API_KEY, else Settings › Credentials' Cursor API key, else none. */
+  /** OpenCode API credentials for this turn, with project/task overrides ahead of Settings. */
   openCodeCredentials(projectId: string, taskEnv: Record<string, string> = {}) {
     return openCodeTurnLogin({ ...this.store.projectEnv(projectId), ...taskEnv }, this.settings.credentials.get("opencodeAuthJson"))
   }
 
+  /** What a Cursor turn logs in with: its own CURSOR_API_KEY, else Settings' Cursor key, else none. */
   cursorCredentials(projectId: string, taskEnv: Record<string, string> = {}): CursorTurnLogin {
     return cursorTurnLogin({ ...this.store.projectEnv(projectId), ...taskEnv }, this.settings.credentials.get("cursorApiKey"))
   }

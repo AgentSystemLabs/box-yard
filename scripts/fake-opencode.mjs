@@ -10,7 +10,13 @@ import { fileURLToPath } from "node:url"
 
 const args = process.argv.slice(2)
 if (args.includes("--version")) { console.log(process.env.FAKE_OPENCODE_VERSION || "1.19.5"); process.exit(0) }
-if (args[0] === "models") { console.log("example/model\nexample/model-other"); process.exit(0) }
+if (args[0] === "models") {
+  for (const id of ["example/model", "example/model-other"]) {
+    console.log(id)
+    if (args.includes("--verbose")) console.log(JSON.stringify({ id: id.split("/")[1], variants: { high: {}, max: {} } }, null, 2))
+  }
+  process.exit(0)
+}
 if (args[0] !== "run" || !args.includes("--format") || !args.includes("json")) throw new Error("Expected run --format json")
 const option = (name) => args.includes(name) ? args[args.indexOf(name) + 1] : null
 let prompt = ""
@@ -27,6 +33,19 @@ if (process.env.FAKE_OPENCODE_LOG) fs.appendFileSync(process.env.FAKE_OPENCODE_L
 const emit = (type, data) => process.stdout.write(JSON.stringify({ type, timestamp: Date.now(), sessionID, ...data }) + "\n")
 if (prompt.includes("[opencode-empty]")) process.exit(0)
 if (prompt.includes("[opencode-error]")) { emit("error", { error: { name: "ProviderAuthError", data: { message: "OpenCode provider authentication required; check API login" } } }); process.exit(0) }
+if (prompt.includes("[opencode-secret-error]")) {
+  const key = Object.values(JSON.parse(process.env.OPENCODE_AUTH_CONTENT || "{}"))[0]?.key || "fixture"
+  process.stderr.write(key.slice(0, 4))
+  await new Promise((r) => setTimeout(r, 10))
+  process.stderr.write(key.slice(4))
+  emit("error", { error: { name: "APIError", data: { message: `OpenCode API rejected ${key}` } } })
+  process.exit(0)
+}
+if (prompt.includes("[opencode-malformed]")) process.stdout.write("{malformed output}\n")
+if (prompt.includes("[opencode-length]")) {
+  emit("step_finish", { part: { id: "step1", reason: "length", cost: 0.1, tokens: { input: 100, output: 20 } } })
+  process.exit(0)
+}
 if (prompt.includes("[opencode-fragments]")) {
   const step = { type: "step-finish", id: "step1", reason: "tool-calls", cost: 0.1, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 30, write: 10 } } }
   const line = JSON.stringify({ type: "step_finish", timestamp: Date.now(), sessionID, part: step }) + "\n"
