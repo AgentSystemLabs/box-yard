@@ -1104,7 +1104,7 @@ const saysState = (meta: string, label: string) => meta === label.toLowerCase() 
 function RowIcon({ task, label, dim }: { task: Task; label: string; dim: boolean }) {
   return (
     <span className="col-start-1 row-start-1 grid h-5 w-5 place-items-center">
-      <TaskStatusIcon task={task} label={label} muted={dim} pulse={task.status !== "working"} />
+      <TaskStatusIcon task={task} label={label} muted={dim} />
     </span>
   )
 }
