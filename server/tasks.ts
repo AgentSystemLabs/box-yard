@@ -843,6 +843,7 @@ export class TaskManager {
     fs.mkdirSync(path.join(this.c.dataDir, "archives"), { recursive: true })
     this.history = new BoxHistory(this.store.db)
     this.janitor = new BoxJanitor({
+      ownerName: () => this.owner(),
       store: this.store,
       provider: this.provider,
       hub: this.hub,
@@ -852,13 +853,13 @@ export class TaskManager {
       hasFreshArchive: (row) => this.hasFreshArchive(row),
       archive: (taskId) => this.archiveFresh(taskId),
       archiveProblem: (taskId) => this.archiveProblem(taskId),
-      park: (taskId, boxId, note) => this.park(taskId, boxId, withOwner(note, this.owner())),
+      park: (taskId, boxId, note) => this.park(taskId, boxId, note),
       dropPushed: (taskId, boxId) => this.dropPushed(taskId, boxId),
       pushedOnGitHub: (taskId, boxId) => this.pushedOnGitHub(taskId, boxId),
       mirrorsToKeep: (boxId, owner) => this.mirrorsToKeep(boxId, owner),
       finished: (report) => this.cleanupFinished(report),
       inUse: (boxId, taskId) => this.workInUse(boxId, taskId),
-      taskEvent: (taskId, text) => this.addEvent(taskId, withOwner(text, this.owner()), { kind: "cleanup" }),
+      taskEvent: (taskId, text) => this.addEvent(taskId, text, { kind: "cleanup" }),
     })
     this.ownCleanup = new OwnCleanup({
       store: this.store,
@@ -880,7 +881,7 @@ export class TaskManager {
       dropPushed: (taskId, boxId) => this.dropPushed(taskId, boxId),
       where: (boxId) => (isMachineBox(boxId) ? `SSH machine ${this.machineName(boxId)}` : "this computer"),
       inUse: (boxId, taskId) => this.workInUse(boxId, taskId),
-      taskEvent: (taskId, text) => this.addEvent(taskId, withOwner(text, this.owner()), { kind: "cleanup" }),
+      taskEvent: (taskId, text) => this.addEvent(taskId, text, { kind: "cleanup" }),
     })
   }
 
@@ -1580,7 +1581,7 @@ export class TaskManager {
       this.dropQueuedMessages(row.id)
       if (row.status === "waiting") this.store.updateTask(row.id, { status: "idle" }, { quiet: true })
     }
-    const why = by?.cancelled ? withOwner(`Cancelled by its parent task, ${by.parent.title}: it rests for Cody's review.`, this.owner()) : by ? `Stopped with its parent task, ${by.parent.title}.` : null
+    const why = by?.cancelled ? `Cancelled by its parent task, ${by.parent.title}: ${withOwner("it rests for Cody's review.", this.owner())}` : by ? `Stopped with its parent task, ${by.parent.title}.` : null
     this.addEvent(row.id, why ?? withOwner("Stopped by Cody.", this.owner()))
     this.emitTask(row.id)
     await this.cascadeSubtasks(row, (kid) => (this.liveSubtask(kid) ? this.stopTask(kid.id, { parent: row }) : Promise.resolve()))
@@ -2570,7 +2571,7 @@ export class TaskManager {
     if (risky.length && !opts.override) {
       throw new ConflictError(`${check.label} was not ${pod ? "terminated" : "deleted"}: ${risky.map(refusalLine).join("; ")}. Choose ${pod ? "Terminate" : "Delete"} anyway to archive and ${pod ? "terminate" : "delete"} it.`)
     }
-    const overridden = risky.length ? withOwner(` Cody chose ${pod ? "Terminate" : "Delete"} anyway past: ${risky.map(refusalLine).join("; ")}.`, this.owner()) : ""
+    const overridden = risky.length ? ` ${withOwner("Cody", this.owner())} chose ${pod ? "Terminate" : "Delete"} anyway past: ${risky.map(refusalLine).join("; ")}.` : ""
     const result: BoxDeleteResult = { boxId, kind, label: check.label, archived: [], fromGitHub: [] }
     // The check ran before the box was claimed: an agent's delete also refuses a turn that started or got queued since.
     const lateCheck = () => {
@@ -2889,7 +2890,7 @@ export class TaskManager {
           boxId: id,
           type: "created",
           actor: { kind: "resize" },
-          reason: `Target of the resize of ${r.boxId} ${r.from} → ${r.to}, asked by ${initiatorLabel(r.by, this.initiatorProjectName(r.by))}${r.reason ? `: ${r.reason}` : "."}`,
+          reason: `Target of the resize of ${r.boxId} ${r.from} → ${r.to}, asked by ${initiatorLabel(r.by, this.initiatorProjectName(r.by), this.owner())}${r.reason ? `: ${r.reason}` : "."}`,
           relatedBoxId: r.boxId,
           resizeId: r.id,
           detail: createdDetail(made, owner ? this.store.getProject(owner)?.name : undefined),
@@ -3109,7 +3110,7 @@ export class TaskManager {
   /** A resize the Coordinator or a Captain made: a notice for the Coordinator and the box's Captains, and a notification for Cody. */
   private announceResize(r: BoxResize) {
     const captainProject = r.by.kind === "captain" ? r.by.projectId : null
-    const who = initiatorLabel(r.by, captainProject ? this.store.getProject(captainProject)?.name : undefined)
+    const who = initiatorLabel(r.by, captainProject ? this.store.getProject(captainProject)?.name : undefined, this.owner())
     const boxId = r.newBoxId && r.status === "done" ? r.newBoxId : r.boxId
     const forProject = r.by.kind === "scheduler" ? [r.by.projectId] : []
     const projectIds = [...new Set(this.store.listTaskRows({ boxId }).map((t) => t.project_id).concat(this.store.getKv(boxOwnerKey(boxId)) ?? [], forProject))].filter(
@@ -8049,7 +8050,7 @@ export class TaskManager {
     }
     if (log.length >= AGENT_MSG_LIMIT) {
       say(from.id, `Message to ${to} not delivered: too many agent messages in 10 minutes.`, { to, blocked: true })
-      this.store.queueInput(from.id, "system", withOwner(`Your message to ${to} was not delivered because you sent too many agent messages recently. Ask Cody with ask_user if you are stuck.`, this.owner()))
+      this.store.queueInput(from.id, "system", `Your message to ${to} was not delivered because you sent too many agent messages recently. ${withOwner("Ask Cody with ask_user if you are stuck.", this.owner())}`)
       return
     }
     log.push(now)
@@ -8075,10 +8076,7 @@ export class TaskManager {
       this.store.queueInput(
         from.id,
         "system",
-        withOwner(
-          `Your message to "${to}" was not delivered: Cody set ${this.identities.statusOnly(from.project_id) ? "your project" : "its project"} to show the Coordinator its status only, so agents don't message between it and other projects. Ask your Captain with message_captain if you need something from there.`,
-          this.owner(),
-        ),
+        `Your message to "${to}" was not delivered: ${withOwner("Cody", this.owner())} set ${this.identities.statusOnly(from.project_id) ? "your project" : "its project"} to show the Coordinator its status only, so agents don't message between it and other projects. Ask your Captain with message_captain if you need something from there.`,
       )
       this.schedule()
       return

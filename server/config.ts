@@ -219,7 +219,7 @@ export const config = {
   /** Cursor's CLI for agents set to run on Cursor (docs/cursor.md), and for Settings' model list; mock mode uses a stand-in. */
   opencodeBin: mock ? `${process.execPath} ${path.resolve(process.cwd(), "scripts/fake-opencode.mjs")}` : env.OPENCODE_BIN?.trim() || "opencode",
   cursorBin: mock ? `${process.execPath} ${fs.existsSync(fakeCursor) ? fakeCursor : fakeCursorSrc}` : env.CURSOR_BIN?.trim() || defaultCursorBin(),
-  /** What Box Yard calls its human in prompts and labels; empty means the Settings default ("Cody"). */
+  /** What Box Yard calls its human in prompts and labels; empty means the Settings default ("the owner"). */
   ownerName: env.BOXYARD_OWNER_NAME?.trim() ?? "",
   orchestratorModel: env.ORCHESTRATOR_MODEL ?? "",
   /** Wake the orchestrator when a task finishes or needs Cody, so it reports back on its own. */

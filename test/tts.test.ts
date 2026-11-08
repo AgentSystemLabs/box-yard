@@ -136,7 +136,7 @@ describe("TTS settings", () => {
   })
 
   it("preview lines use the owner's name", () => {
-    expect(previewLine("Marin", undefined)).toBe("Hi Cody, this is Marin.")
+    expect(previewLine("Marin", undefined)).toBe("Hi, this is Marin.")
     expect(previewLine("Marin", "Sam")).toBe("Hi Sam, this is Marin.")
   })
 })

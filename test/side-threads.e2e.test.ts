@@ -181,8 +181,8 @@ describe("threaded replies", () => {
     expect(answer!.content).toContain(`Replying to: "${original.content.split("\n")[0]!.slice(0, 120)}"`)
     expect(answer!.content).toContain("You asked: Thanks, and the next step?")
     const prompt = fakeSession(yard.store.sideThreadSession(thread.id)!.sessionId).turns.at(-1)!.prompt
-    expect(prompt).toContain("The message Cody is replying to:")
-    expect(prompt).toContain("Cody's reply:\nThanks, and the next step?")
+    expect(prompt).toContain("The message the owner is replying to:")
+    expect(prompt).toContain("the owner's reply:\nThanks, and the next step?")
 
     // The reply and its answer: two replies, and the answer is unread until the thread is seen.
     expect(await threadOf(call, thread.id)).toMatchObject({ replies: 2, unread: true, busy: false })

@@ -1,5 +1,6 @@
 // Upstash Box sizes, what each one gets, and the resize report the Boxes page and MCP share.
 // One table so the Resize modal, Settings, cost estimates and the server's scale-down check agree.
+import { withOwner } from "./owner.js"
 import { formatBytes } from "./disk.js"
 
 export const BOX_SIZE_ORDER = ["small", "medium", "large"] as const
@@ -163,9 +164,9 @@ export function resizeSummary(r: BoxResize): string {
   return `moved to ${r.newBoxId} (${r.to}); ${n} ${n === 1 ? "task restores" : "tasks restore"} from ${n === 1 ? "its" : "their"} archive on the next message`
 }
 
-export function initiatorLabel(by: ResizeInitiator, projectName?: string): string {
+export function initiatorLabel(by: ResizeInitiator, projectName?: string, ownerName?: string): string {
   return by.kind === "cody"
-    ? "Cody"
+    ? withOwner("Cody", ownerName)
     : by.kind === "coordinator"
     ? "The Coordinator"
     : by.kind === "scheduler"

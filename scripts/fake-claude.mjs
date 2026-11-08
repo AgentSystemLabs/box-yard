@@ -574,7 +574,7 @@ async function orchestrator(mcp, prompt) {
     lines.push(await useTool(mcp, "delete_schedule", { schedule: m[1] }))
   }
   // Cody's messages forwarded from a task's chat (TaskManager.forwardToCaptain): the task's queue comes with each.
-  const forwardRe = /^\[From Cody, sent from the chat of task .*?\((task_[\w-]+)\)[^\n]*\]\n([\s\S]*?)(?=\n\[From |(?![\s\S]))/gm
+  const forwardRe = /^\[From [^\n]+?, sent from the chat of task .*?\((task_[\w-]+)\)[^\n]*\]\n([\s\S]*?)(?=\n\[From |(?![\s\S]))/gm
   while ((m = forwardRe.exec(prompt))) {
     const ids = [...m[2].matchAll(/^- (in_[\w-]+) /gm)].map((x) => x[1])
     lines.push(`Forwarded from ${m[1]} with ${ids.length ? `queued ${ids.join(", ")}` : "no queued messages"}.`)
@@ -610,7 +610,7 @@ async function orchestrator(mcp, prompt) {
     lines.push(`Answered ${m[1]}.`)
   }
   if (captain && /\[fail\]/i.test(text)) throw new Error("fake Captain failure")
-  if (captain && /\[decide\]/i.test(text)) lines.push("", "Cody needs to decide: merge PR #1 now, or after the release.")
+  if (captain && /\[decide\]/i.test(text)) lines.push("", "The owner needs to decide: merge PR #1 now, or after the release.")
   // A Captain's reply that's only for Cody's information says so, so it doesn't wake the Coordinator.
   const fyi = captain && /\[fyi\]/i.test(text) ? "\n\n<!-- boxyard-coordinator: fyi -->" : ""
   await say(withNextSteps(lines.join("\n") + fyi, ["Check the latest yard status", "Start a related task", "Summarize open decisions"]))
@@ -676,7 +676,7 @@ async function worker(mcp, prompt) {
   if (/\[ask\]/i.test(prompt) && !session.turns.length) {
     await useTool(mcp, "ask_user", { question: "Which color should the button be: blue or green?" })
     if (noop) await markNoop()
-    return "I asked Cody which color to use."
+    return "I asked which color to use."
   }
   const agent = prompt.match(/\[agent:([\w-]+)\]/i)
   if (agent) {
@@ -919,7 +919,7 @@ async function turn(prompt, started) {
     } else if (/Your (Captain )?context( for project "[^"]*")? is about to be compacted/.test(prompt)) {
       result = process.env.FAKE_CLAUDE_BAD_SUMMARY
         ? "ok"
-        : `## Decisions and preferences\n- Cody prefers short replies.\n\n## Projects and repos\n- demo (acme/demo): a demo project.\n\n## Ongoing work\n${liveTasks(prompt) || "- none"}\n\n## Open threads and next steps\n- none`
+        : `## Decisions and preferences\n- The owner prefers short replies.\n\n## Projects and repos\n- demo (acme/demo): a demo project.\n\n## Ongoing work\n${liveTasks(prompt) || "- none"}\n\n## Open threads and next steps\n- none`
       await say(result)
     } else if (/\[connectors\]/i.test(prompt)) {
       result = await connectorsCheck()

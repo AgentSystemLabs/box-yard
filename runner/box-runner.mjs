@@ -48,7 +48,7 @@ const task = mode === "clean" || mode === "live" || mode === "deps" ? {} : readJ
 /** Box Yard's built-in text says "Cody"; swap in the configured owner name (same rule as shared/owner.ts). */
 function owner(text) {
   const name = typeof task.ownerName === "string" ? task.ownerName.trim() : ""
-  return name && name !== "Cody" ? text.replace(/\bCody\b/g, () => name) : text
+  return text.replace(/\bCody\b/g, () => name || "the owner")
 }
 /** Tool definitions with every description run through owner(). */
 function namedTools(value) {

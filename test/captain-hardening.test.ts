@@ -255,13 +255,13 @@ describe("Captain message labels (#51)", () => {
   it("formats Captain messages to workers with the project name", () => {
     const names = (id: string) => (id === "prj_alpha01" ? "alpha" : undefined)
     expect(followupPrompt([{ source: "captain:prj_alpha01", content: "Please add tests." }], names)).toBe(
-      "Message from the alpha Captain (on Cody's behalf):\n\nPlease add tests.",
+      "Message from the alpha Captain (on the owner's behalf):\n\nPlease add tests.",
     )
-    expect(followupPrompt([{ source: "orchestrator", content: "hi" }], names)).toBe("Message from the Box Yard Coordinator (on Cody's behalf):\n\nhi")
-    expect(followupPrompt([{ source: "captain:prj_gone01", content: "hi" }], names)).toMatch(/^Message from the project Captain \(on Cody's behalf\)/)
+    expect(followupPrompt([{ source: "orchestrator", content: "hi" }], names)).toBe("Message from the Box Yard Coordinator (on the owner's behalf):\n\nhi")
+    expect(followupPrompt([{ source: "captain:prj_gone01", content: "hi" }], names)).toMatch(/^Message from the project Captain \(on the owner's behalf\)/)
     expect(userMessageLabel({ source: "captain", captainName: "alpha" })).toBe("alpha Captain")
     expect(userMessageLabel({ source: "orchestrator" })).toBe("Coordinator")
-    expect(userMessageLabel(null)).toBe("Cody")
+    expect(userMessageLabel(null)).toBe("the owner")
   })
 
   it("labels a Captain's send_to_task as from that Captain, in the worker prompt and the transcript", async () => {
@@ -287,7 +287,7 @@ describe("Captain message labels (#51)", () => {
     expect(msg.meta).toMatchObject({ source: "captain", captainProjectId: p.id, captainName: "alpha" })
     expect(userMessageLabel(msg.meta)).toBe("alpha Captain")
     const demo = fs.readFileSync(path.join(r.dataDir, "local-boxes", task.boxId!, "tasks", t.id, "work", "box-yard-demo.md"), "utf8")
-    expect(demo).toContain("Message from the alpha Captain (on Cody's behalf):\n\nMake it rhyme.")
+    expect(demo).toContain("Message from the alpha Captain (on the owner's behalf):\n\nMake it rhyme.")
     expect(demo).not.toContain("Coordinator")
   })
 })

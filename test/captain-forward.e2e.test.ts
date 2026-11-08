@@ -86,9 +86,9 @@ describe("forward a task-chat message to the Captain", () => {
 
     // The Captain's prompt named the task and listed its queue by id; it cancelled the first queued message.
     const prompt = captainPrompts(r, p).find((x) => x.includes("Split the dark mode item"))!
-    expect(prompt).toContain(`[From Cody, sent from the chat of task "Login form" (${t.id}) to you instead of its busy agent`)
-    expect(prompt).toContain(`- ${queued[0]!.id} (Cody): Also add a dark mode toggle`)
-    expect(prompt).toContain(`- ${queued[1]!.id} (Cody): And fix the footer links`)
+    expect(prompt).toContain(`[From the owner, sent from the chat of task "Login form" (${t.id}) to you instead of its busy agent`)
+    expect(prompt).toContain(`- ${queued[0]!.id} (the owner): Also add a dark mode toggle`)
+    expect(prompt).toContain(`- ${queued[1]!.id} (the owner): And fix the footer links`)
     expect((await call<QueuedMessage[]>(r, "GET", `/api/tasks/${t.id}/queue`)).map((q) => q.text)).toEqual(["And fix the footer links"])
 
     // The thread order: sent to the Captain, then its reply. Neither went to the agent.

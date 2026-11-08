@@ -82,8 +82,8 @@ describe("human direct-message entry points", () => {
     await r.post("/chat", { id: "chat_natural001", content: "Status please" })
     await vi.waitFor(() => expect(r.yard.orchestrator.busy).toBe(false))
     expect(r.prompts).toHaveLength(1)
-    expect(r.prompts[0]).toContain(`Cody told "Ship it" (${r.task.id}) (2 messages; latest): Cody says `)
-    expect(r.prompts[0]).toContain("Cody told the demo Captain (2 messages; latest): Split this task, Cody says")
+    expect(r.prompts[0]).toContain(`the owner told "Ship it" (${r.task.id}) (2 messages; latest): Cody says `)
+    expect(r.prompts[0]).toContain("the owner told the demo Captain (2 messages; latest): Split this task, Cody says")
     expect(r.prompts[0]).not.toContain("EXCLUDED-TAIL")
     expect(r.prompts[0]).not.toContain("From the Captain chat")
     expect(r.prompts[0]).not.toContain("From the task composer")
@@ -107,8 +107,8 @@ describe("human direct-message entry points", () => {
     await r.post("/chat", { id: "chat_natural002", content: "Hello" })
     await vi.waitFor(() => expect(r.yard.orchestrator.busy).toBe(false))
     expect(r.prompts).toHaveLength(1)
-    expect(r.prompts[0]).not.toContain("Cody told")
-    expect(r.prompts[0]).not.toContain("Cody messaged")
+    expect(r.prompts[0]).not.toContain("the owner told")
+    expect(r.prompts[0]).not.toContain("the owner messaged")
   })
 
   it("enforces actual identity changes between enqueue and delivery and never stores sealed snippets", async () => {
@@ -120,8 +120,8 @@ describe("human direct-message entry points", () => {
     r.yard.identities.update(identity.id, { coordinatorSees: "status" })
     await r.post("/chat", { id: "chat_private01", content: "Hi" })
     await vi.waitFor(() => expect(r.yard.orchestrator.busy).toBe(false))
-    expect(r.prompts[0]).toContain(`Cody messaged "Ship it" (${r.task.id})`)
-    expect(r.prompts[0]).toContain("Cody messaged the demo Captain")
+    expect(r.prompts[0]).toContain(`the owner messaged "Ship it" (${r.task.id})`)
+    expect(r.prompts[0]).toContain("the owner messaged the demo Captain")
     expect(r.prompts[0]).not.toContain("SECRET")
 
     await r.post(`/tasks/${r.task.id}/messages`, { content: "SEALED-TASK-SECRET" })

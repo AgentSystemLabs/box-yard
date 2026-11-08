@@ -13,7 +13,7 @@ const [settings, projects, tasks, identities] = await Promise.all(['agent-settin
 assert(projects[0] && tasks[0], 'Seed a project and task in mock mode first')
 const now = Date.now()
 const project = { ...projects[0], name: 'Workbench', identityId: identities[0].id, runner: 'box' }
-const identity = { ...identities[0], name: 'Personal', githubLogin: 'webdevcody' }
+const identity = { ...identities[0], name: 'Personal', githubLogin: 'example-user' }
 const task = {
   ...tasks[0], id: 'task_details-demo', projectId: project.id,
   title: 'Improve task navigation and preview environments on phones',
