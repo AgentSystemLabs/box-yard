@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 // Every composer says who it messages with an icon at its text's leading edge (ChatIcons.tsx): the Coordinator's
 // helm, a Captain's icon (the cap by default), a task's checklist, a sub-task's nested checklist, or a side question's bubble.
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, createRef, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -209,5 +211,41 @@ describe("the icons", () => {
     const svg = host.querySelector("svg")!
     expect(svg.classList).toContain("lucide-helm")
     expect(svg.getAttribute("aria-hidden")).toBe("true")
+  })
+})
+
+// The global solid :focus-visible outline (styles.css) is unlayered, so a text field's `focus:outline-none`
+// utility can't remove it: every composer showed a square ring inside its rounded focus border.
+describe("the composer's focus indicator", () => {
+  const css = readFileSync(join(__dirname, "../web/src/styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "")
+  /** Top-level (unlayered) rules: [selector, declarations] in source order. */
+  const rules = [...css.matchAll(/(^|\n)([^{}@\n][^{}]*)\{([^{}]*)\}/g)].map((m) => [m[2]!.trim(), m[3]!] as const)
+
+  it("the composer's text field is exempt from the global outline, after it in the cascade", () => {
+    const global = rules.findIndex(([sel, body]) => sel.includes("textarea") && sel.endsWith(":focus-visible") && /outline:\s*2px solid/.test(body))
+    const exempt = rules.findIndex(([sel, body]) => sel.includes("[data-composer-box]") && sel.includes("textarea") && sel.endsWith(":focus-visible") && /outline:\s*none/.test(body))
+    expect(global).toBeGreaterThanOrEqual(0)
+    expect(exempt).toBeGreaterThan(global)
+  })
+
+  it.each([
+    ["the Coordinator's", () => createElement(Dock, { captain: false })],
+    ["a Captain's", () => createElement(Dock, { captain: true })],
+    ["a task's", () => createElement(TaskBox, { t: task() })],
+    ["a side question's", () => {
+      const open = { id: "thr_focus1", projectId: null, anchorId: null, kind: "ask", quote: "q", context: "fork", busy: false, replies: 0, unread: false, resolvedAt: null, createdAt: 2, updatedAt: 2 } as SideThread
+      qc.setQueryData(threadKeys.list(COORDINATOR_CHAT), [open])
+      qc.setQueryData(threadKeys.messages(open.id), [])
+      act(() => openThread(COORDINATOR_CHAT, open.id))
+      return createElement(ThreadChatProvider, { value: COORDINATOR_CHAT }, createElement(SideThreadPane, { chat: COORDINATOR_CHAT }))
+    }],
+  ])("%s composer shows focus on its rounded box, with a 2px border", (_, el) => {
+    render(el())
+    expect(host.querySelectorAll("textarea[data-chat-composer]")).toHaveLength(1)
+    const field = host.querySelector<HTMLTextAreaElement>("textarea[data-chat-composer]")!
+    expect(field.className).toContain("focus:outline-none")
+    const box = field.closest<HTMLElement>("[data-composer-box]")!
+    expect(box).not.toBeNull()
+    expect([...box.classList]).toEqual(expect.arrayContaining(["rounded-xl", "focus-within:border-yard-500", "focus-within:ring-1", "focus-within:ring-yard-500", "focus-within:ring-inset"]))
   })
 })

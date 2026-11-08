@@ -501,7 +501,8 @@ export function Composer({
       <div
         ref={boxRef}
         data-composer-box
-        className="@container/composer rounded-xl border border-control bg-zinc-900 focus-within:border-yard-500"
+        // Focus shows on this box, not on the text field (styles.css): a 2px amber border, the inset ring doubling it.
+        className="@container/composer rounded-xl border border-control bg-zinc-900 focus-within:border-yard-500 focus-within:ring-1 focus-within:ring-yard-500 focus-within:ring-inset"
         onMouseDown={(e) => {
           // A press on the box's empty space (around the text, between the buttons) puts the caret in the text.
           const target = e.target as HTMLElement
