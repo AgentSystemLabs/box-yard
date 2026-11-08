@@ -66,7 +66,7 @@ flowchart TB
 - **What actually changed.** <The mechanism in three sentences; name the type, the flag, the function that moved.>
 - **Files.** `server/<file>.ts or web/src/<file>.tsx` — <clause>; `server/<file>.ts or web/src/<file>.tsx` — <clause>.
 - **Kept as-is on purpose.** <The behaviour the change stops short of, and why.>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 📝 Notes <a id="notes"></a>
 

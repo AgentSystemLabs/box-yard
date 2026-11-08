@@ -1,6 +1,6 @@
 # SSH machines
 
-Box Yard can run agents on computers of your own that it reaches over SSH: an old laptop, a GPU tower, a Mac mini in a cupboard. A machine is used like a box. Box Yard logs in, makes a folder for the task, clones the repo with the project's GitHub token, runs Claude Code (or [Codex](codex.md)) headless with the same MCP bridge, streams its output, archives the workspace, pushes the branch and opens the PR, as it does on Upstash boxes.
+Box Yard can run agents on computers of your own that it reaches over SSH: an old laptop, a GPU tower, a Mac mini in a cupboard. A machine is used like a box. Box Yard logs in, makes a folder for the task, clones the repo with the project's GitHub token, runs Claude Code, [Codex](codex.md) or [Cursor](cursor.md) headless with the same MCP bridge, streams its output, archives the workspace, pushes the branch and opens the PR, as it does on Upstash boxes.
 
 Give machines **labels** (`laptops`, `gpu`, `local`). A project that runs on "SSH machine", or a task with `runs_on: "label:gpu"`, goes to a free machine with that label. Tasks wait while every matching machine is busy.
 
@@ -22,11 +22,12 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && . ~/.nvm/nvm.sh && nvm install --lts
    # or NodeSource, system-wide: curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs
    ```
-3. **Claude Code, Codex, or both.** A machine runs the tasks whose agent it has; Box Yard never installs one there.
+3. **Claude Code, Codex or Cursor.** A machine runs the tasks whose agent it has; Box Yard never installs one there.
    ```sh
    curl -fsSL https://claude.ai/install.sh | bash       # Claude Code, in ~/.local/bin/claude
    # or: npm install -g @anthropic-ai/claude-code
-   npm install -g @openai/codex                         # Codex (needs npm's global folder to be yours, as with nvm)
+   npm install -g @openai/codex                         # Codex (needs npm’s global folder to be yours, as with nvm)
+   # Cursor: follow https://cursor.com/docs/cli/installation, then cursor-agent login
    ```
 4. **A login for each.** For Claude Code, use one of these:
    - **Log in on the laptop.** Run `claude` once, then `/login` (it prints a URL you can open on another computer). Agents there use that login.
@@ -58,7 +59,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
    - Tasks running at once: 1 or 2, depending on its memory (about 2 GB per agent)
    - labels: `laptops`
 
-   Box Yard tests the connection when you add it. The test reports the OS, CPUs, memory, free disk, git, node, and claude and codex with whether each is logged in. **Test connection** runs it again after you fix something.
+   Box Yard tests the connection when you add it. The test reports the OS, CPUs, memory, free disk, git, node, and claude, codex and cursor-agent with whether each is logged in. **Test connection** runs it again after you fix something.
 
    You can also ask the Coordinator, for example: *"add my laptop thinkpad.local, user boxyard, key file:~/.ssh/boxyard_laptops, label it laptops"*.
 8. **Use it.** Any of these sends tasks to the laptop:
@@ -80,7 +81,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
   - it has the label;
   - it's turned on and passed its last test;
   - it answered the last time Box Yard reached it;
-  - it has the task's agent installed (Claude Code or Codex), with a login to use (its own, or one Box Yard hands it for the turn);
+  - it has the task's agent installed (Claude Code, Codex or Cursor), with a login to use (its own, or one Box Yard hands it for the turn);
   - it has a free slot.
 
   A task returns to the machine its workspace is on while that machine qualifies. Otherwise it goes to the matching machine with the fewest agents running. A task moves to another machine only when nothing would be lost (its work is pushed and archived).
@@ -117,7 +118,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
 - **Credentials for one turn.** A turn's credentials reach the machine inside the turn's `task.json`, written over stdin. They are the GitHub token (`GITHUB_TOKEN`/`GH_TOKEN`), the Claude key (or, for Codex, the OpenAI API key) when Box Yard has one, and the project's env.
   - **Linux.** `task.json` goes to the machine's memory (`/dev/shm/boxyard-<uid>`, mode 0700), linked from the task folder.
   - **macOS.** It goes to the task folder, mode 0600.
-  - **After the turn.** The runner removes `task.json` as the turn ends, so the machine keeps no Box Yard credential between turns. An identity's commit signing key works the same way.
+  - **After the turn.** The runner removes `task.json` as the turn ends, so the delivery file is not retained between turns. Forwarded Codex logins have the separate lifecycle below; an unsandboxed agent can copy credentials it can read. An identity's commit signing key works the same way.
   - **Codex's ChatGPT login.** It goes only to a machine with `/dev/shm`, into a task-specific Codex home there (mode 0700, login mode 0600). The login and the replacement files Codex writes while refreshing stay in memory during and between turns. Sessions stay in the workspace; a link lets Box Yard read the refreshed login back and keep the newest copy. A reboot clears it, and the next turn gets Box Yard's copy. Deleting the task removes its memory home too. A machine without `/dev/shm` (macOS) never gets it.
   - **Not logged.** Credentials are never written to Box Yard's logs.
 - **Nothing installed.** Box Yard never uses `sudo`, never installs anything and never changes the machine's git or shell config. Removing a machine from Box Yard leaves its work folder in place.
@@ -149,7 +150,7 @@ These steps are for Ubuntu or Debian; [macOS](#macos-machines) differs only a li
     - `"this_computer"`: always the computer running Box Yard;
     - `"box"`, `"gpu"` or `"docker"`.
   - `machine_label`: used with `runs_on: "ssh"`, or alone.
-- **Projects.** `update_project {machine_label}` changes which machines a project already on SSH machines uses. Moving a project onto SSH machines is Cody's choice, in its Settings. `pool_status` lists the machines under `ssh_machines`.
+- **Projects.** `update_project {machine_label}` changes which machines a project already on SSH machines uses. Moving a project onto SSH machines is the owner’s choice, in its Settings. `pool_status` lists the machines under `ssh_machines`.
 
 `machine` takes a machine's id or name. A machine is in `machine_label` and `runs_on` by its labels or its name.
 
@@ -177,4 +178,4 @@ A Codex task (a project's Agent set to Codex, or `agent: "codex"`, [docs/codex.m
   - the machine's own `codex login` (`~/.codex`).
 
   A machine with none of these isn't picked. The task waits and says what to do.
-- **Its Codex home.** With Box Yard's ChatGPT login, the turn uses a task-specific Codex home in tmpfs (`<secrets>/<task>.codex`), including while Codex atomically refreshes its login. Sessions link to `<task>/codex/sessions`, so archives keep the conversation, and `<task>/codex/auth.json` links back to memory for the server to read refreshed tokens. With an API key, the home is `<task>/codex`, as on boxes. With the machine's own login, it uses `~/.codex`.
+- **Its Codex home.** With Box Yard's ChatGPT login, the turn uses a task-specific Codex home in tmpfs (`<secrets>/<task>.codex`), including while Codex atomically refreshes its login. Sessions link to `<task>/codex/sessions`, so archives keep the conversation, and `<task>/codex/auth.json` links back to memory for the server to read refreshed tokens. With an API key, the home is `<task>/codex`, as on boxes. With the machine’s own login, it copies only that login (and a matching legacy rollout when resuming) into the task-owned home; it does not import the machine’s Codex config or MCP servers. Refreshed local-login tokens are written back to the source login.

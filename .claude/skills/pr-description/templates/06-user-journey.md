@@ -64,7 +64,7 @@ sequenceDiagram
 - **Step 1–2.** <Mechanism: the overlay or picker, the request type, three sentences; files with a clause each.>
 - **Step 3–4.** <Mechanism: the server-side state, the hook route, the web app field it feeds.>
 - **Files.** `web/src/<file>.tsx` — <clause>; `server/<file>.ts` — <clause>.
-- **Gate.** <`npm test` and `npm run typecheck` green, including the e2e that walks this journey; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; affected journey tests run separately while iterating; or what did not run and why.>
 
 ## 📝 Notes <a id="notes"></a>
 

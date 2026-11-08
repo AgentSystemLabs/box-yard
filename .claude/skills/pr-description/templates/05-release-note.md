@@ -72,7 +72,7 @@ flowchart LR
 - **<Group one>.** <Mechanism in three sentences; files with a clause each.>
 - **<Group two>.** <…>
 - **Schema/config.** <Field or setting added; or "unchanged".>
-- **Gate.** <`npm test` and `npm run typecheck` green; or what did not run and why.>
+- **Gate.** <`npm run typecheck`, `npm run build` and `npm run test:fast` green on committed, stable HEAD; or what did not run and why.>
 
 ## 📝 Notes <a id="notes"></a>
 

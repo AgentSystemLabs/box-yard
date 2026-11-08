@@ -11,7 +11,7 @@ A GPU project runs on the Default GPU cloud (RunPod out of the box) unless one o
 ## Setup (once per Box Yard install)
 
 1. **Credit.** Vast.ai is prepaid. Add credit at [cloud.vast.ai › Billing](https://cloud.vast.ai/billing/). Vast stops instances when the credit runs out, so the credit is a hard ceiling on spend. Box Yard's $/hr caps apply on top.
-2. **API key.** Make one at [cloud.vast.ai › Keys](https://cloud.vast.ai/manage-keys/). Box Yard only searches offers, manages instances and reads your credit, so a key scoped to those (Vast's permission groups, e.g. `instance_read`, `instance_write`, `user_read`) can replace a full one; it never needs billing or team permissions. Check a scoped key with `npm run smoke:vast` once. Then either paste it in **Settings › Box providers › GPU clouds › Vast.ai GPU › Vast.ai API key** (where **Test** checks it and shows your credit), or set `VAST_API_KEY` in Box Yard's environment. Box Yard only uses the key from the server; it never reaches an agent.
+2. **API key.** Make one at [cloud.vast.ai › Keys](https://cloud.vast.ai/manage-keys/). Box Yard only searches offers, manages instances and reads your credit, so a key scoped to those (Vast's permission groups, e.g. `instance_read`, `instance_write`, `user_read`) can replace a full one; it never needs billing or team permissions. Settings’ Test is the first credential check. A scoped key’s full provisioning permissions remain unverified until an owner-approved `npm run smoke:vast` run. Then either paste it in **Settings › Box providers › GPU clouds › Vast.ai GPU › Vast.ai API key** (where **Test** checks it and shows your credit), or set `VAST_API_KEY` in Box Yard's environment. The provider uses this key on the server and does not deliberately send it to remote tasks. This is not isolation from local agents: they run as the server’s OS user, and the current local env filter does not remove `VAST_API_KEY`.
 3. **Settings › Box providers › GPU clouds › Vast.ai GPU.** The defaults suit browser and WebGL game testing:
 
    | Setting | Default | What it does |
@@ -32,6 +32,8 @@ A GPU project runs on the Default GPU cloud (RunPod out of the box) unless one o
 4. **A project.** Make or open a GPU project, then in Project › Settings › Boxes set **GPU cloud** to Vast.ai, or make Vast.ai the Default GPU cloud in Settings › Box providers. Its GPU types and minimums there are Vast's when it's on Vast.ai.
 
 GPU names are Vast's (`RTX A5000`, not RunPod's `NVIDIA RTX A5000`). A project that moves from RunPod keeps working: its RunPod GPU ids are read as Vast names.
+
+The following prices are approximate guide values from `shared/vast.ts`, not live offers. Use the picker’s current offers and the spending caps before renting.
 
 | GPU | VRAM | About | Good for |
 | --- | --- | --- | --- |
@@ -61,7 +63,7 @@ GPU names are Vast's (`RTX A5000`, not RunPod's `NVIDIA RTX A5000`). A project t
 
 ## Checking it works
 
-`npm run smoke:vast` (with `VAST_API_KEY` set, and credit on the account) rents one instance with the default settings and checks SSH, the tools, `nvidia-smi`, WebGL in headless Chrome on the NVIDIA GPU, files, and the published port. Then it destroys the instance. It takes about five minutes and costs a few cents. `--keep` leaves the instance up; `SMOKE_IMAGE=<your image>` tries a built image. The tests (`test/vast.test.ts`, `test/vast-pods.e2e.test.ts`) never call Vast.ai.
+`npm run smoke:vast` (with `VAST_API_KEY` set, and credit on the account) rents one instance with the default settings and checks SSH, the tools, `nvidia-smi`, WebGL in headless Chrome on the NVIDIA GPU, files, and the published port. Then it destroys the instance. It spends money; duration and cost depend on the selected host and install time. Run only with the owner’s approval. `--keep` leaves the instance up; `SMOKE_IMAGE=<your image>` tries a built image. The tests (`test/vast.test.ts`, `test/vast-pods.e2e.test.ts`) never call Vast.ai.
 
 ## Files
 
