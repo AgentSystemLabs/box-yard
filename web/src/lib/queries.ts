@@ -33,7 +33,7 @@ import { setTtsInfo } from "./tts"
 import { settleOptimistic } from "./queued"
 import { playSendSound } from "./sendSound"
 import { prNumber } from "./prState"
-import { fetchLog, liveMessage } from "./liveQueries"
+import { fetchLiveState, fetchLog, liveMessage } from "./liveQueries"
 import { reconcileTaskQueue, submissionId, taskMustWait, taskSubmissionWait } from "./taskSubmissions"
 import type {
   BoxCleanup,
@@ -372,10 +372,10 @@ export const useSettings = () =>
     staleTime: Infinity,
   })
 export const useOrchestratorState = () =>
-  useQuery({ queryKey: keys.orchestrator, queryFn: () => api<OrchestratorState>("/api/orchestrator"), staleTime: Infinity })
+  useQuery({ queryKey: keys.orchestrator, queryFn: ({ client }) => fetchLiveState(client, keys.orchestrator, () => api<OrchestratorState>("/api/orchestrator")), staleTime: Infinity })
 /** `enabled` false: no project yet (the Coordinator chat's bottom panel with "All" picked). */
 export const useCaptainState = (projectId: string, o: { enabled?: boolean } = {}) =>
-  useQuery({ queryKey: keys.captain(projectId), queryFn: () => api<CaptainState>(`/api/projects/${projectId}/captain`), staleTime: Infinity, enabled: o.enabled })
+  useQuery({ queryKey: keys.captain(projectId), queryFn: ({ client }) => fetchLiveState(client, keys.captain(projectId), () => api<CaptainState>(`/api/projects/${projectId}/captain`)), staleTime: Infinity, enabled: o.enabled })
 /** Captains whose cached messages are only the prefetched newest few (lib/captainPrefetch.ts), until the chat opens. */
 const captainTails = new Set<string>()
 export const markCaptainTail = (projectId: string) => void captainTails.add(projectId)
@@ -592,7 +592,7 @@ export const useChatStream = () =>
 export const useChatBusy = () =>
   useQuery({
     queryKey: keys.chatBusy,
-    queryFn: async () => (await api<Health>("/api/health")).orchestratorBusy,
+    queryFn: ({ client }) => fetchLiveState(client, keys.chatBusy, async () => (await api<Health>("/api/health")).orchestratorBusy),
     staleTime: Infinity,
   })
 
@@ -1799,10 +1799,10 @@ export function useStopChatTurn(projectId: string | null) {
  */
 export function useChatTurnStop(projectId: string | null, busy: boolean) {
   const { mutate } = useStopChatTurn(projectId)
-  const coordinator = useQuery({ queryKey: keys.orchestrator, queryFn: () => api<OrchestratorState>("/api/orchestrator"), staleTime: Infinity, enabled: busy && !projectId, select: isCompacting })
+  const coordinator = useQuery({ queryKey: keys.orchestrator, queryFn: ({ client }) => fetchLiveState(client, keys.orchestrator, () => api<OrchestratorState>("/api/orchestrator")), staleTime: Infinity, enabled: busy && !projectId, select: isCompacting })
   const captain = useQuery({
     queryKey: keys.captain(projectId ?? ""),
-    queryFn: () => api<CaptainState>(`/api/projects/${projectId}/captain`),
+    queryFn: ({ client }) => fetchLiveState(client, keys.captain(projectId), () => api<CaptainState>(`/api/projects/${projectId}/captain`)),
     staleTime: Infinity,
     enabled: busy && projectId !== null,
     select: isCompacting,

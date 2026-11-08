@@ -3,7 +3,7 @@
 // network returns or a view mounts downloads what's already there (the task thread and the Coordinator chat are
 // hundreds of KB each). A stream that may have missed events (it reconnected, or the page was away STALE_STREAM_MS)
 // invalidates every query itself, so they refetch then, and only then.
-import { hashKey, type Query, type QueryKey } from "@tanstack/react-query"
+import { hashKey, type Query, type QueryKey, type QueryClient } from "@tanstack/react-query"
 import { placeMessage } from "./queued"
 
 /** First key segments of the lists stream.ts keeps current. */
@@ -67,4 +67,13 @@ export async function fetchLog<T extends Message>(key: QueryKey, fetch: () => Pr
 /** stream.ts: a message for the log under `key` arrived. */
 export function liveMessage(key: QueryKey, m: Message) {
   collectors.get(hashKey(key))?.forEach((collect) => collect(m))
+}
+
+/** A busy/state GET can predate an SSE update even when its response arrives later. Count writes rather
+ * than compare values: busy -> idle -> busy may end at the value we started with. */
+export async function fetchLiveState<T>(client: QueryClient, key: QueryKey, fetch: () => Promise<T>): Promise<T> {
+  const writes = client.getQueryState(key)?.dataUpdateCount
+  const answer = await fetch()
+  const current = client.getQueryState<T>(key)
+  return current?.data !== undefined && current.dataUpdateCount !== writes ? current.data : answer
 }
