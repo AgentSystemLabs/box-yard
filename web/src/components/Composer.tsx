@@ -500,7 +500,8 @@ export function Composer({
       {sendTo.open && <SendToMenu picker={sendTo} anchor={boxRef} input={input} />}
       <div
         ref={boxRef}
-        className="@container/composer rounded-xl border border-zinc-800 bg-zinc-900 focus-within:border-yard-500/50"
+        data-composer-box
+        className="@container/composer rounded-xl border border-control bg-zinc-900 focus-within:border-yard-500"
         onMouseDown={(e) => {
           // A press on the box's empty space (around the text, between the buttons) puts the caret in the text.
           const target = e.target as HTMLElement
