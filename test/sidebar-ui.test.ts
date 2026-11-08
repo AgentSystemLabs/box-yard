@@ -152,8 +152,8 @@ describe("the sidebar", () => {
     expect(icons.map((i) => [i.dataset.status, i.getAttribute("aria-label")])).toEqual([["needs_input", "Needs you"], ["working", "Working"]])
     expect(icons[0]!.className).not.toContain("animate-pulse")
     expect(icons[0]!.querySelector("[data-cue]")!.getAttribute("data-cue")).toBe("asks")
-    expect(icons[1]!.className).not.toContain("animate-pulse")
-    expect(section("box-yard")!.querySelector(".task-title-working")!.textContent).toBe(RUN.title)
+    expect(icons[1]!.className).toContain("motion-safe:animate-pulse")
+    expect(section("box-yard")!.querySelector(".task-title-working")).toBeNull()
     expect(section("marketing-site")!.textContent).toContain("#19")
     expect(section("photo-tools")).toBeNull()
     const more = section("More projects")!
@@ -260,7 +260,9 @@ describe("the sidebar", () => {
     render(APP_HOME, [{ ...PR, status: "working" }])
     const row = button(section("marketing-site")!, PR.title).parentElement!
     expect(row.textContent).not.toContain("working")
-    expect(row.querySelector(".task-title-working")!.textContent).toBe(PR.title)
+    expect(row.querySelector("[data-task-row-title]")!.textContent).toBe(PR.title)
+    expect(row.querySelector(".task-title-working")).toBeNull()
+    expect(row.querySelector<HTMLElement>('[data-testid="task-status-icon"]')!.className).toContain("motion-safe:animate-pulse")
     expect(row.querySelector('[aria-label="Working"]')).not.toBeNull()
     expect(row.querySelector("a[data-pr-state]")!.getAttribute("href")).toBe(PR.prUrl)
   })

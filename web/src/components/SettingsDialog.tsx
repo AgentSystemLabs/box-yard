@@ -11,7 +11,7 @@ import {
   savePatch,
   type SettingsSection,
 } from "../lib/settingsNav"
-import { SettingsDraftContext, draftSlots, updateParts, useDraft, type DraftPart, type DraftRegistry } from "../lib/settingsDraft"
+import { SettingsDraftContext, SettingsFieldError, draftSlots, updateParts, useDraft, type DraftPart, type DraftRegistry } from "../lib/settingsDraft"
 import { SettingsField, SettingsSearchProvider, SearchHighlight, useSettingsSearch } from "../lib/settingsSearch"
 import { NUMBER_RULES, numberText, problemSections, refusedByBrowser, settingsProblems, typedNumber, type SettingPath } from "../lib/settingsValidation"
 import { LEGACY_POOL_DEFAULTS, sizeCapacities } from "../lib/capacity"
@@ -208,7 +208,7 @@ export function SettingsDialog({
   const problemCount = Object.keys(problems).length
   const problemRoots = new Set([...problemSections(problems)].map(settingsRoot))
   // A field to show after Save found a problem: its section opens first, then it's focused.
-  const [reveal, setReveal] = useState<HTMLElement | null>(null)
+  const [reveal, setReveal] = useState<HTMLElement | string | null>(null)
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => {
     if (!s) return
@@ -300,13 +300,14 @@ export function SettingsDialog({
 
   // After the scroll reset above. Waits while its section is still hidden (it shows on the next render).
   useEffect(() => {
-    if (!reveal || reveal.closest("[hidden]")) return
-    const details = reveal.closest("details")
+    const control = typeof reveal === "string" ? document.getElementById(reveal) : reveal
+    if (!control || control.closest("[hidden]")) return
+    const details = control.closest("details")
     if (details) details.open = true
-    reveal.scrollIntoView({ block: "center" })
-    reveal.focus({ preventScroll: true })
-    // A value only the browser checks (another panel's field) gets the browser's own message.
-    if (!reveal.hasAttribute("data-setting")) (reveal as HTMLInputElement).reportValidity?.()
+    control.scrollIntoView({ block: "center" })
+    control.focus({ preventScroll: true })
+    // A value only the browser checks gets the browser's own message.
+    if (!control.hasAttribute("data-setting") && !control.hasAttribute("data-identity-field")) (control as HTMLInputElement).reportValidity?.()
     setReveal(null)
   }, [reveal, section, query])
 
@@ -355,10 +356,28 @@ export function SettingsDialog({
     return own ?? [...form.elements].find((el): el is HTMLInputElement => el instanceof HTMLInputElement && el.willValidate && refusedByBrowser(el.validity)) ?? null
   }
 
+  const failedSave = (error: unknown) => {
+    setSaveError(error instanceof Error ? error.message : "Couldn't save")
+    if (error instanceof SettingsFieldError) {
+      error.reveal?.()
+      setQuery("")
+      onSection(error.section)
+      setReveal(error.controlId)
+    }
+  }
+
   // One Save writes every draft. Each part starts inside the click, so a browser permission prompt still works.
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!dirty || saving) return
+    setSaveError(null)
+    // Validate every pending part before writing anything, even when its editor or section is hidden.
+    try {
+      for (const part of partList) part.validate?.()
+    } catch (error) {
+      failedSave(error)
+      return
+    }
     const problem = firstProblem(e.currentTarget as HTMLFormElement)
     if (problem) return showField(problem)
     // A problem with no control on screen (its field is switched off): at least open its section.
@@ -368,7 +387,7 @@ export function SettingsDialog({
     const jobs = [...(changed.length ? [saveCore()] : []), ...partList.map((p) => p.save())]
     const failed = (await Promise.allSettled(jobs)).filter((r): r is PromiseRejectedResult => r.status === "rejected")
     setSaving(false)
-    if (failed.length) setSaveError((failed[0]!.reason as Error)?.message || "Couldn't save")
+    if (failed.length) failedSave(failed[0]!.reason)
     else setSavedAt(Date.now())
   }
 

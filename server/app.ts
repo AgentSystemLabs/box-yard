@@ -60,7 +60,7 @@ import { PROJECT_COLORS } from "../shared/projectColors.js"
 import { RunPodService } from "./runpod/service.js"
 import { VastService } from "./vast/service.js"
 import { DaytonaService } from "./daytona/service.js"
-import { Identities } from "./identity/identities.js"
+import { IdentityValidationError, Identities } from "./identity/identities.js"
 import { IdentityDetector, type DetectOptions } from "./identity/detect.js"
 import { assignChecked, detectFor, importDetected, importInput, runningTask, testRepos } from "./identity/setup.js"
 import { SecretBox } from "./identity/secretBox.js"
@@ -2152,7 +2152,10 @@ export function createBoxYard(
     const message = redact(err instanceof Error ? err.message : String(err), secrets)
     if (status >= 500) console.error("[box-yard]", redact(err instanceof Error ? (err.stack ?? message) : message, secrets))
     if (res.headersSent) return
-    res.status(status).json({ error: message })
+    res.status(status).json({
+      error: message,
+      ...(err instanceof IdentityValidationError && { fields: err.fields.map((f) => ({ path: f.path, message: redact(f.message, secrets) })) }),
+    })
   })
 
   let stopSnapshots: (() => void) | null = null
