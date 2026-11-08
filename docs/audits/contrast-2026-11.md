@@ -33,7 +33,7 @@ The base matrix is **light and dark × 1440×1000 and 400×1000 CSS px** for eve
 | Usage | Populated model and token stacks, legends, tables, selected/hovered day | routes plus interactions |
 | File preview | Generated markdown and black/white SVG previews | interactions |
 | Shared controls | All Button variants, input/value/placeholder/invalid, native checkbox, select, switch on/off/inactive, hover and keyboard focus | components |
-| Status and PRs | Every StatusBadge; open/draft/merged/closed PR chips, links, numbers and activity; PR sheet checks/review/conflicts/files | components plus interactions |
+| Status and PRs | Live open-work/history PR list, still-readable stale merged row, task summary detail; every StatusBadge; open/draft/merged/closed PR chips, links, numbers and activity; PR sheet checks/review/conflicts/files | components plus interactions |
 | Full shared palettes | Every chart colour on base/card/selected surfaces, all project and harness/runner composer tags | components |
 | Project/status icons | All eight project colours, task/Captain bare and tiled working icons at animation trough on base/hover/selected surfaces; blue/yellow/red corner dots | components |
 | Other chat states | Actual pending Coordinator/Captain/task/hook/side-thread message components, context meters at 30/80/95%, markdown/inline code/links/quotes/folded code and folded messages | components |
@@ -92,12 +92,13 @@ Measured failures corrected during the audit (ratios shown to two decimals for r
 | Light selected-day token chart | 2.62 | 3.33 | 3 |
 | Light failed task title on hover | 4.34 | 5.89 | 4.5 |
 | Light notice metadata on hover | 4.47 | 5.54 | 4.5 |
+| Dark PR filter count on selected hover | 3.98 | 7.06 | 4.5 |
 | Light pending-message content/labels | 2.47 minimum observed | 5.57 (lowest pending label in light) | 4.5 |
 | Working glyph at dimmest frame | 2.00 minimum observed | 3.10 minimum across both themes at the new 80% trough | 3 |
 
 Additional fixes address the closed-PR external mark/activity, off-switch thumb, invalid fields, active warning dismiss text, sign-in action, stale/paused content and code/message fades. The original switch-audit selector briefly measured the wrong node; those harness false positives are excluded from this defect table.
 
-Final browser runs exited **0**, with **0 computed failures, 0 axe colour-contrast violations and 0 page errors**. There are **1,086 state/scroll snapshots** and **73,045 repeated calculated observations** across both themes. The [machine-readable summary](contrast-2026-11.json) retains unrounded minima, case names and per-theme counts. A zero automated failure count is reported only alongside the manual resolutions and limitations below.
+Final browser runs exited **0**, with **0 computed failures, 0 axe colour-contrast violations and 0 page errors**. There are **1,106 state/scroll snapshots** and **73,407 repeated calculated observations** across both themes. The [machine-readable summary](contrast-2026-11.json) retains unrounded minima, case names and per-theme counts. A zero automated failure count is reported only alongside the manual resolutions and limitations below.
 
 | Runner | Coverage | Snapshots | Calculated observations | Manual observations | axe incomplete nodes |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -106,6 +107,7 @@ Final browser runs exited **0**, with **0 computed failures, 0 axe colour-contra
 | Shared components | 74 snapshots × 2 themes × 2 widths | 296 | 30,762 | 492 | 9,424 |
 | Narrow/zoom supplement | 5 routes × 2 themes × 320/560/800 px, CSS zoom 125% | 86 | 3,810 | 212 | 171 |
 | Touch supplement | 5 routes × 2 themes × 320/400/560/800 px, coarse pointer | 94 | 5,592 | 232 | 174 |
+| Live PR list supplement | Open list, mock live merge update, stale row, History and detail × 2 themes × 2 widths | 20 | 362 | 12 | 572 |
 
 The route supplement names are Coordinator, Captain, task, identities and usage. The base 400 px run uses a fine pointer; touch is explicitly tested by the supplement. The runners retained 2,458 exemption observations (including repeated inactive controls and punctuation separators). Large incomplete counts mainly repeat offscreen gallery nodes; they are not counts of distinct failures.
 
@@ -121,9 +123,9 @@ The route supplement names are Coordinator, Captain, task, identities and usage.
 | Focus outline | 7.60 | 10.61 | 3 |
 | Status dot against separating ring | 6.47 | 5.23 | 3 |
 
-Browser evidence was captured at `7ded5dc`, including main through #31. Main through #35 was subsequently merged: its only intervening web change enlarges the decorative wordmark Y without changing colour; the other changes are documentation and the SSH fixture correction. The previously observed SSH Codex-home assertion was reproduced, reported to the Captain, corrected by #35, and its focused reproduction then passed. It was not subtracted as a baseline failure.
+Primary browser evidence was captured at `7ded5dc`, including main through #31; the live PR-list supplement at `51f28a7` also covers the final filter-count adjustment. The default shared-component runner now includes that supplement; it was run separately with `ONLY='^pr-list'` during this audit. Main through #35 was subsequently merged: its only intervening web change enlarges the decorative wordmark Y without changing colour; the other changes are documentation and the SSH fixture correction. The previously observed SSH Codex-home assertion was reproduced, reported to the Captain, corrected by #35, and its focused reproduction then passed. It was not subtracted as a baseline failure.
 
-Full raw JSON, fix-time failure records and PNGs are published with this task as `contrast-evidence-2026-11.zip` (19.1 MiB). Public screenshot links: [failed hover before](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/failed-before.png?raw=true), [after](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/failed-after.png?raw=true), [desktop/narrow in both themes](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/coverage.png?raw=true), [working icons at trough](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/dark-working-icons.png?raw=true), [PR checks](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/pr-checks.png?raw=true), [selected usage](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/usage-light.png?raw=true), [preview controls](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/preview-dark.png?raw=true).
+Full raw JSON, fix-time failure records and PNGs are published with this task as `contrast-evidence-2026-11.zip` (under 25 MiB). Public screenshot links: [failed hover before](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/failed-before.png?raw=true), [after](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/failed-after.png?raw=true), [desktop/narrow in both themes](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/coverage.png?raw=true), [working icons at trough](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/dark-working-icons.png?raw=true), [PR checks](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/pr-checks.png?raw=true), [selected usage](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/usage-light.png?raw=true), [preview controls](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/preview-dark.png?raw=true), [live PR update light](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/stale-pr-light.png?raw=true), [dark](https://github.com/AgentSystemLabs/box-yard/blob/pr-assets/task_96956d74d124/stale-pr-dark.png?raw=true).
 
 
 ## Manual review, exemptions and limits
@@ -132,6 +134,7 @@ Full raw JSON, fix-time failure records and PNGs are published with this task as
 | --- | --- |
 | Select background SVG | It is the right-hand chevron, outside the padded text area. Inspected rendered controls and SVG strokes: light #62626f on #f4f4f5 = 5.46:1; dark #a1a1aa on #18181b exceeds 6:1. The values and boundaries measured against the opaque fill pass independently. Native popup painting remains browser-owned. |
 | Sticky header backdrop blur | Header supplies 95% opaque theme background. A conservative 12.75-channel shift toward the worst black/white backing leaves the recorded header text at least 5.19:1 light / 6.04:1 dark and icons at least 5.19:1 / 4.77:1. Visual review includes header chips over scrolled content. |
+| Live-update Re-sort pill blur | The 95% opaque fill bounds backing colour. Applying the same worst-endpoint bound leaves all visible pill ink at least 4.90:1 light / 4.64:1 dark, including punctuation. Reviewed over the stale PR row. |
 | Preview arrows over an image/checkerboard | Generated SVGs contain opposing pure-black/white halves. Resting 70% theme fill gives conservative arrow contrast 4.95:1 light / 5.21:1 dark on the worst endpoint; opaque hover and keyboard focus checked in the real gallery. The checkerboard is decorative. |
 | Stacked chart adjacency | Segments have a theme-background separator border, so neighbouring hues are not their only boundary. Every shared fill is checked against the base/card/selected surface and remains at least 3:1; labelled readouts/legends and breakdown rows provide values without colour matching. |
 | Tagged composer textarea | Transparent textarea overlays the visible tag/text mirror. The helper verifies equal content, then measures mirror words and selected text. Screenshots confirm one visible draft with readable selection; the transparent editing layer is not scored as readable ink. |
@@ -154,4 +157,4 @@ The raw evidence preserves these unresolved-by-automation categories rather than
 
 Assessed risk: **Medium**, because shared colours/focus/pulse affect many surfaces. Security and performance risk are low: production changes are presentational, while the browser gallery and filesystem seed require explicit development commands and mock data. Reverting the change restores prior presentation and removes the audit tooling; it does not undo published screenshots.
 
-The required typecheck/build/fast-test gate is run after the report commit, with HEAD stable; its exact revision and results are recorded in the PR. During iteration the affected-test graph expanded through shared dependencies; an obsolete broad related run was stopped after revealing the SSH assertion above. No full-suite or slow-tier command was used. The separate focused SSH reproduction passed after #35. Browser results above are independent of that integration correction.
+The required typecheck/build/fast-test gate is run after the report commit, with HEAD stable; its exact revision and results are recorded in the PR. During iteration the affected-test graph expanded through shared dependencies; an obsolete broad related run was stopped after revealing the SSH assertion above. The first final fast gate identified two assertions for the deliberately replaced opacity styles; those visual contracts were updated and their focused 30-test run passed. No full-suite or slow-tier command was used. The separate focused SSH reproduction passed after #35. Browser results above are independent of that integration correction.

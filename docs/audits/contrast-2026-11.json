@@ -2,6 +2,7 @@
   "assessedOn": "2026-11-08",
   "sourceHead": "7ded5dc",
   "mainIncluded": "2e62e84 (#31)",
+  "supplementSourceHead": "51f28a7 (PR list states)",
   "browser": "Chromium 158.0.8127.18",
   "playwright": "1.65.0",
   "axe": "4.14.0",
@@ -946,6 +947,82 @@
               "minimum": 3,
               "lowestRatio": 5.225266648447232,
               "example": "absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full ring-2 ring-zinc-950 bg-red-500"
+            }
+          }
+        }
+      }
+    },
+    "prs": {
+      "caseNames": [
+        "pr-list",
+        "pr-list-open",
+        "pr-list-stale",
+        "pr-list-history",
+        "pr-list-detail"
+      ],
+      "widths": [
+        1440,
+        400
+      ],
+      "zoom": 1,
+      "touch": false,
+      "errors": [],
+      "byTheme": {
+        "light": {
+          "cases": 10,
+          "snapshots": 10,
+          "measurements": 181,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 6,
+          "exemptObservations": 0,
+          "axeIncomplete": {
+            "elmPartiallyObscured": 240,
+            "bgImage": 10,
+            "elmPartiallyObscuring": 11,
+            "bgOverlap": 25
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 157,
+              "minimum": 4.5,
+              "lowestRatio": 5.674972234947591,
+              "example": "Merged #1"
+            },
+            "icon": {
+              "observations": 24,
+              "minimum": 3,
+              "lowestRatio": 5.674972234947591,
+              "example": "lucide lucide-git-merge h-3 w-3"
+            }
+          }
+        },
+        "dark": {
+          "cases": 10,
+          "snapshots": 10,
+          "measurements": 181,
+          "computedFailures": 0,
+          "axeViolationNodes": 0,
+          "manualObservations": 6,
+          "exemptObservations": 0,
+          "axeIncomplete": {
+            "elmPartiallyObscured": 240,
+            "bgImage": 10,
+            "elmPartiallyObscuring": 11,
+            "bgOverlap": 25
+          },
+          "minimumByKind": {
+            "text": {
+              "observations": 157,
+              "minimum": 4.5,
+              "lowestRatio": 6.590892364991471,
+              "example": "Merged #1"
+            },
+            "icon": {
+              "observations": 24,
+              "minimum": 3,
+              "lowestRatio": 6.590892364991471,
+              "example": "lucide lucide-git-merge h-3 w-3"
             }
           }
         }
