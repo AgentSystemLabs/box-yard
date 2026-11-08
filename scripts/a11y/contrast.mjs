@@ -1,14 +1,15 @@
 // Real rendered app audit; only disposable seed-contrast.mjs mock data is accepted.
-// See docs/contrast-audit.md for installation, scope, manual checks and reproduction.
+// See docs/audits/contrast-2026-11.md for installation, scope, manual checks and reproduction.
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { computedContrast } from './computed-contrast.mjs'
+import { fixtureRoutes } from './fixture-routes.mjs'
 const [base = 'http://localhost:4000', output = '/tmp/contrast-results'] = process.argv.slice(2)
 assert.equal((await fetch(base + '/api/health').then((r) => r.json())).mock, true, 'Only a mock yard may be audited')
 const projects = await fetch(base + '/api/projects').then((r) => r.json())
 assert.deepEqual(projects.map((p) => p.id), ['prj_contrast'], 'Use a NEW seed-contrast.mjs fixture')
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright')
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright-core')
 const axe = (await import(process.env.AXE_MODULE ?? 'axe-core')).default
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
 await mkdir(output, { recursive: true })
@@ -18,35 +19,24 @@ const routes = [
   ['task', '/?session=task_contrast-idle'], ['subtask', '/?session=task_contrast-child'],
   ['failed-task', '/?session=task_contrast-failed'], ['asking-task', '/?session=task_contrast-needs_input'],
   ['project-settings', '/?projectSettings=prj_contrast'], ['schedules', '/?schedule=all'],
-  ['schedule-detail', '/?schedule=sch_contrast'], ['usage', '/?usage=7'],
+  ['schedule-detail', '/?schedule=sch_contrast'], ['new-schedule', '/?schedule=all&new=schedule'], ['usage', '/?usage=7'],
   ...sections.map((s) => [`settings-${s}`, `/?settings=${s}`]),
 ]
 const results = [], errors = []
 try {
   for (const theme of ['light', 'dark']) for (const width of (process.env.WIDTHS ?? '1440,400').split(',').map(Number)) {
-    const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme, reducedMotion: 'reduce' })
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: theme, reducedMotion: 'reduce', hasTouch: process.env.TOUCH === '1', isMobile: process.env.TOUCH === '1' })
+    const zoom = Number(process.env.ZOOM ?? 1)
+    assert.ok(zoom > 0 && zoom <= 2)
+    await context.addInitScript((zoom) => document.addEventListener('DOMContentLoaded', () => { document.documentElement.style.zoom = String(zoom) }), zoom)
     const page = await context.newPage()
     page.on('pageerror', (error) => errors.push(error.message))
-    // No setting or real data is changed. Even accidental UI writes are fulfilled locally.
-    await page.route('**/api/**', async (r) => {
-      const url = new URL(r.request().url())
-      if (url.pathname === '/api/boot' || url.pathname === '/api/stream') return r.abort()
-      if (r.request().method() !== 'GET') return r.fulfill({ status: 400, json: { error: 'Example validation error: review the fields.' } })
-      if (url.pathname === '/api/tasks' || /^\/api\/tasks\/task_contrast-[a-z_]+$/.test(url.pathname)) {
-        const response = await r.fetch(), data = await response.json()
-        const patch = (task) => {
-          const status = task.id?.replace('task_contrast-', '')
-          return ['queued', 'starting', 'working'].includes(status) ? { ...task, status } : task
-        }
-        return r.fulfill({ json: Array.isArray(data) ? data.map(patch) : patch(data) })
-      }
-      return r.continue()
-    })
+    await fixtureRoutes(page)
     for (const [name, url] of routes.filter(([name]) => !process.env.ONLY || new RegExp(process.env.ONLY).test(name))) {
       await page.goto(base + url)
       await page.locator('textarea').first().waitFor()
       if (name.startsWith('settings-')) await page.locator(`[data-settings-category="${name.slice(9)}"]`).waitFor({ state: 'visible' })
-      else if (name === 'usage' || name === 'project-settings') await page.getByRole('dialog').last().waitFor()
+      else if (name === 'usage' || name === 'project-settings' || name === 'new-schedule') await page.getByRole('dialog').last().waitFor()
       await page.waitForTimeout(180)
       assert.equal(await page.locator('html').evaluate((el) => el.classList.contains('dark')), theme === 'dark')
       await page.addScriptTag({ content: axe.source })
@@ -82,7 +72,7 @@ try {
         await capture(`scroll-${step}`)
       }
       if (['coordinator', 'task', 'settings-identities', 'settings-runners', 'settings-appearance', 'usage'].includes(name)) await page.screenshot({ path: path.join(output, `${theme}-${width}-${name}.png`) })
-      const record = { theme, width, name, url, snapshots }
+      const record = { theme, width, zoom, touch: process.env.TOUCH === "1", name, url, snapshots }
       results.push(record)
       console.log(`${theme} ${width} ${name}: ${snapshots.length} views, ${snapshots.reduce((n,s) => n+s.failures.length,0)} computed failures, ${snapshots.reduce((n,s) => n+s.axe.violations.reduce((n,v) => n+v.nodes.length,0),0)} axe failures`)
       await writeFile(path.join(output, 'results.json'), JSON.stringify({ browser: browser.version(), axe: axe.version, results, errors }, null, 2))

@@ -1,0 +1,165 @@
+import assert from 'node:assert/strict'
+import { mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { computedContrast } from './computed-contrast.mjs'
+import { fixtureRoutes } from './fixture-routes.mjs'
+const [base = 'http://localhost:4000', output = '/tmp/contrast-interactions'] = process.argv.slice(2)
+assert.equal((await fetch(base + '/api/health').then((r) => r.json())).mock, true)
+assert.deepEqual((await fetch(base + '/api/projects').then((r) => r.json())).map((p) => p.id), ['prj_contrast'])
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright-core')
+const axe = (await import(process.env.AXE_MODULE ?? 'axe-core')).default
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
+const results = [], errors = []
+await mkdir(output, { recursive: true })
+try {
+  for (const theme of ['light', 'dark']) for (const width of [1440, 400]) {
+    const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme, reducedMotion: 'reduce' })
+    page.setDefaultTimeout(10000)
+    page.on('pageerror', (e) => errors.push(e.message))
+    await fixtureRoutes(page)
+    const goto = async (url) => { await page.goto(base + url); await page.locator('textarea').first().waitFor(); await page.waitForTimeout(200) }
+    const capture = async (state, screenshot = false) => {
+      await page.waitForTimeout(220) // Let existing colour transitions settle.
+      await page.addScriptTag({ content: axe.source })
+      const computed = await page.evaluate(computedContrast)
+      const checked = await page.evaluate(async () => {
+        const scope = [...document.querySelectorAll('[role=dialog],dialog')].filter((e) => e.checkVisibility()).at(-1) ?? document.body
+        const r = await axe.run(scope, { runOnly: ['color-contrast'] }); return { violations: r.violations, incomplete: r.incomplete }
+      })
+      results.push({ theme, width, state, ...computed, axe: checked })
+      await writeFile(path.join(output, 'results.json'), JSON.stringify({ browser: browser.version(), axe: axe.version, results, errors }, null, 2))
+      if (screenshot) await page.screenshot({ path: path.join(output, `${theme}-${width}-${state}.png`) })
+    }
+    await goto('/')
+    if (await page.getByTestId('chat-switcher').count()) {
+    await page.getByTestId('chat-switcher').first().click()
+    await page.getByTestId('chat-switcher-menu').waitFor()
+    await capture('chat-switcher')
+    await page.getByTestId('chat-switcher-filter').fill('Example')
+    await capture('chat-switcher-search')
+    await page.keyboard.press('Escape')
+    } else {
+      await page.getByRole('button', {name:/^Projects and tasks/}).first().click()
+      await capture('sidebar-drawer', true)
+      await page.keyboard.press('Escape')
+    }
+    await page.keyboard.press('Control+k')
+    await page.getByRole('combobox', { name: 'Search Box Yard' }).waitFor()
+    await capture('palette-selected')
+    await page.getByRole('combobox', { name: 'Search Box Yard' }).fill('example')
+    await capture('palette-search')
+    await page.keyboard.press('Escape')
+    const composer = page.locator('textarea').first()
+    for (const [name, trigger] of [['projects', '%'], ['runners', '@'], ['harnesses', '!']]) {
+      await composer.fill('')
+      await page.waitForTimeout(30)
+      await composer.fill(trigger)
+      await page.getByTestId('run-target-menu').waitFor()
+      await capture(`composer-${name}`)
+      await page.keyboard.press('Escape')
+    }
+    await composer.fill('%Example !codex @box Example draft')
+    await capture('composer-tags', true)
+    await composer.selectText()
+    await capture('selected-draft', true)
+    await composer.fill('')
+    const more = page.getByTestId('composer-more').first()
+    if (await more.isVisible()) { await more.click(); await page.getByTestId('composer-more-menu').waitFor(); await capture('composer-more'); await page.keyboard.press('Escape') }
+    await page.locator('[data-day-index]').first().click()
+    await page.getByRole('group', { name: 'Transcript navigation' }).waitFor()
+    await capture('date-summary', true)
+    await goto('/')
+    const meter = page.locator('[data-testid^=cloud-meter]').filter({ visible: true }).first()
+    if (!await meter.count()) await page.getByRole('button', {name:/^Projects and tasks/}).first().click()
+    await meter.waitFor(); await meter.click()
+    await page.getByTestId('cloud-sheet').waitFor()
+    await capture('boxes-sheet', true)
+    await goto('/')
+    await page.getByTestId('notice-card').first().hover()
+    await capture('notice-hover')
+    await goto('/')
+    let newProject = page.getByRole('button', {name:'New project',exact:true}).filter({visible:true})
+    if (!await newProject.count()) await page.getByRole('button', {name:/^Projects and tasks/}).first().click()
+    await newProject.click()
+    await page.getByRole('dialog', {name:'New project',exact:true}).waitFor()
+    await capture('new-project', true)
+    await goto('/?session=task_contrast-idle')
+    await page.getByRole('button', { name: 'Task details and more actions' }).click()
+    await page.getByRole('dialog', { name: 'Task details', exact: true }).waitFor()
+    await capture('task-details', true)
+    await goto('/?schedule=sch_contrast')
+    await page.getByRole('button', { name: 'Delete schedule', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Delete schedule?' }).waitFor()
+    await capture('confirmation', true)
+    await goto('/?settings=identities')
+    const identity = page.locator('[data-identity-card="Example identity"]')
+    await identity.waitFor()
+    await identity.getByRole('button', { name: 'Test', exact: true }).click()
+    await identity.getByText('Example validation error: review the fields.').waitFor()
+    await capture('identity-test-error')
+    await identity.getByTestId('identity-edit').click()
+    await identity.getByRole('textbox', { name: 'Author name' }).fill('Example draft author')
+    await capture('identity-draft')
+    await page.getByRole('dialog', { name: 'Settings', exact: true }).getByRole('button', { name: 'Save', exact: true }).click()
+    await page.getByText(/Example author validation error/).last().waitFor()
+    await identity.getByRole('textbox', {name:'Author name'}).getAttribute('aria-invalid').then(v => assert.equal(v, 'true'))
+    await capture('identity-save-error', true)
+    await goto('/?usage=7')
+    const segment = page.locator('[data-series]').first()
+    await segment.waitFor(); await segment.scrollIntoViewIfNeeded(); await segment.click()
+    await capture('usage-selected-day', true)
+    await goto('/?settings=connectors')
+    await page.getByTestId('connector-sign-in').click()
+    await page.getByTestId('connector-sign-in-start').click()
+    await page.getByTestId('connector-sign-in-open').waitFor()
+    await capture('connector-sign-in', true)
+    const files = await fetch(base + '/api/artifacts').then(r => r.json())
+    await goto('/?preview=' + files.find(f => f.filename === 'example.md').id)
+    await page.getByRole('dialog').last().waitFor()
+    await page.getByText('example.md', {exact:true}).first().waitFor()
+    await capture('markdown-preview', true)
+    await goto('/?preview=' + files.find(f => f.filename === 'example.svg').id)
+    await page.getByRole('dialog').last().waitFor()
+    await page.locator('img[src*="example.svg"]').waitFor()
+    await capture('image-preview', true)
+    await goto('/?session=task_contrast-idle')
+    await page.locator('a[data-preview=image]').filter({hasText:'example.svg'}).first().click()
+    const arrow = page.getByRole('button', {name:'Next image (→)',exact:true})
+    await arrow.waitFor()
+    await capture('image-gallery', true)
+    await arrow.hover()
+    await capture('image-gallery-hover', true)
+    await page.keyboard.press('Tab'); await arrow.focus()
+    await capture('image-gallery-focus')
+    // Meaningful UI states: text/select/focus/invalid boundaries at rest and on hover.
+    await goto('/?settings=agents')
+    const field = page.getByRole('dialog', { name: 'Settings', exact: true }).locator('input:not([type=checkbox]),select').filter({ visible: true })
+    for (const control of (await field.all()).slice(0, 5)) {
+      await control.hover(); await capture('field-hover')
+      await page.keyboard.press('Tab'); await control.focus(); await capture('field-keyboard-focus')
+    }
+    await goto('/')
+    const expandSidebar = async () => {
+      if (await page.locator('[data-tree-key^="task:"]').filter({visible:true}).count()) return
+      const expand = page.getByRole('button', {name:'Show the sidebar',exact:true})
+      if (await expand.isVisible()) await expand.click()
+      else await page.getByRole('button', {name:/^Projects and tasks/}).last().click()
+    }
+    await expandSidebar()
+    const rows = page.locator('[data-tree-key^="task:"]').filter({visible:true})
+    for (const row of await rows.all()) {
+      await row.hover(); await capture('sidebar-row-hover')
+      await page.keyboard.press('Tab'); await row.focus(); await capture('sidebar-row-focus')
+    }
+    await page.locator('[data-open-task="task_contrast-failed"]').filter({visible:true}).last().click()
+    await page.getByTestId('task-header').waitFor()
+    await expandSidebar()
+    await page.locator('[aria-current=page][data-tree-key*="task_contrast-failed"]').waitFor()
+    await capture('sidebar-failed-selected', true)
+    console.log(`${theme} ${width}: ${results.filter(r=>r.theme===theme&&r.width===width).reduce((n,r)=>n+r.failures.length,0)} computed failures`)
+    await page.close()
+    await writeFile(path.join(output, 'results.json'), JSON.stringify({ browser: browser.version(), axe: axe.version, results, errors }, null, 2))
+  }
+} finally { await browser.close() }
+assert.deepEqual(errors, [])
+assert.equal(results.flatMap(r=>r.failures.concat(r.axe.violations.flatMap(v=>v.nodes))).length, 0, `Inspect ${output}/results.json; manual/incomplete results also need review`)

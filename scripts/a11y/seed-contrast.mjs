@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 const { openDb } = await import('../../dist/server/server/db.js')
+const { Artifacts } = await import('../../dist/server/server/artifacts.js')
 const { Store } = await import('../../dist/server/server/store.js')
 const dir = mkdtempSync(path.join(tmpdir(), 'contrast-yard-'))
 const db = openDb(dir), store = new Store(db), now = Date.now()
@@ -58,7 +59,20 @@ for (const table of ['chat_messages', 'captain_messages', 'task_messages']) db.p
 store.setKv('orchestrator_usage', JSON.stringify({ tokens: 155000, window: 200000, updatedAt: now }))
 store.setKv(`captain_usage:${project.id}`, JSON.stringify({ tokens: 140000, window: 200000, updatedAt: now }))
 store.createSchedule({ id: 'sch_contrast', projectId: project.id, name: 'Example daily review', cron: '0 9 * * *', timezone: 'UTC', prompt: 'Review example changes.', nextRunAt: now + 86400000, enabled: false })
+const usage = db.prepare(`INSERT INTO claude_usage (id, source, run_kind, task_id, project_id, session_id, model, started_at, ended_at, duration_ms,
+  input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens, total_tokens, cost_usd, reported_cost_usd)
+  VALUES (?, 'task', 'turn', 'task_contrast-idle', ?, ?, ?, ?, ?, 60000, 1000, 2000, 5000, 1500, 9500, 0.4, 0.4)`)
+for (let i = 0; i < 21; i++) usage.run(`cu_contrast-${i}`, project.id, `example-session-${i}`, `example-model-${i % 7}`, now - i * 21600000, now - i * 21600000 + 60000)
 db.prepare("INSERT INTO boxes (id, provider, status, created_at, last_used_at, size) VALUES ('box_contrast', 'mock', 'running', ?, ?, 'medium')").run(now, now)
 mkdirSync(path.join(dir, 'local-boxes', 'box_contrast'), { recursive: true })
+const artifacts = new Artifacts(store, path.join(dir, 'artifacts'))
+for (const [id, filename, content] of [
+  ['art_contrast-markdown', 'example.md', markdown],
+  ['art_contrast-other', 'other.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><path fill="black" d="M0 0h400v600H0z"/><path fill="white" d="M400 0h400v600H400z"/></svg>'],
+  ['art_contrast-image', 'example.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><path fill="white" d="M0 0h400v600H0z"/><path fill="black" d="M400 0h400v600H400z"/></svg>'],
+]) {
+  const a = artifacts.save({ id, title: filename, filename, data: Buffer.from(content), projectId: project.id, taskId: 'task_contrast-idle' })
+  store.addTaskMessage('task_contrast-idle', 'event', filename, {kind:'artifact',url:a.url,artifactId:a.id})
+}
 db.close()
 console.log(dir)

@@ -53,7 +53,13 @@ export function computedContrast() {
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT)
   for (let node; (node = walker.nextNode());) {
     const el = node.parentElement
-    if (!node.textContent.trim() || el.closest('script,style,option,.sr-only,[aria-hidden=true]')) continue
+    if (!node.textContent.trim() || el.closest('script,style,option,.sr-only')) continue
+    // aria-hidden only affects assistive technology; visible words still need contrast.
+    // Punctuation separators are decorative, with meaning supplied by adjacent labels.
+    if (el.closest('[aria-hidden=true]') && /^[\s·•|/›‹»«—–,.:;()[\]]+$/.test(node.textContent)) {
+      exempt.push({...describe(el),kind:'decorative-separator',reason:'Separator beside readable labels; carries no information on its own.'})
+      continue
+    }
     const range = document.createRange(); range.selectNodeContents(node)
     if (![...range.getClientRects()].some((r) => visible(el, r))) continue
     const s = getComputedStyle(el), large = parseFloat(s.fontSize) >= 24 || (parseFloat(s.fontSize) >= 18.6667 && Number(s.fontWeight) >= 700)
@@ -62,11 +68,14 @@ export function computedContrast() {
   for (const el of scope.querySelectorAll('input:not([type=checkbox]):not([type=radio]),textarea,select')) {
     if (!visible(el, el.getBoundingClientRect())) continue
     const s = getComputedStyle(el)
-    measure(el, s.color, 4.5, 'value')
+    const mirror = el.closest('[data-composer-box]')?.querySelector('[data-testid=composer-tags]')
+    // Tagged drafts use a transparent textarea over real, measured DOM text.
+    if (colour(s.color)[3] === 0 && mirror?.textContent === el.value) manual.push({ ...describe(el), kind: 'mirrored-value', reason: 'Visible composer mirror measured separately; review overlap/selection visually.' })
+    else measure(el, s.color, 4.5, 'value')
     if (el.placeholder && !el.value) measure(el, getComputedStyle(el, '::placeholder').color, 4.5, 'placeholder')
     // A text field needs a discernible boundary even when empty. The transparent composer
     // textarea delegates that boundary to its enclosing box.
-    const border = parseFloat(s.borderTopWidth) ? el : el.closest('[data-composer-box]')
+    const border = parseFloat(s.borderTopWidth) ? el : el.closest('[data-composer-box],[data-control-boundary]')
     if (border) {
       const bs = getComputedStyle(border)
       measure(border, bs.borderTopColor, 3, 'field-boundary')
@@ -80,7 +89,33 @@ export function computedContrast() {
   for (const el of scope.querySelectorAll('svg')) {
     if (!visible(el, el.getBoundingClientRect())) continue
     const control = el.closest('button,a,[role=button]'), text = control?.textContent.trim()
-    if ((control && !text) || el.closest('[data-testid=task-status-icon],[data-pr-state]')) measure(el, getComputedStyle(el).color, 3, 'icon')
+    if ((control && !text) || el.closest('[data-testid=task-status-icon],[data-testid=agent-icon],[data-pr-state]')) measure(el, getComputedStyle(el).color, 3, 'icon')
+  }
+  for (const el of scope.querySelectorAll('[data-cue]')) {
+    if (!visible(el, el.getBoundingClientRect())) continue
+    const s = getComputedStyle(el), styles = [{backgroundColor:s.getPropertyValue('--tw-ring-color') || 'transparent',opacity:s.opacity}, ...chain(el.parentElement)]
+    const fg = paint(styles, colour(s.backgroundColor)), bg = paint(styles)
+    measurements.push({...describe(el),kind:'status-dot',minimum:3,ratio:ratio(fg,bg),fg:fg.slice(0,3),bg:bg.slice(0,3)})
+  }
+  for (const el of scope.querySelectorAll('[role=switch] > span.rounded-full')) {
+    if (!visible(el, el.getBoundingClientRect())) continue
+    measure(el, getComputedStyle(el.firstElementChild).backgroundColor, 3, 'switch-thumb')
+  }
+  for (const el of scope.querySelectorAll('[data-series]')) {
+    if (!visible(el, el.getBoundingClientRect())) continue
+    measure(el.parentElement, getComputedStyle(el).backgroundColor, 3, 'chart-fill')
+  }
+  const active = document.activeElement
+  if ((active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && active.selectionStart !== active.selectionEnd && visible(active, active.getBoundingClientRect())) {
+    const s = getComputedStyle(active, '::selection'), styles = chain(active)
+    const selection = { backgroundColor: s.backgroundColor, opacity: '1' }
+    const fg = paint([selection, ...styles], colour(s.color)), bg = paint([selection, ...styles])
+    measurements.push({ ...describe(active), kind: 'selected-text', minimum: 4.5, ratio: ratio(fg, bg), fg: fg.slice(0,3), bg: bg.slice(0,3) })
+  }
+  if (scope.contains(active) && active.matches(':focus-visible') && visible(active, active.getBoundingClientRect())) {
+    const s = getComputedStyle(active), outside = chain(active.parentElement)
+    const fg = paint(outside, colour(s.outlineColor)), bg = paint(outside)
+    measurements.push({ ...describe(active), kind: 'focus-outline', minimum: 3, ratio: s.outlineStyle === 'none' || parseFloat(s.outlineWidth) === 0 ? 0 : ratio(fg, bg), fg: fg.slice(0,3), bg: bg.slice(0,3) })
   }
   return { measurements, failures: measurements.filter((m) => m.ratio < m.minimum), manual, exempt }
 }

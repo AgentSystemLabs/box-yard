@@ -61,3 +61,7 @@ Captain setup payload (configuration only, not an instruction to create it now):
 ```
 
 No special runner deployment or server restart is part of this change. The running server must eventually load the merged capability before the Captain can use its new MCP argument; that operational step belongs to the live service owner.
+
+## Browser contrast regression checks
+
+`npm run test:contrast`, `npm run test:contrast:interactions` and `npm run test:contrast:components` inspect actual rendered styles and run axe in Chromium. They are explicit browser jobs, separate from Vitest's fast/slow inventory and the normal merge gate. Install Chromium with `npx playwright-core install chromium` first. Run them sequentially against a new disposable fixture yard, never a real store. The [contrast audit](audits/contrast-2026-11.md) records setup, coverage, ratios and manual review requirements. A zero exit status still requires review of image/gradient/backdrop and axe incomplete evidence.
