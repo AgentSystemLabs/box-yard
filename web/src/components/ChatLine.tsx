@@ -326,7 +326,7 @@ export function NoticeCard({ taskId, className, children }: { taskId: string; cl
       onClick={open}
       onAuxClick={open}
       onKeyDown={open}
-      className={cx(NOTICE_CLASS, "cursor-pointer hover:opacity-90 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none", className)}
+      className={cx(NOTICE_CLASS, "cursor-pointer hover:bg-zinc-800/40 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none", className)}
     >
       {children}
     </div>
