@@ -235,9 +235,9 @@ export interface TaskRow {
   priority?: string | null
   /** 1: never moved to done when its PR merges (server/mergeFollowUp.ts). */
   stay_open_on_merge?: number
-  /** The task whose agent started this one with spawn_subtasks (server/subtasks.ts); null for a top-level task. */
   /** Immutable physical environment inherited by descendants; server policy only, never TaskPatch. */
   environment_type?: string | null
+  /** The task whose agent started this one with spawn_subtasks (server/subtasks.ts); null for a top-level task. */
   parent_task_id?: string | null
   /** The top of its sub-task tree; null for a top-level task. */
   root_task_id?: string | null

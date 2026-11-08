@@ -23,7 +23,10 @@ export class TaskEnvironment {
   }
 
   physical(boxId: string): EnvironmentType {
-    const actual = environmentType(providerOf(this.provider, boxId).name)
+    let name: string
+    try { name = providerOf(this.provider, boxId).name }
+    catch { this.reject("cannot resolve an authoritative physical provider for the placement.") }
+    const actual = environmentType(name)
     const recorded = this.store.getBox(boxId)?.provider
     if (!actual || (recorded && recorded !== actual)) this.reject("cannot determine an authoritative physical provider for the placement.")
     return actual
@@ -68,7 +71,7 @@ export class TaskEnvironment {
   /** Walk parent links, checking the complete lineage rather than trusting root_task_id or depth alone. */
   inherited(row: TaskRow): EnvironmentType | null {
     if (!row.parent_task_id) {
-      if (row.root_task_id || row.subtask_depth) this.reject("incomplete parent lineage; placement is blocked.")
+      if (row.root_task_id || row.subtask_depth || row.with_parent || row.source?.startsWith("agent:")) this.reject("incomplete parent lineage; placement is blocked.")
       return null
     }
     const chain: TaskRow[] = []
@@ -82,7 +85,7 @@ export class TaskEnvironment {
       if (!parent || parent.project_id !== row.project_id) this.reject("missing or cross-project parent lineage; placement is blocked.")
       current = parent
     }
-    if (seen.has(current.id) || current.root_task_id || current.subtask_depth) this.reject("invalid root lineage; placement is blocked.")
+    if (seen.has(current.id) || current.root_task_id || current.subtask_depth || current.with_parent || current.source?.startsWith("agent:")) this.reject("invalid root lineage; placement is blocked.")
     const type = this.original(current)
     for (const [i, child] of chain.reverse().entries()) {
       if (child.root_task_id !== current.id || child.subtask_depth !== i + 1) this.reject("inconsistent root or depth in parent lineage; placement is blocked.")

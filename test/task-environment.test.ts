@@ -83,6 +83,16 @@ describe("immutable physical task environments", () => {
     expect(() => f.policy.physical("first")).toThrow(/authoritative physical provider/)
   })
 
+  it("does not treat a descendant with lost parent links as a top-level exemption", () => {
+    const f = fixture()
+    f.store.db.prepare("UPDATE tasks SET with_parent = 1 WHERE id = ?").run(f.root.id)
+    expect(() => f.policy.inherited(f.row())).toThrow(/incomplete parent lineage/)
+    f.store.db.prepare("UPDATE tasks SET with_parent = 0, source = 'agent:task_example' WHERE id = ?").run(f.root.id)
+    expect(() => f.policy.inherited(f.row())).toThrow(/incomplete parent lineage/)
+    const unavailable = new TaskEnvironment(f.store, { name: "upstash", of: () => { throw new Error("provider unavailable") } } as unknown as BoxProvider)
+    expect(() => unavailable.physical("example-target")).toThrow(/cannot resolve an authoritative physical provider/)
+  })
+
   it("migrates existing rows without inventing origins, then pins a verifiable legacy lineage", () => {
     const db = new Database(":memory:")
     migrate(db, MIGRATIONS.findIndex(m => m.includes("ALTER TABLE tasks ADD COLUMN environment_type")))
