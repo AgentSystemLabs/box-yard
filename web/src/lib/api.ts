@@ -1,10 +1,12 @@
 import type { Attachment } from "../../../shared/types"
+import type { ValidationField } from "../../../shared/identityValidation"
 import { takeEarly } from "./boot"
 
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly fields?: ValidationField[],
   ) {
     super(message)
   }
@@ -44,7 +46,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   if (!res.ok) {
     const message = (data as { error?: string } | null)?.error ?? `Request failed (${res.status})`
     if (res.status === 401) window.dispatchEvent(new Event("box-yard:unauthorized"))
-    throw new ApiError(message, res.status)
+    throw new ApiError(message, res.status, (data as { fields?: ValidationField[] } | null)?.fields)
   }
   return data as T
 }
