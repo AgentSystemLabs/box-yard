@@ -158,10 +158,18 @@ body {
 ::placeholder { color: var(--color-zinc-600); opacity: 1; }
 
 /* A solid indicator supplements the many translucent focus rings. The offset separates it
-   from gold primary actions; both themes meet 3:1 on the adjacent app surfaces. */
+   from gold primary actions; both themes meet 3:1 on the adjacent app surfaces.
+   Text focus outlines the whole rounded composer, including its attachments and toolbar.
+   Scope :has() to the text row's direct child so transcript updates don't affect this match. */
+[data-composer-box]:has(> div > [data-chat-composer]:focus),
 :where(button, a, input, textarea, select, [tabindex]):focus-visible {
   outline: 2px solid var(--focus-ink);
   outline-offset: 2px;
+}
+
+/* The box supplies the textarea's indicator. Other composer controls keep their own outlines. */
+[data-composer-box] > div > [data-chat-composer]:focus {
+  outline: none;
 }
 
 /* Keep WORKING_PULSE timing and reduced-motion behavior. A 50% trough washed out
