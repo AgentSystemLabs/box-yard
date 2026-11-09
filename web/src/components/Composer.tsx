@@ -583,7 +583,7 @@ export function Composer({
             // Reserve the same inset for text and its history ghost; the icon never covers either.
             className={cx(
               textMetrics,
-              "scroll-thin block w-full resize-none overflow-y-hidden bg-transparent placeholder:text-zinc-600 placeholder-shown:truncate focus:outline-none",
+              "scroll-thin block w-full resize-none overflow-y-hidden bg-transparent placeholder:text-zinc-600 placeholder-shown:truncate",
               // Over the tags' layer, which draws the text; the caret, the selection and the IME's marks stay its own.
               tinted ? "relative text-transparent caret-zinc-100 forced-colors:text-[color:CanvasText]" : "text-zinc-100",
             )}
