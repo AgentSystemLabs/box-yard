@@ -110,6 +110,10 @@ export function workerSystemPrompt(input: {
   }
   const box = input.box ? boxLines(input.box, input.ownerName) : []
   if (box.length) lines.push(``, ...box)
+  if (input.agent === "cursor") lines.push(
+    ``,
+    `If asked to verify your model, distinguish the saved request, the launched --model, and the CLI's reported init label/context. Request only model-specific turn.json fields or runner.log "Cursor launch" / "Cursor model" lines from your Captain. Your self-identification, a separate cursor-agent models current/default marker, and global cli-config.json do not prove this session's model. Never dump full argv/env/config/logs, change global Cursor config, or invent model/context suffixes.`,
+  )
   lines.push(
     ``,
     `Your conversation is resumed on every new message, so you keep your context. Keep your final message of each turn short: what you did, and what (if anything) you need.`,
