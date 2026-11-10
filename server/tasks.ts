@@ -773,7 +773,7 @@ export class TaskManager {
   readonly identities: Identities
   /** The Claude and Codex logins turns rotate over (docs/logins.md), or null when this server has none to rotate. */
   readonly logins: AgentLogins | null
-  /** Cursor's models as `cursor-agent models` lists them (Settings › Box agents, and which ids a Cursor task may pass). */
+  /** Cursor's server-side discovery list (Settings › Box agents and inherited routing). Explicit task pins bypass it. */
   readonly cursorModels: CursorModels
   /**
    * External MCP connectors (docs/connectors.md): the ones an agent's turn gets, and the box wall's key for a project's
@@ -6434,15 +6434,16 @@ export class TaskManager {
       sources: opencode ? { agentModel: sources.agentOpencodeModel, agentEffort: "default" } : codex ? { agentModel: sources.agentCodexModel, agentEffort: sources.agentCodexEffort } : cursor ? { agentModel: sources.agentCursorModel, agentEffort: sources.agentEffort } : sources,
       builtinEffort: codex ? DEFAULT_CODEX_EFFORT : DEFAULT_EFFORT,
     })
-    // Cursor's model ids carry their effort (…-high), and a route's Claude alias or Codex name isn't one of them: it
-    // gives way to Settings' Cursor model, as does the built-in Claude default. Cursor has no separate effort.
     if (opencode) {
       const model = route.modelFrom === "builtin" ? s.agentOpencodeModel || null : route.model || null
       if (model && !isOpenCodeModel(model)) throw new BadRequestError(`OpenCode cannot run model ${model}. Use provider/model or provider/model#variant in the task, routing or Settings.`)
       return { model, effort: null, autocompact: null, route }
     }
     if (cursor) {
-      const model = cursorModel(route.modelFrom === "builtin" ? null : route.model, s.agentCursorModel, (id) => this.cursorModels.has(id))
+      // A task pin is an exact CLI request, even when the server's cached catalog doesn't know it. Only inherited
+      // routes may give way to Settings (e.g. a shared Claude alias). The runner CLI accepts or rejects the pin;
+      // replacing it here would silently run another model on both first and resumed turns.
+      const model = route.modelFrom === "task" ? route.model : cursorModel(route.modelFrom === "builtin" ? null : route.model, s.agentCursorModel, (id) => this.cursorModels.has(id))
       return { model, effort: null, autocompact: autocompactFlag(s.agentAutoCompact, row.context_window), route }
     }
     // Codex runs OpenAI models: a Claude model from Settings, routing or the built-in default gives way to the Codex model.

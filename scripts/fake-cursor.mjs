@@ -48,6 +48,8 @@ const FAKE_MODELS = [
   ["gemini-4-argon-high", "Gemini 4 Argon High"],
   ["grok-4.7-high", "Grok 4.7 High"],
   ["kimi-k3-high", "Kimi K3 High"],
+  // Synthetic runner-only entry: deliberately absent from Box Yard's server snapshot.
+  ["claude-example-1-high", "Example Claude 1 1M High"],
 ]
 
 if (argv[0] === "models" || argv.includes("--list-models")) {

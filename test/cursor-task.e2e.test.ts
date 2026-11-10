@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import fs from "node:fs"
 import path from "node:path"
 import { execFileSync } from "node:child_process"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import type { Server } from "node:http"
 import { createBoxYard, type BoxYard } from "../server/app.js"
 import type { Project, Task, TaskMessage } from "../shared/types.js"
 import { CURSOR_BOXYARD_SERVER, cursorAgentArgs } from "../server/cursor.js"
+import { buildMcpServer } from "../server/mcp.js"
 import { freePort, testConfig, tmpDir, waitFor } from "./helpers.js"
 
 // Task agents on Cursor's CLI (docs/cursor.md), through runner/box-runner.mjs and scripts/fake-cursor.mjs: the CLI a
@@ -66,6 +69,54 @@ const usage = (r: Running, id: string) =>
 const said = async (r: Running, id: string, role: string) => (await r.call<TaskMessage[]>("GET", `/api/tasks/${id}/messages`)).filter((m) => m.role === role).map((m) => m.content)
 
 describe("task agents on Cursor", () => {
+  it("preserves an unlisted pin through creation, rejection and a corrected resumed turn", async () => {
+    const r = await start()
+    const model = "claude-example-1-high"
+    // The runner has a model the server's cold snapshot does not. Discovery must not gate an explicit pin.
+    expect(r.yard.tasks.cursorModels.has(model)).toBe(false)
+    const p = await r.call<Project>("POST", "/api/projects", { name: "example", agentCli: "cursor" })
+    const t = await r.call<Task>("POST", "/api/tasks", { projectId: p.id, title: "Example", prompt: "Say hi", agentCli: "cursor", model })
+    const first = await resting(r, t.id)
+    expect(first.status).toBe("idle")
+    expect(runs()[0]).toMatchObject({ model, resume: first.sessionId, existing: false })
+
+    const mcp = buildMcpServer({ store: r.yard.store, tasks: r.yard.tasks, hub: r.yard.hub, artifacts: null as never, uploads: null as never, publicUrl: () => "", settings: r.yard.settings, identities: r.yard.identities }, { kind: "captain", projectId: p.id })
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    await mcp.connect(a)
+    const client = new Client({ name: "cursor-model-test", version: "0" })
+    await client.connect(b)
+    try {
+      const send = (pin: string) => client.callTool({ name: "send_to_task", arguments: { task: t.id, message: "Say hi again", model: pin } })
+      // An unsupported exact request must fail in the CLI, never launch Auto or guess another suffix.
+      expect((await send(`${model}-1m`)).isError).not.toBe(true)
+      const rejected = await resting(r, t.id)
+      expect(rejected.status).toBe("failed")
+      expect(rejected.error).toContain(`Cannot use this model: ${model}-1m`)
+      expect(rejected.model).toBe(`${model}-1m`)
+
+      expect((await send(model)).isError).not.toBe(true)
+      const corrected = await resting(r, t.id)
+      expect(corrected).toMatchObject({ status: "idle", model, effort: null, turnCount: 3, sessionId: first.sessionId })
+      expect(runs()).toHaveLength(2)
+      expect(runs()[1]).toMatchObject({ model, resume: first.sessionId, existing: true })
+      const dir = r.yard.tasks.taskDir(corrected.boxId!, t.id)
+      expect(JSON.parse(fs.readFileSync(path.join(dir, "turn.json"), "utf8"))).toMatchObject({ model, effort: null, resume: true, sessionId: first.sessionId })
+      expect(runs()[1].args).toEqual(cursorAgentArgs({ model, sessionId: first.sessionId!, pluginDir: path.join(dir, "cursor-plugin", "boxyard") }))
+      expect(r.yard.store.listTaskTurns(t.id).map((turn) => turn.model)).toEqual([model, `${model}-1m`, model])
+      expect(corrected.contextWindow).toBe(1_000_000)
+      // Safe, per-attempt evidence keeps argv's request separate from the CLI's reported label/context.
+      const log = fs.readFileSync(path.join(dir, "runner.log"), "utf8")
+      const evidence = (kind: string) => log.split("\n").filter((line) => line.startsWith(`[box-yard] Cursor ${kind} `)).map((line) => JSON.parse(line.slice(`[box-yard] Cursor ${kind} `.length)))
+      const launches = evidence("launch")
+      expect(launches.map((entry) => entry.requestedModel)).toEqual([model, `${model}-1m`, model])
+      expect(launches[2]).toEqual({ turnId: r.yard.store.listTaskTurns(t.id)[2]!.id, pid: expect.any(Number), requestedModel: model, sessionId: first.sessionId, resume: true })
+      expect(evidence("model")).toEqual([0, 2].map((i) => ({ turnId: launches[i].turnId, sessionId: first.sessionId, reportedModel: "Example Claude 1 1M High", contextWindow: 1_000_000 })))
+    } finally {
+      await client.close()
+      await mcp.close()
+    }
+  })
+
   it("run cursor-agent with Box Yard's tools as a plugin; the next turn resumes the chat without the instructions again", async () => {
     const r = await start()
     const p = await r.call<Project>("POST", "/api/projects", { name: "cu", agentCli: "cursor" })
