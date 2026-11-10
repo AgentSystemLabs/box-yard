@@ -1572,6 +1572,10 @@ function runCursor({ turn, sessionId, resume, prompt }) {
       return
     }
     activeChild = child
+    // Model-only launch evidence, written after a successful spawn. Never log full argv, prompts, env or config.
+    child.once("spawn", () => {
+      process.stderr.write(`[box-yard] Cursor launch ${JSON.stringify({ turnId: turn.turnId, pid: child.pid, requestedModel: model, sessionId, resume: Boolean(resume) })}\n`)
+    })
     let result = null
     let reply = ""
     let usage = null
@@ -1598,6 +1602,7 @@ function runCursor({ turn, sessionId, resume, prompt }) {
         const m = /\b(\d+(?:\.\d+)?)\s*([KM])\b/i.exec(String(ev.model ?? ""))
         const n = m ? Number(m[1]) * (m[2].toUpperCase() === "M" ? 1_000_000 : 1_000) : 0
         window = n >= 8_000 ? Math.round(n) : null
+        process.stderr.write(`[box-yard] Cursor model ${JSON.stringify({ turnId: turn.turnId, sessionId, reportedModel: modelLabel ? clip(modelLabel, 200) : null, contextWindow: window })}\n`)
       } else if (ev.type === "assistant" && Array.isArray(ev.message?.content)) {
         for (const block of ev.message.content) {
           if (block?.type !== "text" || !block.text?.trim()) continue

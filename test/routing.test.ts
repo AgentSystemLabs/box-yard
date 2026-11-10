@@ -110,6 +110,8 @@ describe("routing instructions", () => {
     expect(text).toMatch(/Never copy `projects`, `defaults` or `fallback` into create_task/)
     expect(text).toContain("Settings › Box agents now: model claude-opus-5-5, effort high.")
     expect(text).toContain("model: claude-sonnet-5-5")
+    expect(text).toContain("get_task's model is the saved request, not launch proof")
+    expect(text).toContain("first and resumed turns even when the server's discovery cache lacks the ID")
     expect(routingInstructions(tmpDir(), base)).toMatch(/there are no rules: omit model and effort/)
   })
 

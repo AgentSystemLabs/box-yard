@@ -202,7 +202,7 @@ describe("CursorModels", () => {
 
 describe("a Cursor key", () => {
   it("passes Test when Cursor lists models with it, and says why when it doesn't", async () => {
-    expect(await cursorKeyCheck(FAKE_CURSOR, "crsr_good_0000")).toEqual({ ok: true, text: "9 models available" })
+    expect(await cursorKeyCheck(FAKE_CURSOR, "crsr_good_0000")).toEqual({ ok: true, text: "10 models available" })
     const bad = await cursorKeyCheck(FAKE_CURSOR, "crsr_invalid_0000")
     expect(bad.ok).toBe(false)
     expect(bad.text).toMatch(/The provided API key is invalid/)

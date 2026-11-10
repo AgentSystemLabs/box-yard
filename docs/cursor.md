@@ -33,7 +33,26 @@ Settings › Box agents › Cursor model (shown once Agent is Cursor) lists the 
 - **When the CLI can't run.** If the CLI isn't installed, isn't logged in or is offline, the saved list stands in. With no saved list, a snapshot from November 2026 (`CURSOR_FALLBACK_MODELS` in `shared/agentCli.ts`) does. The source line then shows the CLI's error.
 - **Effort is part of the id.** Cursor's ids carry the effort and speed (`claude-opus-5-5-high`, `gpt-5.6-sol-high-fast`), so there's no separate Effort control for Cursor.
 - **Default.** The default is `auto`, Cursor's own choice per request. An explicitly saved empty choice leaves it to the CLI's default.
-- **How a run's model is picked.** A task's or routing's model is used when it's an id Cursor has: one only Cursor runs, or one in the live list. Otherwise the Cursor model setting stands in, so a route's `opus` or `gpt-6.1-sol` doesn't reach Cursor.
+- **Exact task pins.** A model supplied to `create_task`, `send_to_task` or `set_task_model` is passed unchanged to Cursor on first and resumed turns, even when absent from the server's catalog. The runner's CLI accepts or rejects it; Box Yard does not replace it with Auto or guess a suffix. `continue_task` currently checks a newly supplied Cursor model against the server catalog and rejects unknown IDs before queuing; an omitted model keeps the saved pin.
+- **Inherited routing.** Without a task pin, a routing model is used when it is Cursor-only or appears in the server's held catalog. Otherwise Settings' Cursor model stands in, so a shared route's `opus` or `gpt-6.1-sol` doesn't reach Cursor. Settings' Cursor model itself is passed through; an empty setting omits `--model`.
+- **Context is separate evidence.** Use the exact ID and label from the relevant CLI's catalog when selecting a variant. Never append `-1m`, `-high` or another suffix by guesswork. Box Yard has no separate Cursor context-selection flag; its context meter reads a window stated in the CLI's session-init label. A catalog label describes an offered model, not what a running task used.
+
+### Tracing and verifying a launch
+
+Keep requested settings, launch evidence and CLI reporting distinct:
+
+| Stage | Evidence | Meaning |
+| --- | --- | --- |
+| UI selection | The selected option's `id`; labels are displayed separately | Settings/New task and the `!cursor` picker keep the catalog ID, including its variant suffixes |
+| Task creation | Explicit `agent`, otherwise model's harness, then project, then Settings | Claude/GPT-shaped IDs need explicit `agent: "cursor"` to select Cursor |
+| Saved request | Task `model` in `get_task`; creation/model-update inputs | The task's pin for subsequent turns, not confirmation of the current launch |
+| Per-turn resolution | `task_turns.model`, or only `model`, `effort`, `resume`, `sessionId`, `turnId` from that task's `turn.json` | The resolved request; Cursor effort is null and resume does not remove the model argument |
+| Spawn | `[box-yard] Cursor launch` JSON in that task's `runner.log` | After a successful spawn: turn ID, PID, requested model, session ID and whether this attempt resumed |
+| CLI session init | `[box-yard] Cursor model` JSON in that task's `runner.log` | The CLI's reported model label and any context window stated in it, correlated by turn/session |
+
+Extract only these model-specific fields or lines. Never dump full argv, environment, configs, session transcripts or runner logs. The launch record proves what Box Yard passed to the CLI; the init label is what the CLI reported, not independent provider attestation. `auto` may choose per request, so an Auto label does not identify an underlying provider model. A missing init label/window leaves that part unverified.
+
+A separate `cursor-agent models` invocation (including its `(current)` / `(default)` markers), global `cli-config.json`, and an agent's self-identification do not establish a running session's model. The server discovery profile, runner profile, account and cached-list age may differ. Do not change global Cursor config to verify or repair a task. On builds without the model-only log lines, request narrowly filtered launch args/session model metadata through the task's Captain; cross-project evidence goes through the Coordinator.
 
 ## How a Cursor agent runs
 

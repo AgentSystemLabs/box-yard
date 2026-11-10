@@ -158,9 +158,10 @@ export function cursorModelVendor(id: string): string {
 }
 
 /**
- * The model a Cursor run passes to `cursor-agent --model`: `chosen` (a task's or the route's) when Cursor runs it (a
+ * The model an inherited Cursor route passes to `cursor-agent --model`: `chosen` when Cursor runs it (a
  * name only Cursor has, or one in its live list `known`), else the Cursor model setting. A route's Claude alias (opus)
- * or Codex name (gpt-6.1-sol) isn't a Cursor id, so it gives way. An explicitly saved empty setting keeps the CLI's default.
+ * or Codex name (gpt-6.1-sol) isn't a Cursor id, so it gives way. Explicit task pins bypass this compatibility fallback
+ * (the runner CLI validates them). An explicitly saved empty setting keeps the CLI's default.
  */
 export function cursorModel(chosen: string | null | undefined, setting: string | null | undefined, known?: (id: string) => boolean): string | null {
   const c = chosen?.trim()
