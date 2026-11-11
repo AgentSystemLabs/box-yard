@@ -7,7 +7,7 @@ import { ProjectSettingsHost } from "../web/src/components/ProjectSettingsDialog
 import { ProjectAvatar } from "../web/src/components/TaskIcon.js"
 import { warmLazyParts } from "../web/src/components/LazyPart.js"
 import { keys } from "../web/src/lib/queries.js"
-import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
+import { currentConfirm } from "../web/src/lib/confirm.js"
 import { DEFAULT_SETTINGS } from "../server/settings.js"
 import { DEFAULT_IDENTITY_ID, type Identity } from "../shared/identities"
 import { PROJECT_ICON_MAX_BYTES } from "../shared/projectIcons"
@@ -152,10 +152,10 @@ describe("Project settings › General › Icon", () => {
     expect(requests.filter((r) => r.method !== "GET")).toEqual([])
 
     await submit()
-    // Only the icon changed: one PUT of the file itself, no PATCH, and the dialog closes.
+    // Only the icon changed: one PUT of the file itself, no PATCH, and the dialog says Saved.
     expect(requests.filter((r) => r.method !== "GET")).toEqual([{ method: "PUT", url: "/api/projects/prj_app/icon", body: file, type: "application/octet-stream" }])
     expect(qc.getQueryData<Project[]>(keys.projects)![0]!.iconUrl).toBe(ICON_URL)
-    expect(dialog()).toBeNull()
+    expect($("project-settings-saved")!.textContent).toContain("Saved")
   })
 
   it("sends the icon before the rest of the form when both changed", async () => {
@@ -171,7 +171,7 @@ describe("Project settings › General › Icon", () => {
     const sent = requests.filter((r) => r.method !== "GET")
     expect(sent.map((r) => `${r.method} ${r.url}`)).toEqual(["PUT /api/projects/prj_app/icon", "PATCH /api/projects/prj_app"])
     expect((sent[1]!.body as { name: string }).name).toBe("app two")
-    expect(dialog()).toBeNull()
+    expect($("project-settings-saved")!.textContent).toContain("Saved")
   })
 
   it("refuses a file that isn't an image, or is over 1 MB, where it was picked, and keeps what it had", () => {
@@ -210,7 +210,7 @@ describe("Project settings › General › Icon", () => {
     putAnswer = () => json({ ...PROJECT, iconUrl: ICON_URL })
     await submit()
     expect(requests.filter((r) => r.method === "PUT")).toHaveLength(2)
-    expect(dialog()).toBeNull()
+    expect($("project-settings-saved")!.textContent).toContain("Saved")
   })
 
   it("Remove goes back to the letter, and Save takes the icon off", async () => {
@@ -235,15 +235,18 @@ describe("Project settings › General › Icon", () => {
     expect(unsavedDot()).toBeNull()
   })
 
-  it("Cancel drops the pick: nothing is sent and the preview's file is let go", async () => {
+  it("Discard drops the pick: nothing is sent and the preview's file is let go", async () => {
     render()
     pick(png())
-    const cancel = [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Cancel")!
-    click(cancel)
+    // One change: Discard drops it without asking, and the form starts over from the saved project.
+    const discard = [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Discard")!
+    click(discard)
     await settle()
-    const ask = currentConfirm()!
-    expect(ask.title).toBe("Discard unsaved changes?")
-    act(() => settleConfirm(ask.id, true))
+    expect(currentConfirm()).toBeFalsy()
+    expect(preview()).toBeNull()
+    expect(letter()).not.toBeNull()
+    const close = [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Close")!
+    click(close)
     await settle()
     expect(dialog()).toBeNull()
     expect(requests.filter((r) => r.method !== "GET")).toEqual([])

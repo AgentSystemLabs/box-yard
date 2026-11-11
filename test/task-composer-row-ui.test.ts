@@ -62,14 +62,15 @@ async function press(el: HTMLElement) {
 describe("the task box's row", () => {
   it("a working task's two chips fold into More below the width that fits them with Stop, and are labelled only from where the labels fit", () => {
     box(task({ status: "working", pendingCount: 1 }))
-    // Mic, Send, Stop, Side question, Captain and Attach: six 44px buttons need an 18.5rem box (a 320px phone's is 18.4).
-    expect(chips().className).toContain("@max-[18.5rem]/composer:hidden")
-    expect(byTestId("composer-more")!.className).toContain("@min-[21.5rem]/composer:hidden")
-    // Attach and Send to fold together first, leaving the Captain/Side question thresholds unchanged.
-    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[21.5rem]/composer:hidden")
-    // With their labels the chips are wider: they show from 32rem, the row with Expand's place kept for long text.
-    expect(label("task-ask-toggle").className).toBe("@max-[32rem]/composer:sr-only")
-    expect(label("captain-target").className).toBe("@max-[32rem]/composer:sr-only")
+    // Mic, Stop, Send, Side question, Captain and More: six 44px buttons need a 17.75rem box (a 320px phone's is 17.875).
+    expect(chips().className).toContain("@max-[17.75rem]/composer:hidden")
+    // Send to folds with the Captain chip (never alone), so More shows from there.
+    expect(byTestId("composer-more")!.className).toContain("@min-[25rem]/composer:hidden")
+    // Attach, a phone's most used, folds last: Mic, Stop, Send, More and Attach need 15rem.
+    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[15rem]/composer:hidden")
+    // With their labels the chips are wider: Captain's label goes first, then Side question's.
+    expect(label("task-ask-toggle").className).toBe("@max-[22.25rem]/composer:sr-only")
+    expect(label("captain-target").className).toBe("@max-[27.5rem]/composer:sr-only")
     // Send and Stop never fold.
     expect(document.querySelector('button[type="submit"]')!.className).not.toMatch(/composer:hidden/)
   })
@@ -77,19 +78,19 @@ describe("the task box's row", () => {
   it("an idle task keeps both chips: with no Stop they're labelled sooner, and fold later", () => {
     box(task())
     expect(byTestId("captain-target")).not.toBeNull()
-    expect(label("task-ask-toggle").className).toBe("@max-[29rem]/composer:sr-only")
-    expect(label("captain-target").className).toBe("@max-[29rem]/composer:sr-only")
-    // With Attach and Send to in More, Mic, Send, More and the two chips fit down to 15.5rem.
-    expect(chips().className).toContain("@max-[15.5rem]/composer:hidden")
-    expect(byTestId("composer-more")!.className).toContain("@min-[18.5rem]/composer:hidden")
-    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[18.5rem]/composer:hidden")
+    expect(label("task-ask-toggle").className).toBe("@max-[19rem]/composer:sr-only")
+    expect(label("captain-target").className).toBe("@max-[24.25rem]/composer:sr-only")
+    // With Send to in More, Mic, Send, More, Attach and the two chips fit down to 14.5rem.
+    expect(chips().className).toContain("@max-[14.5rem]/composer:hidden")
+    expect(byTestId("composer-more")!.className).toContain("@min-[21.75rem]/composer:hidden")
+    expect(document.querySelector('button[title="Attach files"]')!.className).toContain("@max-[11.75rem]/composer:hidden")
   })
 
   it("an idle task's folded Captain line says what it does, as a working task's does", async () => {
     box(task())
     await press(byTestId("composer-more")!)
     expect(byTestId("more-captain-target")!.textContent).toContain("Send to the demo Captain")
-    expect(byTestId("more-captain-target")!.parentElement!.className).toContain("@min-[15.5rem]/composer:hidden")
+    expect(byTestId("more-captain-target")!.parentElement!.className).toContain("@min-[21.75rem]/composer:hidden")
   })
 
   it("with Side question on, the box has neither the Captain chip nor its More line", () => {
@@ -107,11 +108,11 @@ describe("the task box's row", () => {
     expect(captain.getAttribute("aria-pressed")).toBe("false")
     expect(byTestId("more-task-ask")!.textContent).toContain("Ask the Coordinator aside")
     // The lines show only while their chips are folded: the same width.
-    expect(captain.parentElement!.className).toContain("@min-[18.5rem]/composer:hidden")
+    expect(captain.parentElement!.className).toContain("@min-[25rem]/composer:hidden")
     await press(captain)
     expect(byTestId("composer-more-menu")).toBeNull()
     expect(document.activeElement).toBe(textarea())
-    expect(textarea().placeholder).toContain("Ask the demo Captain")
+    expect(textarea().placeholder).toBe("Message the Captain…")
     expect(byTestId("captain-forward-note")).not.toBeNull()
     await press(byTestId("composer-more")!)
     expect(byTestId("more-captain-target")!.getAttribute("aria-pressed")).toBe("true")
@@ -134,23 +135,23 @@ describe("the task box's row", () => {
   it("a new answer, or one on its way, shows on More while the chip is folded, and its line says so", async () => {
     box(task({ status: "working", pendingCount: 1 }), { ...IDLE_ASK, unread: true })
     const more = byTestId("composer-more")!
-    expect(more.getAttribute("aria-label")).toBe("More (A new answer)")
+    expect(more.getAttribute("aria-label")).toBe("More actions (A new answer)")
     const dot = byTestId("composer-more-dot")!
     expect(dot.className).toContain("bg-yard-400")
     // Only while the chip (with its own dot) is in the menu.
-    expect(dot.className).toContain("@min-[18.5rem]/composer:hidden")
+    expect(dot.className).toContain("@min-[17.75rem]/composer:hidden")
     await press(more)
     expect(byTestId("more-task-ask")!.textContent).toContain("A new answer")
     act(() => root.unmount())
     root = createRoot(host)
     box(task({ status: "working", pendingCount: 1 }), { ...IDLE_ASK, busy: true })
-    expect(byTestId("composer-more")!.getAttribute("aria-label")).toBe("More (An answer is on its way)")
+    expect(byTestId("composer-more")!.getAttribute("aria-label")).toBe("More actions (An answer is on its way)")
     expect(byTestId("composer-more-dot")!.className).toContain("bg-sky-400")
   })
 
   it("no dot on More while the answer's been read, or while the box is on the side question", () => {
     box(task({ status: "working", pendingCount: 1 }))
-    expect(byTestId("composer-more")!.getAttribute("aria-label")).toBe("More")
+    expect(byTestId("composer-more")!.getAttribute("aria-label")).toBe("More actions")
     expect(byTestId("composer-more-dot")).toBeNull()
     act(() => root.unmount())
     root = createRoot(host)

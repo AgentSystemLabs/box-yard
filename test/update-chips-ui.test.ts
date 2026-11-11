@@ -98,8 +98,8 @@ describe("update chips", () => {
     const body = $('[data-testid="update-chip-body"]')!
     expect(body.querySelector("strong")?.textContent).toBe("the request")
     expect(body.textContent).not.toContain("Captain for box-yard replied")
-    // The chip has the message toolbar's one action: Reply.
-    expect([...chip.querySelectorAll("[data-message-actions] button")].map((b) => (b as HTMLElement).dataset.testid)).toEqual(["message-reply"])
+    // The chip has the message toolbar: Reply and Copy.
+    expect([...chip.querySelectorAll("[data-message-actions] button")].map((b) => (b as HTMLElement).dataset.testid)).toEqual(["message-reply", "message-copy"])
     click(line)
     expect($('[data-testid="update-chip-body"]')).not.toBeNull()
   })

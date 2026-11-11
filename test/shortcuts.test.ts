@@ -59,7 +59,7 @@ describe("shortcutGroups", () => {
     const ids = rows(groups).map((r) => r.id)
     expect(new Set(ids).size).toBe(ids.length)
     for (const r of rows(groups)) expect(r.keys.length && r.keys.every((c) => c.length > 0)).toBeTruthy()
-    expect(groups.map((g) => g.title)).toEqual(["Anywhere", "Sidebar", "Composer", "Command palette", "File preview", "Settings"])
+    expect(groups.map((g) => g.title)).toEqual(["Anywhere", "Sidebar", "Composer", "Command palette", "New task dialog", "File preview", "Settings"])
   })
 })
 

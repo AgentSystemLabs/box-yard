@@ -62,7 +62,8 @@ function pick(...files: File[]) {
 const settle = () => act(async () => await new Promise((r) => setTimeout(r, 0)))
 const items = () => [...host.querySelectorAll<HTMLElement>("[data-attachment]")]
 const button = (label: string) => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
-const sendButton = () => button("Send")!
+// Send says what holds it ("Uploading files…") while a file uploads.
+const sendButton = () => host.querySelector<HTMLButtonElement>('button[type="submit"]')!
 const problem = () => host.querySelector('[data-testid="upload-problem"]')
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
 function type(text: string) {
@@ -81,6 +82,7 @@ describe("Composer attachments", () => {
     const bar = () => host.querySelector('[role="progressbar"]')
     expect(bar()!.getAttribute("aria-label")).toBe("Uploading shot.png")
     expect(sendButton().disabled).toBe(true)
+    expect(sendButton().getAttribute("aria-label")).toBe("Uploading files…")
     act(() => sent[0]!.progress(42, 100))
     expect(items()[0]!.textContent).toContain("42%")
     expect(bar()!.getAttribute("aria-valuenow")).toBe("42")
@@ -92,6 +94,7 @@ describe("Composer attachments", () => {
     await act(async () => sent[0]!.respond(201, savedShot))
     expect(bar()).toBeNull()
     expect(sendButton().disabled).toBe(false)
+    expect(sendButton().getAttribute("aria-label")).toBe("Send")
     const link = items()[0]!.querySelector("a")!
     expect(link.getAttribute("href")).toBe("/api/uploads/upload_shot01/shot.png")
     click(link)

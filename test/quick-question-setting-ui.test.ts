@@ -70,10 +70,13 @@ describe("Settings › Coordinator › Quick questions", () => {
   it("default to each chat's own model and effort, and offer Haiku", () => {
     render(settingsInfo())
     expect(model().value).toBe("")
-    expect(selectedText(model())).toBe(`Same as its chat (${DEFAULT_SETTINGS.orchestratorModel})`)
+    expect(selectedText(model())).toBe("Same as chat")
+    // Which model "Same as chat" is sits in a hint beside the picker.
+    expect($("quick-question-model-resolved")!.textContent).toBe("Uses Opus 5.5.")
+    expect(DEFAULT_SETTINGS.orchestratorModel).toBe("claude-opus-5-5")
     expect([...model().options].map((o) => o.value)).toContain("claude-haiku-5-5")
     expect(effort().value).toBe("")
-    expect(selectedText(effort())).toBe("Same as its chat (High)")
+    expect(selectedText(effort())).toBe("Same as chat (High)")
     // "Same as its chat" is the only "" option: no "(saved, unverified)" copy of it.
     expect([...effort().options].filter((o) => o.value === "")).toHaveLength(1)
     expect(effort().textContent).not.toContain("unverified")
@@ -82,10 +85,11 @@ describe("Settings › Coordinator › Quick questions", () => {
     expect(effort().className).toContain("min-h-11")
   })
 
-  it("say 'Same as its chat' alone when the Coordinator and the Captains differ", () => {
+  it("say 'Same as chat' alone when the Coordinator and the Captains differ", () => {
     render(settingsInfo({ captainModel: "claude-sonnet-5-5", captainEffort: "medium" }))
-    expect(selectedText(model())).toBe("Same as its chat")
-    expect(selectedText(effort())).toBe("Same as its chat")
+    expect(selectedText(model())).toBe("Same as chat")
+    expect($("quick-question-model-resolved")!.textContent).toBe("Uses Opus 5.5 for the Coordinator, Sonnet 5.5 for Captains.")
+    expect(selectedText(effort())).toBe("Same as chat")
   })
 
   it("are a draft until Save, which sends the model and effort picked", async () => {

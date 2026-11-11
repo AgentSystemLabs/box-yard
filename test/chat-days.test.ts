@@ -58,11 +58,11 @@ describe("chat calendar days", () => {
       notice("five", 5, "💬 **Login** says: Still working."),
     ]
     const summaries = daySummaries(messages, tasks)
-    expect(summaries.get(dayKey(at(4)))).toEqual([{ text: "Started: Login", repo: null }])
-    expect(summaries.get(dayKey(at(5)))).toEqual([{ text: "Finished: Login", repo: null, sourceMessageId: "two" }])
-    expect(summaries.get(dayKey(at(6)))).toEqual([{ text: "PR merged: Login", repo: null }])
-    expect(daySummaries([messages[0]!], []).get(dayKey(at(5)))).toEqual([{ text: "Worked on: Login", repo: null, sourceMessageId: "one" }])
-    expect(daySummaries([messages[2]!], []).get(dayKey(at(5)))).toEqual([{ text: "PR opened: Login · https://github.com/a/b/pull/1", repo: "a/b", sourceMessageId: "three" }])
+    expect(summaries.get(dayKey(at(4)))).toEqual([{ kind: "started", title: "Login", repo: null, taskId: "task_login1", refs: [] }])
+    expect(summaries.get(dayKey(at(5)))).toEqual([{ kind: "finished", title: "Login", repo: null, taskId: "task_login1", refs: [], sourceMessageId: "two" }])
+    expect(summaries.get(dayKey(at(6)))).toEqual([{ kind: "pr_merged", title: "Login", repo: null, taskId: "task_login1", refs: [] }])
+    expect(daySummaries([messages[0]!], []).get(dayKey(at(5)))).toEqual([{ kind: "worked", title: "Login", repo: null, refs: [], sourceMessageId: "one" }])
+    expect(daySummaries([messages[2]!], []).get(dayKey(at(5)))).toEqual([{ kind: "pr_opened", title: "Login", repo: "a/b", refs: ["https://github.com/a/b/pull/1"], sourceMessageId: "three" }])
     expect(daySummaries(messages, [{ ...tasks[0]!, prState: "open" }]).get(dayKey(at(6)))).toBeUndefined()
     expect(daySummaries([], [])).toEqual(new Map())
   })
@@ -75,7 +75,7 @@ describe("chat calendar days", () => {
       notice("other-day", 5),
     ]
     const result = daySummaries(messages, [task])
-    expect(result.get(dayKey(at(6)))).toEqual([{ text: "PR merged: Login", repo: null, sourceMessageId: "finished" }])
+    expect(result.get(dayKey(at(6)))).toEqual([{ kind: "pr_merged", title: "Login", repo: null, taskId: "task_login1", refs: [], sourceMessageId: "finished" }])
     expect(result.get(dayKey(at(4)))![0]!.sourceMessageId).toBeUndefined()
     expect(result.get(dayKey(at(5)))![0]!.sourceMessageId).toBe("other-day")
     expect(daySummaries([], [task]).get(dayKey(at(6)))![0]!.sourceMessageId).toBeUndefined()
@@ -87,7 +87,7 @@ describe("chat calendar days", () => {
     const done = { ...event, id: "done", meta: { kind: "auto_done" } }
     const other = { ...event, id: "other", taskId: "task_other" }
     expect(daySummaries([event, done, other], [task]).get(dayKey(at(6)))).toEqual([
-      { text: "Finished: Login", repo: null, sourceMessageId: "done" },
+      { kind: "finished", title: "Login", repo: null, taskId: "task_login1", refs: [], sourceMessageId: "done" },
     ])
     expect(daySummaries([other], [task]).get(dayKey(at(6)))).toBeUndefined()
   })
