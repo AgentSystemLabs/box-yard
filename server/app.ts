@@ -86,6 +86,7 @@ import { captainStatePath, type BootPath, type BootPayload } from "../shared/boo
 import { projectDockerPatch } from "./docker/settings.js"
 import { prTasks } from "./prTasks.js"
 import { BOX_SIZES, EFFORTS, PROJECT_BOX_LIMITS, type Health } from "../shared/types.js"
+import { serverCliProblems } from "../shared/claudeCli.js"
 import { BOX_ACTORS, BOX_EVENT_TYPES, type BoxActorKind, type BoxEventType } from "../shared/boxHistory.js"
 import { CLOUD_PROVIDERS, MAX_TTS_CHARS } from "../shared/tts.js"
 
@@ -1004,6 +1005,9 @@ export function createBoxYard(
     const coordinatorCli = settings.get().orchestratorCli
     const problems = configProblems({ ...c, ...settings.credentials.values() }, { claudeLogin: setup.localCheck()?.claudeLogin === true, codexLogin: hasOwnCodexLogin(), coordinatorCli })
     if (coordinatorCli === "claude" && !claudeVersion) problems.push(`The claude CLI (${c.claudeBin}) was not found for the Coordinator. Install it: npm i -g @anthropic-ai/claude-code`)
+    // The Coordinator and Captains run on the server's own claude: one too old for their model runs it in a small window.
+    const { orchestratorModel, captainCli, captainModel } = settings.get()
+    problems.push(...serverCliProblems(claudeVersion, [{ who: "the Coordinator's", model: coordinatorCli === "claude" ? orchestratorModel : null }, { who: "Captains'", model: captainCli === "claude" ? captainModel : null }]))
     if (coordinatorCli === "codex" && !codexVersion) problems.push(`The Coordinator runs on Codex, but the codex CLI (${c.codexBin}) was not found. Install it: npm i -g @openai/codex`)
     if (tasks.boxError) problems.push(tasks.boxError)
     return {

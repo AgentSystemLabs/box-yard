@@ -233,7 +233,7 @@ describe("the message toolbar", () => {
     expect(toolbars()).toHaveLength(4)
     const notice = host.querySelector<HTMLElement>("#captain-cap_notice0001")!
     click(notice.querySelector("[data-testid=message-reply]")!)
-    expect(notice.getAttribute("aria-expanded")).toBe("false")
+    expect(notice.querySelector("[aria-expanded]")!.getAttribute("aria-expanded")).toBe("false")
     expect(openThreadId(project.id)).not.toBeNull()
     expect(openThreadId(COORDINATOR_CHAT)).toBeNull()
     // Nothing went to the Captain: the thread sends when Cody writes in it.

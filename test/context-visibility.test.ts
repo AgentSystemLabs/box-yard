@@ -157,26 +157,32 @@ describe("task header", () => {
 })
 
 describe("Captain header", () => {
-  const state = (): CaptainState =>
-    ({ projectId: project.id, busy: false, usage: { tokens: 300_000, window: 1_000_000, updatedAt: 1 }, compacting: false, compactQueued: false, lastCompaction: null, compactionsDir: "", error: null }) as CaptainState
-  const renderCaptain = () => {
+  const state = (tokens = 300_000): CaptainState =>
+    ({ projectId: project.id, busy: false, usage: { tokens, window: 1_000_000, updatedAt: 1 }, compacting: false, compactQueued: false, lastCompaction: null, compactionsDir: "", error: null }) as CaptainState
+  const renderCaptain = (tokens?: number) => {
     qc.setQueryData(keys.captainMessages(project.id), [])
-    qc.setQueryData(keys.captain(project.id), state())
+    qc.setQueryData(keys.captain(project.id), state(tokens))
     qc.setQueryData(keys.captainCompactions(project.id), [])
     render(createElement(CaptainTab, { project }))
   }
   const header = () => host.querySelector("header")!
   // ⋯ opens a sheet portalled to the body, beyond the header's overflow.
+  const more = () => host.querySelector<HTMLButtonElement>('button[aria-label^="demo Captain menu"]')!
   const menu = () => {
-    click(host.querySelector('button[aria-label="Captain menu"]')!)
-    return [...document.querySelectorAll('[role="dialog"]')].find((d) => d.querySelector("h2")?.textContent === "Captain actions")!
+    click(more())
+    return [...document.querySelectorAll('[role="dialog"]')].find((d) => d.querySelector("h2")?.textContent === "demo Captain")!
   }
 
-  it("auto-compact off: the mini bar is wide-only, and ⋯ has the full reading", () => {
+  it("auto-compact off: ⋯ shows the % only from the warning level, and its sheet has the full reading", () => {
     settings({ coordinator: false })
-    renderCaptain()
+    renderCaptain(800_000)
     expect(header().className).toContain(HEAD_CONTAINER)
-    expect(header().querySelector("[data-testid=context-mini]")!.className).toContain(WIDE_HEAD_ONLY)
+    expect(header().querySelector("[data-testid=context-mini]")).toBeNull()
+    expect(more().textContent).toContain("80%")
+    expect(more().getAttribute("aria-label")).toBe("demo Captain menu, context 80% used")
+    renderCaptain()
+    expect(more().textContent).not.toContain("30%")
+    expect(more().getAttribute("aria-label")).toBe("demo Captain menu")
     const m = menu()
     expect(m.querySelector("[data-testid=context-meter]")!.textContent).toContain("300k / 1m · 30%")
     expect(hasCompact(m)).toBe(false)

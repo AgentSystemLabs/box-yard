@@ -100,6 +100,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/message-captain.e2e.test.ts": "End-to-end runner/server integration",
   "test/model-effort.e2e.test.ts": "End-to-end runner/server integration",
   "test/notes-curation.e2e.test.ts": "End-to-end runner/server integration",
+  "test/old-claude-cli.e2e.test.ts": "End-to-end runner/server integration",
   "test/only-cody-marks-done.e2e.test.ts": "End-to-end runner/server integration",
   "test/orchestrator-schedules.test.ts": "Full Box Yard server/task-manager fixture",
   "test/own-cleanup.e2e.test.ts": "End-to-end runner/server integration",

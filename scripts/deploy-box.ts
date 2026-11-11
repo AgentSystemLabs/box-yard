@@ -19,6 +19,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { config } from "../server/config.js"
+import { claudeCliFloorScript } from "../shared/claudeCli.js"
 import { generatePassword, machineUsername, passwordProblems } from "../server/password.js"
 
 const NAME = process.env.BOXYARD_BOX_NAME ?? "box-yard-orchestrator"
@@ -189,7 +190,8 @@ async function main() {
   await sh(
     box,
     `set -e; cd ${APP}; command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git curl >/dev/null); ` +
-      `command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code --no-audit --no-fund >/dev/null 2>&1; ` +
+      // Also on a redeploy: a box keeps the Claude Code of its first deploy, and an older one doesn't know newer models.
+      `${claudeCliFloorScript()}; ` +
       // Codex, for a Coordinator or Captains set to run on it (docs/codex.md); agents' boxes get it on first use.
       `command -v codex >/dev/null || npm install -g @openai/codex --no-audit --no-fund >/dev/null 2>&1 || true; ` +
       `npm ci --no-audit --no-fund >/dev/null 2>&1 || npm install --no-audit --no-fund >/dev/null; npm run build >/dev/null; claude --version`,
