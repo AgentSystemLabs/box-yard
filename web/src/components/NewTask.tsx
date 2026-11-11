@@ -5,18 +5,20 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
 import { createPortal } from "react-dom"
 import { useLocation } from "wouter"
-import { AlertTriangle, FileText, Laptop, Loader2, Paperclip, Plus, ShieldAlert, SlidersHorizontal, X } from "lucide-react"
-import { newClientId, useAgentSettings, useCreateTask, useProjects, useSettings } from "../lib/queries"
+import { AlertTriangle, ChevronDown, ChevronUp, FileText, Laptop, Loader2, Paperclip, Plus, ShieldAlert, SlidersHorizontal, X } from "lucide-react"
+import { newClientId, useAgentSettings, useCreateTask, useModels, useProjects, useSettings } from "../lib/queries"
 import { clearNewTaskDraft, draftScope, loadDraft, newTaskDraftKey, saveDraft } from "../lib/newTask"
 import { attachFiles, draftAttachments, filesHold, removeFile, retryFile, useDraft, useDraftKey } from "../lib/composerDraft"
 import { primeSendSound } from "../lib/sendSound"
-import { EFFORT_LABEL } from "../../../shared/models"
+import { startTaskChord } from "../lib/shortcuts"
+import { isMac } from "../lib/useDictation"
+import { EFFORT_LABEL, findModel } from "../../../shared/models"
 import { EffortPicker, ModelPicker } from "./ModelPicker"
 import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
 import { titleFromPrompt } from "../../../shared/taskTitle"
 import { type Effort, type Project } from "../../../shared/types"
-import { LOCAL_UNSANDBOXED, type Runner } from "../../../shared/runner"
+import { LOCAL_UNSANDBOXED, RUNNER_LABEL, type Runner } from "../../../shared/runner"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 import { Modal, focusables } from "./Modal"
 import { formatSize } from "./Attachments"
@@ -260,6 +262,8 @@ export function NewTaskPopover({
           }
         }}
         placeholder={placeholder}
+        // Enter sends it, so a phone's keyboard says so.
+        enterKeyHint="send"
         className={cx(inputClass, GROWS)}
       />
       {/* Wraps when a long label doesn't fit beside the other button; the tap areas keep 44px on a touch screen. */}
@@ -315,7 +319,7 @@ export function NewTaskPopover({
           {heading}
           {projectId && project && <span className="font-normal text-zinc-500"> in {project.name}</span>}
         </h2>
-        <span className="ml-auto shrink-0 text-[11px] text-zinc-600" aria-hidden>
+        <span className="ml-auto shrink-0 text-[11px] text-zinc-500" aria-hidden>
           Enter to {onStart ? "send" : "start"} · Shift+Enter new line
         </span>
       </div>
@@ -418,7 +422,9 @@ function anchorStyle(trigger: HTMLElement | null, height: number, align: Align):
 
 /**
  * The full New task form: the prompt, an optional title (made from the prompt when blank), and the options the
- * popover leaves out: agent, model, effort, "Run on this computer", files and env vars. `onCancel` gets the prompt so the popover's draft keeps it.
+ * popover leaves out: agent, model, effort and "Run on this computer" (folded into one line that says what the task
+ * runs with), files and env vars. ⌘↵ / Ctrl+Enter starts it from any field. `onCancel` gets the prompt so the
+ * popover's draft keeps it.
  */
 export function NewTaskDialog({
   projectId: projectProp,
@@ -472,6 +478,24 @@ export function NewTaskDialog({
   const agentCli = cli || projectCli
   const picker = useRef<HTMLInputElement>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
+  const models = useModels()
+  const mac = isMac()
+  const optionsId = useId()
+  // Folded until opened, or until one of its choices isn't the default any more.
+  const [optionsOpen, setOptionsOpen] = useState<boolean | null>(null)
+  const showOptions = optionsOpen ?? Boolean(cli || model || effort || runsOn !== projectRunner)
+  const options = useRef<HTMLDivElement>(null)
+  // Unfolded by hand: what opened comes into the dialog's view (a phone's is short).
+  useEffect(() => {
+    if (optionsOpen) options.current?.scrollIntoView({ block: "nearest" })
+  }, [optionsOpen])
+
+  // What the task runs with, in a line: the agent, its model as the picker names it, the effort and, when it isn't
+  // a box, where. It is the folded options' label, so a choice made there still shows.
+  const modelName = (id: string) => (agentCli === "claude" ? (findModel(models, id)?.label ?? id) : id)
+  const usedModel = model || (agentCli === "opencode" ? settings?.agentOpencodeModel : agentCli === "cursor" ? settings?.agentCursorModel : agentCli === "codex" ? settings?.agentCodexModel : settings?.agentModel)
+  const usedEffort = hasSeparateEffort(agentCli) ? effort || (agentCli === "claude" && settings?.agentEffort !== "orchestrator" ? settings?.agentEffort : "") : ""
+  const runsWith = [AGENT_CLI_LABEL[agentCli], usedModel ? modelName(usedModel) : "default model", usedEffort && EFFORT_LABEL[usedEffort], (runsOn === "local" || runsOn !== projectRunner) && RUNNER_LABEL[runsOn]].filter(Boolean).join(" · ")
 
   // The prompt has the caret, after any text it opened with (the popover's, a kept draft's).
   useLayoutEffect(() => {
@@ -497,6 +521,12 @@ export function NewTaskDialog({
       description={projectProp ? project?.name : undefined}
       dirty={Boolean(title || env) || prompt !== initialPrompt || files.length !== initialFiles}
       onClose={() => onCancel(prompt)}
+      onKeyDown={(e) => {
+        // ⌘↵ / Ctrl+Enter starts it from any field: Enter alone is a new line in the prompt.
+        if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || e.nativeEvent.isComposing) return
+        e.preventDefault()
+        ;(e.currentTarget as HTMLFormElement).requestSubmit()
+      }}
       onSubmit={(e) => {
         e.preventDefault()
         if (!canStart) return
@@ -520,10 +550,15 @@ export function NewTaskDialog({
       }}
       footer={
         <>
+          {/* A keyboard's hint, so not where the footer's buttons stack (a phone). */}
+          <span aria-hidden className="mr-auto text-[11px] text-zinc-500 max-sm:hidden">
+            {startTaskChord(mac)[0]}
+            {mac ? "" : " "}↵ to start
+          </span>
           <Button type="button" variant="ghost" onClick={() => onCancel(prompt)}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={!canStart}>
+          <Button type="submit" variant="primary" disabled={!canStart} aria-keyshortcuts={mac ? "Meta+Enter" : "Control+Enter"}>
             Start task
           </Button>
         </>
@@ -554,67 +589,94 @@ export function NewTaskDialog({
       <Field label="Title (optional)">
         <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={autoTitle} />
       </Field>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Agent">
-          <Select
-            className="w-full"
-            value={cli}
-            onChange={(e) => {
-              setCli(e.target.value as AgentCli | "")
-              // Each agent has its own models.
-              setModel("")
-            }}
-            data-testid="new-task-agent-cli"
-          >
-            <option value="">Default ({AGENT_CLI_LABEL[projectCli]})</option>
-            {AGENT_CLIS.map((c) => (
-              <option key={c} value={c}>
-                {AGENT_CLI_LABEL[c]}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Model">
-          {agentCli === "opencode" ? (
-            <OpenCodeModelInput value={model} onChange={setModel} placeholder={`Default (${settings?.agentOpencodeModel || "OpenCode's default"})`} testId="new-task-model" />
-          ) : agentCli === "cursor" ? (
-            <CursorModelSelect id="new-task-cursor-model" compact value={model} onChange={setModel} defaultLabel={`Default (${settings?.agentCursorModel || "Cursor's default"})`} testId="new-task-model" />
-          ) : agentCli === "codex" ? (
-            <Select className="w-full" value={model} onChange={(e) => setModel(e.target.value)} data-testid="new-task-model">
-              <option value="">Default ({settings?.agentCodexModel || "Codex's default"})</option>
-              {CODEX_MODEL_SUGGESTIONS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <ModelPicker value={model} onChange={setModel} defaultLabel={`Default${settings?.agentModel ? ` (${settings.agentModel})` : ""}`} testId="new-task-model" />
-          )}
-        </Field>
-        <Field label="Effort">
-          {agentCli === "opencode" ? (
-            <Select className="w-full" value="" disabled data-testid="new-task-effort" title="Use provider/model#variant to select a provider-specific variant">
-              <option value="">Provider variant in model</option>
-            </Select>
-          ) : agentCli === "cursor" ? (
-            // Cursor's model ids carry their effort (…-high, …-max): there's nothing to set apart from the model.
-            <Select className="w-full" value="" disabled data-testid="new-task-effort" title="Cursor's model ids carry their effort (…-high, …-max)">
-              <option value="">In the model id</option>
-            </Select>
-          ) : (
-            <EffortPicker
-              value={effort}
-              onChange={(v) => setEffort(v as Effort | "")}
-              model={model || (agentCli === "codex" ? settings?.agentCodexModel : settings?.agentModel) || ""}
-              effective={effort || (settings?.agentEffort !== "orchestrator" ? settings?.agentEffort : "") || ""}
-              lead={<option value="">Default{settings?.agentEffort ? ` (${settings.agentEffort === "orchestrator" ? "Coordinator decides" : EFFORT_LABEL[settings.agentEffort]})` : ""}</option>}
-              testId="new-task-effort"
-            />
-          )}
-        </Field>
+      <div className="@container flex flex-col gap-4">
+        <button
+          type="button"
+          data-testid="new-task-options"
+          aria-expanded={showOptions}
+          aria-controls={optionsId}
+          onClick={() => setOptionsOpen(!showOptions)}
+          className="flex min-h-11 w-full items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-left text-sm hover:border-zinc-700"
+        >
+          <SlidersHorizontal aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />
+          <span className="min-w-0 flex-1 wrap-anywhere text-zinc-200">
+            <span className="text-zinc-400">Runs with </span>
+            {runsWith}
+          </span>
+          {showOptions ? <ChevronUp aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" /> : <ChevronDown aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />}
+        </button>
+        {/* Hidden, not unmounted: a custom model ID's field stays as it was. */}
+        <div ref={options} id={optionsId} hidden={!showOptions} className="flex flex-col gap-4">
+          <div className="grid gap-4 @min-[36rem]:grid-cols-3">
+            <Field label="Agent">
+              <Select
+                className="w-full"
+                value={cli}
+                onChange={(e) => {
+                  setCli(e.target.value as AgentCli | "")
+                  // Each agent has its own models.
+                  setModel("")
+                }}
+                data-testid="new-task-agent-cli"
+              >
+                <option value="">Default ({AGENT_CLI_LABEL[projectCli]})</option>
+                {AGENT_CLIS.map((c) => (
+                  <option key={c} value={c}>
+                    {AGENT_CLI_LABEL[c]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Model">
+              {agentCli === "opencode" ? (
+                <OpenCodeModelInput value={model} onChange={setModel} placeholder={`Default (${settings?.agentOpencodeModel || "OpenCode's default"})`} testId="new-task-model" />
+              ) : agentCli === "cursor" ? (
+                <CursorModelSelect id="new-task-cursor-model" compact value={model} onChange={setModel} defaultLabel={`Default (${settings?.agentCursorModel || "Cursor's default"})`} testId="new-task-model" />
+              ) : agentCli === "codex" ? (
+                <Select className="w-full" value={model} onChange={(e) => setModel(e.target.value)} data-testid="new-task-model">
+                  <option value="">Default ({settings?.agentCodexModel || "Codex's default"})</option>
+                  {CODEX_MODEL_SUGGESTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <ModelPicker value={model} onChange={setModel} defaultLabel={`Default${settings?.agentModel ? ` (${modelName(settings.agentModel)})` : ""}`} testId="new-task-model" />
+              )}
+            </Field>
+            <Field label="Effort">
+              {agentCli === "opencode" ? (
+                <Select className="w-full" value="" disabled data-testid="new-task-effort" title="Use provider/model#variant to select a provider-specific variant">
+                  <option value="">Provider variant in model</option>
+                </Select>
+              ) : agentCli === "cursor" ? (
+                // Cursor's model ids carry their effort (…-high, …-max): there's nothing to set apart from the model.
+                <Select className="w-full" value="" disabled data-testid="new-task-effort" title="Cursor's model ids carry their effort (…-high, …-max)">
+                  <option value="">In the model id</option>
+                </Select>
+              ) : (
+                <EffortPicker
+                  value={effort}
+                  onChange={(v) => setEffort(v as Effort | "")}
+                  model={model || (agentCli === "codex" ? settings?.agentCodexModel : settings?.agentModel) || ""}
+                  effective={effort || (settings?.agentEffort !== "orchestrator" ? settings?.agentEffort : "") || ""}
+                  lead={<option value="">Default{settings?.agentEffort ? ` (${settings.agentEffort === "orchestrator" ? "Coordinator decides" : EFFORT_LABEL[settings.agentEffort]})` : ""}</option>}
+                  testId="new-task-effort"
+                />
+              )}
+            </Field>
+          </div>
+          <RunHereToggle on={runsOn === "local"} projectLocal={projectRunner === "local"} onChange={(on) => setRunner(on ? "local" : projectRunner === "local" ? "box" : projectRunner)} />
+        </div>
+        {/* Said whether the options are folded or not. */}
+        {runsOn === "local" && (
+          <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <LineIcon icon={ShieldAlert} className="h-3.5 w-3.5 text-amber-300" />
+            <span>{LOCAL_UNSANDBOXED}</span>
+          </p>
+        )}
       </div>
-      <RunHereToggle on={runsOn === "local"} projectLocal={projectRunner === "local"} onChange={(on) => setRunner(on ? "local" : projectRunner === "local" ? "box" : projectRunner)} />
       <div role="group" aria-label="Files" className="space-y-2">
         {files.length > 0 && (
           <ul className="flex flex-wrap gap-2">
@@ -679,7 +741,7 @@ export function NewTaskDialog({
   )
 }
 
-/** "Run on this computer": this task only, over its project's "Runs on", in either direction. */
+/** "Run on this computer": this task only, over its project's "Runs on", in either direction. The dialog says what running here means (LOCAL_UNSANDBOXED). */
 function RunHereToggle({ on, projectLocal, onChange }: { on: boolean; projectLocal: boolean; onChange: (on: boolean) => void }) {
   const hint = projectLocal
     ? on
@@ -689,22 +751,14 @@ function RunHereToggle({ on, projectLocal, onChange }: { on: boolean; projectLoc
       ? "This task only runs on this computer, though its project runs in Upstash boxes."
       : "Its project runs in Upstash boxes. Turn it on to run this task here."
   return (
-    <div className="space-y-2">
-      <label className="flex min-h-11 cursor-pointer items-start gap-2.5 text-sm text-zinc-300">
-        <input type="checkbox" className="mt-1 shrink-0" checked={on} onChange={(e) => onChange(e.target.checked)} data-testid="new-task-local" />
-        <span className="min-w-0">
-          <span className="inline-flex items-center gap-1.5 text-zinc-200">
-            <Laptop className="h-3.5 w-3.5 text-zinc-400" /> Run on this computer
-          </span>
-          <span className="block text-xs text-zinc-500">{hint}</span>
+    <label className="flex min-h-11 cursor-pointer items-start gap-2.5 text-sm text-zinc-300">
+      <input type="checkbox" className="mt-1 shrink-0" checked={on} onChange={(e) => onChange(e.target.checked)} data-testid="new-task-local" />
+      <span className="min-w-0">
+        <span className="inline-flex items-center gap-1.5 text-zinc-200">
+          <Laptop className="h-3.5 w-3.5 text-zinc-400" /> Run on this computer
         </span>
-      </label>
-      {on && (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          <LineIcon icon={ShieldAlert} className="h-3.5 w-3.5 text-amber-300" />
-          <span>{LOCAL_UNSANDBOXED}</span>
-        </p>
-      )}
-    </div>
+        <span className="block text-xs text-zinc-500">{hint}</span>
+      </span>
+    </label>
   )
 }
