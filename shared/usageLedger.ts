@@ -217,6 +217,7 @@ export interface UsageView {
   }
   /** Stacked cost, bottom first: models by colour slot, other models, then compute providers. */
   cost: UsageSeries[]
+  /** Each day's cost, added row by row as `totals.costUsd` is: a day's figure here is that day's own view's total to the bit. */
   costByDay: number[]
   tokens: { kind: TokenKind; label: string; total: number; daily: number[] }[]
   tokensByDay: number[]
@@ -234,6 +235,7 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
   const seriesFor = (key: string, init: () => Omit<UsageSeries, "key" | "totalUsd" | "daily" | "estimated">) =>
     series.get(key) ?? series.set(key, { key, ...init(), totalUsd: 0, daily: zeros(), estimated: false }).get(key)!
   const tokenDaily: Record<TokenKind, number[]> = { input: zeros(), cacheWrite: zeros(), cacheRead: zeros(), output: zeros() }
+  const costByDay = zeros()
   const table = new Map<string, UsageTableRow>()
   const rowFor = (g: { key: string; label: string; detail: string | null; filter: UsageFilter | null }) =>
     table.get(g.key) ?? table.set(g.key, { ...g, llmUsd: 0, computeUsd: 0, costUsd: 0, tokens: 0, turns: 0, computeHours: 0, estimated: false }).get(g.key)!
@@ -249,6 +251,7 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
     if (!llmMatches(r, filter)) continue
     const tokens = r.input + r.cacheWrite + r.cacheRead + r.output
     totals.costUsd += r.costUsd
+    costByDay[r.day]! += r.costUsd
     totals.llmUsd += r.costUsd
     totals.estimatedUsd += r.estimatedUsd
     totals.turns += r.turns
@@ -286,6 +289,7 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
   for (const r of ledger.compute) {
     if (!computeMatches(r, filter)) continue
     totals.costUsd += r.costUsd
+    costByDay[r.day]! += r.costUsd
     totals.computeUsd += r.costUsd
     totals.computeHours += r.hours
     if (r.estimated) totals.estimatedUsd += r.costUsd
@@ -316,8 +320,6 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
 
   const order = (s: UsageSeries) => (s.kind === "llm" ? (s.color < 0 ? MODEL_SLOTS : s.color) : 10 + s.color)
   const cost = [...series.values()].filter((s) => s.totalUsd > 0).sort((a, b) => order(a) - order(b))
-  const costByDay = zeros()
-  for (const s of cost) s.daily.forEach((v, i) => (costByDay[i]! += v))
   const tokens = TOKEN_KINDS.map((kind) => ({ kind, label: TOKEN_KIND_LABEL[kind], total: totals.tokens[kind], daily: tokenDaily[kind] }))
   const tokensByDay = zeros().map((_, i) => TOKEN_KINDS.reduce((sum, k) => sum + tokenDaily[k][i]!, 0))
   const rows = [...table.values()].filter((r) => r.costUsd > 0 || r.tokens > 0 || r.computeHours > 0).sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens || a.label.localeCompare(b.label))

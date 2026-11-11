@@ -100,13 +100,19 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
   const table = useRef<HTMLElement>(null)
   const held = useRef<{ el: HTMLElement; top: number } | "table" | null>(null)
   const hold = (el: HTMLElement | null) => void (held.current = el && { el, top: el.getBoundingClientRect().top })
-  /** Before a chip goes: holds what is under the bar, when the bar is stuck over the numbers. */
+  /**
+   * Before a chip goes: holds what is under the bar, when the bar is stuck over the numbers. That is the card the bar
+   * is over (a chart, the table), or the one after it where the first has only its end showing: what changes height
+   * above the held card's top then moves nothing in sight.
+   */
   const holdUnderBar = () => {
     const scroller = scrollerOf(bar.current)
-    if (!scroller || !bar.current || !charts.current) return
-    const edge = scroller.getBoundingClientRect().top
-    if (bar.current.getBoundingClientRect().top > edge + 1) return
-    hold(charts.current.getBoundingClientRect().bottom > edge + bar.current.offsetHeight + 48 ? charts.current : table.current)
+    if (!scroller || !bar.current || !charts.current || !table.current) return
+    const box = scroller.getBoundingClientRect()
+    if (bar.current.getBoundingClientRect().top > box.top + 1) return
+    const under = box.top + bar.current.offsetHeight
+    const cards = [...charts.current.children, table.current] as HTMLElement[]
+    hold(cards.find((el) => el.getBoundingClientRect().bottom > under + (box.bottom - under) / 3) ?? table.current)
   }
   useLayoutEffect(() => {
     const h = held.current
@@ -117,20 +123,45 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
     if (table.current) scroller.scrollTop += table.current.getBoundingClientRect().top - (scroller.getBoundingClientRect().top + (bar.current?.offsetHeight ?? 0) + 8)
   }, [filter])
 
+  // What a tap left behind is gone with it (a table row, a chip, the table's "All N days"), so focus goes to the table's
+  // heading, or to the chip beside a dropped one. And each change of filter is said once, with what is left of the range.
+  const heading = useRef<HTMLHeadingElement>(null)
+  const toTable = () => heading.current?.focus({ preventScroll: true })
+  const tell = useRef(false)
+  const [told, setTold] = useState("")
+  useEffect(() => {
+    if (!tell.current || !view) return
+    tell.current = false
+    const t = view.totals
+    setTold(set.length ? `Narrowed to ${said.join(", ")}: ${usd(t.costUsd, t.estimatedUsd > 0)} of ${money(rangeUsd)}, ${pct(t.costUsd, rangeUsd)}.` : `All filters removed: ${money(rangeUsd)}.`)
+  }, [filter])
+
   const narrow = (f: UsageFilter, drillFrom?: UsageGroup) => {
     const next = { ...filter, ...f }
+    tell.current = true
     setFilter(next)
     if (drillFrom) setGroup(nextGroup(drillFrom, next))
   }
+  /** Lets go of what `f` narrows by. */
+  const widen = (f: UsageFilter) => {
+    tell.current = true
+    setFilter(Object.fromEntries(Object.entries(filter).filter(([k]) => !(k in f))) as UsageFilter)
+  }
   const drop = (key: keyof UsageFilter) => {
     holdUnderBar()
-    setFilter((f) => {
-      const { [key]: _, ...rest } = f
-      return rest
-    })
+    const at = set.findIndex((f) => f.key === key)
+    const beside = (set[at + 1] ?? set[at - 1])?.key
+    const chip = beside && bar.current?.querySelector<HTMLElement>(`[data-filter="${beside}"]`)
+    if (chip) {
+      chip.focus({ preventScroll: true })
+      chip.scrollIntoView?.({ inline: "nearest", block: "nearest" })
+    } else toTable()
+    widen({ [key]: filter[key] })
   }
   const clear = () => {
     holdUnderBar()
+    toTable()
+    tell.current = true
     setFilter({})
   }
 
@@ -151,6 +182,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
             <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
           </div>
           {view && <FilterChips bar={bar} set={set} view={view} rangeUsd={rangeUsd} onDrop={drop} onClear={clear} />}
+          <span className="sr-only" aria-live="polite" data-testid="usage-filter-live">{told}</span>
           {!view ? (
             q.isError ? (
               <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-zinc-400">
@@ -168,11 +200,12 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
               )}
               <Totals view={view} />
               <div ref={charts} className="grid items-start gap-4 @4xl:grid-cols-2">
-                <CostChart view={view} parts={parts} day={shownDay} onDay={setDay} onNarrow={(f) => { hold(charts.current); narrow(f) }} />
+                <CostChart view={view} filter={filter} parts={parts} day={shownDay} onDay={setDay} onNarrow={(f) => { hold(charts.current); narrow(f) }} onWiden={(f) => { hold(charts.current); widen(f) }} />
                 <TokenChart view={view} parts={parts} day={shownDay} onDay={setDay} />
               </div>
               <Breakdown
                 section={table}
+                heading={heading}
                 view={dayView ?? view}
                 split={view.totals.computeUsd > 0 || view.totals.computeHours > 0}
                 day={dayName}
@@ -184,9 +217,13 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
                 onDrill={(row) => {
                   if (!row.filter) return
                   held.current = "table"
+                  toTable()
                   narrow(row.filter, group)
                 }}
-                onAllDays={() => setDay(null)}
+                onAllDays={() => {
+                  toTable()
+                  setDay(null)
+                }}
               />
               <HowEstimated ledger={ledger!} />
             </div>
@@ -302,19 +339,20 @@ function FilterChips({
   )
 }
 
-/** `sub` is the line under the figure, in parts: it wraps between them (after a "·"), never inside one. */
+/** `sub` is the line under the figure, in parts with a "·" between them: it wraps between them, never inside one. */
 function Tile({ label, value, sub, testId }: { label: string; value: string; sub: string[]; testId?: string }) {
   return (
     <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/40 px-3 py-2.5">
       <div className="text-xs text-zinc-400">{label}</div>
       <div data-testid={testId} className="mt-0.5 truncate text-xl font-semibold text-zinc-50 tabular-nums">{value}</div>
-      <div className="text-xs text-zinc-500 tabular-nums">
-        {/* A part goes to the next line whole, and breaks inside only where the tile is narrower than it. */}
-        {sub.map((part, i) => (
-          <span key={i}>
-            <span className="inline-block max-w-full">{part}{i < sub.length - 1 && " ·"}</span>{" "}
-          </span>
-        ))}
+      {/* A part goes to the next line whole, and breaks inside only where the tile is narrower than it. Each has its "·"
+          before it, in a margin that the first part of a line has outside the clip: no line starts or ends with one. */}
+      <div className="overflow-hidden text-xs text-zinc-500 tabular-nums">
+        <div className="-ml-3 flex flex-wrap">
+          {sub.map((part, i) => (
+            <span key={i} className="relative max-w-full pl-3 before:absolute before:left-0 before:w-3 before:text-center before:content-['·']">{part}</span>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -348,7 +386,7 @@ function Totals({ view }: { view: UsageView }) {
 }
 
 /** One stack of a chart: its colour, its daily values, and what tapping it does. */
-type Stack = { key: string; label: string; color: string; light?: string; daily: number[]; total: number; estimated?: boolean; pressed?: boolean; onPick?: () => void }
+type Stack = { key: string; label: string; color: string; light?: string; daily: number[]; total: number; estimated?: boolean; pressed?: boolean; onPick?: () => void; /** The legend item's tap, where it isn't `onPick`. */ onLegend?: () => void }
 
 const colorOf = (i: number) => (i < 0 ? OTHER_COLOR : USAGE_COLORS[i]!)
 
@@ -358,12 +396,33 @@ const fill = (s: Stack) => ({ "--series-color": s.color, ...(s.light && { "--ser
 /** The most series any one day has: the parts a readout keeps room for. */
 const busiest = (series: number[][], n: number) => Math.max(0, ...Array.from({ length: n }, (_, i) => series.reduce((c, daily) => c + ((daily[i] ?? 0) > 0 ? 1 : 0), 0)))
 
-function CostChart({ view, parts, day, onDay, onNarrow }: { view: UsageView; parts: number; day: number | null; onDay: (d: number | null) => void; onNarrow: (f: UsageFilter) => void }) {
+function CostChart({
+  view,
+  filter,
+  parts,
+  day,
+  onDay,
+  onNarrow,
+  onWiden,
+}: {
+  view: UsageView
+  filter: UsageFilter
+  parts: number
+  day: number | null
+  onDay: (d: number | null) => void
+  onNarrow: (f: UsageFilter) => void
+  onWiden: (f: UsageFilter) => void
+}) {
   const plot = useRef<HTMLDivElement>(null)
-  const stacks: Stack[] = view.cost.map((s) => ({ key: s.key, label: s.label, color: colorOf(s.color), daily: s.daily, total: s.totalUsd, estimated: s.estimated, onPick: s.filter ? () => onNarrow(s.filter!) : undefined }))
+  const stacks: Stack[] = view.cost.map((s) => {
+    const f = s.filter
+    // Narrowed to this series already: its legend item is pressed, and lets the filter go again.
+    const pressed = f ? (Object.keys(f) as (keyof UsageFilter)[]).every((k) => filter[k] === f[k]) : undefined
+    return { key: s.key, label: s.label, color: colorOf(s.color), daily: s.daily, total: s.totalUsd, estimated: s.estimated, pressed, onPick: f ? () => onNarrow(f) : undefined, onLegend: f && pressed ? () => onWiden(f) : undefined }
+  })
   return (
     <ChartCard title="Daily cost" sub="Models and boxes · US dollars" testId="usage-cost-chart" action={day !== null && <AllDays n={view.days.length} plot={plot} onDay={onDay} />}>
-      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} byDay={view.costByDay} format={(n) => money(n)} unit={0.01} axis={axisMoney} day={day} onDay={onDay} noun="cost" tells />
+      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} byDay={view.costByDay} total={view.totals.costUsd} format={(n) => money(n)} unit={0.01} axis={axisMoney} day={day} onDay={onDay} noun="cost" tells />
     </ChartCard>
   )
 }
@@ -388,7 +447,7 @@ function TokenChart({ view, parts, day, onDay }: { view: UsageView; parts: numbe
       testId="usage-token-chart"
       action={day !== null && <AllDays n={view.days.length} plot={plot} onDay={onDay} />}
     >
-      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} legend={legend} legendFormat={compact} byDay={byDay} format={(n) => `${compact(n)} tokens`} axis={compact} day={day} onDay={onDay} noun="tokens" />
+      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} legend={legend} legendFormat={compact} byDay={byDay} format={(n) => `${compact(n)} tokens`} word="tokens" axis={compact} day={day} onDay={onDay} noun="tokens" alone />
     </ChartCard>
   )
 }
@@ -450,6 +509,9 @@ function StackedBars({
   onDay,
   noun,
   tells = false,
+  total: whole,
+  word,
+  alone = false,
 }: {
   /** The focusable plot, for the card's "All N days". */
   plot: RefObject<HTMLDivElement | null>
@@ -470,6 +532,12 @@ function StackedBars({
   noun: string
   /** Says, with a picked day's total, that the table below follows it: one of the two charts does. */
   tells?: boolean
+  /** The range's total where the view has it (the cost tile's own figure); else the days added up. */
+  total?: number
+  /** `format`'s unit ("tokens"), which the readout's total drops where the card is narrow; `legendFormat` is the figure without it. */
+  word?: string
+  /** A legend item shows its series alone, on its own scale, rather than narrowing everything to it. */
+  alone?: boolean
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const pointer = useRef<string>("mouse")
@@ -482,7 +550,7 @@ function StackedBars({
   const shown = hover ?? day
   const week = n <= 7
   const labels = labelledDays(n)
-  const total = byDay.reduce((a, b) => a + b, 0)
+  const total = whole ?? byDay.reduce((a, b) => a + b, 0)
 
   const pickSegment = (i: number, s: Stack) => {
     const touch = pointer.current !== "mouse"
@@ -495,6 +563,8 @@ function StackedBars({
     const next = e.key === "ArrowLeft" ? Math.max(0, at - 1) : e.key === "ArrowRight" ? Math.min(n - 1, day === null ? n - 1 : at + 1) : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null
     if (next === null) return
     e.preventDefault()
+    // The readout follows the keys, not a mouse left resting on another day.
+    setHover(null)
     onDay(next)
   }
   /** The day under a pointer on the bars; null where they have no width (not laid out). */
@@ -526,7 +596,7 @@ function StackedBars({
 
   return (
     <div className="mt-3">
-      <Readout id={readoutId} days={days} day={shown} picked={day} onDay={onDay} stacks={stacks} most={parts} byDay={byDay} total={total} format={format} partFormat={legendFormat} unit={unit} />
+      <Readout id={readoutId} days={days} day={shown} picked={day} onDay={onDay} stacks={stacks} most={parts} byDay={byDay} total={total} format={format} partFormat={legendFormat} unit={unit} word={word} alone={alone} />
       {/* Spoken for a picked day only: a mouse passing over the bars changes the line above without a word. */}
       <span className="sr-only" aria-live="polite" data-testid="usage-day-live">
         {day === null ? "" : `${longDayLabel(days[day]!)}: ${format(byDay[day]!)}${tells ? ". Breakdown shows this day." : ""}`}
@@ -612,7 +682,7 @@ function StackedBars({
           </div>
         </div>
       </div>
-      <Legend stacks={legend} days={n} format={format} short={legendFormat} />
+      <Legend stacks={legend} days={n} format={format} short={legendFormat} alone={alone} />
     </div>
   )
 }
@@ -637,6 +707,8 @@ function Readout({
   format,
   partFormat = format,
   unit,
+  word,
+  alone,
 }: {
   id: string
   days: number[]
@@ -653,6 +725,8 @@ function Readout({
   /** Each series' figure, when the unit is already on the day's total ("54.7K" after "1.2M tokens"). */
   partFormat?: (n: number) => string
   unit?: number
+  word?: string
+  alone: boolean
 }) {
   const n = days.length
   const value = day === null ? total : byDay[day]!
@@ -664,9 +738,24 @@ function Readout({
   // picked: two lines of it wherever the parts have two rows or more, so no blank row waits over the bars.
   const rows = { "--rows-2": Math.max(2, Math.ceil(most / 2)), "--rows-4": Math.max(1, Math.ceil(most / 4)) } as CSSProperties
   const then = cx("@md/chart:block", most > 4 ? "@lg/chart:block" : "@lg/chart:inline")
-  // Two words fewer in a card under 17rem (a 320px phone zoomed to 125%), where they would make a third line.
-  const also = <span className="hidden @[17rem]/chart:inline"> and breakdown</span>
-  const label = <span className="font-medium text-zinc-200">{day === null ? `All ${n} days` : longDayLabel(days[day]!)}</span>
+  // A few words fewer in a card under 17rem (a 320px phone zoomed to 125%), where they would make a third line.
+  const more = (words: string) => <span className="hidden @[17rem]/chart:inline">{words}</span>
+  const also = more(" and breakdown")
+  // "Nov 7" for "Sat, Nov 7" in a card under 16rem (a 320px phone zoomed to 125%), where the day, its two arrows and
+  // its total share 12.5rem.
+  const label = (
+    <span className="font-medium text-zinc-200">
+      {day === null ? (
+        `All ${n} days`
+      ) : (
+        <>
+          <span className="@[16rem]/chart:hidden">{dayLabel(days[day]!)}</span>
+          <span className="hidden @[16rem]/chart:inline">{longDayLabel(days[day]!)}</span>
+        </>
+      )}
+    </span>
+  )
+  const pick = alone ? "to see it alone" : "to narrow"
   // At an end the arrow stays focusable (aria-disabled, not disabled), so the keyboard doesn't lose its place.
   const step = (to: number) => to >= 0 && to < n && onDay(to)
   return (
@@ -680,13 +769,17 @@ function Readout({
               <ChevronLeft className="h-4 w-4" aria-hidden />
             </button>
             {/* Room for "Wed, Sep 30", so › doesn't move under a finger stepping through days. */}
-            <span className="min-w-19 text-center">{label}</span>
+            <span className="min-w-12 text-center @[16rem]/chart:min-w-19">{label}</span>
             <button type="button" aria-label="Next day" title="Next day" aria-disabled={picked === n - 1} onClick={() => step(picked + 1)} className={STEP}>
               <ChevronRight className="h-4 w-4" aria-hidden />
             </button>
           </span>
         )}
-        <span className="text-sm font-semibold whitespace-nowrap text-zinc-50">{approx}{format(value)}</span>
+        <span className="text-sm font-semibold whitespace-nowrap text-zinc-50">
+          {approx}
+          {/* The unit goes where a 320px phone has no room for it beside the day: the card's title has said it. */}
+          {word ? <>{partFormat(value)}<span className="hidden @[20rem]/chart:inline"> {word}</span></> : format(value)}
+        </span>
       </div>
       <div
         style={rows}
@@ -699,8 +792,8 @@ function Readout({
           // The tiles above have the daily average and the legend below each series' total: this says how to go finer.
           // A phone wraps it where it will; from 28rem its second half starts the second line.
           <span className="col-span-full">
-            <span className="pointer-coarse:hidden">Hover or drag a day for its numbers{also}, <span className={then}>click a colour to narrow</span></span>
-            <span className="hidden pointer-coarse:inline">Tap or drag a day for its numbers{also}, <span className={then}>then a colour to narrow</span></span>
+            <span className="pointer-coarse:hidden">Hover{more(" or drag")} a day for its numbers{also}, <span className={then}>click a colour {pick}</span></span>
+            <span className="hidden pointer-coarse:inline">Tap{more(" or drag")} a day for its numbers{also}, <span className={then}>then a colour {pick}</span></span>
           </span>
         ) : (
           parts.map(({ s }, i) => (
@@ -720,7 +813,7 @@ function Readout({
  * Each series' colour, name and total over the range (its caption says so), as buttons where a series narrows: two
  * columns of name over figure while the card is narrow (a phone), chips in a row from 24rem. `short` formats the figures on show, the title has `format`'s.
  */
-function Legend({ stacks, days, format, short = format }: { stacks: Stack[]; days: number; format: (n: number) => string; short?: (n: number) => string }) {
+function Legend({ stacks, days, format, short = format, alone }: { stacks: Stack[]; days: number; format: (n: number) => string; short?: (n: number) => string; alone: boolean }) {
   const id = useId()
   if (!stacks.length) return <p className="mt-3 text-sm text-zinc-500">Nothing in this range.</p>
   const item = "flex min-h-11 w-full max-w-full items-center gap-1.5 rounded-md border px-2 text-xs @sm/chart:inline-flex @sm/chart:w-auto"
@@ -747,8 +840,8 @@ function Legend({ stacks, days, format, short = format }: { stacks: Stack[]; day
                 <button
                   type="button"
                   aria-pressed={s.pressed}
-                  onClick={s.onPick}
-                  title={`${s.label}: ${figure}. ${s.pressed ? "Show all" : `Narrow to ${s.label}`}`}
+                  onClick={s.onLegend ?? s.onPick}
+                  title={`${s.label}: ${figure}. ${alone ? (s.pressed ? "Show all" : `Show ${s.label} alone`) : s.pressed ? "Remove this filter" : `Narrow to ${s.label}`}`}
                   className={cx(item, FOCUS, s.pressed ? "border-yard-500/50 bg-yard-500/10" : "border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/60")}
                 >
                   {body}
@@ -777,6 +870,7 @@ const WIDE_CELL = "hidden text-right @2xl:block"
 
 function Breakdown({
   section,
+  heading,
   view,
   split,
   day,
@@ -790,6 +884,8 @@ function Breakdown({
 }: {
   /** The table's section, for the dialog to scroll to. */
   section: RefObject<HTMLElement | null>
+  /** Its heading, where focus goes when the control that had it is gone (a tapped row, a dropped chip). */
+  heading: RefObject<HTMLHeadingElement | null>
   /** The range's view, or the picked day's: its rows and totals are the table. */
   view: UsageView
   /** The range has box time, so every row's cost is split into models and boxes. */
@@ -816,7 +912,7 @@ function Breakdown({
     <section ref={section} aria-labelledby={id} data-testid="usage-breakdown" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <h4 id={id} className="text-sm font-semibold text-zinc-100">
+          <h4 ref={heading} id={id} tabIndex={-1} className={cx("-mx-1 rounded-sm px-1 text-sm font-semibold text-zinc-100", FOCUS)}>
             Breakdown{day && <span className="whitespace-nowrap tabular-nums" data-testid="usage-breakdown-day"> · {day}</span>}
           </h4>
           {day && <AllDays n={days} onDay={onAllDays} />}
@@ -859,7 +955,7 @@ function Breakdown({
             ))}
             {view.rows.length > TABLE_ROWS && (
               <li className="py-1">
-                <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className={cx("min-h-11 text-sm text-sky-400 hover:underline", FOCUS)}>
+                <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className={cx("min-h-11 rounded-md text-sm text-yard-400 underline-offset-2 hover:underline", FOCUS)}>
                   {all ? `Show the top ${TABLE_ROWS} only` : `Show all ${view.rows.length}`}
                 </button>
               </li>
