@@ -4,20 +4,20 @@ import { navigateApp, taskSessionHref } from "../lib/navigation"
 import { memo, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { useLocation } from "wouter"
 import { AlarmClock, AlertTriangle, ChevronDown, ChevronRight, Loader2, Square, Webhook, Wrench } from "lucide-react"
-import { AppLink, InRepo, LineIcon, Markdown, cx } from "./ui"
+import { AppLink, InRepo, LineIcon, Markdown, TAP_AREA, cx } from "./ui"
 import { useEntityIndex } from "../lib/entities"
 import { useTaskTile } from "../lib/taskTiles"
-import { routes, toolMentions } from "../lib/linkify"
+import { githubRef, routes, splitGithubRefs, toolMentions, type GithubRef } from "../lib/linkify"
 import { CAPTAIN_TOOLS, captainToolView, isLongMessage, splitNotice, type NoticeKind } from "../lib/captainTranscript"
 import { NOTICE_ICON } from "./noticeIcons"
-import { NoticeNowRow, useNoticeNow } from "./NoticeNow"
+import { NoticeNowRow, noticeRowPr, useNoticeNow } from "./NoticeNow"
 import { AttachmentList } from "./Attachments"
 import { PickChips } from "./RunTargetMenu"
 import { QueuedChatMessage } from "./QueuedMessages"
 import { ProjectDot, TaskTile } from "./TaskIcon"
 import { CaptainIcon } from "./CaptainIcon"
 import { RecommendedNextSteps, nextStepsFromMeta } from "./RecommendedNextSteps"
-import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
+import { MESSAGE_BLOCK, MessageActions, StandingActions } from "./MessageActions"
 import { ThreadMarkers } from "./SideThread"
 import { ReplySources } from "./ReplySources"
 import { TurnTimingChip, timingOf } from "./TurnTimingChip"
@@ -38,7 +38,8 @@ export function CollapsibleMarkdown({ children, className }: { children: string;
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+          // 44px to a finger; its margins leave that room, so the area never covers the text above it.
+          className={cx(TAP_AREA, "mt-1 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 pointer-coarse:my-3.5")}
         >
           <ChevronDown className={cx("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
           {open ? "Show less" : "Show more"}
@@ -185,40 +186,61 @@ export const NOTICE_CLASS = "rounded-lg border border-zinc-800/80 bg-zinc-900/40
 
 /**
  * The task's project and a link to its Captain, as a quiet pair of links that starts a notice's meta line (with a
- * trailing "·" before the event). The project comes from the notice's meta or, for notices that don't carry it,
- * from the task; with neither known there's no pair.
+ * trailing "·" before the event; `end` when nothing follows). The project comes from the notice's meta or, for
+ * notices that don't carry it, from the task; with neither known there's no pair.
+ * `captain` false: the project alone, which is the way to its Captain too (a card, where the pair cost a phone a line).
  */
-export function NoticeProject({ taskId, projectId }: { taskId: string; projectId?: string | null }) {
+export function NoticeProject({ taskId, projectId, end = false, captain = true }: { taskId: string; projectId?: string | null; end?: boolean; captain?: boolean }) {
   const index = useEntityIndex()
   const id = projectId ?? index.byId.get(taskId)?.projectId
   const project = id ? index.byId.get(id) : undefined
   if (!id || project?.kind !== "project") return null
-  const link = "rounded-sm text-zinc-500 hover:text-zinc-200 hover:underline focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+  // Under a finger each link is 44px tall: it reaches 6px up (more would take taps from the title over it), 20px down
+  // (about 12px into the room its line keeps under it, NOTICE_META, and 8px over the body's leading) and 12px to the
+  // right, over the "·" after it. Padding with the
+  // same margin back, so nothing moves.
+  const link =
+    "rounded-sm text-zinc-500 hover:text-zinc-200 hover:underline focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:-mt-1.5 pointer-coarse:-mr-3 pointer-coarse:-mb-5 pointer-coarse:pt-1.5 pointer-coarse:pr-3 pointer-coarse:pb-5"
+  // The link under it takes its taps.
+  const dot = (
+    <span aria-hidden className="pointer-events-none text-zinc-700">
+      ·
+    </span>
+  )
   return (
     // One line box high and top-aligned, so it sits on the meta line's first line like text.
     <span data-testid="notice-project" className="mr-1 inline-flex h-lh max-w-full items-center gap-1 align-top whitespace-nowrap">
-      <AppLink href={routes.project(id)} title={`Project: ${project.label}`} className={cx("min-w-0 truncate", link)}>
+      {/* It starts the line, so it reaches left too, into the card's own padding. */}
+      <AppLink href={routes.project(id)} title={`Project: ${project.label}`} className={cx("min-w-0 truncate pointer-coarse:-ml-3 pointer-coarse:pl-3", link)}>
         {project.label}
       </AppLink>
-      <span aria-hidden className="text-zinc-700">
-        ·
-      </span>
-      <AppLink href={`${routes.project(id)}?tab=captain`} title={`${project.label} Captain`} className={cx("inline-flex shrink-0 items-center gap-0.5", link)}>
-        <CaptainIcon projectId={id} className="h-3 w-3" />
-        Captain
-      </AppLink>
-      <span aria-hidden className="text-zinc-700">
-        ·
-      </span>
+      {captain && (
+        <>
+          {dot}
+          <AppLink href={`${routes.project(id)}?tab=captain`} title={`${project.label} Captain`} className={cx("inline-flex shrink-0 items-center gap-0.5", link)}>
+            <CaptainIcon projectId={id} className="h-3 w-3" />
+            Captain
+          </AppLink>
+        </>
+      )}
+      {!end && dot}
     </span>
   )
 }
 
-export const NOTICE_TITLE_LINK = "font-semibold text-yard-400 underline decoration-yard-400/40 underline-offset-2 hover:decoration-yard-400"
+/**
+ * A line that starts with a NoticeProject: under a finger it's at least 32px tall, room its links reach down into
+ * without leaving a hole in the card (the last few px of their 44px overlap the body's leading).
+ * Child-scoped `:has()`, so a line whose task has no known project stays its own height.
+ */
+export const NOTICE_META = "pointer-coarse:has-[>[data-testid=notice-project]]:min-h-8"
+
+/** No standing underline: the title has a row of its own, and its whole card opens the task. */
+export const NOTICE_TITLE_LINK = "font-semibold text-yard-400 decoration-yard-400/60 underline-offset-2 hover:underline"
 
 /**
  * Every notice card's layout, at every width (Cody's rule): the icon and the task title on a row of their own, so a
- * narrow panel never squeezes the title; under it a muted meta line (the project · Captain pair, then what happened);
+ * narrow panel never squeezes the title; under it a muted meta line (the project, then what happened);
  * then the card's own sections, like a file list with its Show all / Hide toggle in that list's header.
  * The column is the card's `@container`, so sections switch on the card's width, not the window's (the panel resizes).
  */
@@ -262,7 +284,7 @@ export function NoticeLayout({
           </div>
         )}
         {(project || meta) && (
-          <div data-testid="notice-meta" className="wrap-anywhere text-zinc-400">
+          <div data-testid="notice-meta" className={cx("wrap-anywhere text-zinc-400", NOTICE_META)}>
             {project}
             {meta}
           </div>
@@ -347,6 +369,29 @@ const NOTICE_ACCENT: Partial<Record<NoticeKind, string>> = {
   merge: "border-merged-fg/40! bg-merged/5!",
 }
 
+const sameRef = (a: GithubRef, b: GithubRef | null) =>
+  Boolean(b && a.kind === b.kind && a.number === b.number && `${a.owner}/${a.repo}`.toLowerCase() === `${b.owner}/${b.repo}`.toLowerCase())
+
+/**
+ * A PR notice's sentence without the pull request `pr`, which the card's own line links: "opened a pull request:
+ * <url>", "opened [PR #12](url)" or any other wording. With nothing else to say it is "opened a PR".
+ */
+function withoutPr(event: string, pr: string | null): string {
+  const chip = pr ? githubRef(pr) : null
+  if (!chip) return event
+  const linked = event.replace(/\[[^\]]*\]\((\S+?)\)/g, (link, url: string) => (sameRef(chip, githubRef(url)) ? "" : link))
+  const rest = splitGithubRefs(linked, null)
+    .filter((s) => !(s.url && sameRef(chip, githubRef(s.url))))
+    .map((s) => s.text)
+    .join("")
+    .replace(/\s+/g, " ")
+    .replace(/[\s:·,–—-]+$/, "")
+  return !rest || /^opened(?: an?)?(?: pull request| PR)?$/i.test(rest) ? "opened a PR" : rest
+}
+
+// A question's or failure's verb, which its card's icon and colour already say; the detail gets a line of its own.
+const ASK_VERB = /^(needs you|asks|failed):\s+(?=\S)/
+
 /** A notice in the Coordinator chat: a NoticeLayout, in a NoticeCard when it's about a task. */
 const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
   const taskId = typeof m.meta?.taskId === "string" ? m.meta.taskId : null
@@ -355,20 +400,31 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
   // A question, PR or failure says what its task needs now, or where it is once it has moved on.
   const live = useNoticeNow(n.kind, taskId, m.id)
   const past = live?.now.live === false
+  // The card's line links the PR (its number, GitHub's state), so the sentence above it doesn't name it again.
+  const chipPr = live ? noticeRowPr(live.now, live.task) : null
+  const event = useMemo(() => (n.kind === "pr" ? withoutPr(n.event, chipPr) : n.event), [n.kind, n.event, chipPr])
+  // What a question asks or how a failure went is the card's content, so it reads larger than where it came from.
+  const verb = n.kind === "needs_input" || n.kind === "failed" ? event.match(ASK_VERB) : null
+  const text = (
+    <>
+      <NoticeEvent>{verb ? event.slice(verb[0].length) : event}</NoticeEvent>
+      {n.truncated && taskId && <FullReplyLink taskId={taskId} />}
+    </>
+  )
   const body = (
     <NoticeLayout
       kind={n.kind}
       title={n.title}
       taskId={taskId}
       muted={past}
-      project={taskId && <NoticeProject taskId={taskId} projectId={projectId} />}
-      meta={
-        <>
-          <NoticeEvent>{n.event}</NoticeEvent>
-          {n.truncated && taskId && <FullReplyLink taskId={taskId} />}
-        </>
-      }
+      project={taskId && <NoticeProject taskId={taskId} projectId={projectId} end={Boolean(verb)} captain={false} />}
+      meta={verb ? undefined : text}
     >
+      {verb && (
+        <div data-testid="notice-detail" className={cx("wrap-anywhere text-sm", past ? "text-zinc-300" : "text-zinc-100")}>
+          {text}
+        </div>
+      )}
       {live && taskId && <NoticeNowRow now={live.now} task={live.task} taskId={taskId} title={n.title} />}
     </NoticeLayout>
   )
@@ -395,21 +451,25 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
  * the threads it has show as markers under it (SideThread.tsx; nothing outside a chat with threads).
  * `sources`: on a Coordinator reply, the updates it read (lib/chatUpdates.ts), named in a "from:" line under it.
  * `next`: whether its suggested next steps show (the Coordinator chat shows only the newest reply's).
+ * `standing`: a reply that ends with Reply and Copy standing under it on touch (the Coordinator chat's newest, while
+ * it's the last word).
  */
 export const ChatLine = memo(function ChatLine({
   m,
   onFollowUp,
   sources,
   next = true,
+  standing = false,
 }: {
   m: ChatMessage
   onFollowUp: (message: string) => void
   sources?: UpdateSource[] | null
   next?: boolean
+  standing?: boolean
 }) {
   return (
     <div data-chat-id={m.id}>
-      <ChatLineBody m={m} onFollowUp={onFollowUp} sources={sources} next={next} />
+      <ChatLineBody m={m} onFollowUp={onFollowUp} sources={sources} next={next} standing={standing} />
       {m.role !== "tool" && <ThreadMarkers m={m} />}
     </div>
   )
@@ -417,7 +477,7 @@ export const ChatLine = memo(function ChatLine({
 
 export const USER_BUBBLE = "max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-yard-500/15 px-3 py-2 text-sm whitespace-pre-wrap wrap-anywhere text-zinc-100"
 /** Over Cody's bubble: where it went. */
-const SENT_LABEL = "flex max-w-[85%] min-w-0 items-center gap-1 text-[11px] text-zinc-500"
+const SENT_LABEL = "flex max-w-[85%] min-w-0 items-center gap-1 text-[11px] text-zinc-400"
 
 /** Over a message Cody sent to a task from its card in the chat: the task, and the way to its conversation. */
 function SentFrom({ taskId }: { taskId: string }) {
@@ -477,11 +537,13 @@ function ChatLineBody({
   onFollowUp,
   sources,
   next,
+  standing,
 }: {
   m: ChatMessage
   onFollowUp: (message: string) => void
   sources?: UpdateSource[] | null
   next: boolean
+  standing: boolean
 }) {
   if (m.role === "user" && m.meta?.scheduleId) {
     // A prompt injected by a Coordinator schedule, not typed by Cody.
@@ -562,12 +624,20 @@ function ChatLineBody({
       </div>
     )
   }
+  const steps = next ? nextStepsFromMeta(m.meta) : []
   return (
     <div id={`chat-${m.id}`} data-testid="chat-reply" className={cx(MESSAGE_BLOCK, "text-sm text-zinc-200")}>
       <Markdown>{m.content}</Markdown>
       <ReplyFooter m={m} sources={sources} />
-      {next && <RecommendedNextSteps steps={nextStepsFromMeta(m.meta)} onPick={onFollowUp} />}
-      <MessageActions text={m.content} anchorId={m.id} />
+      <MessageActions text={m.content} anchorId={m.id} standing={standing} />
+      {standing ? (
+        // On touch its Reply and Copy stand here in a row of their own, and its next steps follow under a rule.
+        <StandingActions text={m.content} anchorId={m.id}>
+          {steps.length > 0 && <RecommendedNextSteps steps={steps} onPick={onFollowUp} />}
+        </StandingActions>
+      ) : (
+        <RecommendedNextSteps steps={steps} onPick={onFollowUp} />
+      )}
     </div>
   )
 }

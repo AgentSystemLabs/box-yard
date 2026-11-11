@@ -1,15 +1,21 @@
 // Select text in a chat or transcript to act on it. In a chat with side threads (useThreadChat: the Coordinator's or
 // a Captain's), "Reply quoting selection" opens the message's reply thread (SideThread.tsx) with the passage quoted in
 // its box: the chat's agent routes what Cody writes there, which covers asking about it and starting work from it. In
-// a task's transcript, "Start new task" opens the shared New task popover with the quote and a box for instructions.
-// Enter sends both to whoever routes the work (the Coordinator); "More options" starts the task directly from the
-// full New task dialog.
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react"
+// a task's transcript, "New task from selection" opens the shared New task popover with the quote and a box for
+// instructions. Enter sends both to whoever routes the work (the Coordinator), as its button says, and the toast after
+// it opens that chat; "Start it myself…" starts the task directly from the full New task dialog, which shows the quote
+// and takes the instructions.
+//
+// A mouse gets the action as a pill over the selection. A finger gets a bar as wide as its label, centred just above
+// the chat's composer, or under the chat's header when that side is the one clear of the selection: never over the
+// composer.
+import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
 import { MessageSquarePlus, Reply } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { buildSelectionTaskBrief, buildSelectionTaskPrompt, selectionTarget, type SelectionTaskSource } from "../lib/selectionTask"
-import { clearNewTaskDraft, selectionScope } from "../lib/newTask"
+import { clearNewTaskDraft, newTaskDraftKey, saveDraft, selectionScope } from "../lib/newTask"
 import { toast } from "../lib/toast"
+import { openChat } from "../lib/navigation"
 import { useOwnerName } from "../lib/queries"
 import { NewTaskDialog, NewTaskPopover } from "./NewTask"
 import { useReplyTo, useThreadChat } from "./SideThread"
@@ -29,6 +35,8 @@ interface SelectionInfo {
   y: number
   /** The chat message the selection ends in (`data-chat-id`), whose reply thread it quotes into. */
   anchorId: string | null
+  /** Where the phone bar sits when the chat has a composer on screen (barPlace); null: at the window's bottom edge. */
+  bar: CSSProperties | null
 }
 
 export function SelectionToTask({
@@ -44,9 +52,11 @@ export function SelectionToTask({
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
   /** The New task popover is open on this selection, hanging from where its button was. */
   const [draft, setDraft] = useState<{ text: string; rect: Rect } | null>(null)
-  /** "More options": the full New task dialog for this selection and the instructions typed so far. */
+  /** "Start it myself…": the full New task dialog for this selection and the instructions typed so far. */
   const [dialog, setDialog] = useState<{ text: string; instructions: string } | null>(null)
   const anchor = useRef<HTMLSpanElement>(null)
+  /** This chat's composer, found once: the phone bar sits above it. */
+  const composer = useRef<HTMLElement | null>(null)
   const popoverId = useId()
   const ownerName = useOwnerName()
   const qc = useQueryClient()
@@ -57,7 +67,7 @@ export function SelectionToTask({
   useEffect(() => {
     const update = () => {
       if (!source && !threadChat) return setSelection(null)
-      const info = readSelection(root.current)
+      const info = readSelection(root.current, composer)
       setSelection(info)
     }
     const clearIfOutside = (e: PointerEvent) => {
@@ -106,7 +116,7 @@ export function SelectionToTask({
   const action = canReply
     ? { icon: Reply, label: "Reply quoting selection", bar: "Reply quoting selection", testid: "selection-reply", run: reply, popup: undefined }
     : source
-      ? { icon: MessageSquarePlus, label: "Start new task", bar: "Start new task from selection", testid: "selection-task", run: open, popup: "dialog" as const }
+      ? { icon: MessageSquarePlus, label: "New task from selection", bar: "New task from selection", testid: "selection-task", run: open, popup: "dialog" as const }
       : null
 
   return (
@@ -124,7 +134,11 @@ export function SelectionToTask({
               <action.icon className="h-3.5 w-3.5" /> {action.label}
             </button>
           </div>
-          <div data-selection-task-action className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex gap-2 [@media(pointer:fine)]:hidden">
+          <div
+            data-selection-task-action
+            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 [@media(pointer:fine)]:hidden"
+            style={selection.bar ?? undefined}
+          >
             <button type="button" aria-haspopup={action.popup} onMouseDown={(e) => e.preventDefault()} onClick={action.run} className={BAR}>
               <action.icon className="h-4 w-4 shrink-0" /> {action.bar}
             </button>
@@ -142,13 +156,19 @@ export function SelectionToTask({
             heading="New task from selection"
             quote={draft.text}
             placeholder="Additional instructions (optional)"
+            submitLabel={`Send to ${selectionTarget(source)}`}
+            moreLabel="Start it myself…"
             scope={selectionScope(draft.text)}
             align="center"
             defaultProjectId={source.project?.id}
             onStart={(instructions) => {
               onPrompt(buildSelectionTaskPrompt({ source, selectedText: draft.text, instructions, ownerName }))
               finish()
-              toast.info(`Sent to ${selectionTarget(source)}`, "It will decide where this task belongs.")
+              // With an action, so it shows in a task's view too (its toasts are the quiet ones), and leads to the answer.
+              toast.info(`Sent to ${selectionTarget(source)}`, "It will decide where this task belongs.", {
+                action: { label: "Open chat", onClick: () => openChat(source.kind === "captain" ? source.project.id : null) },
+                duration: 8000,
+              })
             }}
             onClose={() => setDraft(null)}
             onMore={(_, instructions) => {
@@ -160,9 +180,17 @@ export function SelectionToTask({
       )}
       {source && dialog && (
         <NewTaskDialog
-          projectId={source.project?.id}
-          initialPrompt={buildSelectionTaskBrief({ source, selectedText: dialog.text, instructions: dialog.instructions })}
-          onCancel={() => setDialog(null)}
+          // The source's project to start with, not for good: a follow-up may belong to another one.
+          defaultProjectId={source.project?.id}
+          initialPrompt={dialog.instructions}
+          quote={dialog.text}
+          compose={(instructions) => buildSelectionTaskBrief({ source, selectedText: dialog.text, instructions })}
+          draftKey={newTaskDraftKey(selectionScope(dialog.text))}
+          onCancel={(instructions) => {
+            // Kept for this quote, as the popover keeps them.
+            saveDraft(selectionScope(dialog.text), instructions)
+            setDialog(null)
+          }}
           onDone={() => {
             clearNewTaskDraft(selectionScope(dialog.text))
             setDialog(null)
@@ -177,9 +205,45 @@ export function SelectionToTask({
 const PILL =
   "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-yard-200 hover:bg-zinc-800 hover:text-yard-100 focus:ring-2 focus:ring-yard-500 focus:outline-none"
 const BAR =
-  "flex min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl border border-yard-400/50 bg-zinc-900/95 px-4 py-3 text-sm font-medium text-yard-100 shadow-2xl shadow-black/50 backdrop-blur"
+  "flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-2xl border border-yard-400/50 bg-zinc-900/95 px-4 py-3 text-sm font-medium text-yard-100 shadow-2xl shadow-black/50 backdrop-blur"
 
-function readSelection(root: HTMLElement | null): SelectionInfo | null {
+/** The bar's height and the gap around it. */
+const BAR_ROOM = 64
+
+/** The composer of the chat `root` is in: the nearest one up the tree (chats kept beside it have their own). */
+function composerOf(root: HTMLElement, found: { current: HTMLElement | null }): HTMLElement | null {
+  if (found.current?.isConnected) return found.current
+  for (let el = root.parentElement; el; el = el.parentElement) {
+    const box = el.querySelector<HTMLElement>("[data-composer-box]")
+    if (box) return (found.current = box.closest("form") ?? box)
+  }
+  return null
+}
+
+/**
+ * Where the phone bar goes: just above the composer while the selection ends clear of there, else on the side with
+ * more room clear of it, which is mostly under the chat's header (the top of what scrolls), below a notch. Never over
+ * the composer. Null without a composer on screen: the window's bottom edge then covers nothing.
+ */
+function barPlace(root: HTMLElement, found: { current: HTMLElement | null }, range: Range): CSSProperties | null {
+  if (window.matchMedia?.("(pointer: fine)").matches) return null
+  const box = composerOf(root, found)?.getBoundingClientRect()
+  const top = box?.top ?? 0
+  if (!box || top <= BAR_ROOM || top > window.innerHeight) return null
+  // Centred on its chat, which a tablet shows beside others.
+  const left = box.left + box.width / 2
+  const node = range.commonAncestorContainer
+  const scroller = (node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element))?.closest("[data-scroller]")
+  const head = Math.max(0, Math.round(scroller?.getBoundingClientRect().top ?? 0))
+  const picked = range.getBoundingClientRect()
+  // The room left on each side of the selection, of what shows of it.
+  const below = Math.max(0, top - picked.bottom)
+  const above = Math.max(0, picked.top - head)
+  if (below >= BAR_ROOM || below > above) return { left, bottom: window.innerHeight - top + 8 }
+  return { left, top: `max(${head + 8}px, calc(env(safe-area-inset-top) + 0.5rem))`, bottom: "auto" }
+}
+
+function readSelection(root: HTMLElement | null, composer: { current: HTMLElement | null }): SelectionInfo | null {
   if (!root) return null
   const sel = window.getSelection()
   const text = sel?.toString().trim() ?? ""
@@ -196,6 +260,7 @@ function readSelection(root: HTMLElement | null): SelectionInfo | null {
     anchorId: (message(range.endContainer) ?? message(range.startContainer))?.getAttribute("data-chat-id") ?? null,
     x: clamp(rect.left + rect.width / 2, 120, window.innerWidth - 120),
     y: clamp(rect.top - 42, 12, window.innerHeight - 52),
+    bar: barPlace(root, composer, range),
   }
 }
 
