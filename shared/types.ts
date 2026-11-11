@@ -1,5 +1,6 @@
 // Types shared by the API server and the React app.
 import type { TaskOutcome } from "./quiet.js"
+import type { AskQuestion } from "./askQuestions.js"
 import type { BoxCleanup } from "./disk.js"
 import type { Hook, HookRun } from "./hooks.js"
 import type { BoxResize } from "./boxSizes.js"
@@ -204,6 +205,11 @@ export interface Task {
   prMergedBy: string | null
   previews: PreviewLink[]
   question: string | null
+  /**
+   * ask_user's several questions (shared/askQuestions.ts), when the ask had them: the task page asks them one at a
+   * time and sends the answers back as one message. `question` is their text version. Null or absent: a plain question.
+   */
+  questions?: AskQuestion[] | null
   summary: string | null
   /** Until there is a summary: the latest assistant text or tool call as one line (shared/activity.ts), for cards. */
   activity?: string | null

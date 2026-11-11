@@ -40,6 +40,7 @@ import { autocompactFlag, noteBudgetOf, type SettingsStore } from "./settings.js
 import { budgetNotes } from "../shared/notes.js"
 import { MAX_NOTE_CHARS } from "./notes.js"
 import { DEFAULT_OWNER_NAME, withOwner } from "../shared/owner.js"
+import { answersProblem, askKey, formatAnswers, normalizeQuestions, questionsText } from "../shared/askQuestions.js"
 import { cloudSpend, localDay, raiseToday, startOfLocalDay, usd } from "./cloudLimit.js"
 import { localDayStarts } from "../shared/usageLedger.js"
 import { userMessageLabel } from "../shared/sender.js"
@@ -1353,6 +1354,22 @@ export class TaskManager {
     }
   }
 
+  /**
+   * Cody's answers to the task's several questions (ask_user's `questions`, the task page's ask form): one message to
+   * the task's session, each question with its answer (shared/askQuestions.ts formatAnswers), sent like a typed
+   * answer, so it clears the question and starts the next turn on whichever runner the task is on. `key` is the
+   * askKey of the questions the form showed: answers to questions that were since answered or replaced are refused.
+   */
+  answerQuestions(taskId: string, key: string, answers: unknown, clientMessageId?: string): { task: Task; inputId: string; content: string } {
+    const row = this.requireRow(taskId)
+    const questions = row.status === "needs_input" ? this.store.taskQuestions(row) : null
+    if (!questions || askKey(questions) !== key) throw new ConflictError(`${row.title} isn't waiting on these questions any more`)
+    const problem = answersProblem(questions, answers)
+    if (problem) throw new BadRequestError(problem)
+    const content = formatAnswers(questions, answers as string[])
+    return { ...this.send(taskId, content, "cody", [], undefined, undefined, clientMessageId), content }
+  }
+
   /** sendInput that also says which queued message it made (the MCP tools hand it back for cancel/edit). */
   send(taskId: string, content: string, source: InputSource = "cody", attachments: StoredUpload[] = [], route?: Parameters<TaskManager["sendInput"]>[4], hook?: Parameters<TaskManager["sendInput"]>[5], clientMessageId?: string): { task: Task; inputId: string } {
     const inputId = this.enqueue(this.requireRow(taskId), content, source, attachments, route, hook, clientMessageId)
@@ -1797,7 +1814,8 @@ export class TaskManager {
       void stopping?.catch((err) => console.warn(`[box-yard] stopping ${taskId} as it closed: ${errorMessage(err)}`))
       this.dropQueuedMessages(row.id)
       // What it was, for Reopen.
-      const doneFrom = { status: row.status, question: row.question, parent: by?.parent.id ?? null }
+      const questions = this.store.taskQuestions(row)
+      const doneFrom = { status: row.status, question: row.question, ...(questions && { questions }), parent: by?.parent.id ?? null }
       this.store.updateTask(row.id, { status: "done", question: null, doneFrom }, { quiet: true })
       this.addEvent(row.id, isLocalRunnerBox(row.box_id) ? "Closed. Its folder stays on this computer until the task is deleted or this computer's cleanup archives it (Settings › Boxes & limits › This computer and SSH machines)." : "Closed. Its workspace was archived and its box slot freed.")
       if (by) this.addEvent(row.id, by.root ? `Closed with ${by.root.title}, a task above it (its parent task, ${by.parent.title}, was done already).` : `Closed with its parent task, ${by.parent.title}.`, { kind: "subtasks" })
@@ -1848,6 +1866,7 @@ export class TaskManager {
     this.store.updateTask(row.id, {
       status,
       question: status === "needs_input" ? from!.question : null,
+      questions: status === "needs_input" ? (from!.questions ?? null) : null,
       doneFrom: null,
       ...(merged ? { reopenedMergedPr: merged } : {}),
     }, { quiet: true })
@@ -7408,9 +7427,12 @@ export class TaskManager {
         this.store.updateTask(taskId, { sessionId: String(ev.sessionId) })
         return say("event", `${AGENT_CLI_LABEL[taskAgentCli(row)]} session was missing on this box, so the agent started a new one with a recap.`)
       case "ask_user": {
-        const question = String(ev.question ?? "")
-        this.store.updateTask(taskId, { turnFlags: { ...flags, asked: question }, question })
-        say("event", `${withOwner("Asked Cody:", this.owner())} ${question}`, { kind: "question" })
+        // Several questions (shared/askQuestions.ts): the task's question is their text, for everything that reads text.
+        const questions = normalizeQuestions(ev.questions)
+        const intro = String(ev.question ?? "").trim()
+        const question = questions ? questionsText(intro || null, questions) : intro
+        this.store.updateTask(taskId, { turnFlags: { ...flags, asked: question, askedQuestions: questions ?? undefined }, question, questions })
+        say("event", `${withOwner("Asked Cody:", this.owner())} ${question}`, { kind: "question", ...(questions ? { questions: questions.length } : {}) })
         return this.emitTask(taskId)
       }
       case "message_agent":
@@ -7680,6 +7702,7 @@ export class TaskManager {
       sessionId: typeof ev.sessionId === "string" ? ev.sessionId : undefined,
       lastActiveAt: Date.now(),
       question: status === "needs_input" ? (uncertain ? error : flags.asked ?? null) : null,
+      questions: status === "needs_input" && !uncertain && flags.asked ? (flags.askedQuestions ?? null) : null,
       turnFlags: { interrupts: 0, ...(flags.hookIds ? { lastHookIds: flags.hookIds } : {}) },
       outcome,
     }, { quiet: stopped || agentWake })

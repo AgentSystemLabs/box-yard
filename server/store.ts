@@ -4,6 +4,7 @@ import type { ArchiveKind } from "./archive.js"
 import { redactPrivateKeys, redactValues } from "./redact.js"
 import { BOX_SIZES, TASK_STATUSES, WAIT_FIXES, shouldNotify, weakerSource } from "../shared/types.js"
 import { activityLine } from "../shared/activity.js"
+import { normalizeQuestions, type AskQuestion } from "../shared/askQuestions.js"
 import { todaysRaise } from "./cloudLimit.js"
 import { isQuietRun, parseOutcome, type TaskOutcome } from "../shared/quiet.js"
 import { parsePriority, type TaskPriority } from "../shared/priority.js"
@@ -141,6 +142,8 @@ const publicMergeRequest = (req: StoredMergeRequest | null): MergeRequest | null
 /** What happened during the turn that is running now. Reset at turn start. */
 export interface TurnFlags {
   asked?: string
+  /** The several questions `asked` is the text of (ask_user's `questions`), for the task's form once the turn ends. */
+  askedQuestions?: AskQuestion[]
   /** The agent called finish with this summary: its work is ready for review. The task rests, never done (only Cody marks that). */
   finished?: string
   waitingOn?: string[]
@@ -182,6 +185,8 @@ export interface TaskRow {
   outcome: TaskOutcome | null
   previews_json: string
   question: string | null
+  /** ask_user's several questions (shared/askQuestions.ts) as JSON, with `question` their text version. */
+  questions_json?: string | null
   summary: string | null
   error: string | null
   wait_reason: string | null
@@ -262,6 +267,8 @@ export interface DoneFrom {
   status: TaskStatus
   /** Its open question, when it was waiting on Cody's answer. */
   question: string | null
+  /** Its several questions, when the ask had them (Task.questions). */
+  questions?: AskQuestion[] | null
   /** The task it was closed with (a parent's close takes its sub-tasks), so reopening that one reopens it too. */
   parent: string | null
 }
@@ -609,6 +616,8 @@ type TaskPatch = Partial<{
   outcome: TaskOutcome | null
   previews: PreviewLink[]
   question: string | null
+  /** Set with `question`; a patch that sets `question` without it clears it (updateTask). */
+  questions: AskQuestion[] | null
   summary: string | null
   error: string | null
   waitReason: string | null
@@ -666,6 +675,7 @@ const TASK_COLUMNS: Record<keyof TaskPatch, string> = {
   outcome: "outcome",
   previews: "previews_json",
   question: "question",
+  questions: "questions_json",
   summary: "summary",
   error: "error",
   waitReason: "wait_reason",
@@ -1575,6 +1585,7 @@ export class Store {
       prMergedBy: row.pr_merged_by ?? null,
       previews: json<PreviewLink[]>(row.previews_json, []),
       question: row.question,
+      questions: this.taskQuestions(row),
       summary: row.summary,
       activity: row.summary === null ? lookups.activity(row.id) : null,
       error: row.error,
@@ -1661,12 +1672,22 @@ export class Store {
     return req
   }
 
+  /** A task's several questions (Task.questions), while it has the question they go with. */
+  taskQuestions(row: Pick<TaskRow, "question" | "questions_json">): AskQuestion[] | null {
+    return row.question ? normalizeQuestions(json<unknown>(row.questions_json ?? null, null)) : null
+  }
+
   /** What Mark done closed a task from, when it's still done from that close (TaskRow.done_from_json). */
   doneFromOf(row: Pick<TaskRow, "status" | "done_from_json">): DoneFrom | null {
     if (row.status !== "done") return null
     const from = json<Partial<DoneFrom> | null>(row.done_from_json ?? null, null)
     if (!from || !(TASK_STATUSES as readonly string[]).includes(from.status ?? "")) return null
-    return { status: from.status!, question: typeof from.question === "string" ? from.question : null, parent: typeof from.parent === "string" ? from.parent : null }
+    return {
+      status: from.status!,
+      question: typeof from.question === "string" ? from.question : null,
+      questions: typeof from.question === "string" ? normalizeQuestions(from.questions) : null,
+      parent: typeof from.parent === "string" ? from.parent : null,
+    }
   }
 
   getTaskRow(id: string): TaskRow | null {
@@ -1932,11 +1953,13 @@ export class Store {
       sets.push(`${TASK_COLUMNS[key]} = ?`)
       if (key === "previews" || key === "turnFlags" || key === "prLabels") args.push(JSON.stringify(value))
       else if (key === "waitFor") args.push((value as WaitFor[]).length ? JSON.stringify(value) : null)
-      else if (key === "mergeRequest" || key === "pushState" || key === "doneFrom") args.push(value === null ? null : JSON.stringify(value))
+      else if (key === "mergeRequest" || key === "pushState" || key === "doneFrom" || key === "questions") args.push(value === null ? null : JSON.stringify(value))
       else if (key === "sessionStarted" || key === "compactPending" || key === "compacting" || key === "stayOpenOnMerge") args.push(value ? 1 : 0)
       else if (key === "priority") args.push(value === "high" ? "high" : null)
       else args.push(value)
     }
+    // The several questions belong to the question they were asked with: a new or cleared question drops them.
+    if (patch.question !== undefined && patch.questions === undefined) sets.push("questions_json = NULL")
     // Out of done any other way than Reopen (a message picked it up): what Mark done closed it from is history now.
     if (patch.status !== undefined && patch.status !== "done" && patch.doneFrom === undefined) sets.push("done_from_json = NULL")
     if (opts.touch !== false) {

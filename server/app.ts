@@ -19,6 +19,7 @@ import { TaskManager, type DockerRunner, type GpuRunner, type TaskManagerDeps } 
 import { Orchestrator } from "./orchestrator.js"
 import { closeFromOwnerChat } from "./ownerClose.js"
 import { MAX_QUESTION_CHARS, MAX_QUOTE_CHARS, SideThreads } from "./sideThreads.js"
+import { MAX_ANSWER_TEXT, MAX_QUESTIONS } from "../shared/askQuestions.js"
 import { CaptainManager } from "./captains.js"
 import { SettingsStore, TtsSettingsStore, captainIcon, parseSettingKeys } from "./settings.js"
 import { SettingsTools } from "./settingsTools.js"
@@ -264,6 +265,8 @@ const schemas = {
     /** Sent from the task's card in the Coordinator chat: the chat gets a line saying so (TaskManager.sentFromChat). */
     inChat: z.boolean().optional(),
   }),
+  /** The task page's ask form: one answer per question, for the questions with this askKey (TaskManager.answerQuestions). */
+  answers: z.object({ id: idSchema, key: z.string().min(1).max(40), answers: z.array(z.string().max(MAX_ANSWER_TEXT)).min(1).max(MAX_QUESTIONS) }),
   queuedEdit: z.object({ text: z.string().max(50_000), version: z.number().int().positive().optional() }),
   chat: z.object({
     id: idSchema,
@@ -1424,6 +1427,13 @@ export function createBoxYard(
     const { task, inputId } = tasks.send(req.params.id!, body.content, "cody", files, undefined, undefined, body.id)
     orchestrator.directMessages.record({ taskId: task.id }, body.content)
     if (body.inChat) tasks.sentFromChat(task.id, body.content, files)
+    res.json({ ...task, inputId })
+  })
+  // Answers to the task's several questions (ask_user's `questions`), as one message to its session.
+  api.post("/tasks/:id/answers", (req, res) => {
+    const body = parse(schemas.answers, req.body)
+    const { task, inputId, content } = tasks.answerQuestions(req.params.id!, body.key, body.answers, body.id)
+    orchestrator.directMessages.record({ taskId: task.id }, content)
     res.json({ ...task, inputId })
   })
   // Task management from the task's chat, for its project's Captain instead of the busy agent: the Captain gets the
