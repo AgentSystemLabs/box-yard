@@ -1,4 +1,4 @@
-// A task's published files as the header's "📎 N files" drawer shows them: newest first, grouped when titles
+// A task's published files as the header's "N files" drawer shows them: newest first, grouped when titles
 // share a stem ("Captain tab before (mobile)" / "Captain tab after: menu" → "Captain tab"), filtered by a search
 // box, plus the "new since you last looked" count (none before the first look). Pure, so it is unit tested; the UI is
 // components/TaskFiles.tsx.

@@ -1,9 +1,9 @@
-// A task's published files: one "📎 N files" chip in the header that opens a drawer (a bottom sheet on phones)
+// A task's published files: one "N files" chip in the header that opens a drawer (a bottom sheet on phones)
 // with image thumbnails and a compact list, and the small "published" row in the transcript. Ordering, grouping
 // and filtering are in lib/taskFiles.ts. The drawer's open state lives here, so opening it never re-renders the
 // transcript.
 import { memo, useCallback, useEffect, useMemo, useState } from "react"
-import { File, FileCode, FileImage, FileText, Film, Music, Paperclip, Search, X } from "lucide-react"
+import { File, FileCode, FileImage, FileText, Files, Film, Music, Search, X } from "lucide-react"
 import { Modal } from "./Modal"
 import { ArtifactLink } from "./FileLink"
 import { formatSize } from "./Attachments"
@@ -33,7 +33,7 @@ function useFilesSeen(taskId: string): [number | null, (at: number) => void] {
   return [seen, mark]
 }
 
-/** `quiet`: the task header's faint pill; `fold`: there, it narrows to the paperclip and the count (HEADER_FOLD). */
+/** `quiet`: the task header's faint pill; `fold`: there, it narrows to the icon and the count (HEADER_FOLD). The icon is a stack of files: the paperclip is the composer's Attach. */
 export function FilesChip({ taskId, projectId, files, quiet = false, fold = false }: { taskId: string; projectId: string | null; files: Artifact[]; quiet?: boolean; fold?: boolean }) {
   const [open, setOpen] = useState(false)
   const [seen, markSeen] = useFilesSeen(taskId)
@@ -62,7 +62,7 @@ export function FilesChip({ taskId, projectId, files, quiet = false, fold = fals
         title={fresh ? `${label}, ${fresh} new since you last looked` : "Files this task published"}
         className={cx(quiet ? cx(HEADER_CHIP, "bg-zinc-900 font-normal text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200") : cx(META_CHIP, "border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"), fold && HEADER_FOLD.chip, "focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none")}
       >
-        <Paperclip className={cx("h-3 w-3 text-zinc-400", fold && HEADER_FOLD.icon)} /> {files.length}
+        <Files className={cx("h-3 w-3 text-zinc-400", fold && HEADER_FOLD.icon)} /> {files.length}
         <span className={cx(fold && HEADER_FOLD.label)}> file{files.length === 1 ? "" : "s"}</span>
         {/* New files since the drawer was last opened (none before it ever was): a dot, with the count in the tooltip and the label. */}
         {fresh > 0 && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" aria-hidden data-testid="files-new-dot" />}
@@ -80,13 +80,16 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
   // Marked only against an earlier look, like the chip's dot (isUnseen).
   const isNew = (f: TaskFile) => isUnseen(f, seenAt)
   const fresh = unseenCount(files, seenAt)
+  const count = `${files.length} file${files.length === 1 ? "" : "s"}`
+  /** While filtering: how many of the files show, in the header and said to a screen reader as it changes. */
+  const matched = query.trim() ? `${listing.ordered.length} of ${count}` : ""
 
   return (
     <Modal
       size="lg"
       placement="sheet"
       title="Files"
-      description={`${files.length} file${files.length === 1 ? "" : "s"} published by this task${fresh ? ` · ${fresh} new` : ""}`}
+      description={matched || `${count} published by this task${fresh ? ` · ${fresh} new` : ""}`}
       onClose={onClose}
       // The drawer's own width (a phone's sheet, the desktop dialog) lays out the tiles and rows, not the window's.
       // Its padding alone follows the window, with the Modal header's above it.
@@ -115,6 +118,9 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
               <X className="h-3.5 w-3.5" />
             </button>
           )}
+          <p role="status" className="sr-only">
+            {matched}
+          </p>
         </div>
       )}
       {!listing.ordered.length && <p className="py-6 text-center text-sm text-zinc-500">No files match “{query}”.</p>}
@@ -136,14 +142,14 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
                     className="group flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 hover:border-zinc-600 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
                   >
                     <img src={thumbUrl(f.url, 640)} alt="" loading="lazy" decoding="async" className="aspect-video w-full shrink-0 bg-zinc-950 object-cover object-top" />
-                    {/* The title gets the tile's whole width; what kind, how big and how old go under it. */}
+                    {/* The title gets the tile's whole width; how big and how old go under it (the thumbnail says what kind). */}
                     <span className="block px-2 py-1.5 text-xs">
                       <span className="line-clamp-2 wrap-anywhere text-zinc-300 group-hover:text-zinc-100">
                         {isNew(f) && <NewMark />}
                         {shortTitle(f.title, s.label)}
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                        {fileType(f)} · {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
+                        {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
                       </span>
                     </span>
                   </ArtifactLink>
