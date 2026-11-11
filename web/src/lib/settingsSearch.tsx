@@ -36,6 +36,8 @@ interface SearchRegistry {
   words: string[]
   fields: Record<string, SearchableSetting>
   update(id: string, field: SearchableSetting | null): void
+  /** Leaves search for a category. */
+  open(section: SettingsSection): void
 }
 const SearchContext = createContext<SearchRegistry | null>(null)
 const CategoryContext = createContext<SettingsSection | null>(null)
@@ -44,8 +46,25 @@ const NO_WORDS: string[] = []
 /** The words being searched for, lower case; none while search is off. */
 export const useSettingsSearchWords = () => useContext(SearchContext)?.words ?? NO_WORDS
 
-export function useSettingsSearch(query: string) {
+/** A category in the search results: how many of its fields match, and `open` to leave search for it. Null while search is off. */
+export function useSettingsSearchResults(section: SettingsSection) {
+  const search = useContext(SearchContext)
+  if (!search?.words.length) return null
+  return {
+    count: Object.values(search.fields).filter((f) => f.category === section && matchesSetting(f, search.words)).length,
+    open: () => search.open(section),
+  }
+}
+
+/** `onOpen` leaves search for a category: a result's category header calls it. */
+export function useSettingsSearch(query: string, onOpen?: (section: SettingsSection) => void) {
   const words = useMemo(() => searchWords(query), [query])
+  // The latest one, behind a callback that never changes, so the registry is new only when the search is.
+  const latestOpen = useRef(onOpen)
+  useEffect(() => {
+    latestOpen.current = onOpen
+  })
+  const open = useCallback((section: SettingsSection) => latestOpen.current?.(section), [])
   const [fields, setFields] = useState<Record<string, SearchableSetting>>({})
   const update = useCallback((id: string, field: SearchableSetting | null) => {
     setFields((prev) => {
@@ -56,7 +75,7 @@ export function useSettingsSearch(query: string) {
       return next
     })
   }, [])
-  const registry = useMemo(() => ({ words, fields, update }), [words, fields, update])
+  const registry = useMemo(() => ({ words, fields, update, open }), [words, fields, update, open])
   const matches = Object.values(fields).filter((field) => matchesSetting(field, words))
   return { registry, matches, searching: words.length > 0 }
 }

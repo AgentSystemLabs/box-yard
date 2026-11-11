@@ -42,7 +42,7 @@ export function AppearancePanel() {
                 data-theme-choice={value}
                 onClick={() => set(value)}
                 className={cx(
-                  "flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-1 text-sm focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none",
+                  "flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-1 text-sm",
                   on ? "bg-zinc-700 font-medium text-zinc-50" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200",
                 )}
               >

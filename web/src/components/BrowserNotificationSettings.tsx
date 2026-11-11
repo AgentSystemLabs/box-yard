@@ -107,7 +107,7 @@ export function BrowserNotificationsRow({ fid }: { fid: (k: string) => string })
             setTest(null)
           }}
         />
-        {on ? "On" : "Off"}
+        {on ? "On: notify me in the background" : "Off: toasts and Recent only"}
       </label>
     </Row>
   )

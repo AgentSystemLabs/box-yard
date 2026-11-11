@@ -108,7 +108,7 @@ export function SettingsTabs<K extends string>({
                 className={cx(
                   // 36px to a mouse, so all of Settings' categories fit a 900px-tall window; 44px to a finger. The `!`
                   // is over .settings-body's 44px for every button (styles.css).
-                  "flex min-h-9! shrink-0 items-center gap-2.5 rounded-lg px-3 py-1.5 text-left pointer-coarse:min-h-11! text-sm whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none motion-reduce:transition-none",
+                  "flex min-h-9! shrink-0 items-center gap-2.5 rounded-lg px-3 py-1.5 text-left pointer-coarse:min-h-11! text-sm whitespace-nowrap transition motion-reduce:transition-none",
                   on ? "bg-zinc-800/80 font-medium text-zinc-50" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
                 )}
               >

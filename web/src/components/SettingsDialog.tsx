@@ -95,7 +95,8 @@ function FieldError({ id, children }: { id: string; children: ReactNode }) {
 /** On a field's control: Save finds a problem by `data-setting`, and the control names its error. */
 type FieldProps = InputHTMLAttributes<HTMLInputElement> & { "data-setting": SettingPath }
 type FieldCheck = (path: SettingPath) => FieldProps
-type Hint = (k: keyof Settings, problems?: SettingPath[]) => ReactNode
+/** A Row's `hint` and `changed` for a setting: its problems and where its value comes from, and "unsaved" beside its label. */
+type RowMeta = (k: keyof Settings, problems?: SettingPath[]) => { hint: ReactNode; changed: boolean }
 type NumberKey = { [K in keyof Settings]-?: Settings[K] extends number ? K : never }[keyof Settings]
 
 function AutoCompactControl({
@@ -196,10 +197,10 @@ export function SettingsDialog({
   const [searchOpen, setSearchOpen] = useState(false)
   const searchToggle = useRef<HTMLButtonElement>(null)
   // After a clear or Esc, focus goes to whichever of the two is on screen: `first` is tried first.
-  const [refocus, setRefocus] = useState<{ first: "toggle" | "field" } | null>(null)
+  const [refocus, setRefocus] = useState<{ first: "toggle" | "field" | "panel" } | null>(null)
   const models = useModels()
   const modelName = (id: string) => findModel(models, id)?.label ?? id
-  const { registry: searchRegistry, matches, searching } = useSettingsSearch(query)
+  const { registry: searchRegistry, matches, searching } = useSettingsSearch(query, (target) => leaveSearchFor(target))
   const searchCategories = new Set(matches.map((f) => f.category))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -241,13 +242,16 @@ export function SettingsDialog({
   const fid = (k: string) => `${ids}-${k}`
   const errorId = (path: SettingPath) => fid(`error-${path}`)
   const field: FieldCheck = (path) => ({ "data-setting": path, ...(problems[path] && { "aria-invalid": true, "aria-describedby": errorId(path) }) })
-  // Under the control: the field's problems (by default its key's), then where its value comes from.
-  const hint: Hint = (k, paths = [k]) => (
-    <>
-      {paths.map((p) => problems[p] && <FieldError key={p} id={errorId(p)}>{problems[p]}</FieldError>)}
-      <SourceHint source={current?.sources[k]} env={SETTING_ENV[k]} changed={changed.includes(k)} />
-    </>
-  )
+  // Under the control: the field's problems (by default its key's), then where its value comes from. "unsaved" goes beside the label.
+  const row: RowMeta = (k, paths = [k]) => ({
+    changed: changed.includes(k),
+    hint: (
+      <>
+        {paths.map((p) => problems[p] && <FieldError key={p} id={errorId(p)}>{problems[p]}</FieldError>)}
+        <SourceHint source={current?.sources[k]} env={SETTING_ENV[k]} changed={false} />
+      </>
+    ),
+  })
 
   const discard = () => {
     setDraft(null)
@@ -305,12 +309,21 @@ export function SettingsDialog({
   }
   useEffect(() => {
     if (!refocus) return
+    if (refocus.first === "panel") return panelRef.current?.focus({ preventScroll: true })
     const order = refocus.first === "toggle" ? [searchToggle.current, searchRef.current] : [searchRef.current, searchToggle.current]
     for (const el of order) {
       el?.focus()
       if (document.activeElement === el) break
     }
   }, [refocus])
+
+  /** A search result's category header: search ends and that category opens, with focus on its panel (the header is gone). */
+  const leaveSearchFor = (target: SettingsSection) => {
+    setQuery("")
+    setSearchOpen(false)
+    if (target !== section) onSection(target)
+    setRefocus({ first: "panel" })
+  }
 
   // Another category (a tab, a link in a help text or a search result) leaves search.
   useEffect(() => {
@@ -325,6 +338,8 @@ export function SettingsDialog({
     if (previous === section) return
     if (settingsRoot(section) !== section) panelRef.current?.querySelector<HTMLButtonElement>("[data-settings-back]")?.focus()
     else if (settingsRoot(previous) === section) panelRef.current?.querySelector<HTMLButtonElement>(`[data-runner-section=${previous}]`)?.focus()
+    // A link in a dialog that closed to show this category (a project's settings): its focus has nowhere to go back to.
+    else if (document.activeElement === document.body) panelRef.current?.focus({ preventScroll: true })
   }, [section])
 
   // Document runs before the window palette/Modal handlers. Nested dialogs keep their own keys.
@@ -546,7 +561,7 @@ export function SettingsDialog({
               setSearchOpen(false)
             }}
           />
-          {(query || searchOpen) && <button type="button" aria-label={query ? "Clear settings search" : "Close settings search"} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400 focus-visible:ring-2 focus-visible:ring-yard-400" onClick={closeSearch}><X className="h-4 w-4" /></button>}
+          {(query || searchOpen) && <button type="button" aria-label={query ? "Clear settings search" : "Close settings search"} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400" onClick={closeSearch}><X className="h-4 w-4" /></button>}
         </div>
         {searching && <p role="status" className="mt-2 text-xs text-zinc-400">{matches.length} matching {matches.length === 1 ? "field" : "fields"} in {searchCategories.size} {searchCategories.size === 1 ? "category" : "categories"}</p>}
       </div>
@@ -568,7 +583,7 @@ export function SettingsDialog({
             aria-expanded={searchOpen}
             title="Search settings"
             onClick={focusSearch}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-control bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-400"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-control bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
           >
             <Search aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -578,7 +593,7 @@ export function SettingsDialog({
         panelRole={searching ? "region" : "tabpanel"}
         panelLabel={searching ? "Settings search results" : SETTINGS_SECTIONS.find((s) => s.key === section)!.label}
       >
-        {!searching && rootSection !== section && <button type="button" data-settings-back onClick={() => onSection(rootSection)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-yard-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yard-400"><ArrowLeft aria-hidden="true" className="h-4 w-4" />Box providers</button>}
+        {!searching && rootSection !== section && <button type="button" data-settings-back onClick={() => onSection(rootSection)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-yard-300"><ArrowLeft aria-hidden="true" className="h-4 w-4" />Box providers</button>}
         {searching && matches.length === 0 && <div className="py-10 text-center"><p className="text-sm text-zinc-200">No settings found</p><p className="mt-2 text-xs text-zinc-500">Try a different word, like model, signing or voice.</p></div>}
         <SettingsDraftContext.Provider value={registry}>
           {SETTINGS_SECTIONS.filter((sec) => visited.includes(sec.key)).map(({ key: category }) => (
@@ -588,13 +603,13 @@ export function SettingsDialog({
               ) : category === "voice" ? (
                 <VoicePanel fid={fid} />
               ) : category === "runners" ? (
-                <RunnerSettings fid={fid} onSection={onSection} dirtySections={dirtySections} active={!searching && rootSection === "runners"} settings={s ? { s, set, hint } : null} />
+                <RunnerSettings fid={fid} onSection={onSection} dirtySections={dirtySections} active={!searching && rootSection === "runners"} settings={s ? { s, set, row } : null} />
               ) : category === "local" ? (
                 <LocalRunnerPanel fid={fid} />
               ) : category === "upstash" ? (
                 <UpstashPanel fid={fid}>
                   {s ? (
-                    <UpstashBoxRows s={s} set={set} hint={hint} field={field} fid={fid} sources={current?.sources} changed={changed} current={current?.settings} pin={pin} resetKeys={resetKeys} resets={resets} />
+                    <UpstashBoxRows s={s} set={set} row={row} field={field} fid={fid} sources={current?.sources} changed={changed} current={current?.settings} pin={pin} resetKeys={resetKeys} resets={resets} />
                   ) : (
                     <Loading label="Loading box sizes" />
                   )}
@@ -633,7 +648,7 @@ export function SettingsDialog({
                     id={fid("ocli")}
                     label="Agent"
                     help={<>The coding agent the Coordinator chat runs on; Codex needs a Codex login in <SettingsLink section="credentials">Settings › Credentials</SettingsLink>.</>}
-                    hint={hint("orchestratorCli")}
+                    {...row("orchestratorCli")}
                   >
                     <AgentCliSelect id={fid("ocli")} clis={MANAGER_CLIS} value={s.orchestratorCli} onChange={(v) => set("orchestratorCli", v)} testId="orchestrator-cli" />
                   </Row>
@@ -642,7 +657,7 @@ export function SettingsDialog({
                       id={fid("ocm")}
                       label="Codex model"
                       help="The OpenAI model the Coordinator runs on; leave it empty for Codex's own default."
-                      hint={hint("orchestratorCodexModel")}
+                      {...row("orchestratorCodexModel")}
                     >
                       <CodexModelSelect id={fid("ocm")} value={s.orchestratorCodexModel} onChange={(v) => set("orchestratorCodexModel", v)} testId="orchestrator-codex-model" />
                     </Row>
@@ -652,12 +667,12 @@ export function SettingsDialog({
                       label="Model"
                       help="The Claude model the Coordinator chat runs on."
                       more="Its quick questions use it too, unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
-                      hint={hint("orchestratorModel")}
+                      {...row("orchestratorModel")}
                     >
                       <ModelPicker id={fid("om")} value={s.orchestratorModel} onChange={(v) => set("orchestratorModel", v)} testId="orchestrator-model" customInputProps={field("orchestratorModel")} />
                     </Row>
                   )}
-                  <Row id={fid("oe")} label="Effort" help="How hard it thinks before answering. Higher is slower and costs more." hint={hint("orchestratorEffort")}>
+                  <Row id={fid("oe")} label="Effort" help="How hard it thinks before answering. Higher is slower and costs more." {...row("orchestratorEffort")}>
                     <EffortPicker
                       id={fid("oe")}
                       cli={s.orchestratorCli}
@@ -671,7 +686,7 @@ export function SettingsDialog({
                     id={fid("oac")}
                     label="Auto-compact"
                     help="Compacts the Coordinator and every Captain between turns once context usage passes this." more={`A summary is saved to the compaction log first and shown again after the compaction. Default: ${DEFAULT_AUTOCOMPACT_TOKENS / 1000}k tokens; every turn re-sends the whole context, so a lower threshold makes turns cheaper. Off: only the CLI's own last-resort compaction near the window limit.`}
-                    hint={hint("orchestratorAutoCompact")}
+                    {...row("orchestratorAutoCompact")}
                   >
                     <AutoCompactControl
                       id={fid("oac")}
@@ -687,11 +702,11 @@ export function SettingsDialog({
                     <Row
                       id={fid("orl")}
                       label="Relay turns"
-                      help="Runs the Coordinator's relay-only turns (woken by task updates and Captain replies, with no message from you) on this model and effort." more="Off by default: another model or effort can't reuse the last turn's prompt cache, so each relay turn sends the whole context again. That's quick and cheap on a small model, slow and costly on a big one. Your own messages always use the model above."
-                      hint={hint("orchestratorRelay", ["orchestratorRelay.model"])}
+                      help="Runs the Coordinator's relay-only turns (woken by task updates and Captain replies, with no message from you) on a model and effort of their own." more="Off by default: another model or effort can't reuse the last turn's prompt cache, so each relay turn sends the whole context again. That's quick and cheap on a small model, slow and costly on a big one. Your own messages always use the model above."
+                      {...row("orchestratorRelay", ["orchestratorRelay.model"])}
                     >
                       <div className="space-y-2">
-                        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                           <input
                             id={fid("orl")}
                             type="checkbox"
@@ -701,22 +716,31 @@ export function SettingsDialog({
                           />
                           {s.orchestratorRelay.enabled ? "On: relay turns use this" : "Off: every turn uses the model above"}
                         </label>
-                        <ModelPicker
-                          value={s.orchestratorRelay.model}
-                          onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, model: v })}
-                          disabled={!s.orchestratorRelay.enabled}
-                          ariaLabel="Relay turn model"
-                          testId="orchestrator-relay-model"
-                          customInputProps={field("orchestratorRelay.model")}
-                        />
-                        <EffortPicker
-                          value={s.orchestratorRelay.effort}
-                          onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, effort: v as Settings["orchestratorEffort"] })}
-                          model={s.orchestratorRelay.model}
-                          disabled={!s.orchestratorRelay.enabled}
-                          ariaLabel="Relay turn effort"
-                          testId="orchestrator-relay-effort"
-                        />
+                        {/* The pickers only while it's on (or its model needs a fix): off, one line says what it would use. */}
+                        {s.orchestratorRelay.enabled || problems["orchestratorRelay.model"] ? (
+                          <>
+                            <ModelPicker
+                              value={s.orchestratorRelay.model}
+                              onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, model: v })}
+                              disabled={!s.orchestratorRelay.enabled}
+                              ariaLabel="Relay turn model"
+                              testId="orchestrator-relay-model"
+                              customInputProps={field("orchestratorRelay.model")}
+                            />
+                            <EffortPicker
+                              value={s.orchestratorRelay.effort}
+                              onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, effort: v as Settings["orchestratorEffort"] })}
+                              model={s.orchestratorRelay.model}
+                              disabled={!s.orchestratorRelay.enabled}
+                              ariaLabel="Relay turn effort"
+                              testId="orchestrator-relay-effort"
+                            />
+                          </>
+                        ) : (
+                          <p className="text-xs text-zinc-500" data-testid="orchestrator-relay-resolved">
+                            Uses {modelName(s.orchestratorRelay.model)} · {EFFORT_LABEL[s.orchestratorRelay.effort]} when on.
+                          </p>
+                        )}
                       </div>
                     </Row>
                   )}
@@ -729,7 +753,7 @@ export function SettingsDialog({
                     id={fid("ccli")}
                     label="Captain agent"
                     help={<>The coding agent every project's Captain runs on; Codex needs a Codex login in <SettingsLink section="credentials">Settings › Credentials</SettingsLink>.</>}
-                    hint={hint("captainCli")}
+                    {...row("captainCli")}
                   >
                     <AgentCliSelect id={fid("ccli")} clis={MANAGER_CLIS} value={s.captainCli} onChange={(v) => set("captainCli", v)} testId="captain-cli" />
                   </Row>
@@ -738,7 +762,7 @@ export function SettingsDialog({
                       id={fid("ccm")}
                       label="Captain Codex model"
                       help="The OpenAI model every Captain runs on; leave it empty for Codex's own default."
-                      hint={hint("captainCodexModel")}
+                      {...row("captainCodexModel")}
                     >
                       <CodexModelSelect id={fid("ccm")} value={s.captainCodexModel} onChange={(v) => set("captainCodexModel", v)} testId="captain-codex-model" />
                     </Row>
@@ -748,12 +772,12 @@ export function SettingsDialog({
                       label="Captain model"
                       help="The Claude model every project Captain runs on."
                       more="Their quick questions use it too, unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
-                      hint={hint("captainModel")}
+                      {...row("captainModel")}
                     >
                       <ModelPicker id={fid("cm")} value={s.captainModel} onChange={(v) => set("captainModel", v)} testId="captain-model" customInputProps={field("captainModel")} />
                     </Row>
                   )}
-                  <Row id={fid("ce")} label="Captain effort" help="How hard Captains think before answering. Lower is faster and cheaper." hint={hint("captainEffort")}>
+                  <Row id={fid("ce")} label="Captain effort" help="How hard Captains think before answering. Lower is faster and cheaper." {...row("captainEffort")}>
                     <EffortPicker
                       id={fid("ce")}
                       cli={s.captainCli}
@@ -768,7 +792,7 @@ export function SettingsDialog({
                     label="Captain icon"
                     help="What every project's Captain shows in the sidebar, its chat and its messages, in its project's colour."
                     more="A project's settings can pick its own; one with an uploaded image and no pick shows the image."
-                    hint={hint("captainIcon")}
+                    {...row("captainIcon")}
                   >
                     <CaptainIconPicker id={fid("cicon")} value={s.captainIcon} onChange={(v) => v && set("captainIcon", v)} testId="captain-icon" />
                   </Row>
@@ -780,6 +804,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("qqm")}
                     label="Quick question model"
+                    changed={changed.includes("quickQuestionModel")}
                     help="The Claude model quick questions run on." more="Same as chat: the Coordinator's model in its chat and for a task's side questions, the Captain model in a Captain's chat. Another model can't reuse the chat's prompt cache, so a thread's first answer reads the chat's whole context again, which is cheap on Haiku. A chat on Codex keeps its own model."
                     hint={
                       <>
@@ -789,7 +814,7 @@ export function SettingsDialog({
                             {s.orchestratorModel === s.captainModel ? `Uses ${modelName(s.orchestratorModel)}.` : `Uses ${modelName(s.orchestratorModel)} for the Coordinator, ${modelName(s.captainModel)} for Captains.`}
                           </span>
                         )}
-                        {hint("quickQuestionModel")}
+                        {row("quickQuestionModel").hint}
                       </>
                     }
                   >
@@ -806,7 +831,7 @@ export function SettingsDialog({
                     id={fid("qqe")}
                     label="Quick question effort"
                     help="How hard quick questions think before answering. Same as chat: the Coordinator's or Captain effort above."
-                    hint={hint("quickQuestionEffort")}
+                    {...row("quickQuestionEffort")}
                   >
                     <EffortPicker
                       id={fid("qqe")}
@@ -828,9 +853,9 @@ export function SettingsDialog({
                     label="Notes retro"
                     help="When a task's PR merges, or a task without a PR ends done, its project's Captain decides on each note suggestion the agent left."
                     more="It accepts, merges or rejects each one, with a one-line reason. Nobody needs to approve them; the Notes tab shows what was decided."
-                    hint={hint("notesRetroEnabled")}
+                    {...row("notesRetroEnabled")}
                   >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                       <input id={fid("nre")} type="checkbox" checked={s.notesRetroEnabled} onChange={(e) => set("notesRetroEnabled", e.target.checked)} data-testid="notes-retro" />
                       {s.notesRetroEnabled ? "On: Captains curate suggestions" : "Off: suggestions stay pending until it's on again"}
                     </label>
@@ -839,7 +864,7 @@ export function SettingsDialog({
                     id={fid("nmc")}
                     label="Max notes"
                     help="Most notes an agent's first prompt gets; Captains keep their project under it." more="Over it, agents get the newest notes that fit, their prompt says how many were left out, and the Captain is asked to prune. A project can set its own on its Settings tab."
-                    hint={hint("notesMaxCount")}
+                    {...row("notesMaxCount")}
                   >
                     <input
                       id={fid("nmc")}
@@ -852,7 +877,7 @@ export function SettingsDialog({
                       {...field("notesMaxCount")}
                     />
                   </Row>
-                  <Row id={fid("nmt")} label="Max note tokens" help="About how many tokens all the notes may take in that prompt, next to Max notes (4 characters is about 1 token)." hint={hint("notesMaxTokens")}>
+                  <Row id={fid("nmt")} label="Max note tokens" help="About how many tokens all the notes may take in that prompt, next to Max notes (4 characters is about 1 token)." {...row("notesMaxTokens")}>
                     <input
                       id={fid("nmt")}
                       type="number"
@@ -873,9 +898,9 @@ export function SettingsDialog({
                     id={fid("adm")}
                     label="Done when its PR merges"
                     help="When a task's pull request merges and its turn is over (it's idle or waiting for review), it moves to done and its workspace is archived, as Mark done does." more="It stays as it is while messages are queued for it, while it has another PR open, or when it's set to stay open. Turning it on also moves resting tasks whose PR has already merged. Off: a merged PR leaves its task idle until you mark it done. Messaging a done task picks it back up."
-                    hint={hint("autoDoneOnMerge")}
+                    {...row("autoDoneOnMerge")}
                   >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                       <input id={fid("adm")} type="checkbox" checked={s.autoDoneOnMerge ?? true} onChange={(e) => set("autoDoneOnMerge", e.target.checked)} data-testid="auto-done-on-merge" />
                       {(s.autoDoneOnMerge ?? true) ? "On: a merged PR moves its task to done" : "Off: you mark tasks done yourself"}
                     </label>
@@ -885,9 +910,9 @@ export function SettingsDialog({
                     label="Close the issues it names"
                     help="When a PR merges into a branch other than the repo's default (an epic branch), Box Yard closes the issues it names with Fixes, Closes or Resolves #N."
                     more="GitHub closes them itself only on a merge into the default branch. Box Yard closes open issues of the same repo only, never PRs or other repos' issues, each with a comment linking the PR."
-                    hint={hint("closeIssuesOnMerge")}
+                    {...row("closeIssuesOnMerge")}
                   >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                       <input id={fid("cim")} type="checkbox" checked={s.closeIssuesOnMerge ?? true} onChange={(e) => set("closeIssuesOnMerge", e.target.checked)} data-testid="close-issues-on-merge" />
                       {(s.closeIssuesOnMerge ?? true) ? "On: closed after a merge into an epic branch, with a comment" : "Off: only GitHub closes them (default branch)"}
                     </label>
@@ -899,7 +924,7 @@ export function SettingsDialog({
                     id={fid("on")}
                     label="Your name"
                     help="What the Coordinator, Captains and agents call you in their prompts and labels. Until you save a name, that’s “the owner”."
-                    hint={hint("ownerName")}
+                    {...row("ownerName")}
                   >
                     {/* Never saved: the default is the placeholder, not a name someone typed, and emptying the field goes back to it. */}
                     <input
@@ -916,12 +941,12 @@ export function SettingsDialog({
                     id={fid("acli")}
                     label="Agent"
                     help="The coding agent new tasks run on: a project can pick its own." more="Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given provider/model runs on OpenCode, one given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
-                    hint={hint("agentCli")}
+                    {...row("agentCli")}
                   >
                     <AgentCliSelect id={fid("acli")} clis={AGENT_CLIS} value={s.agentCli} onChange={(v) => set("agentCli", v)} testId="agent-cli" />
                   </Row>
                   {s.agentCli === "opencode" ? (
-                    <Row id={fid("aoc")} label="OpenCode model" help="Provider and model for OpenCode tasks. An optional #variant selects provider-specific reasoning. Generic effort and Box Yard compaction thresholds do not apply." hint={hint("agentOpencodeModel")}>
+                    <Row id={fid("aoc")} label="OpenCode model" help="Provider and model for OpenCode tasks. An optional #variant selects provider-specific reasoning. Generic effort and Box Yard compaction thresholds do not apply." {...row("agentOpencodeModel")}>
                       <OpenCodeModelInput id={fid("aoc")} value={s.agentOpencodeModel} onChange={(v) => set("agentOpencodeModel", v)} testId="agent-opencode-model" />
                     </Row>
                   ) : s.agentCli === "cursor" ? (
@@ -929,16 +954,16 @@ export function SettingsDialog({
                       id={fid("acu")}
                       label="Cursor model"
                       help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has." more="Auto lets Cursor pick per request. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
-                      hint={hint("agentCursorModel")}
+                      {...row("agentCursorModel")}
                     >
                       <CursorModelSelect id={fid("acu")} value={s.agentCursorModel} onChange={(v) => set("agentCursorModel", v)} testId="agent-cursor-model" />
                     </Row>
                   ) : s.agentCli === "codex" ? (
-                    <Row id={fid("acm")} label="Codex model" help="The model tasks on Codex run on, unless the task or its project's Routing YAML entry picks one. Options depend on your Codex account and CLI version." hint={hint("agentCodexModel")}>
+                    <Row id={fid("acm")} label="Codex model" help="The model tasks on Codex run on, unless the task or its project's Routing YAML entry picks one. Options depend on your Codex account and CLI version." {...row("agentCodexModel")}>
                       <CodexModelSelect id={fid("acm")} value={s.agentCodexModel} onChange={(v) => set("agentCodexModel", v)} testId="agent-codex-model" />
                     </Row>
                   ) : (
-                    <Row id={fid("am")} label="Model" help="The Claude model each task's agent runs on, unless the task or its project's Routing YAML entry picks one." more="Once saved here or set by an env var, it wins over the YAML's defaults and fallback." hint={hint("agentModel")}>
+                    <Row id={fid("am")} label="Model" help="The Claude model each task's agent runs on, unless the task or its project's Routing YAML entry picks one." more="Once saved here or set by an env var, it wins over the YAML's defaults and fallback." {...row("agentModel")}>
                       <ModelPicker id={fid("am")} value={s.agentModel} onChange={(v) => set("agentModel", v)} testId="agent-model" customInputProps={field("agentModel")} />
                     </Row>
                   )}
@@ -956,7 +981,7 @@ export function SettingsDialog({
                           ? "Without one, Routing YAML or the harness default applies."
                           : "Once saved here or set by an env var, it wins over the YAML's defaults and fallback."
                       }
-                      hint={hint(s.agentCli === "codex" ? "agentCodexEffort" : "agentEffort")}
+                      {...row(s.agentCli === "codex" ? "agentCodexEffort" : "agentEffort")}
                     >
                       <EffortPicker
                         id={fid("ae")}
@@ -973,7 +998,7 @@ export function SettingsDialog({
                     id={fid("arc")}
                     label="Routing YAML"
                     help="Optional rules for task model and effort, also read from routing.yaml in the data directory." more="Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (OpenCode: provider/model above, no generic effort; Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
-                    hint={hint("agentRoutingConfig")}
+                    {...row("agentRoutingConfig")}
                   >
                     <textarea
                       id={fid("arc")}
@@ -988,7 +1013,7 @@ export function SettingsDialog({
                     id={fid("aac")}
                     label="Custom auto-compact threshold"
                     help="Passed to each agent's CLI as its auto-compact window (100k–1M tokens). Off: the CLI's own default."
-                    hint={hint("agentAutoCompact")}
+                    {...row("agentAutoCompact")}
                   >
                     <AutoCompactControl id={fid("aac")} label="Agent auto-compact" value={s.agentAutoCompact} onChange={(v) => set("agentAutoCompact", v)} field={field("agentAutoCompact")} />
                   </Row>
@@ -996,7 +1021,7 @@ export function SettingsDialog({
                     id={fid("smd")}
                     label="Sub-task depth"
                     help="How deep sub-tasks may nest. An agent splits its work with spawn_subtasks; each sub-task runs as a task of its own and reports back. 1: a sub-task can't start its own."
-                    hint={hint("subtaskMaxDepth")}
+                    {...row("subtaskMaxDepth")}
                   >
                     <input
                       id={fid("smd")}
@@ -1009,7 +1034,7 @@ export function SettingsDialog({
                       {...field("subtaskMaxDepth")}
                     />
                   </Row>
-                  <Row id={fid("smc")} label="Sub-tasks per task" help="How many sub-tasks one task may start, over its whole life." hint={hint("subtaskMaxChildren")}>
+                  <Row id={fid("smc")} label="Sub-tasks per task" help="How many sub-tasks one task may start, over its whole life." {...row("subtaskMaxChildren")}>
                     <input
                       id={fid("smc")}
                       type="number"
@@ -1023,9 +1048,9 @@ export function SettingsDialog({
                   </Row>
                 </Panel>
               ) : category === "limits" ? (
-                <LimitsPanel s={s} set={set} hint={hint} field={field} fid={fid} sources={current?.sources} resets={resets} />
+                <LimitsPanel s={s} set={set} row={row} field={field} fid={fid} sources={current?.sources} resets={resets} />
               ) : (
-                <CostsPanel s={s} set={set} hint={hint} field={field} fid={fid} />
+                <CostsPanel s={s} set={set} row={row} field={field} fid={fid} />
               )}
             </div>
           ))}
@@ -1041,7 +1066,7 @@ export function SettingsDialog({
 function LimitsPanel({
   s,
   set,
-  hint,
+  row,
   field,
   fid,
   sources,
@@ -1049,7 +1074,7 @@ function LimitsPanel({
 }: {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: Hint
+  row: RowMeta
   field: FieldCheck
   fid: (k: string) => string
   sources?: Record<keyof Settings, SettingSource>
@@ -1082,7 +1107,7 @@ function LimitsPanel({
             label="Max boxes (safety ceiling)"
             help="A safety stop, not a budget: the most worker boxes alive at once, however much work waits."
             more={<>What keeps spend in check is the daily cloud limit (<SettingsLink section="costs">Settings › Usage</SettingsLink>); boxes start when work needs one and are deleted when idle.</>}
-            hint={hint("maxBoxes")}
+            {...row("maxBoxes")}
           >
             <input id={fid("mb")} type="number" min={1} max={100} className={inputClass} {...num("maxBoxes")} data-testid="max-boxes" />
           </Row>
@@ -1090,7 +1115,7 @@ function LimitsPanel({
             id={fid("bcc")}
             label="Boxes created at once"
             help="When many tasks wait for a box (say a Captain starts a batch of tasks), Box Yard creates up to this many boxes in parallel, still within Max boxes." more="Lower it if your box provider rate-limits box creation; Box Yard also backs off by itself when a create fails or is rate-limited."
-            hint={hint("boxCreateConcurrency")}
+            {...row("boxCreateConcurrency")}
           >
             <input
               id={fid("bcc")}
@@ -1104,17 +1129,17 @@ function LimitsPanel({
           </Row>
         </div>
       </details>
-      <Row id={fid("ma")} label="Max tasks running at once" help="A cap on tasks running at once across all boxes. 0 = boxes × tasks running at once per box." hint={hint("maxAgents")}>
+      <Row id={fid("ma")} label="Max tasks running at once" help="A cap on tasks running at once across all boxes. 0 = boxes × tasks running at once per box." {...row("maxAgents")}>
         <input id={fid("ma")} type="number" min={0} max={1000} className={inputClass} {...num("maxAgents")} />
       </Row>
-      <Row id={fid("bid")} label="Idle box deletion" help="Delete an idle worker box after this many minutes, but only when every resident workspace has a fresh archive. 0 keeps boxes." hint={hint("boxIdleDeleteMinutes")}>
+      <Row id={fid("bid")} label="Idle box deletion" help="Delete an idle worker box after this many minutes, but only when every resident workspace has a fresh archive. 0 keeps boxes." {...row("boxIdleDeleteMinutes")}>
         <input id={fid("bid")} type="number" min={0} max={43_200} className={inputClass} {...num("boxIdleDeleteMinutes")} />
       </Row>
       <Row
         id={fid("wrd")}
         label="Workspace retention"
         help="After this many idle days, archived resting task folders are removed from boxes and restored from the archive on the next message. 0 keeps folders."
-        hint={hint("workspaceRetentionDays")}
+        {...row("workspaceRetentionDays")}
       >
         <input id={fid("wrd")} type="number" min={0} max={3650} className={inputClass} {...num("workspaceRetentionDays")} />
       </Row>
@@ -1122,7 +1147,7 @@ function LimitsPanel({
         id={fid("ard")}
         label="Archive retention"
         help="After this many days, orphan archives and long-done task archives are pruned. 0 keeps archives." more="Archives of tasks with an open or unmerged PR are always kept. A done task whose archive was pruned restarts from a recap on its next message."
-        hint={hint("archiveRetentionDays")}
+        {...row("archiveRetentionDays")}
       >
         <input id={fid("ard")} type="number" min={0} max={3650} className={inputClass} {...num("archiveRetentionDays")} />
       </Row>
@@ -1130,7 +1155,7 @@ function LimitsPanel({
         id={fid("akt")}
         label="Keep recent archives"
         help="Never prune the archive of a task touched in the last this many days, so recent work resumes with its full session. 0 = only archive retention applies."
-        hint={hint("archiveKeepTouchedDays")}
+        {...row("archiveKeepTouchedDays")}
       >
         <input id={fid("akt")} type="number" min={0} max={3650} className={inputClass} {...num("archiveKeepTouchedDays")} />
       </Row>
@@ -1138,7 +1163,7 @@ function LimitsPanel({
         id={fid("dmf")}
         label="Disk headroom (MB)"
         help="A new workspace only lands on a box with at least this much free disk. A box below it is cleaned up in the background while tasks go to another box."
-        hint={hint("diskMinFreeMb")}
+        {...row("diskMinFreeMb")}
       >
         <input id={fid("dmf")} type="number" min={0} max={1_000_000} step={128} className={inputClass} {...num("diskMinFreeMb")} />
       </Row>
@@ -1146,7 +1171,7 @@ function LimitsPanel({
         id={fid("dcf")}
         label="Clone size factor"
         help="...and at least this many times the repo's last clone size, for big repos (the clone plus the box's shared mirror of it)."
-        hint={hint("diskCloneFactor")}
+        {...row("diskCloneFactor")}
       >
         <input
           id={fid("dcf")}
@@ -1163,18 +1188,18 @@ function LimitsPanel({
         label="Memory limit (% used)"
         help="A new agent skips a box with more than this much of its memory in use while other agents run on it, and goes to another box (or waits). 0 = off."
         more="Memory is read from the box's cgroup without the reclaimable page cache."
-        hint={hint("memoryMaxUsedPercent")}
+        {...row("memoryMaxUsedPercent")}
       >
         <input id={fid("mup")} type="number" min={0} max={100} step={5} className={inputClass} {...num("memoryMaxUsedPercent")} data-testid="memory-max-used" />
       </Row>
-      <Row id={fid("mmf")} label="Memory headroom (MB)" help="...or with less than this much memory free. 0 = off." hint={hint("memoryMinFreeMb")}>
+      <Row id={fid("mmf")} label="Memory headroom (MB)" help="...or with less than this much memory free. 0 = off." {...row("memoryMinFreeMb")}>
         <input id={fid("mmf")} type="number" min={0} max={1_000_000} step={256} className={inputClass} {...num("memoryMinFreeMb")} />
       </Row>
       <Row
         id={fid("lpc")}
         label="Load limit (per CPU)"
         help="...or with a 1-minute load average above this many times its CPUs (nproc). On Upstash, /proc/loadavg and nproc describe the host the box runs on. 0 = off."
-        hint={hint("loadMaxPerCpu")}
+        {...row("loadMaxPerCpu")}
       >
         <input
           id={fid("lpc")}
@@ -1189,8 +1214,8 @@ function LimitsPanel({
       <Row
         id={fid("bci")}
         label="Build output cleanup (idle minutes)"
-        help="Once a done task has sat idle this long, its git-ignored build output (node_modules, dist, .cache, tmp, perf captures) is removed from its Upstash box (this computer and SSH machines have their own settings below). 0 = off (low-disk cleanup still runs)." more="A task that isn't done keeps it, and so does a folder a process still uses (a dev server, a shell); only low-disk cleanup frees an idle task's build output, and the task's log says what went. Only folders git ignores and doesn't track; uncommitted work is never touched."
-        hint={hint("buildCleanupIdleMinutes")}
+        help="Once a done task has sat idle this long, its git-ignored build output is removed from its Upstash box. 0 = off." more="Build output is node_modules, dist, .cache, tmp and perf captures; this computer and SSH machines have their own settings below, and low-disk cleanup still runs at 0. A task that isn't done keeps it, and so does a folder a process still uses (a dev server, a shell); only low-disk cleanup frees an idle task's build output, and the task's log says what went. Only folders git ignores and doesn't track; uncommitted work is never touched."
+        {...row("buildCleanupIdleMinutes")}
       >
         <input id={fid("bci")} type="number" min={0} max={43_200} className={inputClass} {...num("buildCleanupIdleMinutes")} />
       </Row>
@@ -1198,9 +1223,9 @@ function LimitsPanel({
         id={fid("dce")}
         label="Dependency cache (npm)"
         help="Each box keeps the node_modules its agents installed, one per package-lock.json, next to the task folders." more="A task with that lockfile and no node_modules (a fresh clone, or one the build output cleanup emptied) gets it hard-linked in before its turn, in under a second, and its prompt says it needn't run npm ci. The shared files are read-only, so a task can't change another's. A project can override it."
-        hint={hint("depCacheEnabled")}
+        {...row("depCacheEnabled")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("dce")} type="checkbox" checked={s.depCacheEnabled} onChange={(e) => set("depCacheEnabled", e.target.checked)} data-testid="dep-cache" />
           {s.depCacheEnabled ? "On: node_modules restored from the box cache" : "Off: agents install dependencies"}
         </label>
@@ -1209,7 +1234,7 @@ function LimitsPanel({
         id={fid("dcm")}
         label="Dependency cache size (MB)"
         help="Most work-disk space one box's cache may hold. Over it, the least recently used lockfiles no task links go first. Low-disk cleanup also removes entries no task links."
-        hint={hint("depCacheMaxMb")}
+        {...row("depCacheMaxMb")}
       >
         <input id={fid("dcm")} type="number" min={100} max={1_000_000} step={256} className={inputClass} disabled={!s.depCacheEnabled} {...num("depCacheMaxMb")} data-testid="dep-cache-max" />
       </Row>
@@ -1218,9 +1243,9 @@ function LimitsPanel({
         label="Partial clone mirrors"
         help="Each box keeps one mirror per repo, and task checkouts borrow its objects instead of copying them."
         more="With this on, mirrors skip old file versions (git clone --filter=blob:none); git fetches one from GitHub when log -p, blame or a checkout needs it. A project can override it."
-        hint={hint("gitPartialClone")}
+        {...row("gitPartialClone")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("gpc")} type="checkbox" checked={s.gitPartialClone} onChange={(e) => set("gitPartialClone", e.target.checked)} data-testid="git-partial-clone" />
           {s.gitPartialClone ? "On: blob:none mirrors" : "Off: full mirrors"}
         </label>
@@ -1229,9 +1254,9 @@ function LimitsPanel({
         id={fid("gpt")}
         label="Push at turn end"
         help="After every agent turn in a repo project, Box Yard pushes the task's branch and saves uncommitted work (untracked files too) to a hidden ref on origin, refs/boxyard/wip/<task>, without committing in the task's repo." more="Archives then carry only what git can't, so a box can go at any time without losing code. Without write access it quietly keeps full archives. A project can override it."
-        hint={hint("gitPushAtTurnEnd")}
+        {...row("gitPushAtTurnEnd")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("gpt")} type="checkbox" checked={s.gitPushAtTurnEnd} onChange={(e) => set("gitPushAtTurnEnd", e.target.checked)} data-testid="git-push-at-turn-end" />
           {s.gitPushAtTurnEnd ? "On: branch and WIP pushed, small archives" : "Off: full archives"}
         </label>
@@ -1248,7 +1273,7 @@ function LimitsPanel({
         id={fid("la")}
         label="Tasks running at once on this computer"
         help={`Tasks of projects that run on this computer (project settings › Runs on) that may run at once here, every project's together; a project's own Tasks running at once limits only its own tasks within this. ${LOCAL_UNSANDBOXED}`} more={`They have their own queue: they never take a box slot or count toward Max tasks running at once. Each task works in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"} (BOXYARD_LOCAL_DIR).`}
-        hint={hint("localAgents")}
+        {...row("localAgents")}
       >
         <input
           id={fid("la")}
@@ -1265,7 +1290,7 @@ function LimitsPanel({
         label="Task folders kept on this computer"
         help={`Most task folders in ${server.data?.localDir ?? "~/boxyard-workspaces"}, and on each SSH machine. 0 = no limit.`}
         more="Past it, the oldest done tasks' folders are archived and removed, but only when all their work is pushed. A task that isn't done keeps its folder."
-        hint={hint("localFoldersKept")}
+        {...row("localFoldersKept")}
       >
         <input id={fid("lfk")} type="number" min={0} max={1000} className={inputClass} {...num("localFoldersKept")} data-testid="local-folders-kept" />
       </Row>
@@ -1273,9 +1298,9 @@ function LimitsPanel({
         id={fid("lbc")}
         label="Free a finished task's build output"
         help="Once a task is done and all its work is pushed, remove the dependency and build output git ignores (node_modules, dist, build, .next, caches) from its folder within a couple of minutes." more="A task that isn't done keeps it (only low-disk cleanup frees it), and so does a folder a process still uses. Scratch folders and captures (tmp, shots, perf, reports) stay. The task's log and the agent's next prompt say what went, so it reinstalls first."
-        hint={hint("localBuildCleanup")}
+        {...row("localBuildCleanup")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("lbc")} type="checkbox" checked={s.localBuildCleanup} onChange={(e) => set("localBuildCleanup", e.target.checked)} data-testid="local-build-cleanup" />
           {s.localBuildCleanup ? "On: freed once the work is pushed" : "Off: only low-disk cleanup frees it"}
         </label>
@@ -1285,7 +1310,7 @@ function LimitsPanel({
         label="Low-disk cleanup (GB free)"
         help="When the disk holding the task folders has less free space than this, Box Yard frees space until there's this much again. 0 = off."
         more="It frees build output first (an idle task's too, unless a process still uses its folder), then removes the oldest done tasks' folders. Each task's log says what went. It checks every couple of minutes."
-        hint={hint("localDiskMinFreeGb")}
+        {...row("localDiskMinFreeGb")}
       >
         <input id={fid("ldf")} type="number" min={0} max={100_000} step={5} className={inputClass} {...num("localDiskMinFreeGb")} data-testid="local-disk-min-free" />
       </Row>
@@ -1313,7 +1338,7 @@ function LimitsPanel({
 function UpstashBoxRows({
   s,
   set,
-  hint,
+  row,
   field,
   fid,
   sources,
@@ -1325,7 +1350,7 @@ function UpstashBoxRows({
 }: {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: Hint
+  row: RowMeta
   field: FieldCheck
   fid: (k: string) => string
   sources?: Record<keyof Settings, SettingSource>
@@ -1358,22 +1383,22 @@ function UpstashBoxRows({
         label="Worker size"
         help="Upstash Box size for newly created boxes."
         more="A project's own preferred size wins, and so does one auto-sizing (below) picked from its runs. Existing boxes keep their size until resized from the Boxes page."
-        hint={hint("workerSize")}
+        {...row("workerSize")}
       >
         <UpstashSizes value={s.workerSize} onPick={(size) => set("workerSize", size)} />
       </Row>
       <Row
         id={fid("are")}
         label="Size and resize boxes automatically"
-        help="Box Yard sizes each project's new boxes from what its runs used (from 3 runs: the smallest with RAM for 1.25 × the peak of the last 14 days, bigger for disk or busy CPU), unless the project sets its own Box size, and a turn that runs out of memory carries on once on a bigger box." more="The Coordinator, and Captains for boxes their project uses, may also resize a box with resize_box: up when it keeps running low on disk, down when it sits mostly empty. They never stop running tasks for it, and every resize they make sends you a notice with their reason."
-        hint={hint("autoResizeEnabled")}
+        help="Box Yard sizes each project's new boxes from what its runs used, unless the project sets its own Box size." more="From 3 runs: the smallest size with RAM for 1.25 × the peak of the last 14 days, bigger for disk or busy CPU. A turn that runs out of memory carries on once on a bigger box. The Coordinator, and Captains for boxes their project uses, may also resize a box with resize_box: up when it keeps running low on disk, down when it sits mostly empty. They never stop running tasks for it, and every resize they make sends you a notice with their reason."
+        {...row("autoResizeEnabled")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("are")} type="checkbox" checked={s.autoResizeEnabled} onChange={(e) => set("autoResizeEnabled", e.target.checked)} data-testid="auto-resize" />
           {s.autoResizeEnabled ? "On: Box Yard sizes and resizes boxes" : "Off: new boxes are Worker size, and only you resize boxes"}
         </label>
       </Row>
-      <Row id={fid("arm")} label="Max size it may choose" help="resize_box refuses anything bigger. You can still pick any size yourself on the Boxes page." hint={hint("autoResizeMaxSize")}>
+      <Row id={fid("arm")} label="Max size it may choose" help="resize_box refuses anything bigger. You can still pick any size yourself on the Boxes page." {...row("autoResizeMaxSize")}>
         <Select
           id={fid("arm")}
           className="w-full disabled:opacity-50"
@@ -1394,9 +1419,9 @@ function UpstashBoxRows({
         label="Resize an idle box when no big-enough box is free"
         help="For projects with a box size: when the pool is at Max boxes and no box of that size has room, Box Yard may grow an idle smaller box (no agent running on it) to that size and run the task there."
         more="Larger boxes cost more. Off, the task waits for a box of its size; it never runs on a smaller one."
-        hint={hint("placementResizeEnabled")}
+        {...row("placementResizeEnabled")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input
             id={fid("pre")}
             type="checkbox"
@@ -1413,7 +1438,7 @@ function UpstashBoxRows({
         label="Tasks running at once per box"
         help="Tasks that may run at the same time inside one box, every project's together (each task runs its own Claude Code agent)."
         more={`A project's own Tasks running at once (project settings) limits only its own tasks within this. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].slotsPerBox}`).join(", ")}.`}
-        hint={hint("slotsPerBox")}
+        {...row("slotsPerBox")}
       >
         <BoxLimitInput id={fid("spb")} max={20} {...limitField("slotsPerBox")} />
       </Row>
@@ -1421,7 +1446,7 @@ function UpstashBoxRows({
         id={fid("mr")}
         label="Task folders kept per box"
         help={`Task folders kept on one box (running or not) before older archived workspaces are parked. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].maxResidentPerBox}`).join(", ")}.`}
-        hint={hint("maxResidentPerBox")}
+        {...row("maxResidentPerBox")}
       >
         <BoxLimitInput id={fid("mr")} max={200} {...limitField("maxResidentPerBox")} />
       </Row>
@@ -1579,13 +1604,13 @@ function OpenUsage() {
 function CostsPanel({
   s,
   set,
-  hint,
+  row,
   field,
   fid,
 }: {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: Hint
+  row: RowMeta
   field: FieldCheck
   fid: (k: string) => string
 }) {
@@ -1625,9 +1650,9 @@ function CostsPanel({
         label="Box spend in the header"
         help="The Coordinator's header shows the cloud meter: boxes running, what they cost an hour and today's spend against the daily limit."
         more="Off, the Boxes page still shows it, and the limit's notices and Raise today's limit work the same."
-        hint={hint("showCloudMeter")}
+        {...row("showCloudMeter")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("scm")} type="checkbox" checked={Boolean(s.showCloudMeter)} onChange={(e) => set("showCloudMeter", e.target.checked)} data-testid="show-cloud-meter" />
           {s.showCloudMeter ? "On: shown in the Coordinator's header" : "Off: only on the Boxes page"}
         </label>
@@ -1636,7 +1661,7 @@ function CostsPanel({
         id={fid("daily-budget")}
         label="Daily cloud limit"
         help="What boxes may cost per day, by the CPU they use (Claude isn't counted). 0: no daily limit." more="At 80% Box Yard says so; at the limit new boxes wait until midnight while work already running goes on, and the cloud meter (on the Boxes page, and in the Coordinator's header if shown) offers Raise today's limit."
-        hint={hint("budget", ["budget.dailyUsd"])}
+        {...row("budget", ["budget.dailyUsd"])}
       >
         {money("budget.dailyUsd", s.budget.dailyUsd, (n) => set("budget", { ...s.budget, dailyUsd: n }), fid("daily-budget"))}
       </Row>
@@ -1644,14 +1669,14 @@ function CostsPanel({
         id={fid("monthly-budget")}
         label="Monthly cloud limit"
         help="Box spend over the last 30 days. At it, new boxes wait until the spend drops under it or you raise it. 0: no monthly limit."
-        hint={hint("budget", ["budget.monthlyUsd"])}
+        {...row("budget", ["budget.monthlyUsd"])}
       >
         {money("budget.monthlyUsd", s.budget.monthlyUsd, (n) => set("budget", { ...s.budget, monthlyUsd: n }), fid("monthly-budget"))}
       </Row>
       <Row
         label="Active CPU rates"
         help="Upstash bills the CPU a box uses, per core-hour: a box busy on 2 cores for an hour uses 2." more="Box Yard measures each box's CPU and prices it at these rates, unless Upstash reports its own charge for the box. Defaults match the public Small / Medium / Large rates."
-        hint={hint("costRates", rates("boxActiveCpuHourlyUsd"))}
+        {...row("costRates", rates("boxActiveCpuHourlyUsd"))}
       >
         <div className="grid grid-cols-3 gap-2">
           {BOX_SIZES.map((size) => (
@@ -1667,7 +1692,7 @@ function CostsPanel({
       <Row
         label="Keep-alive rates"
         help="A keep-alive box costs its monthly fee and no CPU charge, prorated by uptime, when the provider reports keep-alive is on."
-        hint={hint("costRates", rates("boxKeepAliveMonthlyUsd"))}
+        {...row("costRates", rates("boxKeepAliveMonthlyUsd"))}
       >
         <div className="grid grid-cols-3 gap-2">
           {BOX_SIZES.map((size) => (
@@ -1680,7 +1705,7 @@ function CostsPanel({
           ))}
         </div>
       </Row>
-      <Row id={fid("storage")} label="Storage rate" help="Storage and snapshot cost per GB-month. Disk use is probed from boxes when available." hint={hint("costRates", ["costRates.boxStorageGbMonthUsd"])}>
+      <Row id={fid("storage")} label="Storage rate" help="Storage and snapshot cost per GB-month. Disk use is probed from boxes when available." {...row("costRates", ["costRates.boxStorageGbMonthUsd"])}>
         {money("costRates.boxStorageGbMonthUsd", s.costRates.boxStorageGbMonthUsd, (n) => set("costRates", { ...s.costRates, boxStorageGbMonthUsd: n }), fid("storage"))}
       </Row>
       <div className="mt-2 rounded-xl border border-zinc-900 bg-zinc-900/40 p-4 text-xs leading-relaxed text-zinc-400">

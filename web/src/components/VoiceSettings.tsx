@@ -97,7 +97,7 @@ export function VoicePanel({ fid }: { fid: (k: string) => string }) {
           checked={s.enabled}
           onChange={(enabled) => set({ enabled })}
         >
-          {s.enabled ? "On" : "Off"}
+          {s.enabled ? "On: updates are spoken" : "Off: nothing is spoken"}
         </Check>
       </Row>
       <Row
@@ -270,7 +270,7 @@ function DictationSection({ fid }: { fid: (k: string) => string }) {
         <>
           <Row id={fid("de")} label="Dictation" help="Show the mic in message boxes. Press and hold it to talk, or click it to start and stop.">
             <Check id={fid("de")} checked={d.enabled} onChange={(enabled) => setDictation({ enabled })}>
-              {d.enabled ? "On" : "Off"}
+              {d.enabled ? "On: mic in message boxes" : "Off: no mic"}
             </Check>
           </Row>
           <Row id={fid("dl")} label="Language" help="What you'll speak. Defaults to the browser's language.">

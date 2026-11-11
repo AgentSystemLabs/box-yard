@@ -128,7 +128,7 @@ export function VastPanel({ fid, active = true, gpuDefault }: { fid: (k: string)
             <VastGpuPicker id={fid("vast-gpus")} value={form.gpuTypes} onChange={(gpuTypes) => set({ gpuTypes })} enabled={s.apiKey} />
           </Row>
           <Row id={fid("vast-verified")} label="Verified hosts only" help="Only rent from hosts Vast.ai has verified. Unverified ones are cheaper and more plentiful but less tested.">
-            <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+            <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
               <input id={fid("vast-verified")} type="checkbox" checked={form.verifiedOnly} onChange={(e) => set({ verifiedOnly: e.target.checked })} />
               {form.verifiedOnly ? "On: verified hosts only" : "Off: any host"}
             </label>

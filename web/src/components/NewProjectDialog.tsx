@@ -83,7 +83,7 @@ export function NewProjectDialog({ onClose, openChat = true }: { onClose: () => 
       </div>
       {runner && (
         <div className="space-y-2">
-          <StackedField label="Runs on" hint="Change it any time in Settings › Projects.">
+          <StackedField label="Runs on" hint="You can change it later in the project's settings.">
             <Select className="w-full" value={runner} onChange={(e) => setPicked(e.target.value as Runner)} data-testid="new-project-runner">
               {RUNNERS.map((r) => (
                 <option key={r} value={r} disabled={(r === "box" && noUpstash) || (r === "gpu" && noRunPod) || (r === "ssh" && noMachines)}>
@@ -120,7 +120,7 @@ export function NewProjectDialog({ onClose, openChat = true }: { onClose: () => 
           )}
         </div>
       )}
-      <StackedField label="Agent" hint="Claude Code, Codex, Cursor or OpenCode for its tasks. Change it any time in Settings › Projects.">
+      <StackedField label="Agent" hint="Claude Code, Codex, Cursor or OpenCode for its tasks.">
         <Select className="w-full" value={agentCli} onChange={(e) => setAgentCli(e.target.value as AgentCli | "")} data-testid="new-project-agent-cli">
           <option value="">Settings default ({AGENT_CLI_LABEL[defaultAgentCli]})</option>
           {AGENT_CLIS.map((c) => (

@@ -7,6 +7,7 @@ import { useProjectColor } from "../lib/taskTiles"
 import { PROJECT_SETTINGS_PARAM, useOpenProjectSettings } from "../lib/projectSettings"
 import { confirmDialog } from "../lib/confirm"
 import { Modal } from "./Modal"
+import { OverSettings } from "./SettingsBlocks"
 import { NewProjectDialog } from "./NewProjectDialog"
 import { LoadFailed, lazyPart } from "./LazyPart"
 import { Button } from "./ui"
@@ -36,7 +37,7 @@ export function ProjectSettingsPicker() {
             type="button"
             onClick={() => setCreating(true)}
             data-testid="project-settings-new"
-            className="flex min-h-11 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+            className="flex min-h-11 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
           >
             <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-dashed border-zinc-700">
               <Plus className="h-3.5 w-3.5" />
@@ -60,7 +61,7 @@ function ProjectRow({ project }: { project: Project }) {
         type="button"
         onClick={() => open(project.id)}
         title={`${project.name} settings`}
-        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-900"
       >
         <ProjectAvatar src={project.iconUrl} className="h-6 w-6 rounded-md">
           <span aria-hidden style={projectColorStyle(color)} className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-(--pc)/15 text-xs font-semibold text-(--pc) uppercase">
@@ -88,21 +89,23 @@ function ProjectSettingsDialog({ id, onClose }: { id: string; onClose: () => voi
   const projects = useProjects()
   const project = projects.data?.find((p) => p.id === id)
   const [dirty, setDirty] = useState(false)
+  const mayLeave = async () => !dirty || (await confirmDialog({ title: "Discard unsaved changes?", body: "Your project settings haven't been saved.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))
   const close = async () => {
-    if (dirty && !(await confirmDialog({ title: "Discard unsaved changes?", body: "Your project settings haven't been saved.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))) return
-    onClose()
+    if (await mayLeave()) onClose()
   }
   return (
     // Sized and laid out as Settings is: category tabs beside the panel (SettingsTabs), and one Save under them.
     <Modal
       title={project ? `${project.name} settings` : "Project settings"}
+      description="Nothing changes until you Save."
       size="xl"
       dirty={dirty}
       onClose={() => void close()}
       className="settings-dialog sm:h-[min(88dvh,56rem)]"
       bodyClassName="flex min-h-0 flex-1 flex-col"
     >
-      {project ? <ProjectSettings project={project} onDone={onClose} onDirtyChange={setDirty} />
+      {/* Opened from Settings › Projects it sits on top of Settings: a "Settings › …" link in it closes it first (SettingsLink). */}
+      {project ? <OverSettings.Provider value={{ param: PROJECT_SETTINGS_PARAM, mayLeave }}><ProjectSettings project={project} onDone={onClose} onDirtyChange={setDirty} /></OverSettings.Provider>
         : <div className="settings-body p-4 sm:p-5">
           {projects.isError ? <div role="alert">Couldn't load this project. <Button onClick={() => void projects.refetch()}>Retry</Button></div>
             : projects.isLoading ? <Loading label="Loading the project" /> : <p>Project not found.</p>}

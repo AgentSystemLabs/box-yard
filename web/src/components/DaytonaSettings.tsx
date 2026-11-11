@@ -216,7 +216,7 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
               label="Spot GPUs"
               help="Cheaper GPUs (Daytona's Tier 2 and up) that Daytona may take back at any moment, with the sandbox and its work. The workspace comes back from Box Yard's last archive."
             >
-              <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+              <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                 <input id={fid("daytona-spot")} type="checkbox" checked={form.spot} onChange={(e) => set({ spot: e.target.checked })} />
                 {form.spot ? "On: spot GPUs" : "Off: on-demand GPUs"}
               </label>
