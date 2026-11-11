@@ -85,6 +85,14 @@ export interface PaletteData {
   boxes?: BoxInfo[]
   /** The sidebar's pins (lib/projectBar.ts), so each project has its Pin or its Unpin. */
   pins?: BarPins
+  /** What "New task…" says under its title. */
+  newTask?: NewTaskContext
+}
+
+/** Where "New task…" starts: the project in view (its name), and the text its dialog kept from last time. */
+export interface NewTaskContext {
+  project?: string | null
+  draft?: string
 }
 
 export const PAGES: PaletteItem[] = [
@@ -144,7 +152,7 @@ export function buildItems(data: PaletteData): PaletteItem[] {
     items.push(...cached(a, project, () => [artifactItem(a, project)]))
   }
 
-  items.push(...buildActions(projects, data.pins), ...SETTINGS_ITEMS)
+  items.push(...buildActions(projects, data.pins, data.newTask), ...SETTINGS_ITEMS)
   return items
 }
 
@@ -221,15 +229,37 @@ function artifactItem(a: Artifact, project: string | undefined): PaletteItem {
   }
 }
 
-/** Opens the New task dialog (components/NewTask.tsx) on the project in view, with its project picker. */
-export const NEW_TASK: PaletteItem = { key: "action:new-task", kind: "action", title: "New task…", aliases: ["create task", "add task", "start task"], command: "new-task" }
+/** Opens the New task dialog (components/NewTask.tsx) on the project in view, with its project picker. N does the same. */
+export const NEW_TASK: PaletteItem = { key: "action:new-task", kind: "action", title: "New task…", aliases: ["create task", "add task", "start task"], command: "new-task", shortcut: "N" }
 
-/** The row offered when nothing matches: the New task dialog, with the typed text as its prompt. */
-export const newTaskFrom = (text: string): PaletteItem => ({ ...NEW_TASK, title: `Start a new task: “${text}”`, prompt: text })
+/** A draft on one line, short enough to sit under a title. */
+function clip(text: string, max = 60) {
+  const flat = text.replace(/\s+/g, " ").trim()
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
+}
 
-export function buildActions(projects: Project[], pins: BarPins = {}): PaletteItem[] {
+/** The line under a New task row: the draft its dialog opens with, else the project the task goes to. */
+function newTaskSubtitle({ project, draft }: NewTaskContext, kept = "Continues your draft"): string {
+  const text = draft ? clip(draft) : ""
+  if (text) return `${kept}: “${text}”`
+  return project ? `In ${project} · you can change it next` : "Pick a project next"
+}
+
+/** "New task…" where the palette opened. */
+export const newTaskItem = (ctx: NewTaskContext = {}): PaletteItem => ({ ...NEW_TASK, subtitle: newTaskSubtitle(ctx) })
+
+/** The row that starts a task from the typed text (nothing matches it, or it reads like a prompt): the dialog opens with it. */
+export const newTaskFrom = (text: string, ctx: NewTaskContext = {}): PaletteItem => ({
+  ...NEW_TASK,
+  title: `Start a new task: “${text}”`,
+  subtitle: newTaskSubtitle(ctx, "Adds to your draft"),
+  shortcut: undefined,
+  prompt: text,
+})
+
+export function buildActions(projects: Project[], pins: BarPins = {}, newTask: NewTaskContext = {}): PaletteItem[] {
   return [
-    NEW_TASK,
+    newTaskItem(newTask),
     { key: "action:new-project", kind: "action", title: "New project…", command: "new-project" },
     { key: "action:shortcuts", kind: "action", title: "Keyboard shortcuts", aliases: ["hotkeys", "keybindings", "keys", "help"], command: "shortcuts", shortcut: "?" },
     ...projects.map((p) => pinAction(p, pins[p.id] === "pinned")),

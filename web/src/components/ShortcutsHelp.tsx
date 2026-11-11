@@ -58,7 +58,7 @@ export function ShortcutsSheet({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="Keyboard shortcuts"
-      description="Single keys like P, / and ? work when you're not typing in a field."
+      description="Single keys like N, P, / and ? work when you're not typing in a field."
       size="lg"
       placement="sheet"
       onClose={onClose}

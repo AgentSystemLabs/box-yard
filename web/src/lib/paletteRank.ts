@@ -455,11 +455,12 @@ function browseOrder(pool: PaletteItem[], scope: PaletteScope, opts: RankOptions
   return [...pool].sort((a, b) => open(a) - open(b) || tieBreak(a, b))
 }
 
-/** Most-used first; unused ones keep their built-in order. */
+/** "New task…" first, then the most-used; unused ones keep their built-in order. */
 function commandsByUse(items: PaletteItem[], usage: Record<string, number> = {}): PaletteItem[] {
   const commands = items.filter(isCommand)
   const order = new Map(commands.map((i, n) => [i.key, n]))
-  return commands.sort((a, b) => (usage[b.key] ?? 0) - (usage[a.key] ?? 0) || order.get(a.key)! - order.get(b.key)!)
+  const lead = (i: PaletteItem) => (i.command === "new-task" ? 0 : 1)
+  return commands.sort((a, b) => lead(a) - lead(b) || (usage[b.key] ?? 0) - (usage[a.key] ?? 0) || order.get(a.key)! - order.get(b.key)!)
 }
 
 const WAITING: TaskStatus[] = ["needs_input", "pr_ready"]
