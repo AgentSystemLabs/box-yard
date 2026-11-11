@@ -15,6 +15,7 @@ import {
   Cpu,
   Gauge,
   MoreHorizontal,
+  Reply,
   Settings,
   UserRound,
   Users,
@@ -35,7 +36,7 @@ import { chatDays } from "../lib/chatDays"
 import { ChatHistory, DayBoundary } from "./ChatHistory"
 import { splitQueued } from "../lib/queued"
 import { useEntityIndex } from "../lib/entities"
-import { HEAD_CONTAINER, spotClass, useAutoCompact } from "../lib/contextVisibility"
+import { HEAD_CONTAINER, useAutoCompact } from "../lib/contextVisibility"
 import { captainRows, groupLabel, parseNotice, plainText, stripFrontMatter, type CaptainNoticeItem, type CaptainRow } from "../lib/captainTranscript"
 import { NOTICE_ICON } from "./noticeIcons"
 import { AgentIcon, AppLink, Button, InRepo, LineIcon, Markdown, TimeAgo, cx, useRepoScope, warmMarkdown } from "./ui"
@@ -59,10 +60,10 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
 import { pickProject, setChatProjectFilter } from "../lib/projectBar"
 import { COORDINATOR_CHAT } from "../lib/threads"
 import { useTiles } from "../lib/taskTiles"
-import { CONTEXT_WARN_PCT, ContextMiniBar, contextLabel, contextPct, contextTone, formatTokens } from "./ContextMeter"
+import { CONTEXT_WARN_PCT, contextLabel, contextPct, contextTone, formatTokens } from "./ContextMeter"
 import { StickyScroll, createJumpStore, type StickyScrollHandle } from "./StickyScroll"
 import { SelectionToTask } from "./SelectionToTask"
-import { SideThreadPane, ThreadChatProvider, ThreadMarkers } from "./SideThread"
+import { SideThreadPane, ThreadChatProvider, ThreadMarkers, useReplyTo } from "./SideThread"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import type { SelectionTaskSource } from "../lib/selectionTask"
 import { DismissButton, Modal } from "./Modal"
@@ -414,8 +415,8 @@ const HEAD = "mb-1 grid grid-cols-[auto_minmax(0,auto)_minmax(0,1fr)_auto] items
 const HEAD_DETAIL = "flex min-w-0 items-center gap-x-1.5 gap-y-0.5 @max-xl:col-span-full @max-xl:row-start-2 @max-xl:flex-wrap"
 /** A task's title there: one truncated line beside the rest, all of it on the line of its own. */
 const HEAD_TITLE = "min-w-0 truncate tracking-normal normal-case @max-xl:whitespace-normal @max-xl:wrap-anywhere"
-/** Its link is 44px tall to a finger: padding that its own negative margin takes back, so the header's lines stay put. */
-const HEAD_LINK = "hover:underline pointer-coarse:-my-3 pointer-coarse:py-3"
+/** Its link is 44px tall to a finger (a 16px line and 14px each side): padding that its own negative margin takes back, so the header's lines stay put. */
+const HEAD_LINK = "hover:underline pointer-coarse:-my-3.5 pointer-coarse:py-3.5"
 
 /** The task an agent's message_captain came from (its title links to it), and whether the agent waited for a reply. */
 function AgentSource({ meta }: { meta: CaptainMessage["meta"] }) {
@@ -501,10 +502,12 @@ export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMe
  * One task notice: status icon, linked task title, a plain summary and the time. Its icon is the button that shows all
  * of it, and a click on the row's text does the same; its links stay beside the button, never inside one. A wide row is
  * one line, title first; in a narrow one (its own `@container`, not the window) or once opened, the whole title gets
- * its own row and the summary and time go under it.
+ * its own row and the summary and time go under it. Reply (MessageActions) is the hover toolbar with a mouse; on touch
+ * it's a button in the opened row, so a tap on a row never moves the rows under the finger.
  */
 const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
   const [full, setFull] = useState(false)
+  const replyTo = useReplyTo()
   const n = useMemo(() => parseNotice(m.content, m.meta), [m.content, m.meta])
   const taskId = typeof m.meta?.taskId === "string" ? m.meta.taskId : null
   const { icon: Icon, className, label } = NOTICE_ICON[n.kind]
@@ -528,7 +531,8 @@ const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
       title={full ? undefined : plainText(stripTruncation(m.content).text)}
       onClick={toggle}
       className={cx(
-        MESSAGE_BLOCK,
+        // MessageActions' hover group and positioning box, without MESSAGE_BLOCK's room for a tapped toolbar.
+        "group/msg relative",
         // 44px to a finger: a 16px line and 14px above and under it. The button's focus ring goes round the row.
         "flex min-w-0 cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-900/60 has-[>button:focus-visible]:ring-2 has-[>button:focus-visible]:ring-yard-500/40 pointer-coarse:min-h-11 pointer-coarse:py-3.5",
       )}
@@ -574,13 +578,32 @@ const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>
+        {full && replyTo && (
+          <button
+            type="button"
+            data-testid="notice-reply"
+            aria-label="Reply in a thread"
+            onClick={(e) => {
+              e.stopPropagation()
+              replyTo(m.id, m.content)
+            }}
+            className="mt-1 -mb-2 -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none pointer-fine:hidden"
+          >
+            <Reply className="h-4 w-4" aria-hidden />
+            Reply
+          </button>
+        )}
       </div>
-      <MessageActions text={m.content} anchorId={m.id} />
+      <MessageActions text={m.content} anchorId={m.id} className="pointer-coarse:hidden" />
     </div>
   )
 })
 
-/** Consecutive notices folded into "4 task updates", with their icons and titles as a preview. */
+/**
+ * Consecutive notices folded into "4 task updates", with their icons and titles as a preview: the first title and how
+ * many more. A wide row is one line; a narrow one (its own `@container`) has the whole title on a second line, under
+ * the label, never a stub of it; the narrowest (a 320px phone at 125% zoom) leaves out the time, which each row has.
+ */
 const NoticeGroup = memo(function NoticeGroup({
   id,
   items,
@@ -604,7 +627,7 @@ const NoticeGroup = memo(function NoticeGroup({
         type="button"
         aria-expanded={open}
         onClick={() => onToggle(id)}
-        className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-900/60 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:min-h-11"
+        className="grid w-full min-w-0 grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0.5 rounded-lg px-2 py-1.5 text-left text-xs text-zinc-500 hover:bg-zinc-900/60 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:min-h-11 @[26rem]/group:grid-cols-[auto_auto_auto_minmax(0,1fr)_auto]"
       >
         <ChevronRight className={cx("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-90")} />
         <span className="flex shrink-0 gap-0.5">
@@ -613,16 +636,22 @@ const NoticeGroup = memo(function NoticeGroup({
             return <Icon key={k} className={cx("h-3.5 w-3.5", className)} />
           })}
         </span>
-        <span className="shrink-0 font-medium text-zinc-300">{groupLabel(messages, items.length)}</span>
+        <span className="min-w-0 font-medium text-zinc-300">{groupLabel(messages, items.length)}</span>
         {titles.length > 0 && (
-          // The first title, cut where the row ends, then how many more: the count is never what's cut. A row too
-          // narrow for a readable title (a 320px phone) keeps just "3 task updates".
-          <span data-testid="notice-group-titles" className="flex min-w-0 flex-1 text-zinc-600 @max-[18rem]/group:hidden">
-            <span className="min-w-0 truncate">· {titles[0]}</span>
+          // Wide: on the label's line, cut where the row ends, and the count is never what's cut. Narrow: all of it on
+          // the second line, from the label's left edge to the row's end.
+          <span
+            data-testid="notice-group-titles"
+            className="col-span-2 col-start-3 row-start-2 min-w-0 wrap-anywhere text-zinc-600 @[26rem]/group:col-span-1 @[26rem]/group:col-start-4 @[26rem]/group:row-start-1 @[26rem]/group:flex"
+          >
+            <span className="@[26rem]/group:min-w-0 @[26rem]/group:truncate">
+              <span className="@max-[26rem]/group:hidden">· </span>
+              {titles[0]}
+            </span>
             {titles.length > 1 && <span className="shrink-0 whitespace-pre"> +{titles.length - 1}</span>}
           </span>
         )}
-        <span className="ml-auto shrink-0 pl-1 text-[11px] text-zinc-600">
+        <span className="col-start-4 row-start-1 pl-1 text-right text-[11px] whitespace-nowrap text-zinc-600 @max-[14.5rem]/group:hidden @[26rem]/group:col-start-5">
           <TimeAgo ts={last.createdAt} />
         </span>
       </button>
@@ -652,14 +681,13 @@ function useCaptainMeter(state: CaptainState | undefined) {
   const model = settings ? `${id ? modelLabel(id) : codex ? "Codex's default model" : "Default model"} · ${settings.captainEffort} effort` : null
   // Captains compact on the Coordinator's auto-compact setting; the meter is only a reading.
   const autoCompact = useAutoCompact("coordinator")
-  const headerMeter = spotClass(autoCompact, "header")
   const meter: MeterProps | null = autoCompact ? null : {
     tokens: state?.usage.tokens ?? null,
     window: state?.usage.window ?? null,
     compacting: state?.compacting ?? false,
     queued: Boolean(state?.compactQueued),
   }
-  return { model, meter, headerMeter }
+  return { model, meter }
 }
 
 /**
@@ -712,7 +740,7 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
               </span>
             </ChatName>
           </div>
-          {/* Context readings stay out of the chat, as in the Coordinator's: the full meter is in ⋯. */}
+          {/* Context readings stay out of the header, as in the Coordinator's: the meter is in ⋯, which turns amber when it's nearly full. */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {!sidebarInline && <SearchButton />}
             <CaptainMenu project={project} meter={meter} model={model} lastActive={lastActive} />
@@ -727,11 +755,11 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
 /**
  * A side panel's one header, which is the panel's too (OverlayHost.tsx draws none over it): Back where the panel is a
  * sheet, the Captain's icon (which says its state), "<project> Captain" (it opens the chat switcher: the Coordinator,
- * then every project's Captain), a small context reading when wide, ⋯ (model, last active and the full meter), then
- * Pin and Close beside the chat. A task's panel header's height and column (TaskHeader.tsx), so the two line up.
+ * then every project's Captain), ⋯ (model, last active and the context meter; it turns amber when the context is nearly
+ * full), then Pin and Close beside the chat. A task's panel header's height and column (TaskHeader.tsx), so the two line up.
  */
 function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: { project: Project; state: CaptainState | undefined; lastActive: number | null; onClose?: () => void; backLabel?: string }) {
-  const { model, meter, headerMeter } = useCaptainMeter(state)
+  const { model, meter } = useCaptainMeter(state)
   const color = useTiles().colors.get(project.id)
   const imageMark = useCaptainMark(project.id).kind === "image"
   return (
@@ -748,9 +776,6 @@ function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: 
           </ChatSwitcher>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          {meter && headerMeter !== null && (
-            <ContextMiniBar tokens={meter.tokens} window={meter.window} hint="How much of the Captain's context window is used." className={cx("mr-1", headerMeter)} />
-          )}
           <CaptainMenu project={project} meter={meter} model={model} lastActive={lastActive} />
           <PanelControls name={`${project.name} Captain`} />
         </div>
@@ -763,6 +788,8 @@ function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: 
 const FACT = "flex gap-2 px-2 py-1.5 text-sm"
 const FACT_NAME = "w-20 shrink-0 text-zinc-500"
 const FACT_ICON = "h-3.5 w-3.5 text-zinc-500"
+/** From this much context used, ⋯ itself says so (amber, and in its name): the header has no meter. */
+const CONTEXT_CUE_PCT = 70
 
 /** "Context 142k / 200k · 71%" over a bar as wide as the sheet, with the compaction's state. A reading, not a control. */
 function ContextFact({ tokens, window, compacting, queued }: MeterProps) {
@@ -791,7 +818,8 @@ function ContextFact({ tokens, window, compacting, queued }: MeterProps) {
 
 /**
  * ⋯: the Captain's model (it opens Settings, where every Captain's is picked), last activity and context, then
- * Project settings and compaction history. A sheet like the task header's ⓘ (a Modal portalled to the body), so the
+ * Project settings and compaction history. With auto-compact off (a `meter`) and the context nearly full, the button
+ * is amber and its name and tooltip say how full. A sheet like the task header's ⓘ (a Modal portalled to the body), so the
  * header's overflow can't clip it.
  */
 function CaptainMenu({ project, meter, model, lastActive }: { project: Project; meter: MeterProps | null; model: string | null; lastActive: number | null }) {
@@ -804,6 +832,8 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
   const count = compactions.data?.length ?? 0
   const facts = Boolean(model || lastActive || meter)
   const modelHint = useId()
+  const pct = meter ? contextPct(meter.tokens, meter.window) : null
+  const cue = pct !== null && pct >= CONTEXT_CUE_PCT
   // What opens next takes ⋯ as the place focus returns to, not the row that's about to go.
   const then = (next: () => void) => () => {
     trigger.current?.focus()
@@ -817,13 +847,14 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
         size="sm"
         variant="ghost"
         className="px-1.5"
-        aria-label="Captain menu"
-        title="More"
+        aria-label={cue ? `${project.name} Captain menu, context ${pct}% used` : "Captain menu"}
+        title={cue ? `More · context ${pct}% used` : "More"}
+        data-context-cue={cue || undefined}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <MoreHorizontal className="h-4 w-4" />
+        <MoreHorizontal className={cx("h-4 w-4", cue && "text-amber-400")} />
       </Button>
       {open && (
         <Modal
@@ -848,7 +879,8 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
                   aria-label={`Model ${model.replace(" · ", ", ")}. Opens Settings`}
                   aria-describedby={modelHint}
                 >
-                  <Cpu className={cx(FACT_ICON, "shrink-0")} aria-hidden />
+                  {/* Its icon sits on the "Model" line, as the Context row's does; the chevron stays at the row's middle. */}
+                  <LineIcon icon={Cpu} className={FACT_ICON} box="self-start" />
                   {/* The hint starts where the value does: under it, in the names' second column. A box too narrow
                       for two columns (a 320px phone at 125% zoom) stacks them from its left edge. */}
                   <span className="@container min-w-0 flex-1">
@@ -856,7 +888,7 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
                       <span className={FACT_NAME}>Model</span>
                       <span className="min-w-0 wrap-anywhere">{model}</span>
                       <span id={modelHint} className="basis-full text-xs text-zinc-500 @[13rem]:col-start-2">
-                        All Captains use this model. Change it in Settings.
+                        Used by every Captain. Change in Settings.
                       </span>
                     </span>
                   </span>

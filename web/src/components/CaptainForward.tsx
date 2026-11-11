@@ -85,13 +85,16 @@ export const TaskComposer = memo(function TaskComposer({
   const stop = useMemo(() => (running && !asking ? { label: "Stop the agent's turn", onStop: () => stopTask(task.id) } : null), [running, asking, stopTask, task.id])
   const showCaptain = !asking
   // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts). Their labels show
-  // only where the whole row fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
+  // only where the row fits them. `others` is what is on the row with the chips: Mic, Send, Attach, Stop and Send to.
   const chips = (ask ? 1 : 0) + (showCaptain ? 1 : 0)
-  const others = 4 + (stop ? 1 : 0) + (asking ? 0 : 1)
+  const others = 3 + (stop ? 1 : 0) + (asking ? 0 : 1)
   const captainChip = showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0
-  const labels = labelFrom(rowWidth(others + (ask ? LABELLED.ask : 0) + captainChip))
-  // "Captain" is the shorter label, so it comes first: from the width where the row fits it beside "Side question"'s
-  // icon alone (a large phone; any phone when the task has no side questions).
+  // "Side question" is the longer label and the first to go: it shows where both labels fit, with room kept for Expand
+  // (there once the text grows), so the labels of a wide box don't come and go while typing.
+  const labels = labelFrom(rowWidth(others + 1 + (ask ? LABELLED.ask : 0) + captainChip))
+  // "Captain" says where the message goes, so it stays longer: from the width where the row as it usually is (no
+  // Expand) fits it beside "Side question"'s icon alone. That's a 21.5rem box (a 400px phone's is 23rem), or 18.5rem
+  // when the task has no side questions. If Expand joins a row that tight, the chips scroll (Composer.tsx).
   const captainLabel = labelFrom(rowWidth(others + (ask ? 1 : 0) + captainChip))
   const askToggle = ask?.toggle
   const toggleAsk = useCallback(() => {
