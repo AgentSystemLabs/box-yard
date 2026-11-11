@@ -249,7 +249,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
                   )}
                   {/* The Coordinator's replies span projects: "#12" links only where a paragraph is about one repo. Notices and chips set their task's. */}
                   <InRepo mentions>
-                    <CoordinatorTranscript rows={tail.visible} onFollowUp={followUp} />
+                    <CoordinatorTranscript rows={tail.visible} onFollowUp={followUp} moved={talking || queued.length > 0 || !!tail.later || history.moreAfter} />
                     <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={scroller} />
                     {!history.browsing && <StreamingReply busy={talking} />}
                     {queued.length > 0 && <ChatLines messages={queued} onFollowUp={followUp} />}

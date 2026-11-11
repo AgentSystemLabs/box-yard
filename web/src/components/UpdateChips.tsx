@@ -264,17 +264,30 @@ export const UpdateGroup = memo(function UpdateGroup({ id, items }: { id: string
 /**
  * The Coordinator chat as a plain transcript (rows from usePlainRows): Cody's messages and the Coordinator's replies,
  * questions, PRs and failures as cards, every other update a chip, and a run of them one "N updates" line. Task and
- * Captain names in them open their panels. Only the newest reply offers its next steps: older ones were for a moment
- * that has passed. Likewise only a task's newest question, PR or failure asks for anything (lib/noticeNow.ts); `rows`
- * are the newest ones (useTail), so each task's newest card is among them.
+ * Captain names in them open their panels. Only the newest reply offers its next steps (and, on touch, its standing
+ * Reply and Copy), and only while it's the last word: older ones were for a moment that has passed, and so is this one
+ * once Cody has written after it or the chat has moved on (`moved`: the Coordinator is answering, or newer rows aren't
+ * shown). Likewise only a task's newest question, PR or failure asks for anything (lib/noticeNow.ts); `rows` are the
+ * newest ones (useTail), so each task's newest card is among them.
  */
-export const CoordinatorTranscript = memo(function CoordinatorTranscript({ rows, onFollowUp }: { rows: CoordinatorRow[]; onFollowUp: (message: string) => void }) {
+export const CoordinatorTranscript = memo(function CoordinatorTranscript({
+  rows,
+  onFollowUp,
+  moved = false,
+}: {
+  rows: CoordinatorRow[]
+  onFollowUp: (message: string) => void
+  moved?: boolean
+}) {
   const newest = useMemo(() => {
+    if (moved) return
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i]!
-      if (r.type === "message" && r.message.role === "assistant") return r.id
+      if (r.type !== "message") continue
+      if (r.message.role === "user") return
+      if (r.message.role === "assistant") return r.id
     }
-  }, [rows])
+  }, [rows, moved])
   const asks = useNewestAsks(rows)
   return (
     <NewestAsks.Provider value={asks}>
@@ -286,7 +299,7 @@ export const CoordinatorTranscript = memo(function CoordinatorTranscript({ rows,
           ) : r.type === "update" ? (
             <UpdateChip item={r.item} />
           ) : (
-            <ChatLine m={r.message} sources={r.sources} onFollowUp={onFollowUp} next={r.id === newest} />
+            <ChatLine m={r.message} sources={r.sources} onFollowUp={onFollowUp} next={r.id === newest} standing={r.id === newest} />
           )}
         </Fragment>
       ))}

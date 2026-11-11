@@ -17,7 +17,7 @@ import { QueuedChatMessage } from "./QueuedMessages"
 import { ProjectDot, TaskTile } from "./TaskIcon"
 import { CaptainIcon } from "./CaptainIcon"
 import { RecommendedNextSteps, nextStepsFromMeta } from "./RecommendedNextSteps"
-import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
+import { MESSAGE_BLOCK, MessageActions, StandingActions } from "./MessageActions"
 import { ThreadMarkers } from "./SideThread"
 import { ReplySources } from "./ReplySources"
 import { TurnTimingChip, timingOf } from "./TurnTimingChip"
@@ -188,8 +188,9 @@ export const NOTICE_CLASS = "rounded-lg border border-zinc-800/80 bg-zinc-900/40
  * The task's project and a link to its Captain, as a quiet pair of links that starts a notice's meta line (with a
  * trailing "·" before the event; `end` when nothing follows). The project comes from the notice's meta or, for
  * notices that don't carry it, from the task; with neither known there's no pair.
+ * `captain` false: the project alone, which is the way to its Captain too (a card, where the pair cost a phone a line).
  */
-export function NoticeProject({ taskId, projectId, end = false }: { taskId: string; projectId?: string | null; end?: boolean }) {
+export function NoticeProject({ taskId, projectId, end = false, captain = true }: { taskId: string; projectId?: string | null; end?: boolean; captain?: boolean }) {
   const index = useEntityIndex()
   const id = projectId ?? index.byId.get(taskId)?.projectId
   const project = id ? index.byId.get(id) : undefined
@@ -201,13 +202,17 @@ export function NoticeProject({ taskId, projectId, end = false }: { taskId: stri
       <AppLink href={routes.project(id)} title={`Project: ${project.label}`} className={cx("min-w-0 truncate", link)}>
         {project.label}
       </AppLink>
-      <span aria-hidden className="text-zinc-700">
-        ·
-      </span>
-      <AppLink href={`${routes.project(id)}?tab=captain`} title={`${project.label} Captain`} className={cx("inline-flex shrink-0 items-center gap-0.5", link)}>
-        <CaptainIcon projectId={id} className="h-3 w-3" />
-        Captain
-      </AppLink>
+      {captain && (
+        <>
+          <span aria-hidden className="text-zinc-700">
+            ·
+          </span>
+          <AppLink href={`${routes.project(id)}?tab=captain`} title={`${project.label} Captain`} className={cx("inline-flex shrink-0 items-center gap-0.5", link)}>
+            <CaptainIcon projectId={id} className="h-3 w-3" />
+            Captain
+          </AppLink>
+        </>
+      )}
       {!end && (
         <span aria-hidden className="text-zinc-700">
           ·
@@ -222,7 +227,7 @@ export const NOTICE_TITLE_LINK = "font-semibold text-yard-400 decoration-yard-40
 
 /**
  * Every notice card's layout, at every width (Cody's rule): the icon and the task title on a row of their own, so a
- * narrow panel never squeezes the title; under it a muted meta line (the project · Captain pair, then what happened);
+ * narrow panel never squeezes the title; under it a muted meta line (the project, then what happened);
  * then the card's own sections, like a file list with its Show all / Hide toggle in that list's header.
  * The column is the card's `@container`, so sections switch on the card's width, not the window's (the panel resizes).
  */
@@ -399,7 +404,7 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
       title={n.title}
       taskId={taskId}
       muted={past}
-      project={taskId && <NoticeProject taskId={taskId} projectId={projectId} end={Boolean(verb)} />}
+      project={taskId && <NoticeProject taskId={taskId} projectId={projectId} end={Boolean(verb)} captain={false} />}
       meta={verb ? undefined : text}
     >
       {verb && (
@@ -433,21 +438,25 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
  * the threads it has show as markers under it (SideThread.tsx; nothing outside a chat with threads).
  * `sources`: on a Coordinator reply, the updates it read (lib/chatUpdates.ts), named in a "from:" line under it.
  * `next`: whether its suggested next steps show (the Coordinator chat shows only the newest reply's).
+ * `standing`: a reply that ends with Reply and Copy standing under it on touch (the Coordinator chat's newest, while
+ * it's the last word).
  */
 export const ChatLine = memo(function ChatLine({
   m,
   onFollowUp,
   sources,
   next = true,
+  standing = false,
 }: {
   m: ChatMessage
   onFollowUp: (message: string) => void
   sources?: UpdateSource[] | null
   next?: boolean
+  standing?: boolean
 }) {
   return (
     <div data-chat-id={m.id}>
-      <ChatLineBody m={m} onFollowUp={onFollowUp} sources={sources} next={next} />
+      <ChatLineBody m={m} onFollowUp={onFollowUp} sources={sources} next={next} standing={standing} />
       {m.role !== "tool" && <ThreadMarkers m={m} />}
     </div>
   )
@@ -515,11 +524,13 @@ function ChatLineBody({
   onFollowUp,
   sources,
   next,
+  standing,
 }: {
   m: ChatMessage
   onFollowUp: (message: string) => void
   sources?: UpdateSource[] | null
   next: boolean
+  standing: boolean
 }) {
   if (m.role === "user" && m.meta?.scheduleId) {
     // A prompt injected by a Coordinator schedule, not typed by Cody.
@@ -600,13 +611,20 @@ function ChatLineBody({
       </div>
     )
   }
+  const steps = next ? nextStepsFromMeta(m.meta) : []
   return (
     <div id={`chat-${m.id}`} data-testid="chat-reply" className={cx(MESSAGE_BLOCK, "text-sm text-zinc-200")}>
       <Markdown>{m.content}</Markdown>
       <ReplyFooter m={m} sources={sources} />
-      {/* Before the next steps: on touch the newest reply's Reply and Copy stand in a row of their own. */}
-      <MessageActions text={m.content} anchorId={m.id} standing={next} />
-      {next && <RecommendedNextSteps steps={nextStepsFromMeta(m.meta)} onPick={onFollowUp} />}
+      <MessageActions text={m.content} anchorId={m.id} standing={standing} />
+      {standing ? (
+        // On touch its Reply and Copy stand here, and its next steps go on along the same lines.
+        <StandingActions text={m.content} anchorId={m.id}>
+          {steps.length > 0 && <RecommendedNextSteps inline steps={steps} onPick={onFollowUp} />}
+        </StandingActions>
+      ) : (
+        <RecommendedNextSteps steps={steps} onPick={onFollowUp} />
+      )}
     </div>
   )
 }

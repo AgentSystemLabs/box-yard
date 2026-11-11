@@ -4,7 +4,7 @@ import type { Project, Task } from "../../../shared/types"
 import { ArrowDownRight, ChevronRight } from "lucide-react"
 import { dayKey, dayLabel } from "../lib/calendarDay"
 import { api } from "../lib/api"
-import { DAY_SUMMARY_GROUPS, daySummaries, type ChatDay, type DaySummary } from "../lib/chatDays"
+import { DAY_SUMMARY_GROUPS, daySummaries, type ChatDay, type DaySummary, type DaySummaryKind } from "../lib/chatDays"
 import { githubRef, routes, shortGithubLabel } from "../lib/linkify"
 import type { NoticeLike } from "../lib/publishedNotices"
 import { fetchTasks, keys } from "../lib/queries"
@@ -228,6 +228,8 @@ const JUMP = "min-h-11! flex-1 transition-none"
 const RAIL_HEAD = 28
 /** A milestone's row in the popup, as one target: 44px tall, its title wrapping in it. */
 const SUMMARY_ROW = "flex min-h-11 min-w-0 flex-1 basis-32 items-center gap-2 rounded-lg px-2 py-1.5 text-left wrap-anywhere text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400"
+/** A long group of milestones shows this many, then its "Show all N". One more than this is shown whole: the button would take the row it hid. */
+const GROUP_ROWS = 5
 /** A PR or issue at a row's end: drawn as a small link, 44px to a finger (its row is that tall). */
 const SUMMARY_REF = cx(TAP_AREA, "inline-block h-7 shrink-0 rounded px-1 leading-7 whitespace-nowrap text-sky-400 hover:underline focus-visible:outline-2 focus-visible:outline-sky-400")
 
@@ -355,7 +357,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
                 "flex h-11 min-h-11 w-11 flex-col items-center justify-center border-l-2 text-[11px] leading-tight focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400",
                 // Only the open day is filled. The day being read is marked in its text and a thin bar, so it doesn't
                 // read as the focus or as a second open day.
-                d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : d.key === current ? "border-zinc-600 font-semibold text-zinc-100 hover:bg-zinc-900" : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : d.key === current ? "border-zinc-500 font-semibold text-zinc-100 hover:bg-zinc-900" : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
               )}
             >
               <span>{new Date(d.at).toLocaleDateString(undefined, { month: "short" })}</span>
@@ -366,48 +368,91 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
         {railEnd < days.length && <div aria-hidden style={{ height: (days.length - railEnd) * 44 }} />}
       </nav>
       {day && (
-        <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} className="scroll-thin absolute top-2 left-12 z-20 max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-xl">
-          <div className="flex min-h-11 items-center justify-between gap-2">
-            <p className="font-semibold text-zinc-100">{dayLabel(day.at, now)}</p>
-            <DismissButton kind="close" className="h-11 w-11 transition-none!" onClick={close} label="Close day summary" />
-          </div>
-          {/* A narrow panel gives "Jump to day" its own row, so the three never squeeze. */}
-          <div role="group" aria-label="Transcript navigation" className="mb-3 flex flex-wrap gap-2">
-            {/* It takes the focus as the day opens: a held Enter on the day must not also jump. */}
-            <Button data-day-jump size="sm" className={cx(JUMP, "@max-[26rem]/history:basis-full")} onKeyDown={(e) => { if (e.repeat) e.preventDefault() }} onClick={() => jump(day)}>Jump to day</Button>
-            <Button size="sm" className={JUMP} disabled={!complete} title={complete ? undefined : "Load all chat dates to jump to start"} onClick={() => jump(days[0]!)}>Jump to start</Button>
-            <Button size="sm" className={JUMP} onClick={() => { setOpen(null); onEnd() }}>Jump to end</Button>
-          </div>
-          {bullets.length > 0 ? (
-            <div className="space-y-2">
-              {DAY_SUMMARY_GROUPS.map((g) => {
-                const rows = bullets.filter((b) => b.kind === g.kind)
-                if (!rows.length) return null
-                return (
-                  <section key={g.kind} data-summary-group={g.kind}>
-                    <h3 className="px-2 text-[11px] text-zinc-400">{g.label} <span aria-hidden>·</span> {rows.length}</h3>
-                    <ul role="list">
-                      {rows.map((b, i) => (
-                        <SummaryRow
-                          key={b.taskId ?? `${i}:${b.title}`}
-                          summary={b}
-                          // The task's own page has nowhere else to open it.
-                          openTask={Boolean(b.taskId) && b.taskId !== taskId}
-                          onShow={() => jump(day, b.sourceMessageId, true)}
-                          onOpen={() => setOpen(null)}
-                        />
-                      ))}
-                    </ul>
-                  </section>
-                )
-              })}
+        // The title and the jumps stay put; the milestones scroll under them. A panel too short for both (the list
+        // keeps a row or two: min-h) scrolls the popup instead.
+        <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} className="@container/day scroll-thin absolute top-2 left-12 z-20 flex max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm flex-col overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 text-xs shadow-xl">
+          <div className="shrink-0 border-b border-zinc-800 px-3 pt-3">
+            <div className="flex min-h-11 items-center justify-between gap-2">
+              <p className="font-semibold text-zinc-100">{dayLabel(day.at, now)}</p>
+              <DismissButton kind="close" className="h-11 w-11 transition-none!" onClick={close} label="Close day summary" />
             </div>
-          ) : <p className="py-1 text-zinc-400">No task milestones on this day.</p>}
+            {/* A narrow panel gives "Jump to day" its own row, so the three never squeeze. */}
+            <div role="group" aria-label="Transcript navigation" className="flex flex-wrap gap-2 pb-3">
+              {/* It takes the focus as the day opens: a held Enter on the day must not also jump. */}
+              <Button data-day-jump size="sm" className={cx(JUMP, "@max-[26rem]/history:basis-full")} onKeyDown={(e) => { if (e.repeat) e.preventDefault() }} onClick={() => jump(day)}>Jump to day</Button>
+              <Button size="sm" className={JUMP} disabled={!complete} title={complete ? undefined : "Load all chat dates to jump to start"} onClick={() => jump(days[0]!)}>Jump to start</Button>
+              <Button size="sm" className={JUMP} onClick={() => { setOpen(null); onEnd() }}>Jump to end</Button>
+            </div>
+          </div>
+          {/* scroll-pt: a row the keyboard reaches stops clear of its group's pinned heading. */}
+          <div data-day-groups className={cx("scroll-thin flex-1 scroll-pt-8 overflow-y-auto px-3 pb-3", bullets.length > 1 ? "min-h-24" : "min-h-11")}>
+            {bullets.length > 0 ? (
+              <DayGroups key={day.key} bullets={bullets} taskId={taskId} onShow={(b) => jump(day, b.sourceMessageId, true)} onOpen={() => setOpen(null)} />
+            ) : <p className="py-3 text-zinc-400">No task milestones on this day.</p>}
+          </div>
         </div>
       )}
     </>
   )
 })
+
+/**
+ * A day's milestones, by kind, each group under a heading that stays at the top while its rows scroll. A long group
+ * shows its first rows and a "Show all N" that opens the rest in place. Keyed by the day, so every day starts folded.
+ */
+function DayGroups({ bullets, taskId, onShow, onOpen }: { bullets: DaySummary[]; taskId?: string; onShow: (summary: DaySummary) => void; onOpen: () => void }) {
+  const [whole, setWhole] = useState<readonly DaySummaryKind[]>([])
+  const opened = useRef<HTMLElement | null>(null)
+  // The button that opened a group is gone: the keyboard goes on at the first row it revealed.
+  useLayoutEffect(() => {
+    const list = opened.current
+    opened.current = null
+    if (list) (list.querySelector<HTMLElement>(`li:nth-child(n+${GROUP_ROWS + 1}) :is(button, a)`) ?? list).focus()
+  }, [whole])
+  return (
+    <div className="space-y-2">
+      {DAY_SUMMARY_GROUPS.map((g) => {
+        const rows = bullets.filter((b) => b.kind === g.kind)
+        if (!rows.length) return null
+        const folded = rows.length > GROUP_ROWS + 1 && !whole.includes(g.kind)
+        return (
+          <section key={g.kind} data-summary-group={g.kind}>
+            <h3 className="sticky top-0 z-10 bg-zinc-900 px-2 pt-2 pb-1 text-[11px] text-zinc-400">{g.label} <span aria-hidden>·</span> {rows.length}</h3>
+            <ul role="list" tabIndex={-1} className="outline-none">
+              {(folded ? rows.slice(0, GROUP_ROWS) : rows).map((b, i) => (
+                <SummaryRow
+                  key={b.taskId ?? `${i}:${b.title}`}
+                  summary={b}
+                  // The task's own page has nowhere else to open it.
+                  openTask={Boolean(b.taskId) && b.taskId !== taskId}
+                  onShow={() => onShow(b)}
+                  onOpen={onOpen}
+                />
+              ))}
+            </ul>
+            {folded && (
+              <button
+                type="button"
+                data-summary-more
+                onClick={(e) => {
+                  opened.current = e.currentTarget.previousElementSibling as HTMLElement | null
+                  setWhole((kinds) => [...kinds, g.kind])
+                }}
+                className="flex min-h-11 w-full items-center rounded-lg px-2 text-left font-medium text-yard-300 hover:bg-zinc-800 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400"
+              >
+                Show all {rows.length}
+                <span className="sr-only"> in {g.label}</span>
+              </button>
+            )}
+          </section>
+        )
+      })}
+    </div>
+  )
+}
+
+/** A row's trailing word: read out at every width, drawn beside its glyph once the popup has the room. */
+const SUMMARY_WORD = "sr-only shrink-0 text-[11px] text-zinc-400 @min-[22rem]/day:not-sr-only"
 
 /**
  * One milestone: the task's title as the row's one target, and its PRs and issues as links at the row's end (beside
@@ -420,14 +465,15 @@ function SummaryRow({ summary, openTask, onShow, onOpen }: { summary: DaySummary
       {summary.sourceMessageId ? (
         <button type="button" data-summary-jump title="Show in chat" onClick={onShow} className={SUMMARY_ROW}>
           {title}
+          <span className={SUMMARY_WORD}>Show in chat</span>
           <ArrowDownRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-yard-300" />
-          <span className="sr-only">Show in chat</span>
         </button>
       ) : openTask ? (
         // AppLink keeps its click to itself, so the popup closes on the way down.
         <span data-summary-open className="contents" onClickCapture={onOpen}>
           <AppLink href={routes.task(summary.taskId!)} className={SUMMARY_ROW}>
             {title}
+            <span className={SUMMARY_WORD}>Open</span>
             <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           </AppLink>
         </span>
