@@ -54,7 +54,7 @@ import {
   type TreeCount,
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
-import { TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
+import { TREE_ACTION, TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
 import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { DismissButton, isDialogOpen } from "./Modal"
@@ -70,7 +70,7 @@ import { NewProjectDialog } from "./NewProjectDialog"
 import { openShortcuts } from "./ShortcutsHelp"
 import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
-import { ProjectDot, TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
+import { TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
 import { AgentIcon, PrChip, STATUS, TAP_AREA, cx } from "./ui"
 
@@ -130,6 +130,8 @@ const openPart = (id: string) => ({ id, tabIndex: -1, [TREE_OPEN]: "" })
 const TOGGLE_PART = { tabIndex: -1, [TREE_TOGGLE]: "" }
 /** "Waiting on you" and More projects: their head only folds, so Enter and the arrows click the same button. */
 const OPEN_TOGGLE_PART = { ...TOGGLE_PART, [TREE_OPEN]: "" }
+/** A row's own action (Mark done): what Shift+Enter clicks. */
+const ACTION_PART = { [TREE_ACTION]: "" }
 /** The tree's keys for rows that aren't a chat or a task. */
 const WAITING_HEAD = "group:waiting"
 const WAITING_MORE = "waiting:more"
@@ -908,12 +910,23 @@ const TREE_STEPS = cx(
   "[--tree-full:3] [--tree-deep:0.625rem] @max-[16rem]/side:[--tree-deep:0.375rem] @min-[20rem]/side:[--tree-deep:0.875rem] @min-[26rem]/side:[--tree-deep:1.25rem]",
   "pointer-coarse:@max-[20rem]/side:[--tree-full:2] @max-[16rem]/side:[--tree-full:1] pointer-coarse:@max-[16rem]/side:[--tree-full:1]",
 )
+/** How many levels below a project's tasks always step in, however narrow the sidebar, and by how much (rem). */
+const NEST_KEPT = 3
+const NEST_FLOOR = 0.375
 /**
  * Budget the indent against the actual sidebar container, including its gutters. Leave 13rem for the chevron,
  * icon, readable title and non-shrinking Mark done target, even at arbitrary depth. The groups remain full width,
- * so this bounds each absolute indent rather than accumulating padding through the recursive wrappers.
+ * so this bounds each absolute indent rather than accumulating padding through the recursive wrappers. The budget
+ * never flattens the tree: each of the first NEST_KEPT levels of sub-tasks keeps a 6px step of its own (a floor under
+ * it, and the budget of the levels above it stops that much short), so the depth still shows in a 200px sidebar, where a row
+ * with a PR keeps about six characters of its title. Deeper levels share the last one's indent there.
  */
-export const nestAt = (level: number) => `min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(1.25rem, calc(100cqw - 13rem)))`
+export const nestAt = (level: number) => {
+  const kept = Math.min(Math.max(level - 1, 0), NEST_KEPT)
+  const floor = 1.25 + kept * NEST_FLOOR
+  const budget = 13 + (NEST_KEPT - kept) * NEST_FLOOR
+  return `min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(${floor}rem, calc(100cqw - ${budget}rem)))`
+}
 /**
  * A nested list's guide: a still, faint 1px line in the border colour, 10px left of its rows' icons (under the middle
  * of their parent's icon at a full step), down to the list's last row. It's drawn over every row's fill, so a hover
@@ -1045,7 +1058,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           )}
         </button>
       )}
-      <div className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-x-2 py-1 pr-2 text-sm pointer-coarse:min-h-11 pointer-coarse:py-0", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
+      <div className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-x-2 py-1 pr-2 text-sm pointer-coarse:min-h-11 pointer-coarse:py-0", "@max-[14rem]/side:gap-x-1 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
         <button
           type="button"
           onClick={(e) => {
@@ -1057,7 +1070,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           data-open-task={task.id}
           {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
           title={`${task.title} · ${label}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
-          className={cx(folded && tree ? "grid-cols-[1.25rem_minmax(0,1fr)_auto]" : "grid-cols-[1.25rem_minmax(0,1fr)]", "grid min-h-7 min-w-0 flex-1 items-center gap-x-2.5 rounded-lg text-left @max-[14rem]/side:gap-x-0.5 pointer-coarse:min-h-11", FOCUS)}
+          className={cx(folded && tree ? "grid-cols-[1.25rem_minmax(0,1fr)_auto]" : "grid-cols-[1.25rem_minmax(0,1fr)]", "grid min-h-7 min-w-0 flex-1 items-center gap-x-2.5 rounded-lg text-left @max-[14rem]/side:gap-x-1.5 pointer-coarse:min-h-11", FOCUS)}
         >
           <TaskRowTitle title={task.title} status={task.status} />
           <RowIcon task={task} label={label} dim={dim} />
@@ -1072,8 +1085,9 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
 })
 
 /**
- * ✓ at the end of a failed row or one ready for Cody's review: Mark done without opening the
- * task, done at once with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target.
+ * ✓ in a box at the end of a failed row or one ready for Cody's review: Mark done without opening the
+ * task, done at once with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target; Shift+Enter on
+ * its row in the tree (lib/treeView.ts TREE_ACTION).
  * On a tree's row it closes the whole tree (`subtasks`), so a tree with a
  * sub-task running or asking has none. Search results have none: they list finished work, and the task's header has it.
  */
@@ -1093,9 +1107,13 @@ function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
       aria-label={`Mark ${task.title}${kids} done`}
       title={`Mark done${kids ? `, with its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""}. Messaging it picks it back up.`}
       data-testid="sidebar-mark-done"
-      className={cx("mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)}
+      {...(tree ? ACTION_PART : undefined)}
+      className={cx("group/done mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)}
     >
-      <Check className="h-3.5 w-3.5" aria-hidden />
+      {/* In a box, as a checkbox to tick: a bare check at a row's end reads as "done already". */}
+      <span className="grid h-5 w-5 place-items-center rounded-md border border-zinc-700 transition-colors group-hover/done:border-emerald-400/50">
+        <Check className="h-3 w-3" aria-hidden />
+      </span>
     </button>
   )
 }
@@ -1132,7 +1150,8 @@ function ProjectSettingsButton({ id, name, bright }: { id: string; name: string;
       aria-label={`${name} project settings`}
       data-testid="sidebar-project-settings"
       tabIndex={-1}
-      className={cx(ROW_TOOL, toolInk(bright))}
+      // A zoomed phone's drawer keeps the row for the name and the pin: the Captain's ⋯ menu has the settings too.
+      className={cx(ROW_TOOL, toolInk(bright), "pointer-coarse:@max-[15rem]/side:hidden")}
     >
       <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
     </button>
@@ -1140,7 +1159,12 @@ function ProjectSettingsButton({ id, name, bright }: { id: string; name: string;
 }
 
 /** "Show fewer", in the head of the whole "Waiting on you" list: quiet, in the head's amber, 44px to a finger. */
-const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center rounded-md px-1.5 text-[11px] font-medium text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 pointer-coarse:min-h-11 pointer-coarse:px-2.5", FOCUS)
+const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 @max-[19rem]/side:mr-0 @max-[19rem]/side:px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5 pointer-coarse:@max-[19rem]/side:px-1", FOCUS)
+/**
+ * The head's " on you" goes where "Waiting", its count and "Fewer" need the row: a sidebar narrower than its default
+ * (16rem less its border), a zoomed phone's drawer. A finger's "Fewer" is 44px wide, so it goes a little sooner.
+ */
+const HEAD_SHORT = "@max-[15.5rem]/side:sr-only pointer-coarse:@max-[16.5rem]/side:sr-only"
 /** The head of the whole list stays in view above its rows, on the section's own tint (opaque: rows pass under it). */
 const WAITING_STUCK = "sticky top-0 z-10 rounded-b-none border-b border-amber-300/15 bg-[color-mix(in_oklab,var(--color-amber-300)_3%,var(--color-zinc-950))]"
 
@@ -1186,23 +1210,23 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
           aria-expanded={!folded}
           {...OPEN_TOGGLE_PART}
           id={headId}
-          className={cx("flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg pl-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase after:absolute after:inset-0 after:rounded-lg hover:text-amber-100 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
+          className={cx("flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg pl-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase after:absolute after:inset-0 after:rounded-lg hover:text-amber-100 @max-[19rem]/side:gap-1.5 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
         >
-          <Inbox className={cx("h-3.5 w-3.5 shrink-0", stuck && "@max-[15rem]/side:hidden")} aria-hidden />
-          {/* Under 15rem "Waiting" alone fits (under 20rem, beside "Show fewer"); the rest stays in its name. */}
+          <Inbox className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {/* Narrow, "Waiting" alone fits; the rest stays in its name. By the sidebar's width only, never by what's open. */}
           <span className="min-w-0 truncate">
-            Waiting<span className={stuck ? "@max-[20rem]/side:sr-only" : "@max-[15rem]/side:sr-only"}> on you</span>
+            Waiting<span className={HEAD_SHORT}> on you</span>
           </span>
           <Badge count={total} asks={asks} className="h-4 min-w-4 px-1 text-[10px]" />
         </button>
         {stuck && (
-          // It goes with the click, so the press doesn't take the focus to it. Under 15rem it's "Fewer", to fit.
+          // It goes with the click, so the press doesn't take the focus to it. Under 19rem it's "Fewer", to fit.
           <button type="button" onClick={fewer} onMouseDown={(e) => e.preventDefault()} tabIndex={-1} aria-label="Show fewer" className={FEWER}>
-            <span className="@max-[15rem]/side:hidden">Show fewer</span>
-            <span className="@min-[15rem]/side:hidden">Fewer</span>
+            <span className="@max-[19rem]/side:hidden">Show fewer</span>
+            <span className="@min-[19rem]/side:hidden">Fewer</span>
           </button>
         )}
-        <span className="mr-2 ml-1 shrink-0 text-amber-200/50" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
+        <span className="mr-2 ml-1 shrink-0 text-amber-200/50 @max-[19rem]/side:ml-0.5" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
       </div>
       {!folded && (
         <div role="group" aria-label="Waiting on you" className="space-y-px px-1 pb-1">
@@ -1212,8 +1236,9 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
               <Fragment key={r.task.id}>
                 {/* The row's own name ends with its project, so this line is for the eye only. */}
                 {mixed && project.name && rows[i - 1]?.task.projectId !== r.task.projectId && (
-                  <div aria-hidden className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 px-2 pt-1 text-[11px] leading-4 text-zinc-400">
-                    <span className="grid place-items-center"><ProjectDot projectId={r.task.projectId} /></span>
+                  <div aria-hidden className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 px-2 pt-1 text-[11px] leading-4 text-zinc-500">
+                    {/* The project's square, as under More projects: a round dot here would read as a task's state. */}
+                    <span className="grid place-items-center"><span style={projectColorStyle(project.color)} className="h-2 w-2 rounded-[3px] bg-(--pc)" /></span>
                     <span className="min-w-0 truncate">{project.name}</span>
                   </div>
                 )}

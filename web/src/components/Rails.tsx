@@ -377,7 +377,8 @@ function RailTree({ id, captain, title, anchor, takeFocus, onClose }: {
       tabIndex={-1}
       onBlur={blur}
       style={{ left: box.left, top: box.top, height: box.height, width: `min(20rem, calc(100vw - ${box.left}px - 0.5rem))` }}
-      className="@container/side fixed z-40 flex flex-col border-r border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/60 focus:outline-none"
+      // A layer over the chat, with no scrim: a lighter edge than the app's own dividers, and a shadow that falls on the chat.
+      className="@container/side fixed z-40 flex flex-col border-r border-zinc-700 bg-zinc-950 shadow-[16px_0_32px_-8px_rgb(0_0_0/0.7)] focus:outline-none"
     >
       {/* As high as the strip's top row, so the tree's head and the strip's buttons read as one row. */}
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-900 pr-1.5 pl-3.5">

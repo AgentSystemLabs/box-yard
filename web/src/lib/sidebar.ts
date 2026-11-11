@@ -219,13 +219,28 @@ export const keepSelection = (prev: Selection | undefined, next: Selection): Sel
 export const WAITING_CAP = 5
 
 /**
- * The "Waiting on you" rows on screen: the first `cap`, or all once Cody asked for them. The open task (`keep`) always
- * stays, so the row drawn selected is never one hidden behind "Show all n".
+ * `rows` with each project's together, so the list names a project once: the projects in the order of their first
+ * (most urgent) row, each one's rows in the order they came.
+ */
+export function byProject(rows: readonly SidebarRow[]): SidebarRow[] {
+  const runs = new Map<string, SidebarRow[]>()
+  for (const r of rows) {
+    const run = runs.get(r.task.projectId)
+    if (run) run.push(r)
+    else runs.set(r.task.projectId, [r])
+  }
+  return [...runs.values()].flat()
+}
+
+/**
+ * The "Waiting on you" rows on screen: the first `cap` (the most urgent, whatever their project), or all once Cody
+ * asked for them, then each project's together (byProject). The open task (`keep`) always stays, so the row drawn
+ * selected is never one hidden behind "Show all n".
  */
 export function cappedRows(rows: readonly SidebarRow[], opts: { expanded: boolean; keep?: string | null }): { shown: SidebarRow[]; hidden: number } {
-  if (opts.expanded || rows.length <= WAITING_CAP) return { shown: [...rows], hidden: 0 }
+  if (opts.expanded || rows.length <= WAITING_CAP) return { shown: byProject(rows), hidden: 0 }
   const shown = rows.filter((r, i) => i < WAITING_CAP || r.task.id === opts.keep)
-  return { shown, hidden: rows.length - shown.length }
+  return { shown: byProject(shown), hidden: rows.length - shown.length }
 }
 
 // --- Selection: exactly one row looks selected ----------------------------------------------------------------------
