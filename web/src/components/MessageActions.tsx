@@ -86,13 +86,13 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
       e.stopPropagation()
       hide()
     }
-    document.addEventListener("pointerdown", away, true)
+    document.addEventListener("click", away, true)
     document.addEventListener("keydown", key, true)
     // The app going to the background (a phone's home-screen app is frozen, not closed): put it away, so a thaw
     // doesn't bring back a toolbar whose tap is long over.
     const off = onSuspend(hide)
     return () => {
-      document.removeEventListener("pointerdown", away, true)
+      document.removeEventListener("click", away, true)
       document.removeEventListener("keydown", key, true)
       off()
     }

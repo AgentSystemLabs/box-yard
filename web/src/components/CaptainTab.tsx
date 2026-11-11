@@ -587,7 +587,8 @@ const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
               e.stopPropagation()
               replyTo(m.id, m.content)
             }}
-            className="mt-1 -mb-2 -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none pointer-fine:hidden"
+            // Its 44px ends where the row does: under its label there's only the row's own 14px.
+            className="mt-1 -mb-1.5 -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none pointer-coarse:-mb-3.5 pointer-fine:hidden"
           >
             <Reply className="h-4 w-4" aria-hidden />
             Reply
@@ -639,10 +640,10 @@ const NoticeGroup = memo(function NoticeGroup({
         <span className="min-w-0 font-medium text-zinc-300">{groupLabel(messages, items.length)}</span>
         {titles.length > 0 && (
           // Wide: on the label's line, cut where the row ends, and the count is never what's cut. Narrow: all of it on
-          // the second line, from the label's left edge to the row's end.
+          // the second line, from the label's left edge to the row's end; from the icons' in the narrowest (a 320px phone).
           <span
             data-testid="notice-group-titles"
-            className="col-span-2 col-start-3 row-start-2 min-w-0 wrap-anywhere text-zinc-600 @[26rem]/group:col-span-1 @[26rem]/group:col-start-4 @[26rem]/group:row-start-1 @[26rem]/group:flex"
+            className="col-span-2 col-start-3 row-start-2 min-w-0 wrap-anywhere text-zinc-600 @max-[20rem]/group:col-span-3 @max-[20rem]/group:col-start-2 @[26rem]/group:col-span-1 @[26rem]/group:col-start-4 @[26rem]/group:row-start-1 @[26rem]/group:flex"
           >
             <span className="@[26rem]/group:min-w-0 @[26rem]/group:truncate">
               <span className="@max-[26rem]/group:hidden">· </span>
@@ -740,7 +741,7 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
               </span>
             </ChatName>
           </div>
-          {/* Context readings stay out of the header, as in the Coordinator's: the meter is in ⋯, which turns amber when it's nearly full. */}
+          {/* Context readings stay out of the header, as in the Coordinator's: the meter is in ⋯, which shows the percentage when it's nearly full. */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {!sidebarInline && <SearchButton />}
             <CaptainMenu project={project} meter={meter} model={model} lastActive={lastActive} />
@@ -755,8 +756,9 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
 /**
  * A side panel's one header, which is the panel's too (OverlayHost.tsx draws none over it): Back where the panel is a
  * sheet, the Captain's icon (which says its state), "<project> Captain" (it opens the chat switcher: the Coordinator,
- * then every project's Captain), ⋯ (model, last active and the context meter; it turns amber when the context is nearly
- * full), then Pin and Close beside the chat. A task's panel header's height and column (TaskHeader.tsx), so the two line up.
+ * then every project's Captain), ⋯ (model, last active and the context meter; it shows the percentage when the context
+ * is nearly full), then Pin and Close beside the chat. A task's panel header's height and column (TaskHeader.tsx), so
+ * the two line up.
  */
 function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: { project: Project; state: CaptainState | undefined; lastActive: number | null; onClose?: () => void; backLabel?: string }) {
   const { model, meter } = useCaptainMeter(state)
@@ -788,8 +790,6 @@ function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: 
 const FACT = "flex gap-2 px-2 py-1.5 text-sm"
 const FACT_NAME = "w-20 shrink-0 text-zinc-500"
 const FACT_ICON = "h-3.5 w-3.5 text-zinc-500"
-/** From this much context used, ⋯ itself says so (amber, and in its name): the header has no meter. */
-const CONTEXT_CUE_PCT = 70
 
 /** "Context 142k / 200k · 71%" over a bar as wide as the sheet, with the compaction's state. A reading, not a control. */
 function ContextFact({ tokens, window, compacting, queued }: MeterProps) {
@@ -818,9 +818,9 @@ function ContextFact({ tokens, window, compacting, queued }: MeterProps) {
 
 /**
  * ⋯: the Captain's model (it opens Settings, where every Captain's is picked), last activity and context, then
- * Project settings and compaction history. With auto-compact off (a `meter`) and the context nearly full, the button
- * is amber and its name and tooltip say how full. A sheet like the task header's ⓘ (a Modal portalled to the body), so the
- * header's overflow can't clip it.
+ * Project settings and compaction history. The header has no meter: with auto-compact off (a `meter`), from where the
+ * sheet's bar changes colour the button shows the percentage beside ⋯ in the bar's tone, and its name and tooltip say
+ * it. A sheet like the task header's ⓘ (a Modal portalled to the body), so the header's overflow can't clip it.
  */
 function CaptainMenu({ project, meter, model, lastActive }: { project: Project; meter: MeterProps | null; model: string | null; lastActive: number | null }) {
   const [open, setOpen] = useState(false)
@@ -833,7 +833,8 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
   const facts = Boolean(model || lastActive || meter)
   const modelHint = useId()
   const pct = meter ? contextPct(meter.tokens, meter.window) : null
-  const cue = pct !== null && pct >= CONTEXT_CUE_PCT
+  const cue = pct !== null && pct >= CONTEXT_WARN_PCT
+  const tone = cue ? contextTone(pct).text : undefined
   // What opens next takes ⋯ as the place focus returns to, not the row that's about to go.
   const then = (next: () => void) => () => {
     trigger.current?.focus()
@@ -847,14 +848,15 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
         size="sm"
         variant="ghost"
         className="px-1.5"
-        aria-label={cue ? `${project.name} Captain menu, context ${pct}% used` : "Captain menu"}
-        title={cue ? `More · context ${pct}% used` : "More"}
+        aria-label={`${project.name} Captain menu${cue ? `, context ${pct}% used` : ""}`}
+        title={cue ? `Context ${pct}% full` : "More"}
         data-context-cue={cue || undefined}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <MoreHorizontal className={cx("h-4 w-4", cue && "text-amber-400")} />
+        {cue && <span className={cx("text-xs tabular-nums", tone)}>{pct}%</span>}
+        <MoreHorizontal className={cx("h-4 w-4", tone)} />
       </Button>
       {open && (
         <Modal
@@ -888,7 +890,7 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
                       <span className={FACT_NAME}>Model</span>
                       <span className="min-w-0 wrap-anywhere">{model}</span>
                       <span id={modelHint} className="basis-full text-xs text-zinc-500 @[13rem]:col-start-2">
-                        Used by every Captain. Change in Settings.
+                        Shared by every Captain.
                       </span>
                     </span>
                   </span>
