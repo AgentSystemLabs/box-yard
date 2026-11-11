@@ -65,7 +65,7 @@ The linked script paths were checked against tracked files and their command-lin
 ## Main corrections
 
 - README now describes all three shipped task CLIs, all runner providers, current Settings navigation, server polling, Steer, CLI-specific context/compaction and the absence of manager Compact/reset controls.
-- Node setup recommends 22.12+. The installed Vite requirement is `^20.19.0 || >=22.12.0`; the package’s older `>=20.11` declaration and `yard` major-version check remain a runtime follow-up, not a claimed fix.
+- Node setup recommends 22.12+. The installed Vite requirement is `^20.19.0 || >=22.12.0`; the package’s older `>=20.11` declaration and `yard` major-version check remained a runtime follow-up at the time (since fixed: both require 22.12, as does the npx launcher).
 - Harness/SSH docs reflect task-owned Codex homes, Cursor availability, supported worker installation and existing credential delivery limits.
 - Identity docs include the shipped local GPG signing payload and mixed Coordinator compaction withholding; agent tools cannot mark tasks done.
 - Date navigation requires explicit jump controls; repeated activation/double-click does not jump. Old benchmark numbers remain labeled historical evidence.
