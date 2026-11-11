@@ -247,6 +247,8 @@ export interface TaskRow {
   subtask_depth?: number
   /** 1: runs where its parent runs and shares its parent's slot (runs_on "same"). */
   with_parent?: number
+  /** The owner's place for it among its siblings in the sidebar (Store.orderTasks); null: the automatic order. */
+  sort_order?: number | null
   /** What Mark done closed it from (DoneFrom, as JSON), for Reopen; null once it leaves done another way. */
   done_from_json?: string | null
   /** The merged PR a reopen kept open: that merge doesn't move it to done again (TaskManager.autoDoneOnMerge). */
@@ -1612,6 +1614,7 @@ export class Store {
       rootTaskId: row.root_task_id ?? null,
       subtaskDepth: row.subtask_depth ?? 0,
       withParent: row.with_parent === 1,
+      sortOrder: row.sort_order ?? null,
       lastActiveAt: row.last_active_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -2022,6 +2025,37 @@ export class Store {
 
   deleteTask(id: string) {
     this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id)
+  }
+
+  /**
+   * The owner's order for one list of the sidebar: a project's tasks (`parentTaskId` null), or one task's sub-tasks.
+   * `ids` are that list's tasks, first to last; a sibling left out keeps the place it has. `auto` clears their places
+   * instead, back to the automatic order. It only ever writes sort_order: a task of another project, or one that isn't
+   * a sub-task of `parentTaskId`, is refused, so a move never changes a task's project or parent. Returns the tasks
+   * whose place changed.
+   */
+  orderTasks(projectId: string, opts: { parentTaskId?: string | null; ids: readonly string[]; auto?: boolean }): Task[] {
+    const changed: string[] = []
+    this.db.transaction(() => {
+      if (!this.getProject(projectId)) throw new NotFoundError(`Project ${projectId} not found`)
+      const parentId = opts.parentTaskId ?? null
+      if (parentId && this.getTaskRow(parentId)?.project_id !== projectId) throw new NotFoundError(`Task ${parentId} not found`)
+      const seen = new Set<string>()
+      const set = this.db.prepare("UPDATE tasks SET sort_order = ? WHERE id = ?")
+      opts.ids.forEach((id, i) => {
+        if (seen.has(id)) throw new BadRequestError(`Task ${id} is listed twice`)
+        seen.add(id)
+        const row = this.getTaskRow(id)
+        if (!row) throw new BadRequestError(`Unknown task: ${id}`)
+        if (row.project_id !== projectId) throw new BadRequestError(`Task ${id} is in another project`)
+        if (parentId && row.parent_task_id !== parentId) throw new BadRequestError(`Task ${id} is not a sub-task of ${parentId}`)
+        const place = opts.auto ? null : i
+        if ((row.sort_order ?? null) === place) return
+        set.run(place, id)
+        changed.push(id)
+      })
+    })()
+    return changed.map((id) => this.getTask(id)!)
   }
 
   /** A task's sub-tasks (its direct children), oldest first (server/subtasks.ts). */

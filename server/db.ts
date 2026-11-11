@@ -1287,6 +1287,11 @@ export const MIGRATIONS: string[] = [
   -- read from the task's harness, or the model's name.
   ALTER TABLE claude_usage ADD COLUMN harness TEXT;
   `,
+  `
+  -- The owner's place for a task among its siblings in the sidebar (a project's tasks, or one task's sub-tasks), set by
+  -- Store.orderTasks: lower is higher up. NULL (every older row, and every new task) is the automatic order.
+  ALTER TABLE tasks ADD COLUMN sort_order INTEGER;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {
