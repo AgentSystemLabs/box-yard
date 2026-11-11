@@ -13,7 +13,7 @@ import { openPreview } from "../lib/preview"
 import { NewTabLink, PR_STYLE, STATUS, TAP_AREA, TimeAgo, cx } from "./ui"
 import { useOpenSettings } from "./SettingsHost"
 import { NewProjectDialog } from "./NewProjectDialog"
-import { NewTaskDialog } from "./NewTask"
+import { NewTaskDialog, useNarrow } from "./NewTask"
 import { Loading } from "./Loading"
 import { clearNewTaskDraft, draftScope, loadDraft, newTaskDraftKey, saveDraft } from "../lib/newTask"
 import { projectOfTask } from "../lib/overlays"
@@ -246,6 +246,7 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
   const projects = useProjects(QUIET)
   const artifacts = useArtifacts(QUIET)
   const pins = useBarPins()
+  const narrow = useNarrow()
   const [text, setText] = useState("")
   const [scope, setScope] = useState<PaletteScope | null>(null)
   const [expanded, setExpanded] = useState<ReadonlySet<GroupKey>>(() => new Set())
@@ -437,8 +438,9 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
           spellCheck={false}
           value={text}
           onChange={(e) => onInput(e.target.value)}
-          placeholder={scope ? SCOPE_PLACEHOLDER[scope] : "Search tasks, Captains, settings, files…"}
-          className="min-w-0 flex-1 bg-transparent py-3.5 text-base text-zinc-100 outline-none! placeholder:text-zinc-600 sm:text-sm"
+          // A field with the caret in it cuts a long placeholder off without a "…": a phone gets one that fits.
+          placeholder={scope ? SCOPE_PLACEHOLDER[scope] : narrow ? "Search Box Yard…" : "Search tasks, Captains, settings, files…"}
+          className="min-w-0 flex-1 bg-transparent py-3.5 text-base text-ellipsis text-zinc-100 outline-none! placeholder:text-zinc-600 sm:text-sm"
         />
         <kbd className="rounded border border-zinc-800 px-1.5 py-0.5 font-sans text-[10px] text-zinc-500 max-sm:hidden">esc</kbd>
         {/* A phone has no Esc key; a wider screen shows the esc hint instead. */}
