@@ -28,7 +28,9 @@ export function EmptyCaptain({ project, onPick }: { project: Project; onPick: (t
   const hasTasks = useHasTasks(project.id) ?? true
   const color = useProjectColor(project.id)
   return (
-    <div data-testid="captain-empty" className="flex flex-col items-center pt-[8dvh] text-center">
+    // The gap above follows the chat's width (its container), not the window's height: the same in a side panel, and
+    // still when a phone's keyboard opens.
+    <div data-testid="captain-empty" className="flex flex-col items-center pt-[clamp(1.5rem,10cqi,5rem)] text-center">
       {/* The Captain's icon, in its project's colour as everywhere. */}
       <span style={projectColorStyle(color)} className={color ? "text-(--pc)" : "text-zinc-300"}>
         <CaptainIcon projectId={project.id} className="h-6 w-6" />
@@ -39,7 +41,8 @@ export function EmptyCaptain({ project, onPick }: { project: Project; onPick: (t
       <p className="mt-1.5 max-w-md text-sm text-zinc-400">
         {hasTasks
           ? "It keeps track of this project's tasks. Ask what's going on, or tell it what to do next."
-          : "Tell the Captain what you want done, in plain English. It starts a task for each request and reports back here."}
+          : "Tell the Captain what you want done, in plain English. It starts a task for each request and reports back here."}{" "}
+        Pick one to edit it before sending.
       </p>
       <div role="group" aria-label="Start from" className="mt-4 grid w-full max-w-md gap-2">
         {captainStarters(project, hasTasks).map((s) => (
@@ -53,7 +56,6 @@ export function EmptyCaptain({ project, onPick }: { project: Project; onPick: (t
           </button>
         ))}
       </div>
-      <p className="mt-6 max-w-md text-xs leading-relaxed text-zinc-500">Picking one puts it in the box below, so you can edit it before you send it.</p>
     </div>
   )
 }

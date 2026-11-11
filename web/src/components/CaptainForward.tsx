@@ -87,9 +87,12 @@ export const TaskComposer = memo(function TaskComposer({
   // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts). Their labels show
   // only where the whole row fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
   const chips = (ask ? 1 : 0) + (showCaptain ? 1 : 0)
-  const labels = labelFrom(
-    rowWidth(4 + (stop ? 1 : 0) + (asking ? 0 : 1) + (ask ? LABELLED.ask : 0) + (showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0)),
-  )
+  const others = 4 + (stop ? 1 : 0) + (asking ? 0 : 1)
+  const captainChip = showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0
+  const labels = labelFrom(rowWidth(others + (ask ? LABELLED.ask : 0) + captainChip))
+  // "Captain" is the shorter label, so it comes first: from the width where the row fits it beside "Side question"'s
+  // icon alone (a large phone; any phone when the task has no side questions).
+  const captainLabel = labelFrom(rowWidth(others + (ask ? 1 : 0) + captainChip))
   const askToggle = ask?.toggle
   const toggleAsk = useCallback(() => {
     handle.current?.clearSendTo()
@@ -135,7 +138,7 @@ export const TaskComposer = memo(function TaskComposer({
       if (toCaptain)
         return (
           <div data-testid="captain-forward-note" className="flex min-w-0 items-center gap-1.5 px-1.5 pb-1 text-[11px] text-yard-300/80">
-            <CaptainIcon projectId={task.projectId} className="h-3 w-3" />
+            <CaptainIcon projectId={task.projectId} style={projectColorStyle(color)} className={cx("h-3 w-3 shrink-0", color ? "text-(--pc)" : "text-zinc-300")} />
             <span className="min-w-0 truncate">
               To the {captain}, not the agent{task.pendingCount ? `, with this task's ${queuedLabel(task.pendingCount)}` : ""}. Its reply shows here.
             </span>
@@ -159,7 +162,7 @@ export const TaskComposer = memo(function TaskComposer({
         </div>
       )
     },
-    [asking, toCaptain, suggest, dismissed, captain, task.projectId, task.pendingCount, running, sendToCaptain],
+    [asking, toCaptain, suggest, dismissed, captain, color, task.projectId, task.pendingCount, running, sendToCaptain],
   )
 
   return (
@@ -215,7 +218,7 @@ export const TaskComposer = memo(function TaskComposer({
               className={cx(CHIP, toCaptain ? "bg-yard-500/15 text-yard-200 ring-1 ring-yard-500/40" : "text-zinc-500 hover:text-zinc-200")}
             >
               <CaptainIcon projectId={task.projectId} style={projectColorStyle(color)} className={cx("h-3.5 w-3.5", color ? "text-(--pc)" : "text-zinc-300")} />
-              <span className={labels}>{toCaptain ? "To Captain" : "Captain"}</span>
+              <span className={captainLabel}>{toCaptain ? "To Captain" : "Captain"}</span>
             </button>
           )}
         </>
@@ -317,11 +320,14 @@ export const CaptainAnswerLine = memo(function CaptainAnswerLine({ m }: { m: Tas
   return (
     <div data-testid="captain-answer" style={projectColorStyle(color)} className={cx(MESSAGE_BLOCK, "flex min-w-0 items-start gap-2 rounded-lg bg-yard-500/5 px-3 py-2 text-sm leading-relaxed")}>
       <LineIcon icon={captainIconFor(pid)} className={cx("h-4 w-4", color ? "text-(--pc)" : "text-zinc-300")} />
-      <div className="min-w-0 text-zinc-200 [&>.prose-chat>:first-child]:mt-0!">
-        <div className="mb-0.5 text-[11px] leading-5 font-semibold text-yard-400">
-          {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
-          <span className="font-normal text-zinc-500"> · replied</span>
-          <span className="ml-2 text-[10px] font-normal text-zinc-600">
+      <div className="min-w-0 flex-1 text-zinc-200 [&>.prose-chat>:first-child]:mt-0!">
+        {/* The time ends the first line, as in ToCaptainLine. */}
+        <div className="mb-0.5 flex min-w-0 items-baseline gap-x-1 text-[11px] leading-5 font-semibold text-yard-400">
+          <span className="min-w-0 wrap-anywhere">
+            {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
+            <span className="font-normal text-zinc-500"> · replied</span>
+          </span>
+          <span className="ml-auto shrink-0 pl-2 text-[10px] font-normal whitespace-nowrap text-zinc-600">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>

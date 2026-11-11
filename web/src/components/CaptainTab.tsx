@@ -4,7 +4,7 @@ import { HistoryNavigation } from "./HistoryNavigation"
 // One slim header (its icon, which says its state, its name and the ⋯ menu: model, last active, context), the thread
 // with task notices folded into one-line rows, and the shared Composer to message the Captain directly.
 // A picked Captain is also a top-level chat: `centre` lays it out as the whole centre, like the Coordinator's.
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react"
+import { Fragment, memo, useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react"
 import {
   AlarmClock,
   AlertTriangle,
@@ -48,6 +48,8 @@ import { captainSourceOf, forwardedFromTask } from "../../../shared/captain"
 import { modelLabel } from "../../../shared/usageLedger"
 import { COMPOSER_FOOTER, Composer, type ComposerExtra, type ComposerHandle } from "./Composer"
 import { DockComposer } from "./DockComposer"
+import { ComposerIcon } from "./ChatIcons"
+import { PullRequestsButton, PullRequestsMenuItem } from "./PullRequests"
 import { SidebarMenuButton } from "./Sidebar"
 import { CoordinatorCrumb } from "./TreeNav"
 import { ProjectAvatar } from "./TaskIcon"
@@ -230,6 +232,12 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
             </div>
           )}
           <LoopGuardLine until={state.data?.throttledUntil ?? null} />
+          {/* The one line a screen reader hears about the Captain's work: always here, so a change of its text is
+              announced. It names the Captain (the Coordinator's chat may be open beside this one), so the headers'
+              icons don't announce too. An error has its own alert above. */}
+          <span role="status" data-testid="captain-status" className="sr-only">
+            {state.data?.compacting ? "The Captain is compacting its context" : busy ? "The Captain is working" : ""}
+          </span>
 
           <SelectionToTask source={selectionSource} onPrompt={submit}>
             <ChatHistory index={history.index} days={history.days ?? days} messages={settled} reveal={reveal} ensure={history.ensure} scrollHandle={thread} projectId={project.id}>
@@ -255,11 +263,11 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
                 <CaptainTranscript rows={tail.visible} openGroups={openGroups} onToggle={toggleGroup} onFollowUp={followUp} centre={centre} newest={newest} />
                 <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={thread} />
                 {!history.browsing && busy && (
-                  // Just the dots, like the Coordinator's: the header's icon says it's working, and announces it. Still
+                  // Just the dots, like the Coordinator's (ChatPanel.tsx): the status line above says it in words. Still
                   // with reduced motion.
-                  <div data-testid="captain-working" role="img" aria-label="The Captain is working" className="flex gap-1 px-1 py-2">
+                  <div data-testid="captain-working" aria-hidden className="flex gap-1 px-1 py-2">
                     {[0, 1, 2].map((i) => (
-                      <span key={i} className="h-1.5 w-1.5 rounded-full bg-sky-400/70 motion-safe:animate-bounce" style={{ animationDelay: `${i * 120}ms` }} />
+                      <span key={i} className="h-1.5 w-1.5 rounded-full bg-zinc-500 motion-safe:animate-bounce" style={{ animationDelay: `${i * 120}ms` }} />
                     ))}
                   </div>
                 )}
@@ -296,8 +304,14 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
               panelRef={panel}
               historyKey={`captain:${project.id}`}
               stop={stop}
+              // As the centre's box (DockComposer.tsx): the Captain's icon in its project's colour, and this project's
+              // pull requests (the centre may show another chat's).
+              target={<ComposerIcon kind="captain" label={`Messaging ${target.label}`} color={color} projectId={project.id} />}
               runTargets
               runTargetsProject={project.id}
+              tools={<PullRequestsButton projectId={project.id} />}
+              toolsMenu={<PullRequestsMenuItem projectId={project.id} />}
+              toolSlots={1.25}
             />
           )}
         </div>
@@ -389,12 +403,19 @@ const INBOUND: Record<CaptainSource, { label: string; icon: LucideIcon; box: str
 /** A chip in a message's header: what the sender expects, in words. */
 const HEAD_CHIP = "shrink-0 rounded px-1 font-normal tracking-normal normal-case"
 /**
+ * A message's header: the sender's icon and name, what follows it, then the time. A grid, so the time always ends the
+ * first line: where there's no room the name truncates instead (a 320px phone at 125% zoom).
+ */
+const HEAD = "mb-1 grid grid-cols-[auto_minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-x-1.5 gap-y-0.5 text-[11px] font-semibold tracking-wide uppercase"
+/**
  * What follows the sender in a message's header: the task it's from and its chips. On the header's line where the row
  * is wide; in a narrow row (a phone: the row's own `@container`) on a second line, at the bubble's whole width.
  */
-const HEAD_DETAIL = "flex min-w-0 items-center gap-x-1.5 gap-y-0.5 @max-xl:order-last @max-xl:basis-full @max-xl:flex-wrap"
+const HEAD_DETAIL = "flex min-w-0 items-center gap-x-1.5 gap-y-0.5 @max-xl:col-span-full @max-xl:row-start-2 @max-xl:flex-wrap"
 /** A task's title there: one truncated line beside the rest, all of it on the line of its own. */
 const HEAD_TITLE = "min-w-0 truncate tracking-normal normal-case @max-xl:whitespace-normal @max-xl:wrap-anywhere"
+/** Its link is 44px tall to a finger: padding that its own negative margin takes back, so the header's lines stay put. */
+const HEAD_LINK = "hover:underline pointer-coarse:-my-3 pointer-coarse:py-3"
 
 /** The task an agent's message_captain came from (its title links to it), and whether the agent waited for a reply. */
 function AgentSource({ meta }: { meta: CaptainMessage["meta"] }) {
@@ -405,7 +426,7 @@ function AgentSource({ meta }: { meta: CaptainMessage["meta"] }) {
   return (
     <span className={HEAD_DETAIL}>
       {taskId ? (
-        <AppLink href={`/tasks/${taskId}`} className={cx(HEAD_TITLE, "font-semibold hover:underline")}>
+        <AppLink href={`/tasks/${taskId}`} className={cx(HEAD_TITLE, HEAD_LINK, "font-semibold")}>
           {title}
         </AppLink>
       ) : (
@@ -430,7 +451,7 @@ export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMe
       <AgentSource meta={m.meta} />
     ) : via ? (
       <span className={HEAD_DETAIL}>
-        <AppLink href={`/tasks/${via.taskId}`} data-testid="captain-via-task" className={cx(HEAD_TITLE, "font-normal hover:underline")}>
+        <AppLink href={`/tasks/${via.taskId}`} data-testid="captain-via-task" className={cx(HEAD_TITLE, HEAD_LINK, "font-normal")}>
           <span className="@max-xl:hidden">· </span>from {via.taskTitle}
         </AppLink>
       </span>
@@ -440,12 +461,12 @@ export const InboundMessage = memo(function InboundMessage({ m }: { m: CaptainMe
       </span>
     ) : null
   const bubble = (
-    <div className={cx(MESSAGE_BLOCK, "max-w-[85%] min-w-0 rounded-2xl px-3 py-2 text-sm text-zinc-100", s.box)} aria-busy={m.meta?.pending === true || undefined}>
-      <div className={cx("mb-1 flex items-center gap-x-1.5 gap-y-0.5 text-[11px] font-semibold tracking-wide uppercase", detail && "@max-xl:flex-wrap", s.head)}>
-        <Icon className="h-3 w-3 shrink-0" aria-hidden />
-        <span className={detail ? "shrink-0" : "min-w-0 truncate"}>{source === "hook" && typeof m.meta?.hookName === "string" ? `Hook: ${m.meta.hookName}` : s.label}</span>
+    <div className={cx(MESSAGE_BLOCK, "max-w-[85%] min-w-0 rounded-2xl px-3 py-2 text-sm text-zinc-100 @max-[14rem]:max-w-full", s.box)} aria-busy={m.meta?.pending === true || undefined}>
+      <div className={cx(HEAD, s.head)}>
+        <Icon className="h-3 w-3" aria-hidden />
+        <span className="min-w-0 truncate">{source === "hook" && typeof m.meta?.hookName === "string" ? `Hook: ${m.meta.hookName}` : s.label}</span>
         {detail}
-        <span className="ml-auto shrink-0 pl-2 font-normal tracking-normal whitespace-nowrap normal-case text-zinc-500">
+        <span className="col-start-4 row-start-1 pl-2 font-normal tracking-normal whitespace-nowrap normal-case text-zinc-500">
           <TimeAgo ts={m.createdAt} />
         </span>
       </div>
@@ -491,9 +512,16 @@ const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
     if ((e.target as HTMLElement).closest("a, button")) return
     setFull((v) => !v)
   }
+  // The summary answers a tap itself, so a finger that lands on it isn't snapped to the title's link beside it; the
+  // row's own handler must not then toggle it back.
+  const toggleSummary = (e: MouseEvent) => {
+    e.stopPropagation()
+    toggle(e)
+  }
   // One line (title · summary · time) only for a collapsed row with a title in a wide row.
   const inline = Boolean(n.title) && !full
-  const text = full ? "whitespace-normal wrap-anywhere" : "truncate"
+  // Collapsed: one line, or two under the title in a narrow row.
+  const text = full ? "whitespace-normal wrap-anywhere" : "truncate @max-md:line-clamp-2 @max-md:whitespace-normal @max-md:wrap-anywhere"
   return (
     <div
       id={`captain-${m.id}`}
@@ -529,7 +557,7 @@ const NoticeRow = memo(function NoticeRow({ m }: { m: CaptainMessage }) {
               )}
             </div>
           )}
-          <div data-testid="notice-meta" className={text}>
+          <div data-testid="notice-meta" onClick={toggleSummary} className={text}>
             {inline && n.summary.length > 0 && <span className="text-zinc-600 @max-md:hidden">· </span>}
             {n.summary.map((s, i) =>
               "href" in s ? (
@@ -571,7 +599,7 @@ const NoticeGroup = memo(function NoticeGroup({
   const titles = [...new Set(parsed.flatMap((p) => (p.title ? [p.title] : [])))]
   const last = messages.at(-1)!
   return (
-    <div data-testid="notice-group" className="rounded-lg border border-zinc-900 bg-zinc-900/20">
+    <div data-testid="notice-group" className="@container/group rounded-lg border border-zinc-900 bg-zinc-900/20">
       <button
         type="button"
         aria-expanded={open}
@@ -587,9 +615,11 @@ const NoticeGroup = memo(function NoticeGroup({
         </span>
         <span className="shrink-0 font-medium text-zinc-300">{groupLabel(messages, items.length)}</span>
         {titles.length > 0 && (
-          <span className="min-w-0 flex-1 truncate text-zinc-600">
-            · {titles.slice(0, 2).join(", ")}
-            {titles.length > 2 ? ` +${titles.length - 2}` : ""}
+          // The first title, cut where the row ends, then how many more: the count is never what's cut. A row too
+          // narrow for a readable title (a 320px phone) keeps just "3 task updates".
+          <span data-testid="notice-group-titles" className="flex min-w-0 flex-1 text-zinc-600 @max-[18rem]/group:hidden">
+            <span className="min-w-0 truncate">· {titles[0]}</span>
+            {titles.length > 1 && <span className="shrink-0 whitespace-pre"> +{titles.length - 1}</span>}
           </span>
         )}
         <span className="ml-auto shrink-0 pl-1 text-[11px] text-zinc-600">
@@ -633,6 +663,19 @@ function useCaptainMeter(state: CaptainState | undefined) {
 }
 
 /**
+ * "<project> Captain" in a header. The project's name comes first and is only cut when it alone doesn't fit; " Captain"
+ * shows whole or not at all (it wraps to a second line, which the one-line box clips), never as "Ca…". Still read out.
+ */
+function CaptainName({ name }: { name: string }) {
+  return (
+    <span className="flex h-lh min-w-0 flex-wrap overflow-hidden">
+      <span className="min-w-0 truncate">{name}</span>
+      <span className="shrink-0 whitespace-pre"> Captain</span>
+    </span>
+  )
+}
+
+/**
  * The centre's header for a Captain, laid out like the Coordinator's (ChatPanel): on a phone the sidebar's menu
  * button and the Coordinator's crumb, then its icon in its project's colour (it pulses while the Captain works: no
  * status word) and its name (where the sidebar is a column, the name opens the chat switcher; on a phone ☰ switches),
@@ -659,17 +702,13 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
           {/* On a phone, the Coordinator is one tap up from here (TreeNav.tsx). Under 280px (a 320px phone at 125% zoom)
               the crumb gives its room to the project's name; ☰ still reaches the Coordinator. */}
           {!sidebarInline && <CoordinatorCrumb className="@max-[17.5rem]:hidden" />}
-          <AgentIcon busy={Boolean(state?.busy)} compacting={Boolean(state?.compacting)} error={Boolean(state?.error)} color={color} projectId={project.id} />
+          <AgentIcon busy={Boolean(state?.busy)} compacting={Boolean(state?.compacting)} error={Boolean(state?.error)} color={color} projectId={project.id} announce={false} />
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <ChatName current={project.id} onPick={pick}>
-              {/* Which Captain matters more than the word, so a narrow header keeps the project's name (sooner on a phone,
-                  where the Coordinator's crumb and 🔍 take room too). */}
+              {/* Which Captain matters more than the word, so a narrow header keeps the project's name. */}
               <span data-testid="chat-title" className="flex min-w-0 items-center gap-1.5">
                 <ProjectAvatar src={imageMark ? null : project.iconUrl} className="h-4 w-4 rounded-[4px]" />
-                <span className="min-w-0 truncate">
-                  {project.name}
-                  <span className={sidebarInline ? "@max-[17.5rem]:sr-only" : "@max-[23rem]:sr-only"}> Captain</span>
-                </span>
+                <CaptainName name={project.name} />
               </span>
             </ChatName>
           </div>
@@ -699,16 +738,12 @@ function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: 
     <header data-testid="captain-panel-header" className={cx(HEAD_CONTAINER, "shrink-0 border-b border-zinc-900")}>
       <div className={cx(CHAT_COLUMN, "flex min-h-[calc(3.5rem-1px)] items-center gap-2 pt-[env(safe-area-inset-top)] [&_button]:min-h-11 [&_button]:min-w-11")}>
         {onClose && <DismissButton kind="back" label={backLabel} onClick={onClose} className={cx("-ml-3", BACK_ON_SHEET)} />}
-        <AgentIcon busy={Boolean(state?.busy)} compacting={Boolean(state?.compacting)} error={Boolean(state?.error)} color={color} projectId={project.id} />
+        <AgentIcon busy={Boolean(state?.busy)} compacting={Boolean(state?.compacting)} error={Boolean(state?.error)} color={color} projectId={project.id} announce={false} />
         <div className="flex min-w-0 flex-1 items-center">
           <ChatSwitcher current={project.id}>
             <span className="flex min-w-0 items-center gap-1.5">
               <ProjectAvatar src={imageMark ? null : project.iconUrl} className="h-4 w-4 rounded-[4px]" />
-              <span className="min-w-0 truncate">
-                {project.name}
-                {/* Which Captain matters more than the word: a 320px phone at 125% zoom keeps the project's name. */}
-                <span className="@max-[17.5rem]/head:sr-only"> Captain</span>
-              </span>
+              <CaptainName name={project.name} />
             </span>
           </ChatSwitcher>
         </div>
@@ -725,7 +760,7 @@ function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: 
 }
 
 /** A fact's row in ⋯: its icon, its name, then what it is. The names share a column. */
-const FACT = "flex items-start gap-2 px-2 py-1.5 text-sm"
+const FACT = "flex gap-2 px-2 py-1.5 text-sm"
 const FACT_NAME = "w-20 shrink-0 text-zinc-500"
 const FACT_ICON = "h-3.5 w-3.5 text-zinc-500"
 
@@ -734,7 +769,7 @@ function ContextFact({ tokens, window, compacting, queued }: MeterProps) {
   const pct = contextPct(tokens, window)
   const bar = pct === null ? "bg-zinc-600" : pct >= CONTEXT_WARN_PCT ? contextTone(pct).bar : "bg-yard-500"
   return (
-    <div data-testid="context-meter" title="How much of the Captain's context window is used." className={FACT}>
+    <div data-testid="context-meter" title="How much of the Captain's context window is used." className={cx(FACT, "items-start")}>
       <LineIcon icon={Gauge} className={FACT_ICON} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
@@ -768,6 +803,7 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
   const compactions = useCaptainCompactions(project.id)
   const count = compactions.data?.length ?? 0
   const facts = Boolean(model || lastActive || meter)
+  const modelHint = useId()
   // What opens next takes ⋯ as the place focus returns to, not the row that's about to go.
   const then = (next: () => void) => () => {
     trigger.current?.focus()
@@ -804,14 +840,25 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
           {facts && (
             <div className="pb-1.5">
               {model && (
-                <button type="button" className={menuItem} onClick={then(() => openSettings("orchestrator"))} data-testid="captain-model">
+                <button
+                  type="button"
+                  className={menuItem}
+                  onClick={then(() => openSettings("orchestrator"))}
+                  data-testid="captain-model"
+                  aria-label={`Model ${model.replace(" · ", ", ")}. Opens Settings`}
+                  aria-describedby={modelHint}
+                >
                   <Cpu className={cx(FACT_ICON, "shrink-0")} aria-hidden />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex flex-wrap items-baseline gap-x-2">
+                  {/* The hint starts where the value does: under it, in the names' second column. A box too narrow
+                      for two columns (a 320px phone at 125% zoom) stacks them from its left edge. */}
+                  <span className="@container min-w-0 flex-1">
+                    <span className="flex flex-wrap items-baseline gap-x-2 @[13rem]:grid @[13rem]:grid-cols-[5rem_minmax(0,1fr)]">
                       <span className={FACT_NAME}>Model</span>
                       <span className="min-w-0 wrap-anywhere">{model}</span>
+                      <span id={modelHint} className="basis-full text-xs text-zinc-500 @[13rem]:col-start-2">
+                        All Captains use this model. Change it in Settings.
+                      </span>
                     </span>
-                    <span className="text-xs text-zinc-500">Every Captain runs on it. Change it in Settings.</span>
                   </span>
                   <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" aria-hidden />
                 </button>
