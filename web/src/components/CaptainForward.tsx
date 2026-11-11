@@ -13,7 +13,7 @@ import { captainHref } from "./ChatSwitcher"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import { AttachmentList } from "./Attachments"
 import { AppLink, LineIcon, Markdown, TimeAgo, cx } from "./ui"
-import { useForwardToCaptain, useOwnerName, useStopTask } from "../lib/queries"
+import { useForwardToCaptain, useStopTask } from "../lib/queries"
 import { looksLikeTaskManagement, suggestsCaptain } from "../lib/captainForward"
 import { useComposerFocus } from "../lib/chatSwitch"
 import { labelFrom, rowWidth } from "../lib/composerRow"
@@ -254,7 +254,7 @@ export const TaskComposer = memo(function TaskComposer({
         asking
           ? "Ask about this task…"
           : toCaptain
-          ? `Ask the ${captain}: split, reprioritise, ${task.pendingCount ? "the queue" : "new tasks"}…`
+          ? `Message the ${captain}…`
           : task.status === "needs_input"
             ? "Answer the agent…"
             : running
@@ -281,22 +281,23 @@ function ChipLine({ onToggle, box, ...line }: Omit<ComponentProps<typeof Compose
   )
 }
 
-/** "Cody → box-yard Captain": Cody's message sent from this chat to the Captain (TaskManager.forwardToCaptain). */
+/**
+ * "You → box-yard Captain": Cody's message sent from this chat to the Captain (TaskManager.forwardToCaptain), "You" as
+ * in the Captain's own chat. The task's queued messages are named only when some went with it.
+ */
 export const ToCaptainLine = memo(function ToCaptainLine({ m }: { m: TaskMessage }) {
-  const ownerName = useOwnerName()
   const name = typeof m.meta?.captainName === "string" ? `${m.meta.captainName} Captain` : "Captain"
   const queued = typeof m.meta?.queued === "number" ? m.meta.queued : 0
   const pid = typeof m.meta?.captainProjectId === "string" ? m.meta.captainProjectId : null
   return (
     <div data-testid="to-captain" className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 border-dashed border-yard-500/70 bg-yard-500/5 px-3 py-2")}>
-      <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] font-semibold text-yard-400">
-        <span className="min-w-0 truncate">
-          {ownerName} → {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
+      {/* The time keeps the first line's end, whatever wraps before it. */}
+      <div className="mb-0.5 flex min-w-0 items-baseline gap-x-1 text-[11px] font-semibold text-yard-400">
+        <span className="min-w-0 wrap-anywhere">
+          You → {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
+          {queued > 0 && <span className="font-normal text-zinc-500"> · with {queuedLabel(queued)}</span>}
         </span>
-        <span className="font-normal text-zinc-500">
-          · sent to the Captain{queued ? `, with ${queuedLabel(queued)}` : ""}
-        </span>
-        <span className="ml-1 text-[10px] font-normal text-zinc-600">
+        <span className="ml-auto shrink-0 pl-2 text-[10px] font-normal whitespace-nowrap text-zinc-600">
           <TimeAgo ts={m.createdAt} />
         </span>
       </div>
@@ -311,9 +312,11 @@ export const ToCaptainLine = memo(function ToCaptainLine({ m }: { m: TaskMessage
 export const CaptainAnswerLine = memo(function CaptainAnswerLine({ m }: { m: TaskMessage }) {
   const name = typeof m.meta?.captainName === "string" ? `${m.meta.captainName} Captain` : "Captain"
   const pid = typeof m.meta?.captainProjectId === "string" ? m.meta.captainProjectId : null
+  // The Captain's icon in its project's colour, as everywhere a Captain shows.
+  const color = useProjectColor(pid)
   return (
-    <div data-testid="captain-answer" className={cx(MESSAGE_BLOCK, "flex min-w-0 items-start gap-2 rounded-lg bg-yard-500/5 px-3 py-2 text-sm leading-relaxed")}>
-      <LineIcon icon={captainIconFor(pid)} className="h-4 w-4 text-yard-400" />
+    <div data-testid="captain-answer" style={projectColorStyle(color)} className={cx(MESSAGE_BLOCK, "flex min-w-0 items-start gap-2 rounded-lg bg-yard-500/5 px-3 py-2 text-sm leading-relaxed")}>
+      <LineIcon icon={captainIconFor(pid)} className={cx("h-4 w-4", color ? "text-(--pc)" : "text-zinc-300")} />
       <div className="min-w-0 text-zinc-200 [&>.prose-chat>:first-child]:mt-0!">
         <div className="mb-0.5 text-[11px] leading-5 font-semibold text-yard-400">
           {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}

@@ -39,7 +39,7 @@ export function EmptyCaptain({ project, onPick }: { project: Project; onPick: (t
       <p className="mt-1.5 max-w-md text-sm text-zinc-400">
         {hasTasks
           ? "It keeps track of this project's tasks. Ask what's going on, or tell it what to do next."
-          : "Tell the Captain what you want done, in plain English. It starts an agent on its own box and reports back here."}
+          : "Tell the Captain what you want done, in plain English. It starts a task for each request and reports back here."}
       </p>
       <div role="group" aria-label="Start from" className="mt-4 grid w-full max-w-md gap-2">
         {captainStarters(project, hasTasks).map((s) => (
@@ -53,7 +53,7 @@ export function EmptyCaptain({ project, onPick }: { project: Project; onPick: (t
           </button>
         ))}
       </div>
-      <p className="mt-4 max-w-md text-xs leading-relaxed text-zinc-500">Picking one puts it in the box below, so you can edit it before you send it.</p>
+      <p className="mt-6 max-w-md text-xs leading-relaxed text-zinc-500">Picking one puts it in the box below, so you can edit it before you send it.</p>
     </div>
   )
 }

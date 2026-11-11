@@ -22,7 +22,6 @@ import { CaptainTab } from "./CaptainTab"
 import { lazyPart } from "./LazyPart"
 import { Button, cx } from "./ui"
 import { Loading } from "./Loading"
-import { ProjectAvatar } from "./TaskIcon"
 
 // Schedules are a chunk of their own, out of the first load.
 const SchedulesView = lazyPart(() => import("./Schedules").then((m) => m.SchedulesView), { Loading: () => <Loading label="Loading schedules" /> })
@@ -64,9 +63,9 @@ export function OverlayHost({ view, rails = false }: { view: Overlay; rails?: bo
   const titleOf = (tid: string) => tasks.data?.find((t) => t.id === tid)?.title
   const panelFor = (ref: string, i: number): Panel => {
     const { kind, id } = viewOf(ref)
+    const behind = i > 0 ? labelOf(refs[i - 1]!) : undefined
+    const close = () => closePanel(i)
     if (kind === "session") {
-      const behind = i > 0 ? labelOf(refs[i - 1]!) : undefined
-      const close = () => closePanel(i)
       return { ref, label: titleOf(id) ?? "Task conversation", body: FILL, content: <TaskSession key={ref} id={id} onClose={close} backLabel={behind ? `Back to ${behind}` : undefined} scrollKey={`panel:session:${id}`} /> }
     }
     const project = kind === "captain" ? projects.data?.find((p) => p.id === id) : undefined
@@ -76,13 +75,11 @@ export function OverlayHost({ view, rails = false }: { view: Overlay; rails?: bo
     return {
       ref,
       label,
-      title:
-        kind === "captain" && project?.iconUrl
-          ? <span className="flex min-w-0 items-center gap-2"><ProjectAvatar src={project.iconUrl} className="h-5 w-5 rounded-md" /><span className="truncate">{label}</span></span>
-          : label,
+      // A Captain's chat draws the panel's header itself, as a task does (CaptainTab.tsx PanelCaptainHeader).
+      title: kind === "captain" && project ? undefined : label,
       body: kind === "schedule" ? undefined : FILL,
       content:
-        kind === "captain" ? project ? <CaptainTab key={key} project={project} scrollKey={`panel:${key}`} /> : <div className="p-4">
+        kind === "captain" ? project ? <CaptainTab key={key} project={project} scrollKey={`panel:${key}`} onClose={close} backLabel={behind ? `Back to ${behind}` : undefined} /> : <div className="p-4">
             {projects.isLoading ? <Loading kind="chat" label="Loading the project" /> : projects.isError ? <div role="alert">Couldn't load this project. <Button onClick={() => void projects.refetch()}>Retry</Button></div> : <p>Project not found.</p>}
           </div>
           : id === "all" ? <SchedulesView /> : schedule ? <ScheduleCard key={key} schedule={schedule} expanded />
