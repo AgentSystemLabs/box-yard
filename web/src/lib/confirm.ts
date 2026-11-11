@@ -1,6 +1,10 @@
 // In-app replacement for window.confirm(): `await confirmDialog({...})` resolves true/false.
 // One request shows at a time; <ConfirmHost> (mounted once in App) renders it with the shared Modal.
 import { useSyncExternalStore } from "react"
+import type { Task } from "../../../shared/types"
+
+/** A task a confirm lists: drawn with its state's icon (TaskStatusIcon) and its title. */
+export type ConfirmTask = Pick<Task, "id" | "title" | "icon" | "projectId" | "status">
 
 export interface ConfirmRequest {
   title: string
@@ -10,6 +14,10 @@ export interface ConfirmRequest {
   cancelLabel?: string
   /** Red confirm button for destructive actions. */
   danger?: boolean
+  /** Cancel has the focus as it opens, so Enter keeps things as they are: for one that stops work under way. */
+  cancelFocus?: boolean
+  /** The tasks it reaches, listed under the body: a few (`shown`), and how many more aren't (`more`). */
+  tasks?: { shown: readonly ConfirmTask[]; more: number }
 }
 
 interface Pending extends ConfirmRequest {

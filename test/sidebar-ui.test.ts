@@ -934,7 +934,7 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     expect(document.querySelector('header [data-delete-task]')).not.toBeNull()
   })
 
-  it("a tree's ✓ closes the whole tree, which leaves together; while a sub-task runs or asks, the tree has none", () => {
+  it("a tree's ✓ closes the whole tree, which leaves together; while a sub-task asks, the tree has none", () => {
     render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2)])
     const site = () => section("marketing-site")
     click(checks(site()!)[0]!)
@@ -943,11 +943,37 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     act(() => currentToasts()[0]!.action!.onClick())
     expect(site()!.textContent).toContain("Logo designer 2")
 
-    for (const status of ["working", "needs_input"] as const) {
-      act(() => root.unmount())
-      root = createRoot(host)
-      render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2, status)])
-      expect(labels(site()!), status).toEqual(["Mark Logo designer 1 done"])
-    }
+    act(() => root.unmount())
+    root = createRoot(host)
+    render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2, "needs_input")])
+    expect(labels(site()!)).toEqual(["Mark Logo designer 1 done"])
+  })
+
+  it("a tree with a sub-task running keeps its ✓, which asks before it stops it: Cancel leaves the tree as it was", async () => {
+    render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2, "working")])
+    const site = () => section("marketing-site")
+    expect(labels(site()!)).toEqual(["Mark Design the logo and its 2 sub-tasks done", "Mark Logo designer 1 done"])
+    const dialog = () => document.querySelector<HTMLElement>("[role=dialog]")
+
+    click(checks(site()!)[0]!)
+    expect(dialog()!.textContent).toContain("Stop its running sub-task?")
+    expect(dialog()!.querySelector("[data-testid=confirm-tasks]")!.textContent).toBe("Logo designer 2")
+    // Cancel has the focus: Enter, or a slip, keeps the work going.
+    expect(document.activeElement?.textContent).toBe("Cancel")
+    await act(async () => void button(dialog()!, "Cancel").click())
+    expect(dialog()).toBeNull()
+    expect(site()!.textContent).toContain("Design the logo")
+    expect(currentToasts()).toEqual([])
+    expect(posts()).toEqual([])
+
+    click(checks(site()!)[0]!)
+    await act(async () => void button(dialog()!, "Stop and mark done").click())
+    expect(dialog()).toBeNull()
+    expect(site()?.textContent ?? "").not.toMatch(/Design the logo|Logo designer/)
+    expect(currentToasts().map((t) => [t.title, t.action?.label])).toEqual([["Marked done", "Undo"]])
+    // Nothing is sent in the undo window: Undo still stops nothing.
+    expect(posts()).toEqual([])
+    act(() => currentToasts()[0]!.action!.onClick())
+    expect(site()!.textContent).toContain("Logo designer 2")
   })
 })

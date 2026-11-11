@@ -1181,8 +1181,8 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
   const twice = useTreeDoubleClick(task.id, foldTwice && folded !== null)
   const inTree = useContext(InTree)
   const id = useId()
-  // Mark done closes the whole tree, so not while a sub-task runs or asks.
-  const closable = (readyForReview(task.status) || task.status === "failed") && !tree?.running && !tree?.asks
+  // Mark done closes the whole tree, so not while a sub-task asks. One that runs is stopped, after a warning (lib/markDone.ts).
+  const closable = (readyForReview(task.status) || task.status === "failed") && !tree?.asks
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
   return (
     <div
@@ -1245,8 +1245,9 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
  * with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target and one resting look for a mouse and a
  * finger: its ✓ faint, then whole and green under the pointer or with the keyboard's focus on it or on its row.
  * Shift+Enter on its row in the tree (lib/treeView.ts TREE_ACTION), as its tooltip there says.
- * On a tree's row it closes the whole tree (`subtasks`), so a tree with a
- * sub-task running or asking has none. Search results have none: they list finished work, and the task's header has it.
+ * On a tree's row it closes the whole tree (`subtasks`): a tree with a sub-task asking has none, and one with a sub-task
+ * running asks first, as every Mark done does, since those are stopped. Search results have none: they list finished
+ * work, and the task's header has it.
  */
 function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
   const markDone = useMarkDone()
