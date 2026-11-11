@@ -13,6 +13,7 @@ import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
 import { undoClose } from "../web/src/lib/inbox.js"
 import { resetClosedTasks } from "../web/src/lib/closedTasks.js"
 import { currentToasts, dismiss } from "../web/src/lib/toast.js"
+import { seenKey } from "../web/src/lib/taskFiles.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -61,6 +62,8 @@ function task(over: Partial<Task> = {}): Task {
 }
 
 const file = (i: number): Artifact => ({ id: `art_${i}`, projectId: project.id, taskId: "task_head000001", title: `f${i}.png`, filename: `f${i}.png`, mime: "image/png", size: 1, url: `/artifacts/art_${i}/f${i}.png`, createdAt: 1000 + i })
+// The files list was opened once, before any of these files arrived, so all of them are new.
+const openedFilesBefore = () => localStorage.setItem(seenKey("task_head000001"), "1")
 const requested: MergeRequest = { prNumber: 76, prUrl, requestedAt: 1, deliveredAt: 2 }
 
 describe("TaskHeader", () => {
@@ -142,7 +145,7 @@ describe("TaskHeader", () => {
       "Back",
       "task-title",
       "open",
-      "2 files, 2 new",
+      "2 files",
       "preview-chip",
       "spend-button",
       "Task details and more actions",
@@ -158,6 +161,7 @@ describe("TaskHeader", () => {
   })
 
   it("folds its words away when narrow but keeps them for screen readers: the PR, preview and files", () => {
+    openedFilesBefore()
     renderInPanel(task(), [file(1), file(2)])
     // The state never takes words in the header: its icon says it, by name to a screen reader.
     expect(document.querySelector('[data-testid="task-title"]')!.textContent).toBe(task().title)
@@ -308,6 +312,7 @@ describe("TaskHeader", () => {
   })
 
   it("marks new files with a dot, not a count badge", () => {
+    openedFilesBefore()
     render(task(), [file(1), file(2), file(3)])
     const chip = [...meta().querySelectorAll("button")].find((b) => b.textContent?.includes("3 files"))!
     expect(chip.getAttribute("aria-label")).toBe("3 files, 3 new")
