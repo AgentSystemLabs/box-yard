@@ -32,10 +32,10 @@ export function ContinueTask({ task, className, menu = false }: { task: Pick<Tas
       size="sm"
       onClose={() => setOpen(false)}
       onSubmit={(event) => { event.preventDefault(); if (!continuation.isPending) continuation.mutate({ taskId: task.id, agent }, { onSuccess: () => setOpen(false) }) }}
-      footer={<Button type="submit" loading={continuation.isPending}>Continue task</Button>}
+      footer={<Button type="submit" variant="primary" loading={continuation.isPending}>Continue task</Button>}
     >
-      <div className="space-y-4 p-5 text-sm">
-        <p className="text-zinc-300">Keep this task, branch, workspace, attachments and conversation. Any queued messages go with it.</p>
+      <div className="space-y-4 text-sm">
+        <p className="text-zinc-300">Keeps this task's branch, workspace, runner, attachments and conversation. Queued messages go with it.</p>
         <label className="block space-y-1.5">
           <span className="font-medium">Harness</span>
           <Select className="w-full" value={agent} onChange={(e) => setAgent(e.target.value as typeof agent)}>
@@ -44,7 +44,6 @@ export function ContinueTask({ task, className, menu = false }: { task: Pick<Tas
           </Select>
         </label>
         <p className="text-zinc-400">{reset ? "Clear this task's model, effort and routing pins and use the chosen harness's defaults and routing. A different harness starts a new CLI session with a recap of this task." : "Keep the saved model and effort choices and resume its current CLI session."}</p>
-        <p className="text-xs text-zinc-500">This keeps its runner. Changing the default harness in Settings only affects new tasks; this choice applies to this task explicitly.</p>
       </div>
     </Modal>}
   </>

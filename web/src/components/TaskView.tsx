@@ -1,7 +1,7 @@
 import { useTranscriptHistory } from "../lib/transcriptHistory"
 import { HistoryNavigation } from "./HistoryNavigation"
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
-import { Bot, MessageCircleQuestion, MessageSquareReply, Navigation2, Users, Webhook } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, MessageCircleQuestion, MessageSquareReply, Navigation2, Users, Webhook } from "lucide-react"
 import { useOwnerName, useTaskMessages } from "../lib/queries"
 import { useEntityIndex } from "../lib/entities"
 import { useTail } from "../lib/tail"
@@ -120,7 +120,8 @@ export const TaskThread = memo(function TaskThread({
       }),
     [runs, steps],
   )
-  // The running turn's so far, after the newest line (not while reading older rows).
+  // The ones after the newest line (not while reading older rows): a running turn's so far, which its live line
+  // counts and unfolds, or a stopped turn's last, in a row of their own.
   const stepsSoFar = tail.later ? null : (steps.get(STEPS_SO_FAR) ?? null)
 
   // Older replies aren't rendered yet: parse their markdown in idle time so loading them is quick.
@@ -163,25 +164,10 @@ export const TaskThread = memo(function TaskThread({
               )
               return before ? [<StepsRun key={stepsKey(before)} messages={before} />, row] : [row]
             }),
-            stepsSoFar && <StepsRun key={stepsKey(stepsSoFar)} messages={stepsSoFar} />,
+            stepsSoFar && !working && <StepsRun key={stepsKey(stepsSoFar)} messages={stepsSoFar} />,
           ]}
           <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={historyHandle} />
-          {working && (
-            // In the events' column (pl-6), with no dot or colour of its own: the task's icon in the header says it works.
-            <div data-testid="working-line" className="flex min-w-0 items-baseline gap-1.5 pt-1 pl-6 text-xs text-zinc-400">
-              <span className="shrink-0">{working}</span>
-              {workingSince !== null && (
-                <span data-testid="working-for" className="shrink-0">
-                  · <Elapsed since={workingSince} title="Started" className="tabular-nums" />
-                </span>
-              )}
-              {tool && (
-                <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px]">
-                  · {tool}
-                </span>
-              )}
-            </div>
-          )}
+          {working && <WorkingLine label={working} since={workingSince} tool={tool} steps={stepsSoFar} />}
           {ask && (
             // At the foot, where the working line was, so it's the last thing above the box however long the thread.
             <div role="group" aria-label="The agent asks" data-testid="pending-ask" className="flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-sm">
@@ -275,30 +261,95 @@ const HousekeepingRun = memo(
   (a, b) => a.revealRequest === b.revealRequest && a.messages.length === b.messages.length && a.messages.every((m, i) => m === b.messages[i]),
 )
 
+/**
+ * The live line while a turn runs, in the events' column (pl-6), with no dot or colour of its own: the task's icon in
+ * the header says it works. "Turn running · 2m · 4 steps › · Bash npm run typecheck": the steps since the newest line
+ * unfold under it, where the newest one then is, so the line stops repeating it.
+ */
+function WorkingLine({ label, since, tool, steps }: { label: string; since: number | null; tool: string | null; steps: TaskMessage[] | null }) {
+  const [open, setOpen] = useState(false)
+  const listed = open && steps !== null
+  const Chevron = listed ? ChevronDown : ChevronRight
+  return (
+    <>
+      <div data-testid="working-line" className="flex min-w-0 items-baseline gap-1.5 pt-1 pl-6 text-xs text-zinc-400">
+        <span className="shrink-0">{label}</span>
+        {since !== null && (
+          <span data-testid="working-for" className="shrink-0">
+            · <Elapsed since={since} title="Started" className="tabular-nums" />
+          </span>
+        )}
+        {steps && (
+          <span className="shrink-0">
+            ·{" "}
+            <button type="button" data-testid="working-steps" aria-expanded={listed} onClick={() => setOpen((o) => !o)} className={cx(TAP_AREA, STEPS_TOGGLE, "inline-flex items-center gap-0.5")}>
+              {stepsSummary(steps).count}
+              <Chevron className="h-3.5 w-3.5 text-zinc-500" aria-hidden />
+            </button>
+          </span>
+        )}
+        {tool && !listed && (
+          <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px]">
+            · {tool}
+          </span>
+        )}
+      </div>
+      {listed && (
+        <div data-testid="working-steps-list" className="space-y-1">
+          {steps.map((m) => <ToolText key={m.id} m={m} />)}
+        </div>
+      )}
+    </>
+  )
+}
+
 const stepsKey = (messages: TaskMessage[]) => `steps:${messages[0]!.id}`
 
+/** A steps toggle's own look: plain words (its chevron says it opens), brighter under the pointer. */
+const STEPS_TOGGLE = "rounded text-left hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none"
+
 /**
- * Back-to-back tool calls (lib/taskThread.ts) as one closed row, "12 steps": what a turn ran is there to unfold (after
- * a failed turn, say) and costs one row until then.
+ * What a run of tool messages says while closed: how many calls ("3 steps"), their first three different tools in the
+ * order they ran ("Read, Grep, Edit +2"), and how many errors came back.
+ */
+function stepsSummary(messages: readonly TaskMessage[]): { count: string; tools: string; failed: number } {
+  const names: string[] = []
+  let failed = 0
+  for (const m of messages) {
+    if (m.meta?.error) {
+      failed++
+      continue
+    }
+    const name = typeof m.meta?.name === "string" && m.meta.name ? m.meta.name : m.content.trim().split(/\s/, 1)[0]
+    if (name && !names.includes(name)) names.push(name)
+  }
+  // A tool's error is its own message, not a step.
+  const calls = messages.length - failed || messages.length
+  return { count: `${calls} ${calls === 1 ? "step" : "steps"}`, tools: names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", "), failed }
+}
+
+/**
+ * Back-to-back tool calls (lib/taskThread.ts) as one closed row, "3 steps · Read, Grep, Edit": what a turn ran is there
+ * to unfold (after a failed turn, say) and costs one row until then. It hangs close under the line before it, its
+ * chevron in the icons' column; its words stay the same open or closed.
  */
 const StepsRun = memo(
   function StepsRun({ messages }: { messages: TaskMessage[] }) {
     const [open, setOpen] = useState(false)
-    const steps = `${messages.length} ${messages.length === 1 ? "step" : "steps"}`
-    const failed = messages.reduce((n, m) => n + (m.meta?.error ? 1 : 0), 0)
+    const { count, tools, failed } = stepsSummary(messages)
+    const Chevron = open ? ChevronDown : ChevronRight
     return (
-      <div data-testid="tool-steps" data-open={open || undefined} className="space-y-1">
-        <div className="flex min-w-0 items-center pl-6 text-[11px] text-zinc-500 pointer-coarse:min-h-8">
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setOpen((o) => !o)}
-            className={cx(TAP_AREA, "rounded underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300 hover:decoration-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none")}
-          >
-            {open ? "Hide steps" : steps}
+      <div data-testid="tool-steps" data-open={open || undefined} className="space-y-1 not-first:-mt-1.5">
+        <div className="flex min-w-0">
+          {/* 16px of text, 28px on a touch screen (and 44px to a finger), so its tap area stays clear of the lines around it. */}
+          <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className={cx(TAP_AREA, STEPS_TOGGLE, "flex max-w-full min-w-11 items-center gap-2 text-xs text-zinc-400 pointer-coarse:py-1.5")}>
+            <Chevron className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <span className="shrink-0">{count}</span>
+              {tools && <span className="min-w-0 truncate">· {tools}</span>}
+              {failed > 0 && <span className="shrink-0 text-red-300">· {failed} failed</span>}
+            </span>
           </button>
-          {open && <span className="ml-2">{steps}</span>}
-          {failed > 0 && <span className="ml-2 text-red-300">{failed} failed</span>}
         </div>
         {open && messages.map((m) => <ToolText key={m.id} m={m} />)}
       </div>
@@ -307,15 +358,21 @@ const StepsRun = memo(
   (a, b) => a.messages.length === b.messages.length && a.messages.every((m, i) => m === b.messages[i]),
 )
 
-/** One tool call, or a tool's error: the tool and what it was given, on up to three lines. */
+/**
+ * One tool call (the tool and what it was given, on up to three lines), or a tool's error: all of it, in a box that
+ * scrolls past ten lines or so, since the error is what a failed turn is opened for.
+ */
 function ToolText({ m }: { m: TaskMessage }) {
-  return (
-    <div className={cx("line-clamp-3 pl-6 font-mono text-[11px] whitespace-pre-wrap wrap-anywhere", m.meta?.error ? "text-red-300" : "text-zinc-400")}>
-      {m.meta?.error ? "✗ " : "› "}
-      {m.content}
-    </div>
-  )
+  if (m.meta?.error)
+    return (
+      <div role="group" aria-label="Tool error" tabIndex={0} className={cx(TOOL_TEXT, "scroll-thin max-h-40 overflow-y-auto rounded text-red-300 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none")}>
+        ✗ {m.content}
+      </div>
+    )
+  return <div className={cx(TOOL_TEXT, "line-clamp-3 text-zinc-400")}>› {m.content}</div>
 }
+
+const TOOL_TEXT = "pl-6 font-mono text-[11px] whitespace-pre-wrap wrap-anywhere"
 
 /** A plain event: dim small text, its time, and a finished turn's timing. */
 function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {

@@ -162,7 +162,7 @@ type QueuedTurn = "none" | "steerable" | "compacting" | "unsteerable"
 
 const WAITS: Record<QueuedTurn, (cli: string) => string> = {
   none: () => "Delivered when the agent's next turn starts.",
-  steerable: () => "Delivered when the current turn ends, or during the turn with Steer.",
+  steerable: () => "Sends when the turn ends, or now with Steer.",
   compacting: () => "Delivered once the agent has compacted its context.",
   unsteerable: (cli) => `Delivered when the current turn ends: ${cli} can't take a message mid-turn.`,
 }
@@ -198,8 +198,13 @@ const QueuedRow = memo(function QueuedRow({
           <LineIcon icon={m.status === "accepted" || m.status === "uncertain" ? Clock : locked ? Loader2 : Clock} className={cx("h-3 w-3", m.status === "delivering" && "animate-spin")} />
         )}
         <span className={cx("font-semibold", steered ? "text-yard-300" : "text-zinc-400")}>{m.status === "uncertain" ? "Delivery uncertain" : m.status === "accepted" ? "Accepted by Codex" : steered ? "Steering" : locked ? "Delivering" : "Queued"}</span>
-        <span aria-hidden>·</span>
-        <span className="min-w-0 truncate">{m.sender || ownerName}</span>
+        {/* The owner's own messages need no name: only another sender's (a hook, an agent, a Captain) says who. */}
+        {m.source !== "cody" && (
+          <>
+            <span aria-hidden>·</span>
+            <span className="min-w-0 truncate">{m.sender || ownerName}</span>
+          </>
+        )}
         {/* Too narrow for the time next to two 44px buttons (a 320px phone at 125% zoom): it goes, so nothing overflows. */}
         <span className="hidden shrink-0 text-[10px] text-zinc-600 @min-[15rem]:inline">
           <TimeAgo ts={m.createdAt} />

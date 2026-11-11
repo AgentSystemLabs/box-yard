@@ -53,8 +53,8 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
  * Reopen once it's done, or Delete if it failed) and ⓘ (its details) last. The icon is the header's status (TaskStatusIcon): it pulses while
  * the task works and has a still dot when it asks or failed, and its name says the state to screen readers; the details
  * say it in words. A narrow header (a slim panel) folds the chips to their icons. The agent and where it runs are
- * only in the details. Too narrow even for that, the icons wrap under the
- * title. It sticks to the top while the transcript scrolls.
+ * only in the details. Too narrow even for that, the chips and Mark done wrap under the
+ * title, and ⓘ stays on its row. A failed task's title is red. It sticks to the top while the transcript scrolls.
  *
  * In a panel its crumbs' row is the Captain's header's (CaptainTab.tsx CentreCaptainHeader): as tall, the Captain's
  * icon and its project's name where that header has them (TreeNav.tsx), then the task's own crumb; filling the room
@@ -130,7 +130,7 @@ export function TaskHeader({
         {/* The title has the row to itself, and the chips their own under it, starting where the title's text does
             (past its icon): a narrow header never squeezes the title beside them. */}
         <div data-testid="task-meta" className={cx(CHAT_COLUMN, "min-w-0 pb-0.5 text-xs text-zinc-500")}>
-          <Heading className={cx("flex min-w-0", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
+          <Heading className={cx("flex min-w-0", titleTone(task.status))}>
             <TitleButton task={task} open={details} onOpen={() => setDetails(true)} wrap />
           </Heading>
           {crowded && <div className="-mt-2 flex h-11 min-w-0 items-center pl-6">{chips}</div>}
@@ -139,25 +139,33 @@ export function TaskHeader({
     )
   const crumbs = Boolean(onBack && tree)
   const meta = (
-    <div data-testid="task-meta" className="flex min-w-0 flex-wrap items-center gap-x-0.5 text-xs text-zinc-500 @min-[36rem]/head:gap-x-1.5">
-      {/* The title keeps 12rem (about 16 characters) after Back and the crumbs; any less and the chips wrap to a second
-          row. So this group's least width is its content's (no min-w-0), where the title counts as its 12rem alone
-          (contain-inline-size), and the crumbs give way first once the header itself is narrower than that. */}
-      <div className="flex max-w-full flex-1 basis-0 items-center">
-        {onBack && <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-2 pointer-coarse:-ml-3", backClassName)} />}
-        {/* The Captain's crumb reaches into the gap before it, where Back shows (a sheet over the chat) its own. */}
-        {crumbs && <TaskCrumbs task={task} project={project} className={backClassName ? "@max-[35.5rem]/coord:ml-2" : "ml-2"} />}
-        <Heading className={cx("flex min-w-48 flex-1 contain-inline-size", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
+    // Row 1 is 44px whatever wraps under it, so Back, the crumbs and ⓘ sit at the title's height on one row or two.
+    <div data-testid="task-meta" className="flex min-w-0 items-start gap-x-0.5 text-xs text-zinc-500 @min-[36rem]/head:gap-x-1.5">
+      {(onBack || crumbs) && (
+        <div className="flex h-11 min-w-0 items-center">
+          {onBack && <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-2 pointer-coarse:-ml-3", backClassName)} />}
+          {/* The Captain's crumb reaches into the gap before it, where Back shows (a sheet over the chat) its own. */}
+          {crumbs && <TaskCrumbs task={task} project={project} className={backClassName ? "@max-[35.5rem]/coord:ml-2" : "ml-2"} />}
+        </div>
+      )}
+      {/* The title keeps 12rem (about 16 characters) after Back and the crumbs; any less and the chips (Mark done with
+          them) wrap to a row of their own, which starts under the title's icon. So this group's least width is its
+          content's (no min-w-0), where the title counts as its 12rem alone (contain-inline-size), and the crumbs give
+          way first once the header itself is narrower than that. */}
+      <div className="flex flex-1 basis-0 flex-wrap items-center gap-x-0.5 @min-[36rem]/head:gap-x-1.5">
+        <Heading className={cx("flex min-h-11 min-w-48 flex-1 items-center contain-inline-size", titleTone(task.status))}>
           <TitleButton task={task} open={details} onOpen={() => setDetails(true)} />
         </Heading>
+        {/* On a row of their own they keep 4px off the title's row and the header's edge. */}
+        <div className="my-1 ml-1 flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5 pointer-coarse:my-0">
+          {chips}
+          {ready && <MarkDoneButton task={task} crowded={crowded} />}
+          {task.status === "done" && <ReopenButton task={task} crowded={crowded} />}
+          {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
+        </div>
       </div>
-      {/* Chips and ⓘ wrap together, so ⓘ stays last. On a row of their own they keep 4px off the title's row and the
-          header's edge (a touch screen's 44px ⓘ already does). */}
-      <div className="my-1 ml-auto flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5 pointer-coarse:my-0">
-        {chips}
-        {ready && <MarkDoneButton task={task} crowded={crowded} />}
-        {task.status === "done" && <ReopenButton task={task} crowded={crowded} />}
-        {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
+      {/* ⓘ stays last on the title's row, and Pin and Close after it: they never wrap with the chips. */}
+      <div className="flex h-11 shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5">
         {tools}
         {menu}
         {controls}
@@ -178,6 +186,9 @@ export function TaskHeader({
     </header>
   )
 }
+
+/** The title's colour: red once the task failed (as its rows are everywhere), dim while it idles. */
+const titleTone = (status: Task["status"]) => (status === "failed" ? "task-title-failed" : status === "idle" ? "text-zinc-400" : "text-zinc-50")
 
 /**
  * The Captain's header's column (CaptainTab.tsx CentreCaptainHeader): `chat-column`, its scrollbar gutters too (they
@@ -592,8 +603,7 @@ function TaskMenu({
                 <CopyButton text={task.id} label="Copy task id" />
               </Detail>
               <Detail label="Link">
-                <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300">{taskSessionHref(task.id)}</span>
-                <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link" />
+                <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link">Copy link</CopyButton>
               </Detail>
               {task.branch && (
                 <Detail label="Branch">
@@ -726,14 +736,19 @@ function Detail({ label, top, children }: { label: string; top?: boolean; childr
   )
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+/** Copies `text`. An icon button after the value it copies; with `children` (its words), the whole row, and the tooltip says what it copies. */
+function CopyButton({ text, label, children }: { text: string; label: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const icon = copied ? <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />
   return (
     <button
       type="button"
-      aria-label={label}
-      title={label}
-      className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
+      aria-label={children ? undefined : label}
+      title={children ? text : label}
+      className={cx(
+        "shrink-0 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none",
+        children ? "-ml-2 flex h-11 min-w-0 flex-1 items-center pl-2 text-left" : "grid h-11 w-11 place-items-center",
+      )}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text)
@@ -744,7 +759,14 @@ function CopyButton({ text, label }: { text: string; label: string }) {
         }
       }}
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+      {children ? (
+        <>
+          <span className="min-w-0 flex-1 text-zinc-300">{children}</span>
+          <span className="grid h-11 w-11 shrink-0 place-items-center">{icon}</span>
+        </>
+      ) : (
+        icon
+      )}
     </button>
   )
 }

@@ -95,9 +95,11 @@ export function SubtaskReportLine({ m }: { m: TaskMessage }) {
     <div data-testid="subtask-report" className={cx(MESSAGE_BLOCK, "flex items-start gap-2 rounded-lg bg-violet-500/5 px-3 py-2 text-sm text-violet-100")}>
       <LineIcon icon={Users} className="h-4 w-4 text-violet-400" />
       <div className="min-w-0 flex-1">
-        {/* A narrow card (a phone) leaves "Report from" to screen readers, so the title has the row. */}
+        {/* "Report" says what the card is; a narrow one (a phone) leaves "from" to screen readers, so the title has the row. */}
         <div className="@container/report mb-0.5 flex min-w-0 items-baseline gap-x-1.5 text-[11px] leading-5 font-semibold text-violet-400 pointer-coarse:min-h-9 pointer-coarse:items-center">
-          <span className="shrink-0 font-normal @max-[22rem]/report:sr-only">Report from</span>
+          <span className="shrink-0">
+            Report<span className="font-normal @max-[22rem]/report:sr-only"> from</span>
+          </span>
           <AppLink href={`/tasks/${from}`} title={name} className={cx(TAP_AREA, "flex min-w-0 text-yard-300 hover:underline")}>
             <span className="truncate">{name}</span>
           </AppLink>

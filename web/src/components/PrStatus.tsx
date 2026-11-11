@@ -146,7 +146,7 @@ function PrSheet({ task, query, onClose }: { task: PrStatusTask; query: ReturnTy
           From GitHub <TimeAgo ts={answer.checkedAt} />. It refreshes every minute while this page is open.
         </p>
       )}
-      <PrAgents prUrl={task.prUrl!} onOpenTask={openTask} className="border-t border-zinc-800 pt-4" />
+      <PrAgents prUrl={task.prUrl!} onOpenTask={openTask} currentTaskId={task.id} className="border-t border-zinc-800 pt-4" />
     </Modal>
   )
 }
