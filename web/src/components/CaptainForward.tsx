@@ -7,7 +7,7 @@ import { COMPOSER_FOOTER, Composer, type ComposerHandle } from "./Composer"
 import { ComposerMenuItem, useCloseMore, useToolFold } from "./ComposerMenu"
 import { ComposerIcon, TaskComposerIcon } from "./ChatIcons"
 import { CaptainIcon, captainIconFor } from "./CaptainIcon"
-import { projectColorStyle } from "./TaskIcon"
+import { WORKING_PULSE, projectColorStyle } from "./TaskIcon"
 import { useProjectColor } from "../lib/taskTiles"
 import { captainHref } from "./ChatSwitcher"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
@@ -129,16 +129,16 @@ export const TaskComposer = memo(function TaskComposer({
     (draft: string) => {
       if (asking)
         return (
-          <div data-testid="task-ask-note" className="flex min-w-0 items-center gap-1.5 px-1.5 pb-1 text-[11px] text-yard-300/80">
-            <MessageCircleQuestion className="h-3 w-3 shrink-0" aria-hidden />
-            <span className="min-w-0 truncate">To the Coordinator, aside. The agent doesn't see it.</span>
+          <div data-testid="task-ask-note" className="flex min-w-0 items-start gap-1.5 px-1.5 pb-1 text-xs text-yard-300/80">
+            <LineIcon icon={MessageCircleQuestion} className="h-3 w-3" />
+            <span className="min-w-0 wrap-anywhere">To the Coordinator, aside. The agent doesn't see it.</span>
           </div>
         )
       if (toCaptain)
         return (
-          <div data-testid="captain-forward-note" className="flex min-w-0 items-center gap-1.5 px-1.5 pb-1 text-[11px] text-yard-300/80">
-            <CaptainIcon projectId={task.projectId} className="h-3 w-3" />
-            <span className="min-w-0 truncate">
+          <div data-testid="captain-forward-note" className="flex min-w-0 items-start gap-1.5 px-1.5 pb-1 text-xs text-yard-300/80">
+            <LineIcon icon={captainIconFor(task.projectId)} className="h-3 w-3" />
+            <span className="min-w-0 wrap-anywhere">
               To the {captain}, not the agent{task.pendingCount ? `, with this task's ${queuedLabel(task.pendingCount)}` : ""}. Its reply shows here.
             </span>
           </div>
@@ -198,7 +198,7 @@ export const TaskComposer = memo(function TaskComposer({
                   data-testid="task-ask-dot"
                   role="img"
                   aria-label={ask.busy ? "An answer is on its way" : "A new answer"}
-                  className={cx("absolute top-1 right-1 h-1.5 w-1.5 rounded-full pointer-coarse:top-2.5 pointer-coarse:right-1.5", ask.busy ? "animate-pulse bg-sky-400" : "bg-yard-400")}
+                  className={cx("absolute top-1 right-1 h-1.5 w-1.5 rounded-full pointer-coarse:top-2.5 pointer-coarse:right-1.5", ask.busy ? cx(WORKING_PULSE, "bg-sky-400") : "bg-yard-400")}
                 />
               )}
             </RowChip>
@@ -258,11 +258,11 @@ export const TaskComposer = memo(function TaskComposer({
         asking
           ? "Ask about this task…"
           : toCaptain
-          ? `Ask the ${captain}: split, reprioritise, ${task.pendingCount ? "the queue" : "new tasks"}…`
+          ? "Message the Captain…"
           : task.status === "needs_input"
             ? "Answer the agent…"
             : running
-              ? "Queue a message for the agent…"
+              ? "Queue a message…"
               : "Send feedback or a follow-up…"
       }
       label={asking ? "Side question about this task" : toCaptain ? "Message the Captain" : "Message this task"}

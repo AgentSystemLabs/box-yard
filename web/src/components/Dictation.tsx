@@ -2,6 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { Mic, X } from "lucide-react"
 import { keyLabel, type DictationError, type DictationMachine } from "../lib/dictation"
 import { dictationSupported, isMac, useDictationSettings, useDictationState } from "../lib/useDictation"
+import { isTouchDevice } from "../lib/composer"
 import { Button, cx } from "./ui"
 
 const ERROR_TEXT: Record<DictationError, string> = {
@@ -18,8 +19,10 @@ export function MicButton({ machine }: { machine: DictationMachine }) {
   const state = useDictationState(machine)
   if (!settings.enabled || !dictationSupported()) return null
   const on = state.phase !== "idle"
-  const chord = settings.key === "off" ? "" : ` (hold ${keyLabel(settings.key, isMac())})`
-  const label = on ? "Stop dictation" : `Dictate: hold to talk, click to toggle${chord}`
+  // A phone has no key to hold, and it's tapped, not clicked.
+  const touch = isTouchDevice()
+  const chord = touch || settings.key === "off" ? "" : ` (hold ${keyLabel(settings.key, isMac())})`
+  const label = on ? "Stop dictation" : `Dictate: hold to talk, ${touch ? "tap" : "click"} to toggle${chord}`
   return (
     <Button
       type="button"

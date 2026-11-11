@@ -2,9 +2,10 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every half rem from 8 to 36. */
+/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every quarter rem from 8 to 36
+   (the chips' labels, sr-only, every half rem). */
 @source inline("@{min,max}-[{8..36}rem]/composer:hidden");
-@source inline("@{min,max}-[{8..35}.5rem]/composer:hidden");
+@source inline("@{min,max}-[{8..35}.{25,5,75}rem]/composer:hidden");
 @source inline("@max-[{8..36}rem]/composer:sr-only");
 @source inline("@max-[{8..35}.5rem]/composer:sr-only");
 
