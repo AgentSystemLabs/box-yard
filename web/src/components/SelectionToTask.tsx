@@ -6,9 +6,9 @@
 // it opens that chat; "Start it myself…" starts the task directly from the full New task dialog, which shows the quote
 // and takes the instructions.
 //
-// A mouse gets the action as a pill over the selection. A finger gets a bar just above the chat's composer, or on it
-// while the selection reaches down to where the bar would be.
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react"
+// A mouse gets the action as a pill over the selection. A finger gets a bar just above the chat's composer, or under
+// the chat's header while the selection reaches down to where the bar would be: never over the composer.
+import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
 import { MessageSquarePlus, Reply } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { buildSelectionTaskBrief, buildSelectionTaskPrompt, selectionTarget, type SelectionTaskSource } from "../lib/selectionTask"
@@ -34,8 +34,8 @@ interface SelectionInfo {
   y: number
   /** The chat message the selection ends in (`data-chat-id`), whose reply thread it quotes into. */
   anchorId: string | null
-  /** The phone bar's distance from the bottom of the window when it sits above the composer; null: over it. */
-  bar: number | null
+  /** Where the phone bar sits when the chat has a composer on screen (barPlace); null: at the window's bottom edge. */
+  bar: CSSProperties | null
 }
 
 export function SelectionToTask({
@@ -136,7 +136,7 @@ export function SelectionToTask({
           <div
             data-selection-task-action
             className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex gap-2 [@media(pointer:fine)]:hidden"
-            style={selection.bar === null ? undefined : { bottom: selection.bar }}
+            style={selection.bar ?? undefined}
           >
             <button type="button" aria-haspopup={action.popup} onMouseDown={(e) => e.preventDefault()} onClick={action.run} className={BAR}>
               <action.icon className="h-4 w-4 shrink-0" /> {action.bar}
@@ -219,12 +219,20 @@ function composerOf(root: HTMLElement, found: { current: HTMLElement | null }): 
   return null
 }
 
-/** Where the phone bar goes: above the composer, unless there isn't one on screen or the selection is in the way. */
-function barBottom(root: HTMLElement, found: { current: HTMLElement | null }, range: Range): number | null {
+/**
+ * Where the phone bar goes: just above the composer, or, while the selection reaches down to there, under the chat's
+ * header (the top of what scrolls), below a notch. Never over the composer. Null without a composer on screen: the
+ * window's bottom edge then covers nothing.
+ */
+function barPlace(root: HTMLElement, found: { current: HTMLElement | null }, range: Range): CSSProperties | null {
   if (window.matchMedia?.("(pointer: fine)").matches) return null
   const top = composerOf(root, found)?.getBoundingClientRect().top ?? 0
-  if (top <= BAR_ROOM || top > window.innerHeight || range.getBoundingClientRect().bottom > top - BAR_ROOM) return null
-  return window.innerHeight - top + 8
+  if (top <= BAR_ROOM || top > window.innerHeight) return null
+  if (range.getBoundingClientRect().bottom <= top - BAR_ROOM) return { bottom: window.innerHeight - top + 8 }
+  const node = range.commonAncestorContainer
+  const scroller = (node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element))?.closest("[data-scroller]")
+  const under = Math.max(0, Math.round(scroller?.getBoundingClientRect().top ?? 0)) + 8
+  return { top: `max(${under}px, calc(env(safe-area-inset-top) + 0.5rem))`, bottom: "auto" }
 }
 
 function readSelection(root: HTMLElement | null, composer: { current: HTMLElement | null }): SelectionInfo | null {
@@ -244,7 +252,7 @@ function readSelection(root: HTMLElement | null, composer: { current: HTMLElemen
     anchorId: (message(range.endContainer) ?? message(range.startContainer))?.getAttribute("data-chat-id") ?? null,
     x: clamp(rect.left + rect.width / 2, 120, window.innerWidth - 120),
     y: clamp(rect.top - 42, 12, window.innerHeight - 52),
-    bar: barBottom(root, composer, range),
+    bar: barPlace(root, composer, range),
   }
 }
 
