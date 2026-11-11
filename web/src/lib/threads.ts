@@ -1,10 +1,11 @@
 // Side threads: a question about a highlighted passage in the Coordinator chat or a Captain's chat, answered in a
 // panel on the right (server/sideThreads.ts). This keeps their queries, the live events that update them, and which thread each chat has open.
-import { useCallback, useSyncExternalStore } from "react"
+// A thread can be asked from inside another one (its parent, to any depth), and a Captain's chat keeps the asks about
+// passages of its project's task transcripts, which show in the task's own panel (its slot, taskSlot).
+import { createContext, useCallback, useContext, useSyncExternalStore } from "react"
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { api } from "./api"
-import { appendDraft } from "./composerDraft"
-import { keys, newClientId, upsert } from "./queries"
+import { newClientId, upsert } from "./queries"
 import { toast } from "./toast"
 import type { SideThread, SideThreadKind, SideThreadMessage, UiEvent } from "../../../shared/types"
 import type { RerouteTarget } from "../../../shared/threadRoutes"
@@ -14,6 +15,19 @@ export type ThreadChat = string
 export const COORDINATOR_CHAT: ThreadChat = "coordinator"
 export const chatOf = (projectId: string | null): ThreadChat => projectId ?? COORDINATOR_CHAT
 const projectOf = (chat: ThreadChat) => (chat === COORDINATOR_CHAT ? null : chat)
+
+/**
+ * Where an open thread shows: a chat's side panel (the chat itself is the slot), or a task's panel (taskSlot), whose
+ * threads belong to its project's Captain chat.
+ */
+export type ThreadSlot = string
+export const taskSlot = (taskId: string): ThreadSlot => `task:${taskId}`
+
+const ThreadChatContext = createContext<ThreadChat | null>(null)
+/** Turns on side threads for the chat lines inside (ChatLine's markers, the selection's Ask, Reply). */
+export const ThreadChatProvider = ThreadChatContext.Provider
+/** The chat whose lines these are, or null where there are no threads of a chat's own (a task's transcript). */
+export const useThreadChat = () => useContext(ThreadChatContext)
 
 export const threadKeys = {
   list: (chat: ThreadChat) => ["threads", chat] as const,
@@ -38,7 +52,8 @@ export function useMessageThreads(chat: ThreadChat, anchorId: string): SideThrea
     queryKey: threadKeys.list(chat),
     queryFn: () => api<SideThread[]>(`/api/threads${projectOf(chat) ? `?projectId=${encodeURIComponent(chat)}` : ""}`),
     staleTime: Infinity,
-    select: (list: SideThread[]) => list.filter((t) => t.anchorId === anchorId),
+    // A thread asked inside another one shows in its parent's panel, not under the message again.
+    select: (list: SideThread[]) => list.filter((t) => t.anchorId === anchorId && !t.parentId),
   })
   return q.data ?? NONE
 }
@@ -46,6 +61,24 @@ export function useMessageThreads(chat: ThreadChat, anchorId: string): SideThrea
 export function useThread(chat: ThreadChat, id: string | null): SideThread | null {
   const q = useThreads(chat)
   return (id && q.data?.find((t) => t.id === id)) || null
+}
+
+const listQuery = (chat: ThreadChat) => ({
+  queryKey: threadKeys.list(chat),
+  queryFn: () => api<SideThread[]>(`/api/threads${projectOf(chat) ? `?projectId=${encodeURIComponent(chat)}` : ""}`),
+  staleTime: Infinity,
+})
+
+/** The threads asked from inside this one, oldest first: its panel lists them. */
+export function useChildThreads(chat: ThreadChat, parentId: string | null): SideThread[] {
+  const q = useQuery({ ...listQuery(chat), select: (list: SideThread[]) => (parentId ? list.filter((t) => t.parentId === parentId) : NONE), enabled: Boolean(parentId) })
+  return q.data ?? NONE
+}
+
+/** The asks about passages of a task's transcript (in its project's Captain chat), oldest first: the task's panel lists them. */
+export function useTaskAsks(chat: ThreadChat, taskId: string): SideThread[] {
+  const q = useQuery({ ...listQuery(chat), select: (list: SideThread[]) => list.filter((t) => t.kind === "ask" && t.anchorId === taskId && !t.parentId) })
+  return q.data ?? NONE
 }
 
 /** `enabled` false: a draft reply thread, which has no messages on the server yet. */
@@ -64,13 +97,14 @@ const pendingMessage = (threadId: string, id: string, content: string): SideThre
 
 /**
  * Start a thread on a message with its first message, and open it: a question about a highlighted passage, or (kind
- * "reply") a reply to the whole message, whose quote is the message. `reveal` false: the caller shows the thread
- * itself (a task's side questions in its panel), so the chat's side panel stays as it is.
+ * "reply") a reply to the whole message, whose quote is the message. `parentId`: asked from inside that thread.
+ * `reveal` false: the caller shows the thread itself (a task's side questions in its panel), so the chat's side panel
+ * stays as it is. `slot`: where it opens, when that isn't the chat's own panel (a task's).
  */
-export function useAskThread(chat: ThreadChat, { reveal = true }: { reveal?: boolean } = {}) {
+export function useAskThread(chat: ThreadChat, { reveal = true, slot = chat }: { reveal?: boolean; slot?: ThreadSlot } = {}) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: { id: string; messageId: string; anchorId: string; quote: string; question: string; kind?: SideThreadKind }) =>
+    mutationFn: (input: { id: string; messageId: string; anchorId: string; quote: string; question: string; kind?: SideThreadKind; parentId?: string }) =>
       api<{ thread: SideThread; message: SideThreadMessage }>("/api/threads", {
         body: { ...input, quote: input.kind === "reply" ? undefined : input.quote, projectId: projectOf(chat) },
       }),
@@ -81,6 +115,7 @@ export function useAskThread(chat: ThreadChat, { reveal = true }: { reveal?: boo
         projectId: projectOf(chat),
         anchorId: input.anchorId,
         kind: input.kind ?? "ask",
+        parentId: input.parentId ?? null,
         quote: input.quote.trim(),
         context: null,
         busy: true,
@@ -92,19 +127,20 @@ export function useAskThread(chat: ThreadChat, { reveal = true }: { reveal?: boo
       }
       qc.setQueryData<SideThread[]>(threadKeys.list(chat), (list) => upsert(list ?? [], thread))
       qc.setQueryData<SideThreadMessage[]>(threadKeys.messages(input.id), [pendingMessage(input.id, input.messageId, input.question.trim())])
-      if (reveal) openThread(chat, input.id)
+      if (reveal) openThread(slot, input.id)
     },
     onError: (err: Error, input) => {
       qc.setQueryData<SideThread[]>(threadKeys.list(chat), (list) => list?.filter((t) => t.id !== input.id))
       qc.removeQueries({ queryKey: threadKeys.messages(input.id) })
-      if (openThreadId(chat) === input.id) closeThread(chat)
+      // Back to the thread it was asked from, which is still there.
+      if (openThreadId(slot) === input.id) input.parentId ? openThread(slot, input.parentId) : closeThread(slot)
       toast.error("Couldn't ask", err.message)
     },
     onSuccess: ({ thread, message }, input) => {
       // A reply to a message that already had a reply thread went to that one.
       if (thread.id !== input.id) {
         dropThread(qc, chat, input.id)
-        if (openThreadId(chat) === input.id) openThread(chat, thread.id)
+        if (openThreadId(slot) === input.id) openThread(slot, thread.id)
         qc.removeQueries({ queryKey: threadKeys.messages(thread.id) })
       } else qc.setQueryData<SideThreadMessage[]>(threadKeys.messages(thread.id), (list) => upsert(list ?? [], message))
       qc.setQueryData<SideThread[]>(threadKeys.list(chat), (list) => upsert(list ?? [], thread))
@@ -160,14 +196,19 @@ export function useAskAboutTask(taskId: string, title: string) {
   )
 }
 
-export function useThreadControl(chat: ThreadChat) {
+/** `slot`: where the chat's threads show, when that isn't its own panel (a task's). */
+export function useThreadControl(chat: ThreadChat, slot: ThreadSlot = chat) {
   const qc = useQueryClient()
+  /** A thread that goes (resolved, deleted) while it shows: its parent shows again, or the panel closes. */
+  const leave = (id: string) => {
+    if (openThreadId(slot) === id) leaveThread(qc, chat, slot)
+  }
   return {
     /** Resolve (fold it away under its message and close it) or reopen. */
     resolve: async (id: string, resolved: boolean) => {
       const before = qc.getQueryData<SideThread[]>(threadKeys.list(chat))?.find((t) => t.id === id)
       patch(qc, chat, id, () => ({ resolvedAt: resolved ? Date.now() : null }))
-      if (resolved && openThreadId(chat) === id) closeThread(chat)
+      if (resolved) leave(id)
       try {
         const thread = await api<SideThread>(`/api/threads/${id}/resolve`, { body: { resolved } })
         qc.setQueryData<SideThread[]>(threadKeys.list(chat), (list) => (list ? upsert(list, thread) : list))
@@ -185,7 +226,7 @@ export function useThreadControl(chat: ThreadChat) {
     remove: async (id: string) => {
       try {
         await api(`/api/threads/${id}`, { method: "DELETE" })
-        if (openThreadId(chat) === id) closeThread(chat)
+        leave(id)
         dropThread(qc, chat, id)
       } catch (err) {
         toast.error("Couldn't delete the thread", (err as Error).message)
@@ -194,10 +235,13 @@ export function useThreadControl(chat: ThreadChat) {
   }
 }
 
+/** A thread is gone, and with it the threads asked from inside it (the server deletes them together). */
 function dropThread(qc: QueryClient, chat: ThreadChat, id: string) {
+  const under = (qc.getQueryData<SideThread[]>(threadKeys.list(chat)) ?? []).filter((t) => t.parentId === id)
   qc.setQueryData<SideThread[]>(threadKeys.list(chat), (list) => list?.filter((t) => t.id !== id))
   qc.removeQueries({ queryKey: threadKeys.messages(id) })
   qc.removeQueries({ queryKey: threadKeys.stream(id) })
+  for (const t of under) dropThread(qc, chat, t.id)
 }
 
 /** Live events (lib/stream.ts). Returns false for an event that isn't a thread's. */
@@ -215,7 +259,8 @@ export function applyThreadEvent(qc: QueryClient, ev: UiEvent): boolean {
       qc.setQueryData<string>(threadKeys.stream(ev.threadId), (prev) => (prev ?? "") + ev.text)
       return true
     case "thread.deleted":
-      if (openThreadId(chatOf(ev.projectId)) === ev.threadId) closeThread(chatOf(ev.projectId))
+      // Wherever it shows (the chat's panel, or a task's): back to the thread it was asked in, or closed.
+      for (const [slot, shown] of open) if (shown.id === ev.threadId) leaveThread(qc, chatOf(ev.projectId), slot)
       dropThread(qc, chatOf(ev.projectId), ev.threadId)
       return true
     default:
@@ -226,32 +271,43 @@ export function applyThreadEvent(qc: QueryClient, ev: UiEvent): boolean {
 // ---------------------------------------------------------------- the open thread, per chat
 
 /**
- * A chat's open thread. `draft`: a reply thread not started yet (Reply on a message with no replies): the panel shows
- * the message and a composer, and the first reply creates the thread with this id. `expanded`: the panel covers the
- * whole chat.
+ * A slot's open thread. `draft`: a thread not started yet: the panel shows what it's about and a composer, and the
+ * first message creates the thread with this id. `expanded`: the panel covers the whole chat.
  */
 export interface OpenThread {
   id: string
-  draft?: { anchorId: string; text: string }
+  draft?: ThreadDraft
   expanded?: boolean
   /**
-   * Opened from Reply or "Reply quoting selection": a new number puts the caret in the box, after anything in it (the
-   * quote), once. Showing the panel again (another chat and back, a question restored) leaves the focus where it is.
+   * Opened from Reply or the selection's Ask: a new number puts the caret in the box, after anything in it, once.
+   * Showing the panel again (another chat and back, a question restored) leaves the focus where it is.
    */
   focus?: number
+}
+
+/**
+ * A thread not started yet. A reply (the default `kind`): Reply on a message with no replies, `text` the message. An
+ * "ask": the selection's Ask, `text` the highlighted passage, `anchorId` the message it's in (or the task whose
+ * transcript it's in), and `parentId` the thread it was highlighted in, if it was in one.
+ */
+export interface ThreadDraft {
+  anchorId: string
+  text: string
+  kind?: "reply" | "ask"
+  parentId?: string
 }
 
 /** The draft store's key for a thread's box (lib/composerDraft.ts). */
 export const threadDraftKey = (id: string) => `thread:${id}`
 
-let open = new Map<ThreadChat, OpenThread>()
+let open = new Map<ThreadSlot, OpenThread>()
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 const subscribe = (l: () => void) => {
   listeners.add(l)
   return () => void listeners.delete(l)
 }
-const set = (chat: ThreadChat, value: OpenThread | null) => {
+const set = (chat: ThreadSlot, value: OpenThread | null) => {
   const next = new Map(open)
   if (value) next.set(chat, value)
   else next.delete(chat)
@@ -259,31 +315,38 @@ const set = (chat: ThreadChat, value: OpenThread | null) => {
   emit()
 }
 
-export const openThreadId = (chat: ThreadChat) => open.get(chat)?.id ?? null
+export const openThreadId = (chat: ThreadSlot) => open.get(chat)?.id ?? null
 /** What a chat's panel shows, to put it back later (App: a question that gave way to pinned panels). */
-export const openThreadState = (chat: ThreadChat) => open.get(chat) ?? null
-export const restoreThread = (chat: ThreadChat, value: OpenThread) => set(chat, value)
-export const openThread = (chat: ThreadChat, id: string) => set(chat, { id, expanded: open.get(chat)?.expanded })
+export const openThreadState = (chat: ThreadSlot) => open.get(chat) ?? null
+export const restoreThread = (chat: ThreadSlot, value: OpenThread) => set(chat, value)
+export const openThread = (chat: ThreadSlot, id: string) => set(chat, { id, expanded: open.get(chat)?.expanded })
 let replies = 0
 
 /**
- * Reply to a message: open its reply thread, or a draft of one when it has none yet, with the caret in its box (each
- * press, one already open too). `quote`: a passage of it (the selection's "Reply quoting"), which the composer starts with.
+ * The selection's Ask: open a thread not started yet on the highlighted passage, with the caret in its box. Asking
+ * again about the same passage keeps the draft that's open (and what's typed in it).
  */
-export function openReply(qc: QueryClient, chat: ThreadChat, anchorId: string, text: string, quote?: string) {
-  const existing = qc.getQueryData<SideThread[]>(threadKeys.list(chat))?.find((t) => t.kind === "reply" && t.anchorId === anchorId)
-  const cur = open.get(chat)
-  const drafted = !existing && cur?.draft?.anchorId === anchorId ? cur : null
-  const id = existing?.id ?? drafted?.id ?? newClientId("thr")
-  // The quote goes into the draft here, not when the panel mounts, so a panel shown again doesn't add it twice.
-  if (quote) appendDraft(threadDraftKey(id), quote)
-  set(chat, { id, ...(!existing && { draft: drafted?.draft ?? { anchorId, text } }), expanded: cur?.expanded, focus: ++replies })
+export function openAsk(slot: ThreadSlot, ask: { anchorId: string; quote: string; parentId?: string }) {
+  const cur = open.get(slot)
+  const same = cur?.draft?.kind === "ask" && cur.draft.anchorId === ask.anchorId && cur.draft.text === ask.quote && cur.draft.parentId === ask.parentId
+  set(slot, {
+    id: same ? cur.id : newClientId("thr"),
+    draft: { anchorId: ask.anchorId, text: ask.quote, kind: "ask", ...(ask.parentId && { parentId: ask.parentId }) },
+    expanded: cur?.expanded,
+    focus: ++replies,
+  })
 }
 
-/** A message of the chat's, in full, from what's loaded (the Coordinator's chat, or a Captain's). */
-export function chatMessageText(qc: QueryClient, chat: ThreadChat, id: string): string | null {
-  const list = qc.getQueryData<{ id: string; content: string }[]>(chat === COORDINATOR_CHAT ? keys.chat : keys.captainMessages(chat))
-  return list?.find((m) => m.id === id)?.content ?? null
+/**
+ * Reply to a message: open its reply thread, or a draft of one when it has none yet, with the caret in its box (each
+ * press, one already open too).
+ */
+export function openReply(qc: QueryClient, chat: ThreadChat, anchorId: string, text: string) {
+  const existing = qc.getQueryData<SideThread[]>(threadKeys.list(chat))?.find((t) => t.kind === "reply" && t.anchorId === anchorId)
+  const cur = open.get(chat)
+  const drafted = !existing && cur?.draft?.anchorId === anchorId && (cur.draft.kind ?? "reply") === "reply" ? cur : null
+  const id = existing?.id ?? drafted?.id ?? newClientId("thr")
+  set(chat, { id, ...(!existing && { draft: drafted?.draft ?? { anchorId, text } }), expanded: cur?.expanded, focus: ++replies })
 }
 
 /**
@@ -302,16 +365,28 @@ export function useRerouteThreadMessage(chat: ThreadChat, threadId: string) {
   })
 }
 /** The open thread covers the whole chat, or goes back beside it. */
-export const toggleExpanded = (chat: ThreadChat) => {
+export const toggleExpanded = (chat: ThreadSlot) => {
   const cur = open.get(chat)
   if (cur) set(chat, { ...cur, expanded: !cur.expanded })
 }
 /** Close the panel: it's gone at once, with no slide out. */
-export const closeThread = (chat: ThreadChat) => {
+export const closeThread = (chat: ThreadSlot) => {
   if (open.has(chat)) set(chat, null)
 }
 
-export function useOpenThread(chat: ThreadChat): OpenThread | null {
+/**
+ * Leave the open thread by one level: back to the thread it was asked in, or (a top-level one) close the panel. Esc
+ * and a sheet's Back.
+ */
+export function leaveThread(qc: QueryClient, chat: ThreadChat, slot: ThreadSlot = chat) {
+  const cur = open.get(slot)
+  if (!cur) return
+  const parent = cur.draft ? cur.draft.parentId : qc.getQueryData<SideThread[]>(threadKeys.list(chat))?.find((t) => t.id === cur.id)?.parentId
+  if (parent) openThread(slot, parent)
+  else closeThread(slot)
+}
+
+export function useOpenThread(chat: ThreadSlot): OpenThread | null {
   return useSyncExternalStore(
     subscribe,
     () => open.get(chat) ?? null,

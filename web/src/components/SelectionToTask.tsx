@@ -1,26 +1,27 @@
-// Select text in a chat or transcript to act on it. In a chat with side threads (useThreadChat: the Coordinator's or
-// a Captain's), "Reply quoting selection" opens the message's reply thread (SideThread.tsx) with the passage quoted in
-// its box: the chat's agent routes what Cody writes there, which covers asking about it and starting work from it. In
-// a task's transcript, "New task from selection" opens the shared New task popover with the quote and a box for
-// instructions. Enter sends both to whoever routes the work (the Coordinator), as its button says, and the toast after
-// it opens that chat; "Start it myself…" starts the task directly from the full New task dialog, which shows the quote
-// and takes the instructions.
+// Select text in a chat, a task's transcript or a side thread to act on it. Two actions, the same everywhere:
 //
-// A mouse gets the action as a pill over the selection. A finger gets a bar as wide as its label, centred just above
-// the chat's composer, or under the chat's header when that side is the one clear of the selection: never over the
-// composer.
+// - "Ask" opens the side panel on a thread about the passage, which shows quoted above a box for the question
+//   (SideThread.tsx). The question is asked from inside whatever the passage is in: a chat message, a task's transcript
+//   (a thread of its project's Captain chat, shown in the task's panel), or another thread, which the new one then
+//   nests under, to any depth.
+// - "Create task" opens the shared New task popover with the passage quoted and a box for the request. Sending it
+//   messages whoever creates the task, as its button says: the project's Captain (a task's, or the Captain chat's own),
+//   or the Coordinator from its chat. The message asks for a new task from the request and the passage, and says where
+//   the passage was highlighted (lib/selectionTask.ts). Nothing here creates a task itself. A toast confirms and opens
+//   that chat.
+//
+// A mouse gets the actions as a pill over the selection. A finger gets them as a bar, centred just above the chat's
+// composer, or under the chat's header when that side is the one clear of the selection: never over the composer.
 import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
-import { MessageSquarePlus, Reply } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
-import { buildSelectionTaskBrief, buildSelectionTaskPrompt, selectionTarget, type SelectionTaskSource } from "../lib/selectionTask"
-import { clearNewTaskDraft, newTaskDraftKey, saveDraft, selectionScope } from "../lib/newTask"
+import { flushSync } from "react-dom"
+import { ListPlus, MessageCircleQuestion } from "lucide-react"
+import { buildSelectionTaskPrompt, selectionTarget, selectionTargetProject, type SelectionTaskSource } from "../lib/selectionTask"
+import { selectionScope } from "../lib/newTask"
 import { toast } from "../lib/toast"
 import { openChat } from "../lib/navigation"
-import { useOwnerName } from "../lib/queries"
-import { NewTaskDialog, NewTaskPopover } from "./NewTask"
-import { useReplyTo, useThreadChat } from "./SideThread"
-import { quoteLines } from "./MessageActions"
-import { chatMessageText } from "../lib/threads"
+import { newClientId, useOwnerName, useSendCaptainMessage, useSendChat } from "../lib/queries"
+import { NewTaskPopover } from "./NewTask"
+import { openAsk, useThreadChat, type ThreadChat, type ThreadSlot } from "../lib/threads"
 
 interface Rect {
   left: number
@@ -33,40 +34,60 @@ interface SelectionInfo {
   text: string
   x: number
   y: number
-  /** The chat message the selection ends in (`data-chat-id`), whose reply thread it quotes into. */
+  /** The chat message the selection ends in (`data-chat-id`), which a question about it is anchored on. */
   anchorId: string | null
   /** Where the phone bar sits when the chat has a composer on screen (barPlace); null: at the window's bottom edge. */
   bar: CSSProperties | null
 }
 
+/** Where "Ask" puts its thread. */
+export interface SelectionAsk {
+  /** The chat the thread belongs to: the Coordinator's or a Captain's. */
+  chat: ThreadChat
+  /** Where it opens, when that isn't the chat's own side panel (a task's panel, lib/threads.ts' taskSlot). */
+  slot?: ThreadSlot
+  /** What it's anchored on, when that isn't the chat message the selection is in: a task (its transcript), or a thread's own anchor. */
+  anchorId?: string
+  /** The thread the selection is in: the question nests under it. */
+  parentId?: string
+}
+
+/** The longest passage a thread takes (server/sideThreads.ts' MAX_QUOTE_CHARS); a longer selection is cut to it. */
+const MAX_ASK_QUOTE = 20_000
+
 export function SelectionToTask({
   source,
-  onPrompt,
+  askOn,
+  thread = null,
   children,
 }: {
+  /** Where these lines are, for "Create task": who gets it and what it says. Null: no Create task (still loading). */
   source: SelectionTaskSource | null
-  onPrompt: (prompt: string) => void
+  /** Where "Ask" goes. Left out: the chat these lines are in (ThreadChatProvider), on the selected message. Null: no Ask. */
+  askOn?: SelectionAsk | null
+  /** The side thread these lines are in, which "Create task" names as where the passage was highlighted. */
+  thread?: { id: string; quote: string } | null
   children: ReactNode
 }) {
   const root = useRef<HTMLDivElement>(null)
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
-  /** The New task popover is open on this selection, hanging from where its button was. */
-  const [draft, setDraft] = useState<{ text: string; rect: Rect } | null>(null)
-  /** "Start it myself…": the full New task dialog for this selection and the instructions typed so far. */
-  const [dialog, setDialog] = useState<{ text: string; instructions: string } | null>(null)
+  /** The Create task popover is open on this selection, hanging from where its button was. */
+  const [draft, setDraft] = useState<{ text: string; messageId: string | null; rect: Rect } | null>(null)
   const anchor = useRef<HTMLSpanElement>(null)
   /** This chat's composer, found once: the phone bar sits above it. */
   const composer = useRef<HTMLElement | null>(null)
   const popoverId = useId()
   const ownerName = useOwnerName()
-  const qc = useQueryClient()
   const threadChat = useThreadChat()
-  const replyTo = useReplyTo()
-  const canReply = Boolean(replyTo && selection?.anchorId)
+  const ask: SelectionAsk | null = askOn === undefined ? (threadChat ? { chat: threadChat } : null) : askOn
+  const askAnchor = ask ? (ask.anchorId ?? selection?.anchorId ?? null) : null
+  const sendChat = useSendChat()
+  const sendCaptain = useSendCaptainMessage(source ? (selectionTargetProject(source) ?? "") : "")
+  const on = Boolean(source || ask)
 
   useEffect(() => {
     const update = () => {
-      if (!source && !threadChat) return setSelection(null)
+      if (!on) return setSelection(null)
       const info = readSelection(root.current, composer)
       setSelection(info)
     }
@@ -89,123 +110,120 @@ export function SelectionToTask({
       window.removeEventListener("pointerdown", clearIfOutside)
       window.removeEventListener("scroll", update, true)
     }
-  }, [source, threadChat])
+  }, [on])
 
-  const open = (e: MouseEvent<HTMLButtonElement>) => {
-    if (!selection) return
-    const r = e.currentTarget.getBoundingClientRect()
-    setDraft({ text: selection.text, rect: { left: r.left, top: r.top, width: r.width, height: r.height } })
-    setSelection(null)
-  }
-
-  /** The message's reply thread, with the passage quoted in its box and the caret after it. */
-  const reply = () => {
+  /**
+   * The side panel on a thread about the passage, the caret in its box. In the press's own commit (flushSync), so the
+   * box takes the focus before the handler returns, which is what brings up a phone's keyboard.
+   */
+  const askAbout = () => {
     const sel = selection
-    if (!replyTo || !threadChat || !sel?.anchorId) return
-    replyTo(sel.anchorId, chatMessageText(qc, threadChat, sel.anchorId) ?? sel.text, `${quoteLines(sel.text)}\n\n`)
+    if (!ask || !sel || !askAnchor) return
+    flushSync(() => openAsk(ask.slot ?? ask.chat, { anchorId: askAnchor, quote: sel.text.slice(0, MAX_ASK_QUOTE), parentId: ask.parentId }))
     setSelection(null)
     window.getSelection()?.removeAllRanges()
   }
 
-  const finish = () => {
-    setDraft(null)
-    window.getSelection()?.removeAllRanges()
+  const createTask = (e: MouseEvent<HTMLButtonElement>) => {
+    if (!selection) return
+    // The pill or the bar, whichever was pressed: the popover hangs from it.
+    const r = (e.currentTarget.closest("[data-selection-task-action]:not(button)") ?? e.currentTarget).getBoundingClientRect()
+    setDraft({ text: selection.text, messageId: selection.anchorId, rect: { left: r.left, top: r.top, width: r.width, height: r.height } })
+    setSelection(null)
   }
 
-  /** One action: a reply where the chat has threads, otherwise a new task. */
-  const action = canReply
-    ? { icon: Reply, label: "Reply quoting selection", bar: "Reply quoting selection", testid: "selection-reply", run: reply, popup: undefined }
-    : source
-      ? { icon: MessageSquarePlus, label: "New task from selection", bar: "New task from selection", testid: "selection-task", run: open, popup: "dialog" as const }
-      : null
+  /** To the project's Captain, or the Coordinator: it creates the task. The toast leads to its chat, where it answers. */
+  const send = (source: SelectionTaskSource, text: string, messageId: string | null, instructions: string) => {
+    const content = buildSelectionTaskPrompt({ source, selectedText: text, instructions, place: { messageId, thread }, ownerName })
+    const projectId = selectionTargetProject(source)
+    const input = { id: newClientId("chat"), content, attachments: [] }
+    const sending = projectId ? sendCaptain.mutateAsync({ ...input, projectId }) : sendChat.mutateAsync(input)
+    const target = selectionTarget(source)
+    // Once it's there; a send that fails says so itself. With an action, so it shows in a task's view too (its toasts
+    // are the quiet ones).
+    sending.then(
+      () =>
+        toast.info(`Sent to ${target}`, projectId ? `It creates the task in ${source.project!.name}.` : "It creates the task in the project it belongs to.", {
+          action: { label: "Open chat", onClick: () => openChat(projectId) },
+          duration: 8000,
+        }),
+      () => {},
+    )
+  }
+
+  const actions = [
+    ...(askAnchor ? [{ key: "ask", icon: MessageCircleQuestion, label: "Ask", title: "Ask about the selected text in a side thread", run: askAbout, popup: undefined }] : []),
+    ...(source ? [{ key: "task", icon: ListPlus, label: "Create task", title: `Create a task from the selected text: ${selectionTarget(source)} gets it`, run: createTask, popup: "dialog" as const }] : []),
+  ]
 
   return (
     <div ref={root} className="contents">
       {children}
-      {selection && !draft && action && (
+      {selection && !draft && actions.length > 0 && (
         <>
           {/* Pressing these keeps the selection and the focus where they are (never the composer's). */}
           <div
             data-selection-task-action
-            className="fixed z-40 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-yard-400/50 bg-zinc-900/95 p-0.5 shadow-lg shadow-black/40 backdrop-blur [@media(pointer:fine)]:flex"
+            role="group"
+            aria-label="Selected text"
+            className="fixed z-40 hidden w-max -translate-x-1/2 items-center gap-0.5 rounded-full border border-yard-400/50 bg-zinc-900/95 p-0.5 shadow-lg shadow-black/40 backdrop-blur [@media(pointer:fine)]:flex"
             style={{ left: selection.x, top: selection.y }}
           >
-            <button type="button" data-testid={action.testid} data-selection-task-action aria-haspopup={action.popup} onMouseDown={(e) => e.preventDefault()} onClick={action.run} className={PILL}>
-              <action.icon className="h-3.5 w-3.5" /> {action.label}
-            </button>
+            {actions.map((a) => (
+              <button key={a.key} type="button" data-testid={`selection-${a.key}`} data-selection-task-action title={a.title} aria-haspopup={a.popup} onMouseDown={(e) => e.preventDefault()} onClick={a.run} className={PILL}>
+                <a.icon className="h-3.5 w-3.5" aria-hidden /> {a.label}
+              </button>
+            ))}
           </div>
           <div
             data-selection-task-action
-            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 [@media(pointer:fine)]:hidden"
+            role="group"
+            aria-label="Selected text"
+            className={BAR}
             style={selection.bar ?? undefined}
           >
-            <button type="button" aria-haspopup={action.popup} onMouseDown={(e) => e.preventDefault()} onClick={action.run} className={BAR}>
-              <action.icon className="h-4 w-4 shrink-0" /> {action.bar}
-            </button>
+            {actions.map((a) => (
+              <button key={a.key} type="button" data-testid={`selection-${a.key}-bar`} aria-haspopup={a.popup} onMouseDown={(e) => e.preventDefault()} onClick={a.run} className={BAR_BUTTON}>
+                <a.icon className="h-4 w-4 shrink-0" aria-hidden /> {a.label}
+              </button>
+            ))}
           </div>
         </>
       )}
       {source && draft && (
         <>
-          {/* Where the action button was: the popover hangs from it (the button itself goes once the selection does). */}
+          {/* Where the actions were: the popover hangs from there (they go once the selection does). */}
           <span ref={anchor} aria-hidden className="pointer-events-none fixed" style={draft.rect} />
           <NewTaskPopover
             key="selection"
             id={popoverId}
             trigger={anchor}
-            heading="New task from selection"
+            heading="Create task"
             quote={draft.text}
-            placeholder="Additional instructions (optional)"
+            placeholder="What should the task do? (optional)"
             submitLabel={`Send to ${selectionTarget(source)}`}
-            moreLabel="Start it myself…"
             scope={selectionScope(draft.text)}
             align="center"
             defaultProjectId={source.project?.id}
             onStart={(instructions) => {
-              onPrompt(buildSelectionTaskPrompt({ source, selectedText: draft.text, instructions, ownerName }))
-              finish()
-              // With an action, so it shows in a task's view too (its toasts are the quiet ones), and leads to the answer.
-              toast.info(`Sent to ${selectionTarget(source)}`, "It will decide where this task belongs.", {
-                action: { label: "Open chat", onClick: () => openChat(source.kind === "captain" ? source.project.id : null) },
-                duration: 8000,
-              })
+              send(source, draft.text, draft.messageId, instructions)
+              setDraft(null)
+              window.getSelection()?.removeAllRanges()
             }}
             onClose={() => setDraft(null)}
-            onMore={(_, instructions) => {
-              setDialog({ text: draft.text, instructions })
-              setDraft(null)
-            }}
           />
         </>
-      )}
-      {source && dialog && (
-        <NewTaskDialog
-          // The source's project to start with, not for good: a follow-up may belong to another one.
-          defaultProjectId={source.project?.id}
-          initialPrompt={dialog.instructions}
-          quote={dialog.text}
-          compose={(instructions) => buildSelectionTaskBrief({ source, selectedText: dialog.text, instructions })}
-          draftKey={newTaskDraftKey(selectionScope(dialog.text))}
-          onCancel={(instructions) => {
-            // Kept for this quote, as the popover keeps them.
-            saveDraft(selectionScope(dialog.text), instructions)
-            setDialog(null)
-          }}
-          onDone={() => {
-            clearNewTaskDraft(selectionScope(dialog.text))
-            setDialog(null)
-            finish()
-          }}
-        />
       )}
     </div>
   )
 }
 
 const PILL =
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-yard-200 hover:bg-zinc-800 hover:text-yard-100 focus:ring-2 focus:ring-yard-500 focus:outline-none"
+  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap text-yard-200 hover:bg-zinc-800 hover:text-yard-100 focus:ring-2 focus:ring-yard-500 focus:outline-none"
+/** The phone's bar: one rounded box, a 44px button per action. */
 const BAR =
-  "flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-2xl border border-yard-400/50 bg-zinc-900/95 px-4 py-3 text-sm font-medium text-yard-100 shadow-2xl shadow-black/50 backdrop-blur"
+  "fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-stretch divide-x divide-yard-400/30 overflow-hidden rounded-2xl border border-yard-400/50 bg-zinc-900/95 shadow-2xl shadow-black/50 backdrop-blur [@media(pointer:fine)]:hidden"
+const BAR_BUTTON = "flex min-h-11 min-w-11 items-center justify-center gap-2 px-4 py-3 text-sm font-medium whitespace-nowrap text-yard-100 active:bg-zinc-800"
 
 /** The bar's height and the gap around it. */
 const BAR_ROOM = 64
@@ -250,8 +268,6 @@ function readSelection(root: HTMLElement | null, composer: { current: HTMLElemen
   if (!sel || sel.rangeCount === 0 || text.length < 3) return null
   const range = sel.getRangeAt(0)
   if (!contains(root, range.commonAncestorContainer)) return null
-  // A long message's Reply pill is out beside it: the pill quotes the selection itself (MessageActions).
-  if ([...document.querySelectorAll("[data-reply-pill][data-open]")].some((pill) => pill.parentElement && contains(pill.parentElement, range.commonAncestorContainer))) return null
   const rect = usefulRect(range)
   if (!rect) return null
   const message = (node: Node) => (node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element))?.closest?.("[data-chat-id]")

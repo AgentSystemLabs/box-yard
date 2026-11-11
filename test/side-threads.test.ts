@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
-import { forkPoint, noticeLines, replyPrompt, sessionLineMeta, summaryContext, taskKey, taskThreadPrompt, threadPrompt } from "../server/sideThreads.js"
+import { forkPoint, nestedPrompt, noticeLines, parentTranscript, replyPrompt, sessionLineMeta, summaryContext, taskKey, taskThreadPrompt, threadPrompt } from "../server/sideThreads.js"
 import type { ChatMessage } from "../shared/types.js"
 import { tmpDir } from "./helpers.js"
 
@@ -114,6 +114,45 @@ describe("side thread context", () => {
     expect(prompt).toMatch(/Sam's question:\nWhy\?$/)
     expect(prompt).not.toContain("started fresh")
     expect(threadPrompt({ quote: "q", question: "Why?", anchorText: "the user message", context: "the summary", ownerName: "Sam" })).toContain("started fresh, from your notes.]\n\nthe summary")
+  })
+})
+
+describe("nested threads", () => {
+  it("keeps a thread's parent, and lists the threads under it", () => {
+    const store = memStore()
+    const a = store.addChat("assistant", "Coordinator reply")
+    const parent = store.createSideThread({ projectId: null, anchorId: a.id, quote: "reply", sessionId: "s-1" })
+    const child = store.createSideThread({ projectId: null, anchorId: a.id, quote: "an answer", sessionId: "s-2", parentId: parent.id })
+    expect(parent.parentId).toBeNull()
+    expect(child).toMatchObject({ parentId: parent.id, kind: "ask", anchorId: a.id })
+    expect(store.childSideThreads(parent.id).map((t) => t.id)).toEqual([child.id])
+    expect(store.childSideThreads(child.id)).toEqual([])
+    expect(store.listSideThreads(null).map((t) => t.parentId)).toEqual([null, parent.id])
+  })
+
+  it("asks with the highlight and, in a fresh session, the thread it came from", () => {
+    const forked = nestedPrompt({ quote: "the part", question: "Why?", context: null, ownerName: "Sam" })
+    expect(forked.startsWith("[Box Yard side thread] Sam highlighted a passage in a side thread")).toBe(true)
+    expect(forked).toContain("> the part")
+    expect(forked).toContain("read-only")
+    expect(forked).toMatch(/Sam's question:\nWhy\?$/)
+    expect(forked).not.toContain("started fresh")
+
+    const at = (id: string, role: "user" | "assistant" | "tool" | "error", content: string) => ({ id, threadId: "thr_1", role, content, meta: null, createdAt: 1 })
+    const context = parentTranscript({ kind: "ask", quote: "line one\nline two" }, [at("1", "user", "What is it?"), at("2", "tool", "get_task"), at("3", "assistant", "It is this."), at("4", "error", "boom")], "Sam")
+    expect(context).toContain("started from this highlighted passage:\n> line one\n> line two")
+    expect(context).toContain("[Sam] What is it?\n\n[You] It is this.")
+    expect(context).not.toContain("get_task")
+    expect(context).not.toContain("boom")
+    expect(parentTranscript({ kind: "reply", quote: "the message" }, [])).toBe("The thread the passage was highlighted in started from this message:\n> the message")
+    expect(nestedPrompt({ quote: "q", question: "Why?", context, ownerName: "Sam" })).toContain("started fresh, from your notes.]\n\nThe thread the passage")
+  })
+
+  it("names the task when the highlight is in a task's transcript", () => {
+    const prompt = threadPrompt({ quote: "it loops", question: "Why?", anchorText: null, context: null, ownerName: "Sam", task: { id: "task_demo01", title: "Fix login" } })
+    expect(prompt).toContain('Sam highlighted a passage in the transcript of the task "Fix login" (task_demo01)')
+    expect(prompt).not.toContain("starts at the highlighted message")
+    expect(prompt).toContain("> it loops")
   })
 })
 

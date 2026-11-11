@@ -53,7 +53,7 @@ describe("next-step parsing", () => {
 })
 
 describe("selection task prompt", () => {
-  it("includes project, source task and selected text for orchestrator routing", () => {
+  it("asks for a new task from the request and the highlighted text, and says where it was highlighted", () => {
     const prompt = buildSelectionTaskPrompt({
       source: {
         kind: "task",
@@ -62,14 +62,28 @@ describe("selection task prompt", () => {
       },
       selectedText: "The nav flickers on mobile.",
       instructions: "Make this a separate investigation.",
+      place: { messageId: "tm_42", thread: { id: "thr_7", quote: "the nav\nbar" } },
+      ownerName: "Ada",
     })
-    expect(prompt).toContain("create a new task in the relevant project unless an existing task is clearly the better place")
+    expect(prompt.split("\n")[0]).toContain("Create a new task from Ada's request and the text Ada highlighted")
+    // A task's goes to its project's Captain, which keeps it in the project.
+    expect(prompt).toContain("It belongs in this project unless the request says otherwise.")
+    expect(prompt).toContain("## The request\nMake this a separate investigation.")
     expect(prompt).toContain("Project: site (prj_site)")
-    expect(prompt).toContain("Source task: Fix nav (task_123)")
-    expect(prompt).toContain("Source branch: boxyard/fix-nav")
-    expect(prompt).toContain("Source pull request: https://github.com/acme/site/pull/4")
-    expect(prompt).toContain("> The nav flickers on mobile.")
-    expect(prompt).toContain("Make this a separate investigation.")
+    expect(prompt).toContain("In the transcript of the task: Fix nav (task_123)")
+    expect(prompt).toContain("That task's branch: boxyard/fix-nav")
+    expect(prompt).toContain("That task's pull request: https://github.com/acme/site/pull/4")
+    expect(prompt).toContain("In a side thread (thr_7) about: “the nav bar”")
+    expect(prompt).toContain("Message: tm_42")
+    expect(prompt).toContain("## Highlighted text\n> The nav flickers on mobile.")
+  })
+
+  it("from the Coordinator's chat it leaves the project to the Coordinator, and says so when there's no request", () => {
+    const prompt = buildSelectionTaskPrompt({ source: { kind: "orchestrator" }, selectedText: "Two lines\nof output", instructions: " " })
+    expect(prompt).toContain("Put it in the project it belongs to.")
+    expect(prompt).toContain("didn't write one: work out the task from the highlighted text.")
+    expect(prompt).toContain("- Project: unknown")
+    expect(prompt).toContain("> Two lines\n> of output")
   })
 
   it("uses the shared meta key expected by the UI", () => {

@@ -78,7 +78,7 @@ afterEach(() => {
 const render = (messages: TaskMessage[]) => {
   qc.setQueryData(keys.taskMessages(taskId), messages)
   act(() => root.render(createElement(QueryClientProvider, { client: qc },
-    createElement(TaskThread, { id: taskId, handle: null, working: null, selectionSource: null, onStartFromSelection: () => {}, onFollowUp: () => {} }),
+    createElement(TaskThread, { id: taskId, handle: null, working: null, selectionSource: null, selectionAsk: null, onFollowUp: () => {} }),
   )))
 }
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })))

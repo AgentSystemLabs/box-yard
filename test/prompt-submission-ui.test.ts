@@ -55,7 +55,7 @@ function Harness() {
   const messages = scope === "coordinator" ? useChat() : scope === "captain" ? useCaptainMessages(PROJECT) : null
   return h(ThreadChatProvider, { value: scope === "coordinator" ? COORDINATOR_CHAT : scope === "captain" ? PROJECT : null }, h("section", { ref: panel },
     messages ? messages.data?.map((m) => scope === "captain" ? h(InboundMessage, { key: m.id, m: m as any }) : h(ChatLine, { key: m.id, m, onFollowUp: noop }))
-      : h(TaskThread, { id: TASK, handle: null, working: null, selectionSource: null, onStartFromSelection: noop, onFollowUp: noop }),
+      : h(TaskThread, { id: TASK, handle: null, working: null, selectionSource: null, selectionAsk: null, onFollowUp: noop }),
     h(Composer, { panelRef: panel, placeholder: "Send feedback", draftKey: draftKey(), onSubmit: (content: string, attachments: Attachment[]) => send.mutateAsync({ id: `chat_${crypto.randomUUID()}`, content, attachments }) }),
   ))
 }

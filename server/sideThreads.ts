@@ -24,6 +24,14 @@
 // A thread runs on its chat's model and effort, unless Settings › Coordinator › Quick questions picks others for
 // threads on Claude chats (quickQuestionHost), e.g. Haiku.
 //
+// An ask in a Captain's chat can be about a passage of one of its project's task transcripts instead of a chat
+// message (the selection's Ask in a task's panel): it's anchored on the task's id, starts from the Captain's newest
+// message and names the task, which the Captain can read with get_task.
+//
+// A thread can be asked from inside another one (a passage highlighted in the parent's panel, parent_id), to any
+// depth. It forks the parent's own session where it stands, so it knows the chat and everything said in the parent;
+// when that can't be forked it starts fresh from the parent's messages. Deleting a thread deletes the ones under it.
+//
 // A reply thread (the one Reply on every message) routes each of Cody's messages in its own turn, with no extra model
 // call: the chat's agent answers a question there, or answers with a directive (shared/threadRoutes.ts) and Box Yard
 // sends Cody's words on unchanged, to the task's agent (`[[route:agent]]`, when the message is about a task) or into
@@ -213,11 +221,21 @@ const quoteBlock = (text: string) =>
     .join("\n")
 
 /** A side thread's first prompt: the highlight and the question, with the context a fresh session needs. */
-export function threadPrompt(o: { quote: string; question: string; anchorText: string | null; context: string | null; ownerName?: string }): string {
+export function threadPrompt(o: {
+  quote: string
+  question: string
+  anchorText: string | null
+  context: string | null
+  ownerName?: string
+  /** The highlight is in this task's transcript, not in the chat. */
+  task?: { id: string; title: string } | null
+}): string {
   const own = (t: string) => withOwner(t, o.ownerName)
   return [
     own(
-      "[Box Yard side thread] Cody highlighted a passage in this chat and is asking about it in a side thread. The thread is separate from the main conversation: the main chat never sees it, and it starts at the highlighted message, so nothing said after that message is part of it.",
+      o.task
+        ? `[Box Yard side thread] Cody highlighted a passage in the transcript of the task "${o.task.title}" (${o.task.id}), one of this project's, and is asking about it in a side thread. The thread is separate from the main conversation: the main chat never sees it. The passage is the task's agent's output or a message to it, not something you said; get_task reads the task as it stands.`
+        : "[Box Yard side thread] Cody highlighted a passage in this chat and is asking about it in a side thread. The thread is separate from the main conversation: the main chat never sees it, and it starts at the highlighted message, so nothing said after that message is part of it.",
     ),
     o.context ? `[Your session for this thread was started fresh, from your notes.]\n\n${o.context}` : null,
     o.anchorText ? `The highlighted passage is from this message:\n${quoteBlock(o.anchorText)}` : null,
@@ -226,6 +244,43 @@ export function threadPrompt(o: { quote: string; question: string; anchorText: s
       "Answer briefly and directly. This thread is read-only: you may look things up (get_task, list_tasks, search_history, read_artifact and the other list_, get_ and read_ tools), but nothing that changes Box Yard works here (no create_task, send_to_task, schedules, settings or other changes). If Cody wants something done, say what you would do; Cody can ask for it in the main chat. No next-step block in this thread.",
     ),
     `${own("Cody")}'s question:\n${o.question}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+/**
+ * A nested thread's first prompt: a passage highlighted inside another thread (its parent) and the question. A fork of
+ * the parent's session already has the parent; a fresh session gets it as `context` (parentTranscript).
+ */
+export function nestedPrompt(o: { quote: string; question: string; context: string | null; ownerName?: string }): string {
+  const own = (t: string) => withOwner(t, o.ownerName)
+  return [
+    own(
+      "[Box Yard side thread] Cody highlighted a passage in a side thread of this chat and is asking about it in a thread of its own, nested under that one. It is separate from the main conversation and from the thread it came from: neither sees what is said here.",
+    ),
+    o.context ? `[Your session for this thread was started fresh, from your notes.]\n\n${o.context}` : null,
+    `Highlighted:\n${quoteBlock(o.quote)}`,
+    own(`Answer briefly and directly, here: don't send it on anywhere. ${NESTED_READ_ONLY}`),
+    `${own("Cody")}'s question:\n${o.question}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+const NESTED_READ_ONLY =
+  "This thread is read-only: you may look things up (get_task, list_tasks, search_history, read_artifact and the other list_, get_ and read_ tools), but nothing that changes Box Yard works here (no create_task, send_to_task, schedules, settings or other changes). If Cody wants something done, say what you would do; Cody can ask for it in the main chat. No next-step block in this thread."
+
+/** The thread a nested one was asked from, for a session that can't fork it: what it started on, then what was said (cut like the chat's replay). */
+export function parentTranscript(parent: Pick<SideThread, "kind" | "quote">, messages: SideThreadMessage[], ownerName?: string): string {
+  const lines = messages
+    .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim())
+    .slice(-FALLBACK_MESSAGES)
+    .map((m) => `[${m.role === "user" ? withOwner("Cody", ownerName) : "You"}] ${m.content.length > FALLBACK_MESSAGE_CHARS ? `${m.content.slice(0, FALLBACK_MESSAGE_CHARS)}…` : m.content}`)
+  const start = parent.quote.length > FALLBACK_MESSAGE_CHARS * 2 ? `${parent.quote.slice(0, FALLBACK_MESSAGE_CHARS * 2)}…` : parent.quote
+  return [
+    `The thread the passage was highlighted in started from ${parent.kind === "reply" ? "this message" : parent.kind === "task" ? "the card of this task" : "this highlighted passage"}:\n${quoteBlock(start)}`,
+    lines.length ? `That thread so far:\n${lines.join("\n\n")}` : null,
   ]
     .filter(Boolean)
     .join("\n\n")
@@ -422,9 +477,11 @@ export class SideThreads {
    * Open a thread on a chat message with Cody's first message: a question about a highlighted passage (kind "ask"),
    * or a reply to the whole message (kind "reply", no quote needed). A message has one reply thread: replying to it
    * again adds to that thread. Kind "task": a question from a task's card in the Coordinator chat (anchorId: the
-   * task's id); a card has one thread too.
+   * task's id); a card has one thread too. An ask in a Captain's chat may be anchored on one of its project's tasks
+   * instead of a message: a passage of that task's transcript. `parentId`: an ask from inside another thread of the
+   * chat, about a passage of it (nested, to any depth); it takes its parent's anchor.
    */
-  create(input: { projectId: string | null; anchorId: string; quote?: string; question: string; kind?: SideThreadKind; id?: string; messageId?: string }): {
+  create(input: { projectId: string | null; anchorId: string; quote?: string; question: string; kind?: SideThreadKind; id?: string; messageId?: string; parentId?: string | null }): {
     thread: SideThread
     message: SideThreadMessage
   } {
@@ -432,9 +489,11 @@ export class SideThreads {
     const kind = input.kind ?? "ask"
     const question = input.question.trim()
     if (!question) throw new BadRequestError(kind === "reply" ? "question: write a reply" : "question: ask something")
+    if (input.parentId) return this.createNested({ ...input, parentId: input.parentId }, question)
     if (kind === "task") return this.createOnCard(input, question)
     const anchor = this.store.chatUpTo(input.projectId, input.anchorId, 1)?.[0]
-    if (!anchor) throw new BadRequestError(`anchorId: no message ${input.anchorId} in this chat`)
+    const onTask = !anchor && kind === "ask" && input.projectId ? this.store.getTask(input.anchorId) : null
+    if (!anchor && onTask?.projectId !== input.projectId) throw new BadRequestError(`anchorId: no message ${input.anchorId} in this chat`)
     if (kind === "reply") {
       const existing = this.store.threadOn(input.projectId, input.anchorId, "reply")
       if (existing) {
@@ -442,10 +501,23 @@ export class SideThreads {
         return { thread: this.get(existing.id), message }
       }
     }
-    const quote = (kind === "reply" ? anchor.content : (input.quote ?? "")).trim()
+    const quote = (kind === "reply" ? (anchor?.content ?? "") : (input.quote ?? "")).trim()
     if (!quote) throw new BadRequestError(kind === "reply" ? "anchorId: that message has no text to reply to" : "quote: highlight some text to ask about")
     if (input.id && this.store.getSideThread(input.id)) throw new BadRequestError(`A side thread ${input.id} already exists`)
     const thread = this.store.createSideThread({ id: input.id, projectId: input.projectId, anchorId: input.anchorId, kind, quote: quote.slice(0, MAX_QUOTE_CHARS), sessionId: randomUUID() })
+    this.hub.broadcast({ type: "thread", thread: this.decorate(thread) })
+    const message = this.send(thread.id, question, input.messageId)
+    return { thread: this.get(thread.id), message }
+  }
+
+  /** A thread under another one: an ask about a passage of the parent's messages. */
+  private createNested(input: { projectId: string | null; parentId: string; quote?: string; id?: string; messageId?: string }, question: string) {
+    const parent = this.store.getSideThread(input.parentId)
+    if (!parent || parent.projectId !== input.projectId) throw new BadRequestError(`parentId: no thread ${input.parentId} in this chat`)
+    const quote = (input.quote ?? "").trim()
+    if (!quote) throw new BadRequestError("quote: highlight some text to ask about")
+    if (input.id && this.store.getSideThread(input.id)) throw new BadRequestError(`A side thread ${input.id} already exists`)
+    const thread = this.store.createSideThread({ id: input.id, projectId: parent.projectId, anchorId: parent.anchorId, kind: "ask", parentId: parent.id, quote: quote.slice(0, MAX_QUOTE_CHARS), sessionId: randomUUID() })
     this.hub.broadcast({ type: "thread", thread: this.decorate(thread) })
     const message = this.send(thread.id, question, input.messageId)
     return { thread: this.get(thread.id), message }
@@ -503,8 +575,10 @@ export class SideThreads {
     this.runs.get(id)?.child?.kill("SIGTERM")
   }
 
+  /** A thread goes with the threads asked from inside it. */
   delete(id: string) {
     const thread = this.get(id)
+    for (const child of this.store.childSideThreads(id)) this.delete(child.id)
     const run = this.runs.get(id)
     if (run) {
       run.pending = false
@@ -631,17 +705,38 @@ export class SideThreads {
       if (result.ok || !MISSING_SESSION.test(result.error) || gone()) return gone() ? null : result
     }
 
-    const upTo = this.store.chatUpTo(thread.projectId, thread.anchorId, 400) ?? []
+    // Asked from inside another thread: it starts from that thread, not from the chat.
+    const parent = thread.parentId ? this.store.getSideThread(thread.parentId) : null
+    if (parent) {
+      const from = this.store.sideThreadSession(parent.id)
+      const nested = (context: string | null) => nestedPrompt({ quote: thread.quote, question, context, ownerName: owner })
+      // The parent's session as it stands (never while a turn of its own is writing it). Codex can't fork one.
+      if (from?.started && host.cli() === "claude" && !this.runs.get(parent.id)?.running) {
+        const args = ["--resume", from.sessionId, "--fork-session", "--session-id", session.sessionId]
+        const result = await this.run(id, r, host, nested(null), args, session.sessionId, true, "fork", routes)
+        if (result.ok || !result.noSession || gone()) return gone() ? null : result
+      }
+      const context = parentTranscript(parent, this.store.listSideThreadMessages(parent.id), owner)
+      const fresh = randomUUID()
+      const result = await this.run(id, r, host, nested(context), ["--session-id", fresh], fresh, false, "summary", routes)
+      return gone() ? null : result
+    }
+
+    const inChat = this.store.chatUpTo(thread.projectId, thread.anchorId, 400)
+    // An ask about a passage of a task's transcript (a Captain's chat): there's no message to start at, so it starts
+    // at the Captain's newest one.
+    const task = !inChat && thread.kind === "ask" && thread.projectId ? this.store.getTask(thread.anchorId) : null
+    const upTo: ChatMessage[] = inChat ?? (task && thread.projectId ? this.store.listCaptainMessages(thread.projectId, 400) : [])
     const main = host.session()
     const compactions = this.compactionsFor(host)
     // Codex can't fork a session at a message: a thread on a Codex chat always starts from the summary.
     const fork = main.started && host.cli() === "claude" ? forkPoint(upTo, main.id, compactions.at(-1)?.at ?? null) : null
-    const anchor = upTo.at(-1)
+    const anchor = task ? undefined : upTo.at(-1)
     // A reply thread quotes the whole message it replies to; an ask, the highlight (and the message, unless the fork ends on it).
     const first = (context: string | null, withAnchor: boolean) =>
       thread.kind === "reply"
         ? replyPrompt({ original: anchor?.content || thread.quote, reply: question, context, ownerName: owner, rules })
-        : threadPrompt({ quote: thread.quote, question, anchorText: withAnchor ? (anchor?.content ?? null) : null, context, ownerName: owner })
+        : threadPrompt({ quote: thread.quote, question, anchorText: withAnchor ? (anchor?.content ?? null) : null, context, ownerName: owner, task: task ? { id: task.id, title: task.title } : null })
     if (fork) {
       const prompt = first(null, !fork.atAnchor)
       const args = ["--resume", main.id, "--resume-session-at", fork.uuid, "--fork-session", "--session-id", session.sessionId]
@@ -650,7 +745,7 @@ export class SideThreads {
       if (result.ok || !result.noSession || gone()) return gone() ? null : result
     }
     const summary = this.summaryBefore(compactions, anchor?.createdAt ?? Date.now())
-    const context = summaryContext(upTo, summary, owner)
+    const context = summaryContext(upTo, summary, owner, task ? "your newest message" : undefined)
     const prompt = first(context || null, false)
     const fresh = randomUUID()
     const result = await this.run(id, r, host, prompt, ["--session-id", fresh], fresh, false, "summary", routes)

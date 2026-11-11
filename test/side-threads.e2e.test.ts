@@ -234,6 +234,65 @@ describe("threaded replies", () => {
     expect((await second.call<SideThread>(`/api/threads/${thread.id}/resolve`, { resolved: false })).resolvedAt).toBeNull()
   })
 
+  it("nest a thread under another: it forks the parent's session, leads back to it and is deleted with it", async () => {
+    const { yard, call, say, answers } = await start()
+    await say("status one")
+    const anchor = (await call<ChatMessage[]>("/api/chat")).filter((m) => m.role === "assistant").at(-1)!
+    const { thread: parent } = await call<{ thread: SideThread }>("/api/threads", { anchorId: anchor.id, quote: "the yard", question: "What does this mean?" })
+    const [answer] = await answers(parent.id, 1)
+
+    // A passage of the parent's answer, asked about from its panel.
+    const quote = answer!.content.split("\n")[0]!
+    const { thread: child } = await call<{ thread: SideThread }>("/api/threads", { anchorId: "ignored", parentId: parent.id, quote, question: "And this part?" })
+    expect(child).toMatchObject({ kind: "ask", parentId: parent.id, anchorId: anchor.id, projectId: null, quote })
+    const [nested] = await answers(child.id, 1)
+    expect(nested!.role).toBe("assistant")
+    // It forked the parent's own session, so it has the chat's turn and the parent's.
+    const forked = fakeSession(yard.store.sideThreadSession(child.id)!.sessionId)
+    expect(forked.forkedFrom).toBe(yard.store.sideThreadSession(parent.id)!.sessionId)
+    expect(forked.turns.at(-1)!.prompt).toContain("nested under that one")
+    expect(forked.turns.at(-1)!.prompt).toContain(`> ${quote}`)
+    expect(forked.turns.map((t) => t.prompt).join("\n")).toContain("What does this mean?")
+    expect(await threadOf(call, child.id)).toMatchObject({ context: "fork", parentId: parent.id })
+
+    // Any depth: a thread under the nested one.
+    const { thread: grandchild } = await call<{ thread: SideThread }>("/api/threads", { anchorId: anchor.id, parentId: child.id, quote: "mock Claude", question: "Deeper?" })
+    expect(grandchild).toMatchObject({ parentId: child.id, anchorId: anchor.id })
+    await answers(grandchild.id, 1)
+    // The parent's own session never saw them.
+    expect(fakeSession(yard.store.sideThreadSession(parent.id)!.sessionId).turns.map((t) => t.prompt).join("\n")).not.toContain("And this part?")
+
+    // A parent in another chat is refused, and a nested ask still needs its highlight.
+    const project = await call<{ id: string }>("/api/projects", { name: "demo" })
+    await expect(call("/api/threads", { projectId: project.id, anchorId: anchor.id, parentId: parent.id, quote: "x", question: "y" })).rejects.toMatchObject({ status: 400 })
+    await expect(call("/api/threads", { anchorId: anchor.id, parentId: parent.id, question: "y" })).rejects.toMatchObject({ status: 400 })
+
+    // Deleting the parent deletes what was asked under it.
+    await call(`/api/threads/${parent.id}`, undefined, "DELETE")
+    expect(await call<SideThread[]>("/api/threads")).toEqual([])
+    expect(yard.store.getSideThread(grandchild.id)).toBeNull()
+  })
+
+  it("a Captain's chat takes an ask about a passage of one of its project's task transcripts", async () => {
+    const { yard, call } = await start()
+    const project = await call<{ id: string }>("/api/projects", { name: "demo" })
+    const other = await call<{ id: string }>("/api/projects", { name: "other" })
+    const task = yard.store.createTask({ projectId: project.id, title: "Fix the login page", prompt: "fix it" })
+    const { thread } = await call<{ thread: SideThread }>("/api/threads", { projectId: project.id, anchorId: task.id, quote: "The redirect loops on Safari", question: "Why would it loop?" })
+    expect(thread).toMatchObject({ kind: "ask", projectId: project.id, anchorId: task.id, quote: "The redirect loops on Safari", parentId: null })
+    const done = await waitFor(async () => {
+      const list = (await call<SideThreadMessage[]>(`/api/threads/${thread.id}/messages`)).filter((m) => m.role === "assistant" || m.role === "error")
+      return list.length && !(await call<SideThread[]>(`/api/threads?projectId=${project.id}`)).find((t) => t.id === thread.id)?.busy ? list : null
+    }, "the Captain's side thread answer")
+    expect(done[0]!.role).toBe("assistant")
+    const prompt = fakeSession(yard.store.sideThreadSession(thread.id)!.sessionId).turns.at(-1)!.prompt
+    expect(prompt).toContain(`the transcript of the task "Fix the login page" (${task.id})`)
+    expect(prompt).toContain("> The redirect loops on Safari")
+    // Only its own project's Captain, and never the Coordinator's chat (a task's card has its own thread there).
+    await expect(call("/api/threads", { projectId: other.id, anchorId: task.id, quote: "x", question: "y" })).rejects.toMatchObject({ status: 400 })
+    await expect(call("/api/threads", { anchorId: task.id, quote: "x", question: "y" })).rejects.toMatchObject({ status: 400 })
+  })
+
   it("refuse a reply to a message from another chat", async () => {
     const { call, say } = await start()
     await say("status")

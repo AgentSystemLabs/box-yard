@@ -219,7 +219,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
           {setup.needed && !showSetup && <SetupReminder status={setup.status!} onFinish={finishSetup} className="chat-column" />}
 
           <div className={showSetup ? "hidden" : "contents"}>
-            <SelectionToTask source={selectionSource} onPrompt={submit}>
+            <SelectionToTask source={selectionSource}>
               <ChatHistory index={history.index} days={history.days ?? days} messages={all} reveal={reveal} ensure={history.ensure} scrollHandle={scroller}>
                 <StickyScroll
                   handle={scroller}

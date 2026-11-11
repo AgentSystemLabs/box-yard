@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // A chat message's actions (MessageActions.tsx): Reply and Copy, in a small toolbar on a short message and in pills at
-// the click's height on one taller than about the chat, which quote text selected beside them. On touch they come out
+// the click's height on one taller than about the chat, which step aside for text selected beside them (the selection
+// has its own Ask and Create task). On touch they come out
 // in a row under the tapped message, in room it makes for them, or in a band across a long message's end. Reply opens
 // the message's reply thread, where the chat's agent routes each message (side-threads-web.test.ts,
 // thread-routing.test.ts). No Ask, Respond or ··· menu, and nothing that stops the text being selected.
@@ -13,7 +14,6 @@ import { CaptainTab } from "../web/src/components/CaptainTab.js"
 import { Line } from "../web/src/components/TaskView.js"
 import { SelectionToTask } from "../web/src/components/SelectionToTask.js"
 import { SideThreadPane, ThreadChatProvider } from "../web/src/components/SideThread.js"
-import { quoteLines } from "../web/src/components/MessageActions.js"
 import { findQuoteRange } from "../web/src/lib/threadHighlight.js"
 import { keys } from "../web/src/lib/queries.js"
 import { COORDINATOR_CHAT, closeThread, openThreadId, threadKeys } from "../web/src/lib/threads.js"
@@ -103,7 +103,7 @@ afterEach(() => {
 const render = (node: ReactNode) => act(() => root.render(createElement(QueryClientProvider, { client: qc }, node)))
 /** A chat with reply threads (the Coordinator's), or `null`: one without (a task's transcript). */
 const inChat = (chat: string | null, source: SelectionTaskSource | null, ...children: ReactNode[]) => {
-  const lines = createElement(SelectionToTask, { source, onPrompt: () => {} }, createElement("div", null, ...children))
+  const lines = createElement(SelectionToTask, { source }, createElement("div", null, ...children))
   render(chat ? createElement(ThreadChatProvider, { value: chat }, lines, createElement(SideThreadPane, { chat })) : lines)
 }
 const click = (el: Element, at?: { clientY: number }) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...at })))
@@ -398,43 +398,28 @@ describe("a long message's Reply pill", () => {
     expect(block.querySelector("[data-message-actions]")).not.toBeNull()
   })
 
-  it("a selection doesn't show it, and the selection's own Reply quoting selection is still there", () => {
+  it("a selection doesn't show it, and the selection's own Ask and Create task are there", () => {
     const block = long()
     select("never backs off")
     click(block.querySelector("p:last-child")!, { clientY: 300 })
     expect(column(block).hasAttribute("data-open")).toBe(false)
-    expect(document.querySelector("[data-testid=selection-reply]")).not.toBeNull()
+    expect(document.querySelector("[data-testid=selection-ask]")).not.toBeNull()
+    expect(document.querySelector("[data-testid=selection-task]")).not.toBeNull()
   })
 
-  it("with text selected while it's out, it quotes the selection, beside it, and the selection's own action steps aside", () => {
+  it("with text selected while it's out, it steps aside for the selection's own actions", () => {
     const block = long()
     click(block.querySelector("p")!, { clientY: 300 })
+    expect(column(block).hasAttribute("data-open")).toBe(true)
     select("never backs off")
-    expect(column(block).hasAttribute("data-quote")).toBe(true)
-    expect(pill(block).getAttribute("aria-label")).toBe("Reply quoting selection")
-    expect(pill(block).className).toContain("after:content-['Quote']")
-    // Beside the selection's last line (200px–218px in the window: 709px into the message).
-    expect(stack(block).style.top).toBe(`${709 - HALF}px`)
-    expect(document.querySelector("[data-testid=selection-reply]")).toBeNull()
-    // Pressing it keeps the selection; a phone may drop it before the click lands, so the quote is kept from the press.
-    const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
-    act(() => {
-      pill(block).dispatchEvent(new Event("pointerdown", { bubbles: true }))
-      pill(block).dispatchEvent(press)
-    })
-    expect(press.defaultPrevented).toBe(true)
-    act(() => {
-      window.getSelection()!.removeAllRanges()
-      document.dispatchEvent(new Event("selectionchange"))
-    })
-    click(pill(block))
-    const box = document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!
-    expect(box.value).toBe("> never backs off\n\n")
+    // One place acts on a passage: the pills never quote it.
     expect(column(block).hasAttribute("data-open")).toBe(false)
-    expect(fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")).toEqual([])
+    expect(pill(block).getAttribute("aria-label")).toBe("Reply in a thread")
+    expect(document.querySelector("[data-testid=selection-ask]")!.textContent).toContain("Ask")
+    expect(document.querySelector("[data-testid=selection-task]")!.textContent).toContain("Create task")
   })
 
-  it("selecting nothing again turns it back into a plain Reply", () => {
+  it("a click with nothing selected any more brings back a plain Reply to the whole message", () => {
     const block = long()
     click(block.querySelector("p")!, { clientY: 300 })
     select("never backs off")
@@ -442,10 +427,11 @@ describe("a long message's Reply pill", () => {
       window.getSelection()!.removeAllRanges()
       document.dispatchEvent(new Event("selectionchange"))
     })
-    expect(column(block).hasAttribute("data-quote")).toBe(false)
-    expect(pill(block).getAttribute("aria-label")).toBe("Reply in a thread")
+    click(block.querySelector("p")!, { clientY: 300 })
+    expect(column(block).hasAttribute("data-open")).toBe(true)
     click(pill(block))
     expect(document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!.value).toBe("")
+    expect(document.querySelector("[data-testid=side-thread-original]")).not.toBeNull()
   })
 })
 
@@ -481,11 +467,5 @@ describe("message text", () => {
     touch()
     inChat(COORDINATOR_CHAT, ORCH, line(chat("chat_reply0001", "assistant", "A reply")), line(chat("chat_user00001", "user", "My question")))
     for (const el of host.querySelectorAll<HTMLElement>("*")) expect(el.className.toString()).not.toMatch(/\bselect-none\b|touch-none/)
-  })
-})
-
-describe("quoteLines", () => {
-  it("quotes every line, blank ones too", () => {
-    expect(quoteLines("Line one\n\nLine two\n")).toBe("> Line one\n>\n> Line two")
   })
 })
