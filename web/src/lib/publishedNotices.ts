@@ -2,6 +2,7 @@
 // is unit tested; the cards themselves are components/PublishedNotices.tsx. Used by the Coordinator chat
 // and the project Captain tab.
 import { fileNameOf, previewKind, type PreviewItem } from "./filePreview"
+import { listFiles } from "./taskFiles"
 import { dayKey } from "./calendarDay"
 
 /** The bits of a chat, Captain or task message the grouping reads. */
@@ -111,14 +112,13 @@ export function publishedLabel(count: number): string {
 
 export const previewItemOf = (f: PublishedFileRef): PreviewItem => ({ url: f.url, name: f.filename, title: f.title })
 
-const isImage = (f: PublishedFileRef) => previewKind({ url: f.url, name: f.filename }) === "image"
-
 /**
- * How a card shows its files: the images first, then the rest, each in the order it was published (as the task's
- * Files drawer puts thumbnails above its list), so the strip's "+N more" never holds back a picture.
+ * A card's files in the order the task's Files drawer lists them (listFiles: newest first, thumbnails above the other
+ * files), so the strip, the list and the preview's "2 of 6" mean the same file on both.
  */
-export function imagesFirst(files: readonly PublishedFileRef[]): PublishedFileRef[] {
-  return [...files.filter(isImage), ...files.filter((f) => !isImage(f))]
+export function drawerOrder(files: readonly PublishedFileRef[]): PublishedFileRef[] {
+  const byId = new Map(files.map((f) => [f.id, f]))
+  return listFiles(files.map((f) => ({ ...f, mime: "", size: 0 }))).ordered.map((f) => byId.get(f.id)!)
 }
 
 /** The ←/→ gallery over a whole group: every file the preview can open, in order (like the task's Files drawer). */
