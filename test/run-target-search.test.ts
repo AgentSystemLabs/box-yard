@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { matchRanges, searchRunTargets, searchWords, wordTier } from "../shared/runTargetSearch.js"
 import { harnessModelTargets, type HarnessPickSources } from "../shared/harnessPicks.js"
 import { buildHarnessTargets, buildRunTargets, filterRunTargets } from "../shared/runTargets.js"
+import { BUILTIN_MODELS } from "../shared/models.js"
 
 const sources: HarnessPickSources = {
   defaults: {
@@ -19,6 +20,9 @@ const places = buildRunTargets({
   localLabel: null,
   gpu: { default: "runpod", problems: { runpod: null, vast: null, daytona: null }, types: { runpod: ["A40"], vast: ["RTX 4090"], daytona: ["H100"] } },
 })
+// Every Fable in the catalog, in its order: the latest, the aliases, then the older ones. A new release moves them along.
+const FABLES = BUILTIN_MODELS.filter((m) => /^fable/i.test(m.label)).map((m) => `claude:${m.id}`)
+const NEWEST = FABLES[0]!
 const find = (q: string, under?: string) => searchRunTargets(harnesses, q, under ? harnesses.find((t) => t.token === under) : undefined).map((t) => t.token)
 const where = (q: string, under?: string) => searchRunTargets(places, q, under ? places.find((t) => t.token === under) : undefined).map((t) => t.token)
 
@@ -74,14 +78,15 @@ describe("matchRanges", () => {
 
 describe("searchRunTargets: harness, model and effort in words", () => {
   it("finds a model and its effort from two words, the latest model first", () => {
-    expect(find("fable high")).toEqual(["claude:claude-fable-5-1:high", "claude:fable:high", "claude:fable[1m]:high", "claude:claude-fable-5:high"])
-    expect(find("fa hi")[0]).toBe("claude:claude-fable-5-1:high")
-    expect(find("high fable")[0]).toBe("claude:claude-fable-5-1:high")
-    expect(find("FABLE  HIGH ")[0]).toBe("claude:claude-fable-5-1:high")
+    expect(find("fable high")).toEqual(FABLES.map((token) => `${token}:high`))
+    expect(FABLES.slice(1, 3)).toEqual(["claude:fable", "claude:fable[1m]"])
+    expect(find("fa hi")[0]).toBe(`${NEWEST}:high`)
+    expect(find("high fable")[0]).toBe(`${NEWEST}:high`)
+    expect(find("FABLE  HIGH ")[0]).toBe(`${NEWEST}:high`)
   })
 
   it("lists each matching model once, in the catalog's order, with no effort rows until one is named", () => {
-    expect(find("fa")).toEqual(["claude:claude-fable-5-1", "claude:fable", "claude:fable[1m]", "claude:claude-fable-5"])
+    expect(find("fa")).toEqual(FABLES)
     expect(find("fable")).toEqual(find("fa"))
     expect(find("opus").slice(0, 2)).toEqual(["claude:claude-opus-5-5", "claude:opus"])
   })
@@ -110,7 +115,7 @@ describe("searchRunTargets: harness, model and effort in words", () => {
     expect(find("codex sol high").slice(0, 2)).toEqual(["codex:gpt-6.1-sol:high", "codex:gpt-6-sol:high"])
     expect(find("cursor sol")).toEqual(["cursor:gpt-6.1-sol-high"])
     expect(find("sol")).toEqual(expect.arrayContaining(["codex:gpt-6.1-sol", "cursor:gpt-6.1-sol-high"]))
-    expect(find("claude fable high")[0]).toBe("claude:claude-fable-5-1:high")
+    expect(find("claude fable high")[0]).toBe(`${NEWEST}:high`)
     expect(find("codex fable")).toEqual([])
   })
 
@@ -123,7 +128,7 @@ describe("searchRunTargets: harness, model and effort in words", () => {
 
   it("searches only inside an open level", () => {
     expect(find("sol", "codex")).toEqual(["codex:gpt-6.1-sol", "codex:gpt-6-sol", "codex:gpt-5.6-sol"])
-    expect(find("fable high", "claude")[0]).toBe("claude:claude-fable-5-1:high")
+    expect(find("fable high", "claude")[0]).toBe(`${NEWEST}:high`)
     expect(find("fable", "codex")).toEqual([])
     expect(find("h", "claude:claude-fable-5-1")).toEqual(["claude:claude-fable-5-1:high", "claude:claude-fable-5-1:xhigh"])
   })

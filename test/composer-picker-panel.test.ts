@@ -25,6 +25,10 @@ const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTime
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)))
 const input = () => document.querySelector("textarea")!
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')
+// Every Fable in the catalog, in its order: the latest, the aliases, then the older ones. A new release moves them along.
+const FABLE_MODELS = BUILTIN_MODELS.filter((m) => /^fable/i.test(m.label))
+const FABLES = FABLE_MODELS.map((m) => `claude:${m.id}`)
+const NEWEST = FABLE_MODELS[0]!
 const row = (token: string) => document.querySelector<HTMLElement>(`[role="option"][data-token="${token}"]`)!
 /** The sheet's search field: it keeps the focus, and says which row is highlighted. */
 const search = () => document.querySelector<HTMLInputElement>('[role="dialog"] input[role="combobox"]')!
@@ -265,20 +269,20 @@ describe("Composer button picker panels", () => {
     await settle()
     await open("agent")
     await find("fable high")
-    expect(choices()).toEqual(["claude:claude-fable-5-1:high", "claude:fable:high", "claude:fable[1m]:high", "claude:claude-fable-5:high"])
-    expect(active()).toBe("claude:claude-fable-5-1:high")
+    expect(choices()).toEqual(FABLES.map((token) => `${token}:high`))
+    expect(active()).toBe(`claude:${NEWEST.id}:high`)
     // Each row is named for its model, with the effort beside it and what sets it apart: no two read alike.
-    expect(row("claude:claude-fable-5-1:high").textContent).toMatch(/^Fable 5\.1High/)
+    expect(row(`claude:${NEWEST.id}:high`).textContent).toContain(`${NEWEST.label}High`)
     expect(row("claude:fable:high").textContent).toContain("alias")
     expect(row("claude:claude-fable-5:high").textContent).toContain("older")
-    expect(new Set(tags()).size).toBe(4)
-    expect([...row("claude:claude-fable-5-1:high").querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["Fable", "High"])
+    expect(new Set(tags()).size).toBe(FABLES.length)
+    expect([...row(`claude:${NEWEST.id}:high`).querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["Fable", "High"])
     key("Enter")
     expect(dialog()).toBeNull()
-    expect(input().value).toBe("!claude:claude-fable-5-1:high ")
+    expect(input().value).toBe(`!claude:${NEWEST.id}:high `)
     expect(document.activeElement).toBe(input())
     key("Enter")
-    expect(onSubmit.mock.calls[0]![2].agent).toMatchObject({ value: "claude", model: "claude-fable-5-1", effort: "high" })
+    expect(onSubmit.mock.calls[0]![2].agent).toMatchObject({ value: "claude", model: NEWEST.id, effort: "high" })
   })
 
   it("lists each model once for part of a name, and opens the first one's efforts on Enter", async () => {
@@ -286,19 +290,19 @@ describe("Composer button picker panels", () => {
     await settle()
     await open("agent")
     await find("fa")
-    expect(choices()).toEqual(["claude:claude-fable-5-1", "claude:fable", "claude:fable[1m]", "claude:claude-fable-5"])
+    expect(choices()).toEqual(FABLES)
     expect(document.querySelector('[data-testid="run-target-menu"]')?.textContent).toContain("↵ open")
     key("Enter")
-    expect(title()).toMatch(/Fable 5\.1/)
-    expect(choices()[0]).toBe("claude:claude-fable-5-1")
+    expect(title()).toContain(NEWEST.label)
+    expect(choices()[0]).toBe(`claude:${NEWEST.id}`)
     await find("x")
     // One letter only counts where it starts a word: "x" is Extra high, not also Max.
-    expect(choices()).toEqual(["claude:claude-fable-5-1:xhigh"])
+    expect(choices()).toEqual([`claude:${NEWEST.id}:xhigh`])
     await find("m")
-    expect(choices()).toEqual(["claude:claude-fable-5-1:medium", "claude:claude-fable-5-1:max"])
+    expect(choices()).toEqual([`claude:${NEWEST.id}:medium`, `claude:${NEWEST.id}:max`])
     key("ArrowDown")
     key("Enter")
-    expect(input().value).toBe("!claude:claude-fable-5-1:max ")
+    expect(input().value).toBe(`!claude:${NEWEST.id}:max `)
   })
 
   it("searches inside an open level, and a model's name there finds its efforts too", async () => {
