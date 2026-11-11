@@ -470,15 +470,18 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   // A task opened elsewhere than its row (RevealOpenedTask): its project and the trees above it unfold, then its row
   // scrolls just into view, gliding unless Cody prefers reduced motion. Only the list moves, never the page or a panel,
   // and the focus stays where it is. A list that has just come (the column back from the rail, the drawer opening)
-  // shows its current row at once.
+  // shows its current row, and anything it reveals before its first paint, at once: there's nothing to glide from.
   const reveal = useSidebarReveal()
   const list = useRef<HTMLDivElement>(null)
-  /** The list was on screen at the last commit; `fresh`: it has come since its last reveal. */
-  const shown = useRef({ list: false, fresh: false })
+  /** The list was on screen at the last commit; `fresh`: its current row isn't revealed yet; `painted`: it has been. */
+  const shown = useRef({ list: false, fresh: false, painted: false })
   useLayoutEffect(() => {
     const box = list.current
     const s = shown.current
-    if (box && !s.list) s.fresh = true
+    if (box && !s.list) {
+      Object.assign(s, { fresh: true, painted: false })
+      requestAnimationFrame(() => (s.painted = true))
+    }
     s.list = box !== null
     if (!box) return
     if (reveal && !("opened" in reveal)) {
@@ -510,10 +513,9 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
       key = isRow(selection.selected) ? selection.selected : null
     } else if (s.fresh) key = currentTreeKey(selection)
     else return
-    const glide = !s.fresh && !reducedMotion()
     s.fresh = false
     const row = treeItems(box).find((el) => el.getAttribute("data-tree-key") === key)
-    if (row) scrollListTo(box, row, { block: "nearest", behavior: glide ? "smooth" : "auto" })
+    if (row) scrollListTo(box, row, { block: "nearest", behavior: s.painted && !reducedMotion() ? "smooth" : "auto" })
   })
 
   if (rail)
