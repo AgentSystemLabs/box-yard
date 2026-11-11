@@ -8,7 +8,7 @@
 // its Captain and also expands the sidebar on its tasks; the rail's "Waiting on you", there only while something
 // waits, expands it on that section. Search is the palette (⌘K): on a desktop the top row's 🔍 opens it, on a phone the
 // chats' headers do.
-import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
+import { Fragment, createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
 import { Link } from "wouter"
 import { AlarmClock, BarChart3, Check, ChevronDown, ChevronRight, Inbox, Keyboard, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Plus, Settings as SettingsIcon } from "lucide-react"
 import type { Task } from "../../../shared/types"
@@ -70,12 +70,15 @@ import { NewProjectDialog } from "./NewProjectDialog"
 import { openShortcuts } from "./ShortcutsHelp"
 import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
-import { TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
+import { ProjectDot, TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
 import { AgentIcon, PrChip, STATUS, TAP_AREA, cx } from "./ui"
 
-/** Keyboard focus: a white outline and no fill, so it's never mistaken for the selected row (or a hover). */
-const FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-zinc-100"
+/**
+ * Keyboard focus: a white outline inside the row and no fill, so it's never mistaken for the selected row (or a hover).
+ * `!`: the app's own focus ring (styles.css, gold and outside the box) is unlayered, so it beats a plain utility.
+ */
+const FOCUS = "focus-visible:outline-2! focus-visible:-outline-offset-2! focus-visible:outline-zinc-100!"
 /** The one selected row: a fill and a yellow bar on its left edge. Hover is a fainter fill and no bar. */
 const SELECTED = "bg-zinc-800 text-zinc-50 shadow-[inset_3px_0_0_var(--color-yard-400)]"
 /** A folded group holding the selected task: the bar, faint, and no fill. */
@@ -84,10 +87,13 @@ const INSIDE = "shadow-[inset_3px_0_0_color-mix(in_oklab,var(--color-yard-400)_4
 const ROW_BOX = cx("w-full min-h-9 rounded-lg px-2 text-left text-sm transition pointer-coarse:min-h-11", FOCUS)
 const ROW = cx("flex items-center gap-2.5", ROW_BOX)
 const ICON_BUTTON = cx("grid h-9 w-9 shrink-0 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-900 hover:text-zinc-200 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)
-/** A project row's small buttons (settings, pin): shown on hover, on focus anywhere in the row, on the selected row, and
- * always to a finger (there's no hover on a touch screen). They appear and go at once, with no fade (like the message
- * actions toolbar): only their hover colours ease. */
-const ROW_TOOL = cx("grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 pointer-coarse:h-11 pointer-coarse:w-11 pointer-coarse:opacity-100 focus-visible:opacity-100", FOCUS)
+/**
+ * A project row's small buttons (settings, pin): always there, quiet until the pointer is on one, so nothing waits on a
+ * hover. 32px to a mouse (24px wide in a sidebar under 15rem, where the name needs the room), 44px to a finger.
+ */
+const ROW_TOOL = cx("grid h-8 w-8 shrink-0 place-items-center rounded-md transition-colors hover:bg-zinc-800 hover:text-zinc-200 pointer-fine:@max-[15rem]/side:w-6 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)
+/** A tool's ink: quiet, a step brighter on the selected row's fill or when it's on (a pinned project's pin). */
+const toolInk = (bright: boolean | undefined) => (bright ? "text-zinc-300" : "text-zinc-500")
 
 /*
  * The column and the drawer are a tree to the keyboard and a screen reader (lib/treeView.ts): the Coordinator, "Waiting
@@ -357,6 +363,13 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     keepRows,
   )
   const waiting = useMemo(() => cappedRows(waitingAll, { expanded: allWaiting, keep: openTask }), [waitingAll, allWaiting, openTask])
+  /** "Show all n" and "Show fewer". Back to the first few, the list starts over: it's much shorter than where Cody was. */
+  const expandWaiting = useCallback((all: boolean) => {
+    setAllWaiting(all)
+    if (!all && list.current) list.current.scrollTop = 0
+  }, [])
+  /** Its tasks are from more than one project: its rows say which (WaitingOnYou). */
+  const waitingMixed = useMemo(() => new Set(waitingAll.map((r) => r.task.projectId)).size > 1, [waitingAll])
   const computed = useMemo(() => {
     const projectOf = new Map<string, string>()
     const add = (rows: readonly SidebarRow[] | undefined, project: string) => {
@@ -534,7 +547,8 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
           aria-describedby={empty === "unpinned" ? emptyId : undefined}
           className={cx("flex min-h-0 flex-col", empty !== "none" && "flex-1")}
         >
-          <div className="shrink-0 px-2 pt-2">
+          {/* It stays put above the list, so it has an edge of its own: a row scrolled half out of view ends at a line. */}
+          <div className="shrink-0 border-b border-zinc-800/60 bg-zinc-950 px-2 pt-2 pb-1.5">
             <div {...treeItem(coordinatorKey, 1, coordinatorId, { current: coordinator === "selected" })} className={cx("rounded-lg", FOCUS)}>
               <button
                 type="button"
@@ -545,7 +559,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
               >
                 <CoordinatorIcon />
                 <span className="min-w-0 flex-1 truncate">Coordinator</span>
-                {coordinator === "behind" && <BehindMark />}
+                {coordinator === "behind" && !drawer && <BehindMark />}
               </button>
             </div>
           </div>
@@ -555,15 +569,16 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
               rows={waiting.shown}
               total={waitingAll.length}
               hidden={waiting.hidden}
+              mixed={waitingMixed}
               asks={inbox.asks}
               folded={Boolean(folds[WAITING_FOLD])}
               expanded={allWaiting}
-              onExpand={setAllWaiting}
+              onExpand={expandWaiting}
               selection={selection}
               onPick={pick.task}
             />
             {groups.shown.map((g) => (
-              <ProjectGroup key={g.project.id} group={g} folded={Boolean(folds[g.project.id])} treeFolds={treeFolds} selection={selection} pick={pick} />
+              <ProjectGroup key={g.project.id} group={g} folded={Boolean(folds[g.project.id])} treeFolds={treeFolds} selection={selection} pick={pick} drawer={drawer} />
             ))}
             {empty === "unpinned" && (
               <p id={emptyId} role="none" className="px-2 pt-4 text-xs text-zinc-500">
@@ -634,7 +649,10 @@ function mark(selection: Selection, key: string, group?: string): Mark {
   return null
 }
 
-/** The chat still open in the centre, behind the side panel: a small mark, never the selected fill. */
+/**
+ * The chat still open in the centre, behind the side panel: a small mark, never the selected fill. Not in the drawer:
+ * on a phone the panel covers the chat, and a finger gets no tooltip to say what the mark means.
+ */
 function BehindMark() {
   return (
     <span className="grid h-5 w-5 shrink-0 place-items-center text-zinc-500" title="Open in the centre, behind the panel">
@@ -717,7 +735,7 @@ const RailProject = memo(function RailProject({ group, mark, onPick, onExpand }:
  * A project: one row that is its Captain (the name opens it as the centre chat), with a chevron that only folds its
  * tasks, its settings and its pin; then its live tasks. Folded, the row counts them, with an amber dot if one asks.
  */
-const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, selection, pick }: { group: SidebarGroup; folded: boolean; treeFolds: Readonly<Record<string, true>>; selection: Selection; pick: Pick }) {
+const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, selection, pick, drawer }: { group: SidebarGroup; folded: boolean; treeFolds: Readonly<Record<string, true>>; selection: Selection; pick: Pick; drawer: boolean }) {
   const color = useTiles().colors.get(group.project.id)
   const captain = useCaptainState(group.project.id).data
   const busy = Boolean(captain?.busy)
@@ -729,7 +747,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
     <div data-sidebar-group={project.id} className="pt-1">
       <div
         {...treeItem(captainKey(project.id), 1, nameId, { expanded: rows.length ? !folded : null, current: state === "selected" })}
-        className={cx("group/head flex items-center rounded-lg transition", FOCUS, state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}
+        className={cx("flex items-center rounded-lg transition", FOCUS, state === "selected" ? SELECTED : cx("hover:bg-zinc-900", state === "inside" && INSIDE))}
       >
         <button
           type="button"
@@ -756,17 +774,11 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
           <AgentIcon announce={false} projectId={project.id} color={color} busy={busy} compacting={captain?.compacting} error={Boolean(captain?.error)} tile />
           <span className="min-w-0 flex-1 truncate">{project.name}</span>
           <span className="sr-only">, Captain</span>
-          {folded && rows.length > 0 && (
-            <span className="flex h-5 shrink-0 items-center gap-1 rounded-full bg-zinc-800/80 px-1.5 text-[11px] font-normal text-zinc-400 tabular-nums">
-              {group.needs > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
-              {rows.length}
-              <span className="sr-only"> {rows.length === 1 ? "task" : "tasks"}{group.needs > 0 ? `, ${group.needs} asking you` : ""}</span>
-            </span>
-          )}
-          {state === "behind" && <BehindMark />}
+          {folded && <GroupCountChip group={group} />}
+          {state === "behind" && !drawer && <BehindMark />}
         </button>
-        <ProjectSettingsButton id={project.id} name={project.name} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
-        <PinButton id={project.id} name={project.name} pinned={group.pin === "pinned"} reveal="group-hover/head:opacity-100 group-focus-within/head:opacity-100" shown={state === "selected"} />
+        <ProjectSettingsButton id={project.id} name={project.name} bright={state === "selected"} />
+        <PinButton id={project.id} name={project.name} pinned={group.pin === "pinned"} bright={state === "selected"} />
       </div>
       {!folded && rows.length > 0 && (
         <div id={tasksId} role="group" aria-label={`${project.name} tasks`} className={cx("space-y-px pt-px", PROJECT_TASKS)}>
@@ -783,8 +795,21 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
   )
 })
 
-/** Pin keeps a quiet project in the list; unpinned, it moves to More projects. Drawn like the settings button. */
-function PinButton({ id, name, pinned, reveal, shown }: { id: string; name: string; pinned: boolean; reveal: string; shown?: boolean }) {
+/** A project's tasks out of sight (folded, or under More projects): how many, with an amber dot when one asks. */
+function GroupCountChip({ group }: { group: SidebarGroup }) {
+  const count = group.rows.length
+  if (!count) return null
+  return (
+    <span className="flex h-5 shrink-0 items-center gap-1 rounded-full bg-zinc-800/80 px-1.5 text-[11px] font-normal text-zinc-400 tabular-nums">
+      {group.needs > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
+      {count}
+      <span className="sr-only"> {count === 1 ? "task" : "tasks"}{group.needs > 0 ? `, ${group.needs} asking you` : ""}</span>
+    </span>
+  )
+}
+
+/** Pin keeps a quiet project in the list; unpinned, it moves to More projects. Drawn like the settings button, filled and brighter while it's on. */
+function PinButton({ id, name, pinned, bright }: { id: string; name: string; pinned: boolean; bright?: boolean }) {
   return (
     <button
       type="button"
@@ -793,21 +818,27 @@ function PinButton({ id, name, pinned, reveal, shown }: { id: string; name: stri
       aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
       aria-pressed={pinned}
       tabIndex={-1}
-      className={cx(ROW_TOOL, !shown && cx("opacity-0", reveal))}
+      className={cx(ROW_TOOL, toolInk(pinned || bright))}
     >
       <Pin className={cx("h-3.5 w-3.5", pinned && "fill-current")} aria-hidden />
     </button>
   )
 }
 
-const META_TONE: Partial<Record<Task["status"], string>> = { needs_input: "text-amber-300", failed: "text-red-300", working: "text-sky-300", starting: "text-sky-300", pr_ready: "text-emerald-300" }
+/** A row's PR without a link yet ("PR"): in an open PR's green, unless the row rests. */
+const META_TONE: Partial<Record<Task["status"], string>> = { pr_ready: "text-emerald-300" }
+/**
+ * A row's PR number: 44px to a finger, both ways. In a sidebar under 15rem (its narrowest, or a phone's drawer zoomed
+ * in) it's the number alone, without its ↗: the title needs the room, and its colour and its name still say it's a PR.
+ */
+const ROW_PR = cx(FOCUS, "shrink-0 tabular-nums pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center @max-[15rem]/side:[&>[data-external-mark]]:hidden")
 
 /**
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
- * project), so the copy Cody clicked is the one drawn selected. `project` adds context to the tooltip. One
- * ready for Cody's review, or failed, ends with Mark done's ✓. Its icon names the state, with a still dot when it
- * asks or failed. Working titles carry the motion. A PR number links to
- * GitHub beside the task button, so each action has its own keyboard target.
+ * project), so the copy Cody clicked is the one drawn selected. `project` (a "Waiting on you" row's) ends its name
+ * and its tooltip with its project. One ready for Cody's review, or failed, ends with Mark done's ✓. Its icon alone
+ * says its state, with a still dot when it works, asks or failed. A PR number links to GitHub beside the task button,
+ * so each action has its own keyboard target.
  */
 export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, project }: { row: SidebarRow; spot: RowSpot; selected: boolean; onPick: Pick["task"]; project?: { name: string; color: Parameters<typeof projectColorStyle>[0]; icon?: string | null } }) {
   const { task, dim, meta } = row
@@ -839,9 +870,10 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
       >
         <TaskRowTitle title={task.title} status={task.status} />
         <RowIcon task={task} label={label} dim={dim} />
+        {project?.name && <span className="sr-only">, {project.name}</span>}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
-      {prMeta && <PrChip task={task} variant="number" className={cx(FOCUS, "mr-2 shrink-0 text-xs leading-5 tabular-nums pointer-coarse:min-h-11")} />}
+      {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0")} />}
       {(readyForReview(task.status) || task.status === "failed") && <DoneButton task={task} />}
     </div>
   )
@@ -900,11 +932,11 @@ const TREE_BOX = "ml-[calc(var(--nest)-1.25rem)]"
 /** A tree row's content: past the chevron's column and one step, wherever its box starts (NEST_PAD at the first level). */
 const TREE_PAD = "pl-[2.75rem] pointer-coarse:pl-[4rem]"
 /**
- * A tree row's chevron in the sidebar: on its parent's guide, level with its icon, the guide broken behind it by a
- * patch of the row's fill. Its target reaches left over the indent, clear of the icon: 24px wide to a mouse, 44px to a
- * finger.
+ * A tree row's chevron in the sidebar: on its parent's guide, level with its icon (the row is one line, so its
+ * middle), the guide broken behind it by a patch of the row's fill. Its target is the row's height and reaches left
+ * over the indent, clear of the icon: 24px wide to a mouse, 44px to a finger.
  */
-const NESTED_CHEVRON = "absolute top-0 left-[17px] z-2 flex h-7 w-6 items-start justify-end rounded-lg pt-1 pointer-coarse:h-11 pointer-coarse:w-11"
+const NESTED_CHEVRON = "absolute inset-y-0 left-[17px] z-2 flex w-6 items-center justify-end rounded-lg pointer-coarse:w-11"
 
 /** "2 of 5 running": a folded tree's count, with an amber dot when one of them asks. */
 function TreeCountChip({ tree }: { tree: TreeCount }) {
@@ -1013,7 +1045,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           )}
         </button>
       )}
-      <div className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-x-2 py-1 pr-2 text-sm pointer-coarse:min-h-11", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
+      <div className={cx("flex min-h-9 min-w-0 flex-1 items-center gap-x-2 py-1 pr-2 text-sm pointer-coarse:min-h-11 pointer-coarse:py-0", "@max-[14rem]/side:gap-x-0.5 @max-[14rem]/side:pr-0", guides && TREE_PAD)}>
         <button
           type="button"
           onClick={(e) => {
@@ -1025,13 +1057,13 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           data-open-task={task.id}
           {...(inTree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
           title={`${task.title} · ${label}${folded === null || !foldTwice ? "" : folded ? " (double-click to expand)" : " (double-click to collapse)"}`}
-          className={cx(folded && tree ? "grid-cols-[1.25rem_minmax(0,1fr)_auto]" : "grid-cols-[1.25rem_minmax(0,1fr)]", "grid min-h-7 min-w-0 flex-1 items-center gap-x-2.5 rounded-lg text-left @max-[14rem]/side:gap-x-0.5 pointer-coarse:min-h-9", FOCUS)}
+          className={cx(folded && tree ? "grid-cols-[1.25rem_minmax(0,1fr)_auto]" : "grid-cols-[1.25rem_minmax(0,1fr)]", "grid min-h-7 min-w-0 flex-1 items-center gap-x-2.5 rounded-lg text-left @max-[14rem]/side:gap-x-0.5 pointer-coarse:min-h-11", FOCUS)}
         >
           <TaskRowTitle title={task.title} status={task.status} />
           <RowIcon task={task} label={label} dim={dim} />
           {folded && tree && <span className="col-start-3 row-start-1"><TreeCountChip tree={tree} /></span>}
         </button>
-        {prMeta && <PrChip task={task} variant="number" className={cx(FOCUS, "shrink-0 text-[11px] pointer-coarse:min-h-11")} />}
+        {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "text-[11px]")} />}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("shrink-0 text-[11px] @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </div>
       {(readyForReview(task.status) || task.status === "failed") && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
@@ -1088,9 +1120,9 @@ function RowIcon({ task, label, dim }: { task: Task; label: string; dim: boolean
 
 /**
  * A project row's way to its settings (the dialog over the chat; on a phone, over the drawer, which stays open
- * beneath it). Like the pin it shows on hover or focus, always on a touch screen, and always for the open project.
+ * beneath it). Like the pin it's always there, quiet.
  */
-function ProjectSettingsButton({ id, name, reveal, shown }: { id: string; name: string; reveal: string; shown?: boolean }) {
+function ProjectSettingsButton({ id, name, bright }: { id: string; name: string; bright?: boolean }) {
   const open = useOpenProjectSettings()
   return (
     <button
@@ -1100,21 +1132,30 @@ function ProjectSettingsButton({ id, name, reveal, shown }: { id: string; name: 
       aria-label={`${name} project settings`}
       data-testid="sidebar-project-settings"
       tabIndex={-1}
-      className={cx(ROW_TOOL, !shown && cx("opacity-0", reveal))}
+      className={cx(ROW_TOOL, toolInk(bright))}
     >
       <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
     </button>
   )
 }
 
+/** "Show fewer", in the head of the whole "Waiting on you" list: quiet, in the head's amber, 44px to a finger. */
+const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center rounded-md px-1.5 text-[11px] font-medium text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 pointer-coarse:min-h-11 pointer-coarse:px-2.5", FOCUS)
+/** The head of the whole list stays in view above its rows, on the section's own tint (opaque: rows pass under it). */
+const WAITING_STUCK = "sticky top-0 z-10 rounded-b-none border-b border-amber-300/15 bg-[color-mix(in_oklab,var(--color-amber-300)_3%,var(--color-zinc-950))]"
+
 /**
  * "Waiting on you": what asks Cody, failed, or has a PR to review, above the projects. It isn't a mode: it folds like
- * any group, says how many it holds, and is gone when nothing waits. Long lists stop at WAITING_CAP with "Show n more".
+ * any group, says how many it holds, and is gone when nothing waits. Long lists stop at WAITING_CAP with "Show all n";
+ * the whole list ends with "Show fewer", and its head, which stays in view while it scrolls, has one too, so the
+ * projects under it are never a long scroll away. `mixed`: its tasks are from more than one project, so each run of
+ * rows from one project sits under that project's name.
  */
-const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, asks, folded, expanded, onExpand, selection, onPick }: {
+const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, asks, folded, expanded, onExpand, selection, onPick }: {
   rows: SidebarRow[]
   total: number
   hidden: number
+  mixed: boolean
   asks: boolean
   folded: boolean
   expanded: boolean
@@ -1130,40 +1171,61 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, asks, fol
   const moreId = useId()
   if (!total) return null
   const inside = selection.inside === WAITING_FOLD
+  /** The whole list is on screen, and it's longer than the cap: "Show fewer" takes it back. */
+  const whole = expanded && total > WAITING_CAP
+  /** Then its head stays in view while the list scrolls, with a "Show fewer" of its own. */
+  const stuck = whole && !folded
+  const fewer = () => onExpand(false)
   return (
     <div data-sidebar-group={WAITING_FOLD} className="mt-1 mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.03]">
-      <div {...treeItem(WAITING_HEAD, 1, headId, { expanded: !folded })} className={cx("rounded-lg", FOCUS)}>
+      {/* The fold button covers the whole head (its ::after), under "Show fewer": one row, two targets. */}
+      <div {...treeItem(WAITING_HEAD, 1, headId, { expanded: !folded })} className={cx("flex items-center rounded-lg", FOCUS, stuck ? WAITING_STUCK : "relative")}>
         <button
           type="button"
           onClick={() => toggleSidebarFold(WAITING_FOLD)}
           aria-expanded={!folded}
           {...OPEN_TOGGLE_PART}
           id={headId}
-          className={cx("flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase hover:text-amber-100 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
+          className={cx("flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg pl-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase after:absolute after:inset-0 after:rounded-lg hover:text-amber-100 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
         >
-          <Inbox className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 truncate">Waiting on you</span>
+          <Inbox className={cx("h-3.5 w-3.5 shrink-0", stuck && "@max-[15rem]/side:hidden")} aria-hidden />
+          {/* Under 15rem "Waiting" alone fits (under 20rem, beside "Show fewer"); the rest stays in its name. */}
+          <span className="min-w-0 truncate">
+            Waiting<span className={stuck ? "@max-[20rem]/side:sr-only" : "@max-[15rem]/side:sr-only"}> on you</span>
+          </span>
           <Badge count={total} asks={asks} className="h-4 min-w-4 px-1 text-[10px]" />
-          <span className="ml-auto text-amber-200/50" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
         </button>
+        {stuck && (
+          // It goes with the click, so the press doesn't take the focus to it. Under 15rem it's "Fewer", to fit.
+          <button type="button" onClick={fewer} onMouseDown={(e) => e.preventDefault()} tabIndex={-1} aria-label="Show fewer" className={FEWER}>
+            <span className="@max-[15rem]/side:hidden">Show fewer</span>
+            <span className="@min-[15rem]/side:hidden">Fewer</span>
+          </button>
+        )}
+        <span className="mr-2 ml-1 shrink-0 text-amber-200/50" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
       </div>
       {!folded && (
         <div role="group" aria-label="Waiting on you" className="space-y-px px-1 pb-1">
-          {rows.map((r) => (
-            <TaskRow
-              key={r.task.id}
-              row={r}
-              spot="waiting"
-              selected={selection.selected === taskKey(r.task.id, "waiting")}
-              onPick={onPick}
-              project={lines.get(r.task.projectId) ?? NO_PROJECT}
-            />
-          ))}
-          {(hidden > 0 || (expanded && total > WAITING_CAP)) && (
+          {rows.map((r, i) => {
+            const project = lines.get(r.task.projectId) ?? NO_PROJECT
+            return (
+              <Fragment key={r.task.id}>
+                {/* The row's own name ends with its project, so this line is for the eye only. */}
+                {mixed && project.name && rows[i - 1]?.task.projectId !== r.task.projectId && (
+                  <div aria-hidden className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 px-2 pt-1 text-[11px] leading-4 text-zinc-400">
+                    <span className="grid place-items-center"><ProjectDot projectId={r.task.projectId} /></span>
+                    <span className="min-w-0 truncate">{project.name}</span>
+                  </div>
+                )}
+                <TaskRow row={r} spot="waiting" selected={selection.selected === taskKey(r.task.id, "waiting")} onPick={onPick} project={project} />
+              </Fragment>
+            )
+          })}
+          {(hidden > 0 || whole) && (
             <div {...treeItem(WAITING_MORE, 2, moreId)} className={cx("rounded-lg", FOCUS)}>
-              <button type="button" onClick={() => onExpand(!expanded)} {...openPart(moreId)} className={cx(ROW, "text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")}>
+              <button type="button" onClick={whole ? fewer : () => onExpand(true)} {...openPart(moreId)} className={cx(ROW, "text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")}>
                 <span className="w-5 shrink-0" aria-hidden />
-                {expanded ? "Show fewer" : `Show ${hidden} more`}
+                {whole ? "Show fewer" : `Show all ${total}`}
               </button>
             </div>
           )}
@@ -1228,7 +1290,7 @@ const MoreProjects = memo(function MoreProjects({ groups, selection, onPick }: {
 function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGroup; color: Parameters<typeof projectColorStyle>[0]; selected: boolean; onPick: Pick["captain"] }) {
   const id = useId()
   return (
-    <div {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("group/more flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
+    <div {...treeItem(captainKey(g.project.id), 2, id, { current: selected })} className={cx("flex items-center rounded-lg transition", FOCUS, selected ? SELECTED : "hover:bg-zinc-900")}>
       <button
         type="button"
         onClick={(e) => onPick(g.project.id, e)}
@@ -1242,11 +1304,10 @@ function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGrou
           <span style={projectColorStyle(color)} className="h-2 w-2 rounded-[3px] bg-(--pc)" />
         </span>
         <span className="min-w-0 flex-1 truncate">{g.project.name}</span>
-        {g.needs > 0 && <span className="shrink-0 text-xs text-amber-300">{g.needs} asks</span>}
-        {!g.needs && g.running > 0 && <span className="shrink-0 text-xs text-sky-300">{g.running} running</span>}
+        <GroupCountChip group={g} />
       </button>
-      <ProjectSettingsButton id={g.project.id} name={g.project.name} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
-      <PinButton id={g.project.id} name={g.project.name} pinned={false} reveal="group-hover/more:opacity-100 group-focus-within/more:opacity-100" shown={selected} />
+      <ProjectSettingsButton id={g.project.id} name={g.project.name} bright={selected} />
+      <PinButton id={g.project.id} name={g.project.name} pinned={false} bright={selected} />
     </div>
   )
 }

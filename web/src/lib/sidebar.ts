@@ -13,7 +13,7 @@ export interface SidebarRow {
   task: Task
   /** Resting (idle), ready for Cody's review: drawn dim, so live work stands out. */
   dim: boolean
-  /** The short word on the right: "asks", "starting", or "#253". Working/failed use the title and icon. */
+  /** The row's PR, in short: "#253", "merged #253", or nothing. Never its state: the icon says that. */
   meta: string
   /** Its sub-tasks (server/subtasks.ts), nested under it in spawn order, finished ones too. Only under a project. */
   kids?: SidebarRow[]
@@ -43,18 +43,22 @@ const LIVE: ReadonlySet<TaskStatus> = new Set(["needs_input", "failed", "working
 
 const lastActive = (t: Task) => t.lastActiveAt ?? t.updatedAt
 
-/** The word a row ends with: what Cody would ask about first. */
+/**
+ * What a row ends with: its PR, never its state. The row's icon says the state (TaskStatusIcon, and its name to a
+ * screen reader), so a task that asks, waits, starts or is queued ends with nothing.
+ */
 export function rowMeta(t: Task): string {
   const pr = t.prUrl ? prNumber(t.prUrl) : null
   switch (t.status) {
-    case "needs_input": return "asks"
-    case "failed": return ""
-    case "working": return ""
-    case "starting": return "starting"
-    case "queued": return "queued"
-    case "waiting": return "waiting"
+    case "needs_input":
+    case "failed":
+    case "working":
+    case "starting":
+    case "queued":
+    case "waiting":
+      return ""
     case "pr_ready": return pr ? `#${pr}` : "PR"
-    case "done": return t.prMergedAt ? (pr ? `merged #${pr}` : "merged") : "done"
+    case "done": return t.prMergedAt ? (pr ? `merged #${pr}` : "merged") : ""
     default: return pr ? `#${pr}` : ""
   }
 }
@@ -211,12 +215,12 @@ export function keepGroups(prev: readonly SidebarGroup[] | undefined, next: Side
 export const keepSelection = (prev: Selection | undefined, next: Selection): Selection =>
   prev && prev.selected === next.selected && prev.behind === next.behind && prev.inside === next.inside ? prev : next
 
-/** How many "Waiting on you" rows show before "Show n more", so a long list doesn't push the projects away. */
+/** How many "Waiting on you" rows show before "Show all n", so a long list doesn't push the projects away. */
 export const WAITING_CAP = 5
 
 /**
  * The "Waiting on you" rows on screen: the first `cap`, or all once Cody asked for them. The open task (`keep`) always
- * stays, so the row drawn selected is never one hidden behind "Show n more".
+ * stays, so the row drawn selected is never one hidden behind "Show all n".
  */
 export function cappedRows(rows: readonly SidebarRow[], opts: { expanded: boolean; keep?: string | null }): { shown: SidebarRow[]; hidden: number } {
   if (opts.expanded || rows.length <= WAITING_CAP) return { shown: [...rows], hidden: 0 }

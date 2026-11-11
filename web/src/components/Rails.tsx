@@ -30,8 +30,8 @@ import { DismissButton, modalDepth } from "./Modal"
 import { TREE_STEP, TaskRow, TreeNode } from "./Sidebar"
 import { useTiles } from "../lib/taskTiles"
 
-/** Keyboard focus: the sidebar's white outline, never mistaken for the selected item. */
-const FOCUS = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-zinc-100"
+/** Keyboard focus: the sidebar's white outline, never mistaken for the selected item (`!`: see Sidebar.tsx FOCUS). */
+const FOCUS = "focus-visible:outline-2! focus-visible:-outline-offset-2! focus-visible:outline-zinc-100!"
 /** A task open, or on the way to the one opened: the sidebar's fill and yellow bar. */
 const SELECTED = "bg-zinc-800 text-zinc-50 shadow-[inset_3px_0_0_var(--color-yard-400)]"
 /** 44px to a finger and a mouse alike. */
