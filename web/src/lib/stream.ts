@@ -289,6 +289,9 @@ export function useServerEvents(enabled: boolean): Connection {
         case "runpod.build":
           qc.setQueryData<RunPodStatus>(keys.runpod, (old) => (old ? { ...old, build: ev.build } : old))
           break
+        case "update":
+          qc.setQueryData(keys.update, ev.status)
+          break
         case "docker.build":
           qc.setQueryData<DockerStatus>(keys.docker, (old) =>
             old ? { ...old, build: ev.build, image: ev.build.state === "succeeded" && ev.build.image === old.image.tag ? { ...old.image, present: true } : old.image } : old,

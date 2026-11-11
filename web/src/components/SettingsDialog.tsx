@@ -48,6 +48,7 @@ import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
 import { Button, LineIcon, NewTabLink, Select, TAP_AREA, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
+import { UpdateRow } from "./UpdateBanner"
 import { BOX_SIZE_SPECS } from "../../../shared/boxSizes"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
 import { NOTE_BUDGET_LIMITS } from "../../../shared/notes"
@@ -1750,6 +1751,9 @@ function AboutPanel({ onReset, resetting }: { onReset: () => void; resetting: bo
               {__APP_COMMIT__}
             </NewTabLink>
           )}
+        </AboutRow>
+        <AboutRow label="Updates">
+          <UpdateRow />
         </AboutRow>
         <AboutRow label="Box provider">
           {h?.provider ?? "…"}
