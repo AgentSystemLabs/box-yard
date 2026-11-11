@@ -93,7 +93,7 @@ export interface Tap extends Point {
   t: number
 }
 
-/** A second tap close enough in time and place to the first to be a double tap. */
-export function isDoubleTap(prev: Tap | null, now: Tap): boolean {
-  return !!prev && now.t - prev.t < 300 && Math.hypot(now.x - prev.x, now.y - prev.y) < 30
+/** A second tap close enough in time (within `ms`) and place to the first to be a double tap. */
+export function isDoubleTap(prev: Tap | null, now: Tap, ms = 300): boolean {
+  return !!prev && now.t - prev.t < ms && Math.hypot(now.x - prev.x, now.y - prev.y) < 30
 }

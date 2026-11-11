@@ -3,7 +3,7 @@
 // links open it through <FileLink> and lib/preview.ts.
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { useSearchParams } from "wouter"
-import { Check, ChevronLeft, ChevronRight, Code, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, Loader2, ZoomIn, ZoomOut } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Code, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, ZoomIn, ZoomOut } from "lucide-react"
 import { useArtifacts } from "../lib/queries"
 import {
   CSV_ROW_LIMIT,
@@ -20,8 +20,11 @@ import {
   type PreviewKind,
 } from "../lib/filePreview"
 import { PREVIEW_PARAM, closePreview, stepPreview, usePreviewState } from "../lib/preview"
+import { copyText } from "../lib/clipboard"
+import { toast } from "../lib/toast"
 import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, maxScale, pinchView, swipeAction, zoomAt, zoomStep, type Point, type Tap, type View } from "../lib/imageGestures"
 import { DismissButton, Modal, type ModalSize } from "./Modal"
+import { Loading } from "./Loading"
 import { formatSize } from "./Attachments"
 import { isTyping } from "./TaskFilters"
 import { Markdown, NewTabLink, cx } from "./ui"
@@ -46,11 +49,18 @@ export function FilePreviewHost() {
   if (!item) {
     return (
       <Modal size="sm" title="Preview" onClose={closePreview}>
-        {artifacts.isLoading ? <Loading /> : <Problem message="This file doesn't exist anymore." />}
+        {artifacts.isLoading ? <FileLoading /> : <Problem message="This file doesn't exist anymore." />}
       </Modal>
     )
   }
-  return <FilePreview item={item} position={fromStore && fromStore.items.length > 1 ? [fromStore.index + 1, fromStore.items.length] : null} />
+  const gallery = fromStore && fromStore.items.length > 1 ? fromStore : null
+  return (
+    <FilePreview
+      item={item}
+      position={gallery ? [gallery.index + 1, gallery.items.length] : null}
+      noun={gallery && gallery.items.some((g) => previewKind(g) !== "image") ? "file" : "image"}
+    />
+  )
 }
 
 function withArtifact(item: PreviewItem | null, a: Artifact): PreviewItem {
@@ -78,11 +88,21 @@ const SIZE: Record<PreviewKind, ModalSize> = {
 /** Kinds that fill a fixed-height panel; the rest grow with their content up to the viewport. */
 const TALL: PreviewKind[] = ["image", "html", "pdf"]
 
-function FilePreview({ item, position }: { item: PreviewItem; position: [number, number] | null }) {
+/**
+ * One file, or one of a gallery (`position`: where it is, of how many; `noun`: what the gallery steps through).
+ * A gallery keeps one frame for every kind, so stepping from a screenshot to a log never resizes the dialog: an image
+ * has an arrow on each side, any other kind a pager under it, where nothing covers the text.
+ */
+function FilePreview({ item, position, noun }: { item: PreviewItem; position: [number, number] | null; noun: "image" | "file" }) {
   const kind = previewKind(item)
+  const image = kind === "image"
   const name = item.name || fileNameOf(item.url)
+  const heading = item.title || name
   const [raw, setRaw] = useState(false)
+  // The image owns its zoom (ImageView). This copy only draws the button's state and hides the arrows; the button
+  // and Z ask for a toggle through the ref.
   const [zoomed, setZoomed] = useState(false)
+  const toggleZoom = useRef<(() => void) | null>(null)
   useEffect(() => {
     setRaw(false)
     setZoomed(false)
@@ -94,53 +114,73 @@ function FilePreview({ item, position }: { item: PreviewItem; position: [number,
       if (position && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault()
         stepPreview(e.key === "ArrowLeft" ? -1 : 1)
-      } else if (kind === "image" && (e.key === "z" || e.key === "Z")) {
+      } else if (image && (e.key === "z" || e.key === "Z")) {
         e.preventDefault()
-        setZoomed((z) => !z)
+        toggleZoom.current?.()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [kind, position])
+  }, [image, position])
+
+  const place = position ? `${position[0]} of ${position[1]}` : null
+  // An image has no pager row, so its place in the gallery goes here.
+  const details = [image ? place : null, heading !== name ? name : null, item.size ? formatSize(item.size) : null].filter(Boolean).join(" · ")
 
   return (
     <Modal
-      size={kind ? SIZE[kind] : "md"}
+      size={position ? "full" : kind ? SIZE[kind] : "md"}
       label={name}
       onClose={closePreview}
-      className={cx(kind && TALL.includes(kind) && "sm:h-[85vh]", kind && isTextKind(kind) && "sm:max-h-[85vh]")}
+      className={cx((position || (kind && TALL.includes(kind))) && "sm:h-[85vh]", !position && kind && isTextKind(kind) && "sm:max-h-[85vh]")}
       bodyClassName="relative flex min-h-0 flex-1 flex-col"
     >
-      <header className="flex min-h-14 shrink-0 items-center gap-1 border-b border-zinc-900 py-2 pr-2 pl-4 sm:gap-2 sm:py-2.5 sm:pr-3 sm:pl-5">
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold text-zinc-50" title={name}>
-            {name}
-          </h2>
-          <p className="truncate text-xs text-zinc-500">
-            {/* The position first: a long title truncates, and "2 of 4" must still show on a phone. */}
-            {[position ? `${position[0]} of ${position[1]}` : null, item.title, item.size ? formatSize(item.size) : null].filter(Boolean).join(" · ")}
-          </p>
+      {/* Narrow (a phone): the title keeps the first row to itself, next to Close, and the actions take a second. */}
+      <header className="@container shrink-0 border-b border-zinc-900">
+        <div className="flex flex-wrap items-center gap-x-1 py-2 pr-2 pl-4 @md:min-h-14 @md:flex-nowrap @md:gap-x-2 sm:py-2.5 sm:pr-3 sm:pl-5">
+          <div className="min-w-0 flex-1 basis-[calc(100%-3.5rem)] @md:basis-0">
+            <h2 className="line-clamp-2 text-sm font-semibold wrap-anywhere text-zinc-50" title={heading}>
+              {heading}
+            </h2>
+            {details && (
+              <p className="line-clamp-2 text-xs wrap-anywhere text-zinc-500" title={name}>
+                {details}
+              </p>
+            )}
+          </div>
+          <div className="order-last flex w-full items-center justify-end gap-1 @md:order-none @md:w-auto @md:gap-2">
+            {(kind === "markdown" || kind === "json" || kind === "csv") && (
+              <ToolButton label={raw ? (kind === "csv" ? "Show table" : kind === "json" ? "Show formatted" : "Show rendered") : "Show raw"} active={raw} onClick={() => setRaw((r) => !r)}>
+                {raw ? <Eye className="h-4 w-4" /> : <Code className="h-4 w-4" />}
+                <span className="hidden sm:inline">Raw</span>
+              </ToolButton>
+            )}
+            {image && (
+              <ToolButton label={zoomed ? "Fit to screen (Z)" : "Zoom in (Z)"} active={zoomed} onClick={() => toggleZoom.current?.()}>
+                {zoomed ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
+              </ToolButton>
+            )}
+            <FileActions key={item.url} url={item.url} name={name} />
+          </div>
+          <DismissButton kind="close" onClick={closePreview} />
         </div>
-        {(kind === "markdown" || kind === "json" || kind === "csv") && (
-          <ToolButton label={raw ? (kind === "csv" ? "Show table" : kind === "json" ? "Show formatted" : "Show rendered") : "Show raw"} active={raw} onClick={() => setRaw((r) => !r)}>
-            {raw ? <Eye className="h-4 w-4" /> : <Code className="h-4 w-4" />}
-            <span className="hidden sm:inline">Raw</span>
-          </ToolButton>
-        )}
-        {kind === "image" && (
-          <ToolButton label={zoomed ? "Fit to screen (Z)" : "Zoom in (Z)"} active={zoomed} onClick={() => setZoomed((z) => !z)}>
-            {zoomed ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
-          </ToolButton>
-        )}
-        <FileActions url={item.url} name={name} />
-        <DismissButton kind="close" onClick={closePreview} />
       </header>
-      <PreviewBody key={item.url} item={item} kind={kind} name={name} raw={raw} zoomed={zoomed} onZoom={setZoomed} onStep={position ? stepPreview : undefined} />
-      {position && (
+      <PreviewBody key={item.url} item={item} kind={kind} name={name} raw={raw} gallery={!!position} toggleZoom={toggleZoom} onZoom={setZoomed} onStep={position ? stepPreview : undefined} />
+      {/* A zoomed image pans under the pointer, so its arrows step aside: ←/→ still step. */}
+      {position && image && !zoomed && (
         <>
-          <StepButton side="left" onClick={() => stepPreview(-1)} />
-          <StepButton side="right" onClick={() => stepPreview(1)} />
+          <StepButton side="left" noun={noun} />
+          <StepButton side="right" noun={noun} />
         </>
+      )}
+      {position && !image && (
+        <nav aria-label="Files" className="flex shrink-0 items-center justify-center gap-1 border-t border-zinc-900 px-2 py-1">
+          <StepButton side="left" noun={noun} inline />
+          <span className="min-w-16 text-center text-xs text-zinc-400 tabular-nums" aria-live="polite">
+            {place}
+          </span>
+          <StepButton side="right" noun={noun} inline />
+        </nav>
       )}
     </Modal>
   )
@@ -155,7 +195,7 @@ function ToolButton({ label, active, onClick, children }: { label: string; activ
       aria-label={label}
       aria-pressed={active}
       className={cx(
-        "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-md p-1.5 text-xs font-medium hover:bg-zinc-800 hover:text-zinc-100 sm:min-h-0 sm:min-w-0",
+        "relative inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-md p-1.5 text-xs font-medium hover:bg-zinc-800 hover:text-zinc-100 sm:min-h-0 sm:min-w-0",
         active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400",
       )}
     >
@@ -167,14 +207,17 @@ function ToolButton({ label, active, onClick, children }: { label: string; activ
 const actionClass = "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 sm:min-h-0 sm:min-w-0"
 
 function FileActions({ url, name }: { url: string; name: string }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<"copied" | "failed" | null>(null)
   useEffect(() => {
     if (!copied) return
-    const t = setTimeout(() => setCopied(false), 1500)
+    const t = setTimeout(() => setCopied(null), copied === "failed" ? 4000 : 1500)
     return () => clearTimeout(t)
   }, [copied])
-  const copy = () => {
-    void navigator.clipboard?.writeText(new URL(url, window.location.origin).href).then(() => setCopied(true))
+  // copyText also works over plain http on the LAN, where navigator.clipboard doesn't exist.
+  const copy = async () => {
+    if (await copyText(new URL(url, window.location.origin).href)) return setCopied("copied")
+    setCopied("failed")
+    toast.error("Couldn't copy the link", "The browser blocked clipboard access.")
   }
   return (
     <>
@@ -184,24 +227,39 @@ function FileActions({ url, name }: { url: string; name: string }) {
       <a href={url} download={name} className={actionClass} title="Download" aria-label="Download">
         <Download className="h-4 w-4" />
       </a>
-      <ToolButton label={copied ? "Copied" : "Copy link"} onClick={copy}>
-        {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className="h-4 w-4" />}
+      <ToolButton label={copied === "copied" ? "Copied" : "Copy link"} onClick={() => void copy()}>
+        {copied === "copied" ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className={cx("h-4 w-4", copied === "failed" && "text-red-400")} />}
+        {/* Announced either way. A failure is also shown here: the toast sits under this dialog. */}
+        <span
+          role="status"
+          className={
+            copied === "failed"
+              ? "pointer-events-none absolute top-full right-0 z-20 mt-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] font-medium whitespace-nowrap text-red-200 shadow-lg ring-1 ring-zinc-700"
+              : "sr-only"
+          }
+        >
+          {copied === "copied" ? "Link copied" : copied === "failed" ? "Couldn't copy the link" : ""}
+        </span>
       </ToolButton>
     </>
   )
 }
 
-function StepButton({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+/** Steps through the gallery: floating at an image's side, or `inline` in the pager row under any other kind. */
+function StepButton({ side, noun, inline = false }: { side: "left" | "right"; noun: "image" | "file"; inline?: boolean }) {
   const Icon = side === "left" ? ChevronLeft : ChevronRight
   return (
     <button
       type="button"
-      onClick={onClick}
-      aria-label={side === "left" ? "Previous image (←)" : "Next image (→)"}
+      onClick={() => stepPreview(side === "left" ? -1 : 1)}
+      aria-label={side === "left" ? `Previous ${noun} (←)` : `Next ${noun} (→)`}
       title={side === "left" ? "Previous (←)" : "Next (→)"}
       className={cx(
-        "absolute top-1/2 z-10 grid h-11 w-11 place-items-center rounded-full bg-zinc-950/70 text-zinc-300 shadow-lg ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-900 hover:text-zinc-50 sm:h-10 sm:w-10",
-        side === "left" ? "left-3" : "right-3",
+        "grid h-11 w-11 shrink-0 place-items-center focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none",
+        inline
+          ? "rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50"
+          : "absolute top-1/2 z-10 rounded-full bg-zinc-950/70 text-zinc-300 shadow-lg ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-900 hover:text-zinc-50 sm:h-10 sm:w-10",
+        !inline && (side === "left" ? "left-3" : "right-3"),
       )}
     >
       <Icon className="h-5 w-5" />
@@ -209,12 +267,11 @@ function StepButton({ side, onClick }: { side: "left" | "right"; onClick: () => 
   )
 }
 
-function Loading() {
+/** A file that is still loading: the shared skeleton, as lines of text. It holds the body's space and shows after 300 ms. */
+function FileLoading() {
   return (
-    <div className="grid flex-1 place-items-center py-16 text-sm text-zinc-500">
-      <span className="inline-flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-      </span>
+    <div className="min-w-0 flex-1 px-4 py-5 sm:px-6">
+      <Loading kind="chat" label="Loading file" className="mx-auto max-w-4xl" />
     </div>
   )
 }
@@ -238,7 +295,8 @@ function PreviewBody({
   kind,
   name,
   raw,
-  zoomed,
+  gallery,
+  toggleZoom,
   onZoom,
   onStep,
 }: {
@@ -246,14 +304,17 @@ function PreviewBody({
   kind: PreviewKind | null
   name: string
   raw: boolean
-  zoomed: boolean
+  /** One of a gallery, whose frame has a fixed height: the content fills it. */
+  gallery: boolean
+  /** Where the image puts its zoom toggle, for the header's button and Z. */
+  toggleZoom: ZoomToggle
   onZoom: (z: boolean) => void
   /** Steps through the gallery, when there is one. */
   onStep?: (delta: number) => void
 }) {
   switch (kind) {
     case "image":
-      return <ImageView url={item.url} name={name} zoomed={zoomed} onZoom={onZoom} onStep={onStep} onClose={closePreview} />
+      return <ImageView url={item.url} name={name} toggleRef={toggleZoom} onZoom={onZoom} onStep={onStep} onClose={closePreview} />
     case "html":
       // No allow-same-origin: the page runs its scripts but can't reach Box Yard's cookies or API.
       return <FrameView url={item.url} name={name} sandbox="allow-scripts" />
@@ -261,9 +322,9 @@ function PreviewBody({
       // Browsers won't run their PDF viewer in a sandboxed frame.
       return <FrameView url={item.url} name={name} />
     case "video":
-      return <MediaView url={item.url} kind="video" />
+      return <MediaView url={item.url} kind="video" fill={gallery} />
     case "audio":
-      return <MediaView url={item.url} kind="audio" />
+      return <MediaView url={item.url} kind="audio" fill={gallery} />
     case "markdown":
     case "json":
     case "csv":
@@ -283,22 +344,31 @@ type Pinch = { kind: "pinch"; view: View; from: Point; dist: number }
 
 const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 
+/** The shown image's zoom toggle (null while no image is up): how the header's button and Z reach ImageView. */
+type ZoomToggle = { current: (() => void) | null }
+
+/** Two mouse presses this close together are one double click. */
+const DOUBLE_CLICK_MS = 500
+
 /**
  * An image fitted to the stage. A click, a double tap, Z or the zoom button zooms in about that spot; pinch, Ctrl+wheel
  * or a trackpad pinch zoom freely; one finger, a mouse drag or the wheel pans while zoomed. At fit size a swipe left or
  * right steps through the gallery (`onStep`) and a swipe down closes. The image follows the finger, with no animation.
+ * The view here is the only zoom state: the header asks for a toggle through `toggleRef` and hears the outcome through
+ * `onZoom`, never the other way round (two copies kept in step by effects chased each other after a double click).
  */
 function ImageView({
   url,
   name,
-  zoomed,
+  toggleRef,
   onZoom,
   onStep,
   onClose,
 }: {
   url: string
   name: string
-  zoomed: boolean
+  toggleRef: ZoomToggle
+  /** Told when the image crosses fit size, for the header button's pressed state. */
   onZoom: (z: boolean) => void
   onStep?: (delta: number) => void
   onClose: () => void
@@ -338,14 +408,14 @@ function ImageView({
     setView(clamped(zoomAt(FIT, zoomStep(m.natural, m.fit), client ? m.at(client) : { x: 0, y: 0 }), m))
   }
 
-  // The header's zoom button and Z set `zoomed`; gestures report back when they cross fit size.
   const isZoomed = view.scale > 1
   useEffect(() => {
-    if (zoomed === isZoomed || status !== "ready") return
-    if (zoomed) toggleZoom()
-    else setView(FIT)
+    toggleRef.current = () => toggleZoom()
+    return () => {
+      toggleRef.current = null
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [zoomed, status])
+  }, [toggleRef])
   useEffect(() => onZoom(isZoomed), [isZoomed, onZoom])
 
   // Ctrl+wheel (a trackpad pinch is one) zooms about the pointer; the wheel pans while zoomed. Not passive, so the
@@ -444,11 +514,15 @@ function ImageView({
     }
     const point = { x: e.clientX, y: e.clientY }
     if (!g.moved) {
+      const tap = { ...point, t: e.timeStamp }
       if (g.mouse) {
-        if (g.onImage) toggleZoom(point)
+        if (!g.onImage) return
+        // A double click zooms once: its second press would only undo the first.
+        const second = e.detail > 1 || isDoubleTap(lastTap.current, tap, DOUBLE_CLICK_MS)
+        lastTap.current = second ? null : tap
+        if (!second) toggleZoom(point)
         return
       }
-      const tap = { ...point, t: e.timeStamp }
       if (isDoubleTap(lastTap.current, tap)) {
         lastTap.current = null
         toggleZoom(point)
@@ -478,7 +552,7 @@ function ImageView({
     >
       {status === "loading" && (
         <div className="absolute inset-0 flex">
-          <Loading />
+          <FileLoading />
         </div>
       )}
       {status === "error" ? (
@@ -507,7 +581,7 @@ function FrameView({ url, name, sandbox }: { url: string; name: string; sandbox?
     <div className="relative min-h-0 flex-1 bg-white">
       {!loaded && (
         <div className="absolute inset-0 flex bg-zinc-950">
-          <Loading />
+          <FileLoading />
         </div>
       )}
       <iframe src={url} title={name} sandbox={sandbox} onLoad={() => setLoaded(true)} className="h-full w-full border-0" />
@@ -515,16 +589,17 @@ function FrameView({ url, name, sandbox }: { url: string; name: string; sandbox?
   )
 }
 
-function MediaView({ url, kind }: { url: string; kind: "video" | "audio" }) {
+/** `fill`: in a gallery's fixed frame the video takes the whole stage, so its controls never fall below the pager. */
+function MediaView({ url, kind, fill }: { url: string; kind: "video" | "audio"; fill: boolean }) {
   const [error, setError] = useState(false)
   if (error) return <Problem message={`Couldn't play this ${kind === "video" ? "video" : "audio file"}.`} url={url} />
   return kind === "video" ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
-      <video src={url} controls autoPlay className="max-h-[75vh] max-w-full" onError={() => setError(true)} />
+    <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+      <video src={url} controls autoPlay className={fill ? "absolute inset-0 h-full w-full" : "max-h-[75vh] max-w-full"} onError={() => setError(true)} />
     </div>
   ) : (
-    <div className="px-5 py-8">
-      <audio src={url} controls autoPlay className="w-full" onError={() => setError(true)} />
+    <div className={cx("px-5 py-8", fill && "flex min-h-0 flex-1 items-center")}>
+      <audio src={url} controls autoPlay className="mx-auto block w-full max-w-xl" onError={() => setError(true)} />
     </div>
   )
 }
@@ -561,7 +636,7 @@ function useFileText(url: string, size?: number): TextState {
 
 function TextPreview({ item, kind, raw }: { item: PreviewItem; kind: "markdown" | "json" | "csv" | "text"; raw: boolean }) {
   const file = useFileText(item.url, item.size)
-  if (file.status === "loading") return <Loading />
+  if (file.status === "loading") return <FileLoading />
   if (file.status === "error") return <Problem message={file.message} url={item.url} />
   if (file.status === "too-large")
     return <Problem message={`This file is ${formatSize(file.size)}, too big to preview here (the limit is ${formatSize(TEXT_PREVIEW_MAX)}).`} url={item.url} />
@@ -569,7 +644,10 @@ function TextPreview({ item, kind, raw }: { item: PreviewItem; kind: "markdown" 
   if (!raw && kind === "markdown")
     return (
       <div className="prose-doc scroll-thin min-h-0 flex-1 overflow-auto px-4 py-5 text-sm text-zinc-200 sm:px-6">
-        <Markdown>{text}</Markdown>
+        {/* A readable column, centred in a gallery's wide frame. */}
+        <div className="mx-auto max-w-4xl">
+          <Markdown>{text}</Markdown>
+        </div>
       </div>
     )
   if (!raw && kind === "csv") return <CsvTable text={text} tsv={/\.tsv$/i.test(item.name || item.url)} />
@@ -603,33 +681,36 @@ function CsvTable({ text, tsv }: { text: string; tsv: boolean }) {
   const shown = body.slice(0, CSV_ROW_LIMIT)
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-auto">
-      <table className="min-w-full border-collapse text-left font-mono text-xs">
-        <thead className="sticky top-0 bg-zinc-900">
-          <tr>
-            {head!.map((h, i) => (
-              <th key={i} className="border-b border-zinc-800 px-3 py-2 font-semibold whitespace-nowrap text-zinc-200">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((r, i) => (
-            <tr key={i} className="odd:bg-zinc-900/30">
-              {r.map((c, j) => (
-                <td key={j} className="border-b border-zinc-900 px-3 py-1.5 whitespace-nowrap text-zinc-300">
-                  {c}
-                </td>
+      {/* Centred in a gallery's wide frame, at least a readable column wide; a wider table scrolls from the left edge. */}
+      <div className="mx-auto w-fit min-w-[min(100%,56rem)]">
+        <table className="min-w-full border-collapse text-left font-mono text-xs">
+          <thead className="sticky top-0 bg-zinc-900">
+            <tr>
+              {head!.map((h, i) => (
+                <th key={i} className="border-b border-zinc-800 px-3 py-2 font-semibold whitespace-nowrap text-zinc-200">
+                  {h}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {body.length > shown.length && (
-        <p className="px-3 py-2 text-xs text-zinc-500">
-          Showing the first {CSV_ROW_LIMIT.toLocaleString()} of {body.length.toLocaleString()} rows. Use Raw for the rest.
-        </p>
-      )}
+          </thead>
+          <tbody>
+            {shown.map((r, i) => (
+              <tr key={i} className="odd:bg-zinc-900/30">
+                {r.map((c, j) => (
+                  <td key={j} className="border-b border-zinc-900 px-3 py-1.5 whitespace-nowrap text-zinc-300">
+                    {c}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {body.length > shown.length && (
+          <p className="px-3 py-2 text-xs text-zinc-500">
+            Showing the first {CSV_ROW_LIMIT.toLocaleString()} of {body.length.toLocaleString()} rows. Use Raw for the rest.
+          </p>
+        )}
+      </div>
     </div>
   )
 }

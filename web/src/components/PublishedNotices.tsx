@@ -1,5 +1,5 @@
-// Back-to-back "published" file notices as one compact card per task: the task, "published 6 files", a strip of
-// small thumbnails (type chips for other files) and the first titles; "Show all" lists every file as a link row.
+// Back-to-back "published" file notices as one compact card per task: the task, "published 6 files", then a strip of
+// small thumbnails and titled chips for other files; "Show all 6" swaps the strip for every file as a link row.
 // Every file opens the preview modal, and ←/→ step through the whole group. Grouping is lib/publishedNotices.ts.
 import { memo, useId, useMemo, useState } from "react"
 import { ChevronDown } from "lucide-react"
@@ -9,9 +9,9 @@ import { KindIcon } from "./TaskFiles"
 import { NOTICE_CLASS, NoticeCard, NoticeLayout, NoticeProject } from "./ChatLine"
 import { previewKind } from "../lib/filePreview"
 import { thumbUrl } from "../../../shared/thumbs"
-import { previewGallery, publishedLabel, sameGroup, type PublishedFileRef, type PublishedGroup } from "../lib/publishedNotices"
+import { imagesFirst, previewGallery, publishedLabel, sameGroup, type PublishedFileRef, type PublishedGroup } from "../lib/publishedNotices"
 
-/** Thumbnails shown before "+N" (fewer in a narrow card), so the strip stays one line. */
+/** Files shown before "+N more" (fewer in a narrow card), so the strip stays short. */
 export const STRIP_MAX = 6
 const STRIP_MAX_NARROW = 4
 
@@ -23,9 +23,14 @@ const extOf = (f: PublishedFileRef) => {
   return dot > 0 ? f.filename.slice(dot + 1).toUpperCase().slice(0, 5) : "FILE"
 }
 
-/** A small thumbnail for an image, else a file-type chip; same height either way so the strip never shifts. */
-function Thumb({ f, gallery, className }: { f: PublishedFileRef; gallery: () => ReturnType<typeof previewGallery>; className?: string }) {
+/**
+ * A file in the strip, the same height whatever it is: an image is its thumbnail, any other file its icon and title.
+ * `solo`: the card's only file, so an image shows its title too and nothing caps the title's width but the card.
+ */
+function Thumb({ f, gallery, solo, className }: { f: PublishedFileRef; gallery: () => ReturnType<typeof previewGallery>; solo?: boolean; className?: string }) {
   const kind = kindOf(f)
+  const image = kind === "image"
+  const titled = !image || solo
   return (
     <FileLink
       href={f.url}
@@ -33,18 +38,17 @@ function Thumb({ f, gallery, className }: { f: PublishedFileRef; gallery: () => 
       fileTitle={f.title}
       gallery={gallery}
       title={f.title}
-      aria-label={f.title}
+      aria-label={titled ? undefined : f.title}
       className={cx(
-        "inline-flex h-11 shrink-0 items-center overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-[10px] font-medium text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none sm:h-7",
+        "inline-flex h-11 max-w-full shrink-0 items-center overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-xs text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none sm:h-7",
         className,
       )}
     >
-      {kind === "image" ? (
-        <img src={thumbUrl(f.url, 320)} alt="" loading="lazy" decoding="async" className="h-full w-14 object-cover object-top sm:w-10" />
-      ) : (
-        <span className="inline-flex items-center gap-1 px-1.5">
-          <KindIcon kind={kind} className="h-3 w-3" />
-          {extOf(f)}
+      {image && <img src={thumbUrl(f.url, 320)} alt="" loading="lazy" decoding="async" className="h-full w-14 shrink-0 object-cover object-top sm:w-10" />}
+      {titled && (
+        <span className="inline-flex min-w-0 items-center gap-1 px-1.5">
+          {!image && <KindIcon kind={kind} className="h-3 w-3" />}
+          <span className={cx("truncate", !solo && "max-w-[9rem]")}>{f.title}</span>
         </span>
       )}
     </FileLink>
@@ -52,44 +56,19 @@ function Thumb({ f, gallery, className }: { f: PublishedFileRef; gallery: () => 
 }
 
 /**
- * A NoticeLayout: the task on its own row, "box-yard · Captain · published 2 files" under it, the thumbnail strip,
- * then the file list. The list's header line (the first titles, or "2 files" when open) carries the Show all / Hide
- * toggle, so the toggle sits on the list it opens and closes, never by the title.
+ * A NoticeLayout: the task on its own row, "box-yard · Captain · published 2 files" under it, then the files: a strip
+ * (images first, then titled chips, "+2 more" for the rest), or once opened the whole list. The Show all / Hide toggle
+ * ends the files' own first row either way, so it sits on what it opens and closes, never by the title.
  * `project` adds the task's project and Captain links (the Coordinator's card; the Captain tab is that project already).
  * `time` is the Captain tab's row: the time on the right of the meta line, and that tab's quieter title.
  */
 function GroupBody({ group, time, project }: { group: PublishedGroup; time?: number; project?: boolean }) {
   const [open, setOpen] = useState(false)
   const listId = useId()
-  const files = group.files
+  const files = useMemo(() => imagesFirst(group.files), [group.files])
   const gallery = useMemo(() => previewGallery(files), [files])
   const getGallery = () => gallery
-  const more = files.length - STRIP_MAX
-  const moreNarrow = files.length - STRIP_MAX_NARROW
-  const moreChip = (n: number, className: string) =>
-    n > 0 &&
-    !open && (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title={`Show all ${files.length} files`}
-        className={cx(META_CHIP, "border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200", className)}
-      >
-        +{n}
-      </button>
-    )
-  const toggle = files.length > 1 && (
-    <button
-      type="button"
-      aria-expanded={open}
-      aria-controls={listId}
-      onClick={() => setOpen((o) => !o)}
-      className={cx(META_CHIP, "ml-auto border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200")}
-    >
-      {open ? "Hide" : "Show all"}
-      <ChevronDown className={cx("h-3 w-3 transition-transform", open && "rotate-180")} />
-    </button>
-  )
+  const more = (n: number, className: string) => n > 0 && <span className={cx("whitespace-nowrap text-zinc-500", className)}>+{n} more</span>
   return (
     <div data-testid="published-group" data-count={files.length}>
       <NoticeLayout
@@ -109,28 +88,33 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
           </>
         }
       >
-        {/* A narrow card shows fewer thumbnails before "+N", so the strip stays one line. */}
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {files.slice(0, STRIP_MAX).map((f, i) => (
-            <Thumb key={f.id} f={f} gallery={getGallery} className={i >= STRIP_MAX_NARROW ? "@max-md:hidden" : undefined} />
-          ))}
-          {moreChip(moreNarrow, "@md:hidden")}
-          {moreChip(more, "@max-md:hidden")}
-        </div>
         <div data-testid="published-files" className="mt-1">
-          <div data-testid="published-files-header" className="flex min-w-0 items-center gap-2">
+          <div data-testid="published-files-header" className="flex min-w-0 flex-wrap items-center gap-1.5">
             {open ? (
               <span className="min-w-0 flex-1 truncate text-zinc-500">{files.length} files</span>
             ) : (
-              <span className="min-w-0 flex-1 truncate text-zinc-500" title={files.map((f) => f.title).join("\n")}>
-                {files
-                  .slice(0, 3)
-                  .map((f) => f.title)
-                  .join(" · ")}
-                {files.length > 3 && ` · +${files.length - 3} more`}
-              </span>
+              <>
+                {/* A narrow card shows fewer files before "+N more". */}
+                {files.slice(0, STRIP_MAX).map((f, i) => (
+                  <Thumb key={f.id} f={f} gallery={getGallery} solo={files.length === 1} className={i >= STRIP_MAX_NARROW ? "@max-md:hidden" : undefined} />
+                ))}
+                {more(files.length - STRIP_MAX_NARROW, "@md:hidden")}
+                {more(files.length - STRIP_MAX, "@max-md:hidden")}
+              </>
             )}
-            {toggle}
+            {/* One button in one place in both states, so it keeps the focus when it's pressed. */}
+            {files.length > 1 && (
+              <button
+                type="button"
+                aria-expanded={open}
+                aria-controls={open ? listId : undefined}
+                onClick={() => setOpen((o) => !o)}
+                className={cx(META_CHIP, "ml-auto border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200")}
+              >
+                {open ? "Hide" : `Show all ${files.length}`}
+                <ChevronDown className={cx("h-3 w-3 transition-transform", open && "rotate-180")} />
+              </button>
+            )}
           </div>
           {open && (
             <ul id={listId} className="mt-0.5 space-y-0.5">
@@ -141,7 +125,7 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
                     name={f.filename}
                     fileTitle={f.title}
                     gallery={getGallery}
-                    className="-mx-1 flex min-h-11 items-center gap-1.5 rounded px-1 text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100 sm:min-h-0 sm:py-0.5"
+                    className="-mx-1 flex min-h-11 items-center gap-1.5 rounded px-1 text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none sm:min-h-0 sm:py-0.5"
                   >
                     {/* The icon stays on the first line of a title that wraps. */}
                     <span className="flex min-w-0 items-start gap-1.5">

@@ -7,7 +7,7 @@ import { File, FileCode, FileImage, FileText, Film, Music, Paperclip, Search, X 
 import { Modal } from "./Modal"
 import { ArtifactLink } from "./FileLink"
 import { formatSize } from "./Attachments"
-import { HEADER_CHIP, HEADER_FOLD, META_CHIP, TimeAgo, cx } from "./ui"
+import { HEADER_CHIP, HEADER_FOLD, META_CHIP, TAP_AREA, TimeAgo, cx } from "./ui"
 import { useArtifacts } from "../lib/queries"
 import { FILTER_MIN, fileKind, fileType, galleryOf, isImageFile, latestAt, listFiles, seenKey, shortTitle, unseenCount, type TaskFile } from "../lib/taskFiles"
 import type { PreviewKind } from "../lib/filePreview"
@@ -77,17 +77,19 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
   const listing = useMemo(() => listFiles(files, query), [files, query])
   const gallery = useMemo(() => galleryOf(listing.ordered), [listing])
   const getGallery = useCallback(() => gallery, [gallery])
-  const isNew = (f: TaskFile) => seenAt === null || f.createdAt > seenAt
+  // Marked only against an earlier look: on the first one every file would be new, which says nothing.
+  const isNew = (f: TaskFile) => seenAt !== null && f.createdAt > seenAt
+  const fresh = files.filter(isNew).length
 
   return (
     <Modal
       size="lg"
       placement="sheet"
       title="Files"
-      description={`${files.length} file${files.length === 1 ? "" : "s"} published by this task`}
+      description={`${files.length} file${files.length === 1 ? "" : "s"} published by this task${fresh ? ` · ${fresh} new` : ""}`}
       onClose={onClose}
-      bodyClassName="scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5"
-
+      // The drawer's own width (a phone's sheet, the desktop dialog) lays out the tiles and rows, not the window's.
+      bodyClassName="@container scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5"
     >
       {files.length >= FILTER_MIN && (
         <div className="relative">
@@ -122,21 +124,24 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
             </h3>
           )}
           {s.images.length > 0 && (
-            <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <ul className="grid grid-cols-2 gap-2 @lg:grid-cols-3">
               {s.images.map((f) => (
                 <li key={f.id}>
                   <ArtifactLink
                     artifact={f}
                     gallery={getGallery}
                     title={`${f.title} · ${formatSize(f.size)}`}
-                    className="group block overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 hover:border-zinc-600 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
+                    className="group flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 hover:border-zinc-600 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
                   >
-                    <img src={thumbUrl(f.url, 640)} alt="" loading="lazy" decoding="async" className="aspect-video w-full bg-zinc-950 object-cover object-top" />
-                    <span className="flex items-center gap-1.5 px-2 py-1.5 text-xs">
-                      {isNew(f) && <NewDot />}
-                      <span className="min-w-0 flex-1 truncate text-zinc-300 group-hover:text-zinc-100">{shortTitle(f.title, s.label)}</span>
-                      <span className="shrink-0 text-[10px] text-zinc-600">
-                        <TimeAgo ts={f.createdAt} />
+                    <img src={thumbUrl(f.url, 640)} alt="" loading="lazy" decoding="async" className="aspect-video w-full shrink-0 bg-zinc-950 object-cover object-top" />
+                    {/* The title gets the tile's whole width; what kind, how big and how old go under it. */}
+                    <span className="block px-2 py-1.5 text-xs">
+                      <span className="line-clamp-2 wrap-anywhere text-zinc-300 group-hover:text-zinc-100">
+                        {isNew(f) && <NewMark />}
+                        {shortTitle(f.title, s.label)}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[10px] text-zinc-500">
+                        {fileType(f)} · {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
                       </span>
                     </span>
                   </ArtifactLink>
@@ -151,13 +156,20 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
                   <ArtifactLink
                     artifact={f}
                     gallery={getGallery}
-                    className="flex min-h-11 items-center gap-2.5 px-3 py-2 text-sm hover:bg-zinc-900 focus-visible:bg-zinc-900 focus-visible:outline-none sm:min-h-0"
+                    className="flex min-h-11 items-start gap-2.5 px-3 py-2 text-sm hover:bg-zinc-900 focus-visible:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none focus-visible:ring-inset @lg:items-center sm:min-h-0"
                   >
-                    <KindIcon kind={fileKind(f)} />
-                    {isNew(f) && <NewDot />}
-                    <span className="min-w-0 flex-1 truncate text-zinc-200">{shortTitle(f.title, s.label)}</span>
-                    <span className="shrink-0 text-xs whitespace-nowrap text-zinc-500">
-                      {fileType(f)} · {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
+                    <span className="flex h-lh shrink-0 items-center">
+                      <KindIcon kind={fileKind(f)} />
+                    </span>
+                    {/* Narrow: the title on up to two lines, its details under it. Wide: one line, details at the end. */}
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5 @lg:flex-row @lg:items-center @lg:gap-2.5">
+                      <span className="line-clamp-2 min-w-0 wrap-anywhere text-zinc-200 @lg:line-clamp-1 @lg:flex-1">
+                        {isNew(f) && <NewMark />}
+                        {shortTitle(f.title, s.label)}
+                      </span>
+                      <span className="shrink-0 text-xs whitespace-nowrap text-zinc-500">
+                        {fileType(f)} · {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
+                      </span>
                     </span>
                   </ArtifactLink>
                 </li>
@@ -170,7 +182,13 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
   )
 }
 
-const NewDot = () => <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" title="New since you last looked" aria-label="new" />
+/** Before a title: a dot for a file published since the list was last opened, and the word for a screen reader. */
+const NewMark = () => (
+  <>
+    <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-sky-400 align-middle" title="New since you last looked" aria-hidden />
+    <span className="sr-only">New: </span>
+  </>
+)
 
 const KIND_ICON: Partial<Record<PreviewKind, typeof File>> = {
   image: FileImage,
@@ -199,7 +217,11 @@ export const PublishedFile = memo(function PublishedFile({ artifactId, url, text
     <ArtifactLink
       artifact={{ projectId: null, taskId: null, ...f }}
       title={`Published ${f.title}`}
-      className="inline-flex max-w-full items-center gap-2 rounded-md border border-zinc-800/80 bg-zinc-900/60 py-0.5 pr-2 pl-0.5 align-middle text-xs text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+      // 44px to a finger (TAP_AREA); the margin keeps the areas of two wrapped rows of chips apart.
+      className={cx(
+        TAP_AREA,
+        "inline-flex max-w-full items-center gap-2 rounded-md border border-zinc-800/80 bg-zinc-900/60 py-0.5 pr-2 pl-0.5 align-middle text-xs text-zinc-400 hover:border-zinc-700 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:my-2",
+      )}
     >
       {image ? (
         <img src={thumbUrl(f.url, 320)} alt="" loading="lazy" decoding="async" className="h-6 w-9 shrink-0 rounded-sm border border-zinc-800 bg-zinc-950 object-cover object-top" />
@@ -211,7 +233,8 @@ export const PublishedFile = memo(function PublishedFile({ artifactId, url, text
       <span className="shrink-0 text-zinc-600">Published</span>
       <span className="min-w-0 truncate text-zinc-300">{f.title}</span>
       {f.size > 0 && (
-        <span className="shrink-0 text-[10px] text-zinc-600 max-sm:hidden">
+        // Only where the transcript's column (ChatHistory's container) has the room, whatever the window's width.
+        <span className="shrink-0 text-[10px] text-zinc-600 @max-md/history:hidden">
           {fileType(f)} · {formatSize(f.size)}
         </span>
       )}

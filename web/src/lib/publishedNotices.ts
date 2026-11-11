@@ -111,6 +111,16 @@ export function publishedLabel(count: number): string {
 
 export const previewItemOf = (f: PublishedFileRef): PreviewItem => ({ url: f.url, name: f.filename, title: f.title })
 
+const isImage = (f: PublishedFileRef) => previewKind({ url: f.url, name: f.filename }) === "image"
+
+/**
+ * How a card shows its files: the images first, then the rest, each in the order it was published (as the task's
+ * Files drawer puts thumbnails above its list), so the strip's "+N more" never holds back a picture.
+ */
+export function imagesFirst(files: readonly PublishedFileRef[]): PublishedFileRef[] {
+  return [...files.filter(isImage), ...files.filter((f) => !isImage(f))]
+}
+
 /** The ←/→ gallery over a whole group: every file the preview can open, in order (like the task's Files drawer). */
 export function previewGallery(files: readonly PublishedFileRef[]): PreviewItem[] {
   return files.map(previewItemOf).filter((item) => previewKind(item) !== null)
