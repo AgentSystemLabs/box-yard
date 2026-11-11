@@ -1,6 +1,6 @@
 // The sidebar's keyboard, as a WAI-ARIA tree view (https://www.w3.org/WAI/ARIA/apg/patterns/treeview/): one tab stop
 // for the whole tree, ↑/↓ to move, → to unfold or step in, ← to fold or step out, Space to fold or unfold (or open a
-// leaf), Enter to open, Home/End, and a letter to jump by name.
+// leaf), Enter to open, Shift+Enter for the row's own action (Mark done), Home/End, and a letter to jump by name.
 //
 // It reads the tree from the DOM. A folded item's children aren't drawn, so the treeitems on the page, in order, are
 // exactly the visible ones. Each item says what it is with its own attributes (role="treeitem", data-tree-key,
@@ -14,6 +14,8 @@ import { useCallback, useLayoutEffect, useRef, type FocusEvent, type KeyboardEve
 export const TREE_OPEN = "data-tree-open"
 /** On the button that folds or unfolds an item: its chevron, or the whole row for a group that only folds. */
 export const TREE_TOGGLE = "data-tree-toggle"
+/** On the button an item's Shift+Enter clicks: the row's own action (the sidebar's Mark done), when it has one. */
+export const TREE_ACTION = "data-tree-action"
 
 const ITEM = "[role=treeitem]"
 /** How long a pause starts a new type-ahead word instead of adding to it, in ms. */
@@ -227,7 +229,8 @@ export function useTreeView<T extends HTMLElement = HTMLDivElement>(current: str
     switch (e.key) {
       case "Enter":
         if (!onItem) return
-        part(item, TREE_OPEN)?.click()
+        // Shift+Enter is the row's action, and nothing on a row without one: it never opens it by mistake.
+        part(item, e.shiftKey ? TREE_ACTION : TREE_OPEN)?.click()
         break
       case " ":
         if (!onItem || e.shiftKey) return
