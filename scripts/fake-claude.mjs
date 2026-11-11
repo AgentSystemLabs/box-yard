@@ -138,7 +138,7 @@ if (streamInput && inbox.first?.type !== "user") {
     : [
         { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", supportsEffort: true, supportedEffortLevels: all },
         { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus", supportsEffort: true, supportedEffortLevels: all },
-        { value: "fable", resolvedModel: "claude-fable-5-1", displayName: "Fable", supportsEffort: true, supportedEffortLevels: all },
+        { value: "fable", resolvedModel: "claude-fable-5-2", displayName: "Fable", supportsEffort: true, supportedEffortLevels: all },
         { value: "sonnet", resolvedModel: "claude-sonnet-5-5", displayName: "Sonnet", supportsEffort: true, supportedEffortLevels: all },
         { value: "haiku", resolvedModel: "claude-haiku-5-5", displayName: "Haiku", supportsEffort: true, supportedEffortLevels: all },
       ]
