@@ -182,7 +182,7 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
     hasRaw && (
       <ToolButton label={raw ? (kind === "csv" ? "Show table" : kind === "json" ? "Show formatted" : "Show rendered") : "Show raw"} onClick={() => setRaw((r) => !r)}>
         {raw ? <Eye className="h-4 w-4" /> : <Code className="h-4 w-4" />}
-        <span className={cx(bar && "@max-[23rem]/preview:hidden")}>{raw ? (kind === "csv" ? "Table" : kind === "json" ? "Formatted" : "Rendered") : "Raw"}</span>
+        <span className={cx(bar && "@max-[22rem]/preview:hidden")}>{raw ? (kind === "csv" ? "Table" : kind === "json" ? "Formatted" : "Rendered") : "Raw"}</span>
       </ToolButton>
     )
   const zoom = image && (
