@@ -122,7 +122,7 @@ export function updateSummary(s: UpdateStatus | undefined, now: number): string 
   if (s.phase === "failed") return s.error ?? "The last update didn't work."
   if (s.checkError) return s.checkError
   if (updateAvailable(s)) return `A newer version is out: ${shortSha(s.latest)}.`
-  if (s.checkedAt) return `Up to date (checked ${ago(now - s.checkedAt)}).`
+  if (s.checkedAt !== null) return `Up to date (checked ${ago(now - s.checkedAt)}).`
   return "Not checked yet."
 }
 

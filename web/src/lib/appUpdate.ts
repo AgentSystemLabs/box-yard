@@ -74,7 +74,6 @@ export function resetAppUpdate(build?: string | null) {
   newer = null
   toasted = null
   resumedAt = -Infinity
-  bannerOffers = false
 }
 
 if (typeof document !== "undefined") {

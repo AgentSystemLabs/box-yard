@@ -127,6 +127,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/runpod-pods.e2e.test.ts": "End-to-end runner/server integration",
   "test/schedule-runner-mcp.test.ts": "Full Box Yard server/task-manager fixture",
   "test/schedules.e2e.test.ts": "End-to-end runner/server integration",
+  "test/self-update-routes.test.ts": "Full Box Yard server/HTTP fixture",
   "test/settings-tools.e2e.test.ts": "End-to-end runner/server integration",
   "test/setup.test.ts": "Full Box Yard server/task-manager fixture",
   "test/shared-git.e2e.test.ts": "End-to-end runner/server integration",
