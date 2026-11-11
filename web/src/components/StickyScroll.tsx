@@ -57,6 +57,17 @@ export function rejoinListBottom(el: Element) {
   el.dispatchEvent(new Event(REJOIN_BOTTOM, { bubbles: true }))
 }
 
+// Bubbles from an element that sends from inside the list (an ask's answers), up to its StickyScroll.
+const TO_END = "boxyard:to-end"
+
+/**
+ * A send from inside the list, as `handle.scrollToEnd()` is one from outside it: re-pin the list and jump to its
+ * bottom, so what's sent and the reply to it show as they come, from however far up.
+ */
+export function scrollListToEnd(el: Element) {
+  el.dispatchEvent(new Event(TO_END, { bubbles: true }))
+}
+
 /**
  * Scroll `el` into view inside the StickyScroll that holds it (a card the cards view goes to, say). The list lets go
  * of the bottom first and holds the view where the scroll leaves it: pinned, content growing meanwhile (the card
@@ -535,6 +546,8 @@ export function StickyScroll({
       seeBottom(bottom)
       pin()
     }
+    // scrollListToEnd: a send from inside the list.
+    const onToEnd = () => jumpRef.current(false)
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || !(UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey)) || isEditable(e.target) || innerCanScrollUp(e.target, el)) return
       const t = e.target
@@ -550,6 +563,7 @@ export function StickyScroll({
     el.addEventListener("pointerdown", onPointerDown)
     el.addEventListener(LEAVE_BOTTOM, onLeaveBottom)
     el.addEventListener(REJOIN_BOTTOM, onRejoinBottom)
+    el.addEventListener(TO_END, onToEnd)
     // Capture runs before the list's own listener, which then sets it back for clicks inside.
     document.addEventListener("pointerdown", onDocPointerDown, true)
     document.addEventListener("pointerup", onPointerUp, true)
@@ -562,6 +576,7 @@ export function StickyScroll({
       el.removeEventListener("pointerdown", onPointerDown)
       el.removeEventListener(LEAVE_BOTTOM, onLeaveBottom)
       el.removeEventListener(REJOIN_BOTTOM, onRejoinBottom)
+      el.removeEventListener(TO_END, onToEnd)
       document.removeEventListener("pointerdown", onDocPointerDown, true)
       document.removeEventListener("pointerup", onPointerUp, true)
       document.removeEventListener("pointercancel", onPointerUp, true)

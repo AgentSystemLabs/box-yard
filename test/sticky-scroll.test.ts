@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Activity, act, createElement, createRef } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { StickyScroll, createJumpStore, scrollIntoList, useLatestRow, type JumpStore, type StickyScrollHandle } from "../web/src/components/StickyScroll.js"
+import { StickyScroll, createJumpStore, scrollIntoList, scrollListToEnd, useLatestRow, type JumpStore, type StickyScrollHandle } from "../web/src/components/StickyScroll.js"
 import { firstPaintRows, holdTailGrowth, resetFirstPaintRows, useTail } from "../web/src/lib/tail.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -616,6 +616,21 @@ describe("StickyScroll", () => {
     render()
     frame()
     expect(jumpButton()?.textContent).toMatch(/1 new message/)
+  })
+
+  it("scrollListToEnd, a send from inside the list, re-pins it and jumps to the bottom from however far up", () => {
+    userScroll(-1200)
+    frame()
+    expect(jumpButton()).toBeDefined()
+    act(() => scrollListToEnd(rows()[3]!))
+    expect(atBottom()).toBe(true)
+    expect(jumpButton()).toBeUndefined()
+    // Pinned: what's sent and the reply follow.
+    heights.push(100)
+    render()
+    frame()
+    expect(atBottom()).toBe(true)
+    expect(jumpButton()).toBeUndefined()
   })
 
   it("a short latest row counts once half of it shows, and a jumpStore hears it isn't away", () => {

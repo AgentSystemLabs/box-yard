@@ -18,7 +18,7 @@ import { answerOf, answersOf, askProgressId, dropAskProgress, readAskProgress, s
 import { useAnswerQuestions } from "../lib/queries"
 import { focusComposer } from "../lib/chatSwitch"
 import { ApiError } from "../lib/api"
-import { scrollIntoList, useLatestRow } from "./StickyScroll"
+import { scrollIntoList, scrollListToEnd, useLatestRow } from "./StickyScroll"
 import { LineIcon, Markdown, TimeAgo, cx } from "./ui"
 
 /** The ask card's frame (TaskView.tsx's single question uses it too). */
@@ -172,7 +172,11 @@ export const AskQuestions = memo(function AskQuestions({
       return setError(`Question ${blank + 1} has no answer yet.`)
     }
     // mutateAsync, not mutate's callbacks: the card goes as soon as the task's question clears, and these still run.
-    answer.mutateAsync({ key, answers }).then(
+    const sending = answer.mutateAsync({ key, answers })
+    // As the box's own send does: the chat follows its end again (it let go of it to show a tall card from its top),
+    // so the answers and the reply show as they come rather than as "new messages" below.
+    if (card.current) scrollListToEnd(card.current)
+    sending.then(
       () => {
         dropAskProgress(id)
         focusComposer(taskId)

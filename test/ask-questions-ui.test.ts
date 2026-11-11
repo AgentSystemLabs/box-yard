@@ -329,6 +329,21 @@ describe("on a phone, where the card can be taller than the chat", () => {
     expect(scrolls).toEqual([])
   })
 
+  it("Send takes the chat to its end, as the box's own send does, so the answers and the reply follow", async () => {
+    card = { top: -150, height: 420 }
+    render()
+    layout()
+    click($("[data-testid=ask-next]")!)
+    click($("[data-testid=ask-next]")!)
+    // StickyScroll hears it as a send from inside the list (scrollListToEnd).
+    const toEnd = vi.fn()
+    list().addEventListener("boxyard:to-end", toEnd)
+    click($("[data-testid=ask-send]")!)
+    expect(toEnd).toHaveBeenCalledTimes(1)
+    await flush()
+    expect(posts).toHaveLength(1)
+  })
+
   it("takes 16px text under a finger, so iOS doesn't zoom in on it, and holds Back and Next at the chat's bottom", () => {
     render()
     expect($("[data-testid=ask-custom]")!.className).toContain("pointer-coarse:text-base")
