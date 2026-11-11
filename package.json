@@ -5,8 +5,12 @@
   "license": "MIT",
   "description": "One chat to run a yard of Claude Code agents inside Upstash Boxes.",
   "type": "module",
+  "bin": {
+    "box-yard": "bin/box-yard.mjs",
+    "boxyard": "bin/box-yard.mjs"
+  },
   "engines": {
-    "node": ">=20.11"
+    "node": ">=22.12"
   },
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"NODE_ENV=development tsx watch --clear-screen=false server/index.ts\" \"vite\"",
