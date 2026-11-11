@@ -9,7 +9,7 @@ import { ArtifactLink } from "./FileLink"
 import { formatSize } from "./Attachments"
 import { HEADER_CHIP, HEADER_FOLD, META_CHIP, TAP_AREA, TimeAgo, cx } from "./ui"
 import { useArtifacts } from "../lib/queries"
-import { FILTER_MIN, fileKind, fileType, galleryOf, isImageFile, latestAt, listFiles, seenKey, shortTitle, unseenCount, type TaskFile } from "../lib/taskFiles"
+import { FILTER_MIN, fileKind, fileType, galleryOf, isImageFile, isUnseen, latestAt, listFiles, seenKey, shortTitle, unseenCount, type TaskFile } from "../lib/taskFiles"
 import type { PreviewKind } from "../lib/filePreview"
 import type { Artifact } from "../../../shared/types"
 import { thumbUrl } from "../../../shared/thumbs"
@@ -64,7 +64,7 @@ export function FilesChip({ taskId, projectId, files, quiet = false, fold = fals
       >
         <Paperclip className={cx("h-3 w-3 text-zinc-400", fold && HEADER_FOLD.icon)} /> {files.length}
         <span className={cx(fold && HEADER_FOLD.label)}> file{files.length === 1 ? "" : "s"}</span>
-        {/* New files since the drawer was last opened: a dot, with the count in the tooltip and the label. */}
+        {/* New files since the drawer was last opened (none before it ever was): a dot, with the count in the tooltip and the label. */}
         {fresh > 0 && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" aria-hidden data-testid="files-new-dot" />}
       </button>
       {open && <FilesDrawer taskId={taskId} projectId={projectId} files={files} seenAt={seenAtOpen} onClose={() => setOpen(false)} />}
@@ -77,9 +77,9 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
   const listing = useMemo(() => listFiles(files, query), [files, query])
   const gallery = useMemo(() => galleryOf(listing.ordered), [listing])
   const getGallery = useCallback(() => gallery, [gallery])
-  // Marked only against an earlier look: on the first one every file would be new, which says nothing.
-  const isNew = (f: TaskFile) => seenAt !== null && f.createdAt > seenAt
-  const fresh = files.filter(isNew).length
+  // Marked only against an earlier look, like the chip's dot (isUnseen).
+  const isNew = (f: TaskFile) => isUnseen(f, seenAt)
+  const fresh = unseenCount(files, seenAt)
 
   return (
     <Modal
@@ -89,6 +89,7 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
       description={`${files.length} file${files.length === 1 ? "" : "s"} published by this task${fresh ? ` · ${fresh} new` : ""}`}
       onClose={onClose}
       // The drawer's own width (a phone's sheet, the desktop dialog) lays out the tiles and rows, not the window's.
+      // Its padding alone follows the window, with the Modal header's above it.
       bodyClassName="@container scroll-thin min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-5"
     >
       {files.length >= FILTER_MIN && (
@@ -106,10 +107,11 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
             }}
             placeholder="Filter files"
             aria-label="Filter files"
-            className="min-h-11 w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pr-9 pl-8 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-700 focus:outline-none sm:min-h-0 sm:text-sm"
+            // To a finger: 44px tall, and 16px text, which a phone doesn't zoom into.
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 py-1.5 pr-9 pl-8 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-700 focus:outline-none pointer-coarse:min-h-11 pointer-coarse:pr-12 pointer-coarse:text-base"
           />
           {query && (
-            <button type="button" onClick={() => setQuery("")} aria-label="Clear filter" className="absolute top-1/2 right-1 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-md text-zinc-500 hover:text-zinc-200 sm:h-7 sm:w-7">
+            <button type="button" onClick={() => setQuery("")} aria-label="Clear filter" className="absolute top-1/2 right-1 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-zinc-500 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:right-0 pointer-coarse:h-11 pointer-coarse:w-11">
               <X className="h-3.5 w-3.5" />
             </button>
           )}
@@ -140,7 +142,7 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
                         {isNew(f) && <NewMark />}
                         {shortTitle(f.title, s.label)}
                       </span>
-                      <span className="mt-0.5 block truncate text-[10px] text-zinc-500">
+                      <span className="mt-0.5 block truncate text-xs text-zinc-500">
                         {fileType(f)} · {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
                       </span>
                     </span>
@@ -156,7 +158,7 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
                   <ArtifactLink
                     artifact={f}
                     gallery={getGallery}
-                    className="flex min-h-11 items-start gap-2.5 px-3 py-2 text-sm hover:bg-zinc-900 focus-visible:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none focus-visible:ring-inset @lg:items-center sm:min-h-0"
+                    className="flex items-start gap-2.5 px-3 py-2 text-sm hover:bg-zinc-900 focus-visible:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none focus-visible:ring-inset @lg:items-center pointer-coarse:min-h-11"
                   >
                     <span className="flex h-lh shrink-0 items-center">
                       <KindIcon kind={fileKind(f)} />
@@ -234,7 +236,7 @@ export const PublishedFile = memo(function PublishedFile({ artifactId, url, text
       <span className="min-w-0 truncate text-zinc-300">{f.title}</span>
       {f.size > 0 && (
         // Only where the transcript's column (ChatHistory's container) has the room, whatever the window's width.
-        <span className="shrink-0 text-[10px] text-zinc-600 @max-md/history:hidden">
+        <span className="shrink-0 text-[11px] text-zinc-600 @max-md/history:hidden">
           {fileType(f)} · {formatSize(f.size)}
         </span>
       )}
