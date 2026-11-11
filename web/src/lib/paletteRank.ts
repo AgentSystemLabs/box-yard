@@ -322,8 +322,8 @@ export interface PaletteGroup {
 }
 
 export const GROUP_LABEL: Record<GroupKey, string> = {
-  // Box Yard's own label: the palette passes it through withOwner.
-  waiting: "Waiting on Cody",
+  // As the sidebar's list of the same tasks.
+  waiting: "Waiting on you",
   working: "Working",
   recent: "Recently viewed",
   command: "Commands",

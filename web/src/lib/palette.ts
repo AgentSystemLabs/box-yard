@@ -89,7 +89,7 @@ export interface PaletteData {
   newTask?: NewTaskContext
 }
 
-/** Where "New task…" starts: the project in view (its name), and the text its dialog kept from last time. */
+/** Where "New task…" starts: the project its dialog opens on (its name: the one in view, else the first), and the text it kept from last time. */
 export interface NewTaskContext {
   project?: string | null
   draft?: string
@@ -238,21 +238,20 @@ function clip(text: string, max = 60) {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
 }
 
-/** The line under a New task row: the draft its dialog opens with, else the project the task goes to. */
-function newTaskSubtitle({ project, draft }: NewTaskContext, kept = "Continues your draft"): string {
-  const text = draft ? clip(draft) : ""
-  if (text) return `${kept}: “${text}”`
-  return project ? `In ${project} · you can change it next` : "Pick a project next"
-}
+/** The kept draft as a row's subtitle, or nothing without one. */
+const draftLine = (lead: string, draft?: string) => (draft && clip(draft) ? `${lead}: “${clip(draft)}”` : undefined)
 
-/** "New task…" where the palette opened. */
-export const newTaskItem = (ctx: NewTaskContext = {}): PaletteItem => ({ ...NEW_TASK, subtitle: newTaskSubtitle(ctx) })
+/** "New task…" where the palette opened: the draft its dialog opens with, else the project it opens on. */
+export const newTaskItem = ({ project, draft }: NewTaskContext = {}): PaletteItem => ({
+  ...NEW_TASK,
+  subtitle: draftLine("Continues your draft", draft) ?? (project ? `In ${project} · you can change it next` : undefined),
+})
 
 /** The row that starts a task from the typed text (nothing matches it, or it reads like a prompt): the dialog opens with it. */
 export const newTaskFrom = (text: string, ctx: NewTaskContext = {}): PaletteItem => ({
   ...NEW_TASK,
   title: `Start a new task: “${text}”`,
-  subtitle: newTaskSubtitle(ctx, "Adds to your draft"),
+  subtitle: draftLine("Adds to your draft", ctx.draft) ?? "Opens with this as the description",
   shortcut: undefined,
   prompt: text,
 })

@@ -147,7 +147,7 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
         { id: "open", label: "Open", keys: [["Enter"]] },
         { id: "new-tab", label: "Open in a new tab", keys: [[caps.mod, "Enter"]] },
         { id: "narrow", label: `Narrow to ${orList(PREFIXES.map((p) => (/^[A-Z]{2}/.test(p.label) ? p.label : p.label.toLowerCase())))}`, keys: PREFIXES.map((p) => [p.prefix]) },
-        { id: "unscope", label: "Remove the filter", keys: [["⌫"]] },
+        { id: "unscope", label: "Remove the filter", keys: [["Backspace"]] },
       ],
     },
     {

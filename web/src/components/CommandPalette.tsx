@@ -4,10 +4,9 @@ import { focusComposer, pickFocusesComposer } from "../lib/chatSwitch"
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
 import { useLocation, useSearch } from "wouter"
 import { Activity, AlarmClock, Box, CornerDownLeft, ExternalLink, FileText, FolderGit2, FolderPlus, GitPullRequest, Hand, History, Keyboard, LayoutGrid, ListTodo, ListTree, MessageSquarePlus, Pin, PinOff, Search, Settings, X, Zap } from "lucide-react"
-import { QUIET, useArtifacts, useOwnerName, useProjects, useTasks } from "../lib/queries"
+import { QUIET, useArtifacts, useProjects, useTasks } from "../lib/queries"
 import { NEW_TASK, buildItems, newTaskFrom, pushRecent, recentKeyFor, type NewTaskContext, type PaletteCommand, type PaletteItem } from "../lib/palette"
 import { PREFIXES, bumpUsage, currentUsage, normalizeQuery, paletteIndex, paletteRows, parseQuery, rankPalette, type GroupKey, type PaletteRow, type PaletteScope } from "../lib/paletteRank"
-import { withOwner } from "../../../shared/owner"
 import { subtaskHitsLabel } from "../lib/subtaskSearch"
 import { isFilePath, previewKind } from "../lib/filePreview"
 import { openPreview } from "../lib/preview"
@@ -23,7 +22,8 @@ import { openShortcuts } from "./ShortcutsHelp"
 import { chordLabel, isNewTaskKey, paletteChord } from "../lib/shortcuts"
 import { isMac } from "../lib/useDictation"
 import { DismissButton, Modal, isDialogOpen } from "./Modal"
-import { Subtask } from "./ChatIcons"
+import { CHAT_ICONS, Subtask } from "./ChatIcons"
+import { Kbd } from "./Kbd"
 import { ProjectAvatar, TaskStatusIcon } from "./TaskIcon"
 import { useProjectIcon } from "../lib/taskTiles"
 
@@ -51,8 +51,8 @@ export function SearchButton({ className = HEADER_SEARCH }: { className?: string
     <button
       type="button"
       data-testid="search-button"
-      title={`Search tasks (${chordLabel(paletteChord, mac)} or /)`}
-      aria-label="Search tasks"
+      title={`Search and commands (${chordLabel(paletteChord, mac)} or /)`}
+      aria-label="Search and commands"
       aria-keyshortcuts={mac ? "Meta+K /" : "Control+K /"}
       onClick={(e) => {
         e.currentTarget.focus()
@@ -217,6 +217,7 @@ const KIND_ICON: Record<PaletteItem["kind"], typeof Search> = {
 const COMMAND_ICON: Partial<Record<PaletteCommand, typeof Search>> = {
   "new-task": MessageSquarePlus,
   "new-project": FolderPlus,
+  coordinator: CHAT_ICONS.coordinator,
   settings: Settings,
   shortcuts: Keyboard,
   "pin-project": Pin,
@@ -245,7 +246,6 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
   const projects = useProjects(QUIET)
   const artifacts = useArtifacts(QUIET)
   const pins = useBarPins()
-  const ownerName = useOwnerName()
   const [text, setText] = useState("")
   const [scope, setScope] = useState<PaletteScope | null>(null)
   const [expanded, setExpanded] = useState<ReadonlySet<GroupKey>>(() => new Set())
@@ -261,7 +261,8 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
   const list = useRef<HTMLDivElement>(null)
   const id = useId()
 
-  const newTask = useMemo<NewTaskContext>(() => ({ project: projects.data?.find((p) => p.id === projectInView)?.name, draft }), [projects.data, projectInView, draft])
+  // The project its dialog opens on: the one in view, else the first.
+  const newTask = useMemo<NewTaskContext>(() => ({ project: (projects.data?.find((p) => p.id === projectInView) ?? projects.data?.[0])?.name, draft }), [projects.data, projectInView, draft])
   const items = useMemo(
     () => buildItems({ tasks: tasks.data, projects: projects.data, artifacts: artifacts.data, pins, newTask }),
     [tasks.data, projects.data, artifacts.data, pins, newTask],
@@ -278,10 +279,13 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
   const query = normalizeQuery(text)
   const groups = useMemo(() => rankPalette(items, { scope, query }, { now, recent, usage, expanded }), [items, scope, query, now, recent, usage, expanded])
   // The last row starts a task from what was typed, when nothing matches it or it reads like a prompt (two words, or
-  // a long one). Not in a prefix's scope, which lists one kind, nor while the tasks load.
+  // a long one). Not in a prefix's scope, which lists one kind, nor while the tasks load, nor under "New task…" itself.
   const typed = text.trim()
   const offer = useMemo(
-    () => (typed && !scope && !tasks.isLoading && (groups.length === 0 || typed.length >= 12 || /\s/.test(typed)) ? newTaskFrom(typed, newTask) : null),
+    () =>
+      typed && !scope && !tasks.isLoading && (groups.length === 0 || typed.length >= 12 || /\s/.test(typed)) && !groups.some((g) => g.items.some((i) => i.command === "new-task"))
+        ? newTaskFrom(typed, newTask)
+        : null,
     [groups, typed, scope, tasks.isLoading, newTask],
   )
   const rows = useMemo<PaletteRow[]>(() => (offer ? [...paletteRows(groups), { type: "item", item: offer, group: "command" }] : paletteRows(groups)), [groups, offer])
@@ -464,7 +468,7 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
         {rows.length === 0 && (tasks.isLoading ? <Loading kind="rows" label="Loading tasks" className="px-2.5 py-3" /> : <div className="px-3 py-8 text-center text-sm wrap-anywhere text-zinc-500">{noMatches}</div>)}
         {/* Groups past the drawn rows wait for them. */}
         {groups.map((g) => index < drawn && (
-          <Group key={g.key} name={g.key} label={withOwner(g.label, ownerName)} id={`${id}-${g.key}`}>
+          <Group key={g.key} name={g.key} label={g.label} id={`${id}-${g.key}`}>
             {g.items.map((item) => {
               const i = index++
               if (i >= drawn) return null
@@ -530,16 +534,12 @@ function Palette({ projectInView, onClose, onCommand }: { projectInView: string 
         )}
         {scope && (
           <span className="ml-auto">
-            <Kbd>⌫</Kbd> clear filter
+            <Kbd>Backspace</Kbd> clear filter
           </span>
         )}
       </div>
     </Modal>
   )
-}
-
-function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="mr-0.5 inline-block min-w-4 rounded border border-zinc-800 bg-zinc-900 px-1 text-center font-sans text-[10px] text-zinc-400">{children}</kbd>
 }
 
 function Group({ name, label, id, children }: { name: GroupKey | "new-task"; label: string; id: string; children: ReactNode }) {
