@@ -71,12 +71,13 @@ export function taskReference(task: Task, { context = false, projectName }: { co
 export function insertReference(text: string, at: number, ref: string): { text: string; caret: number } {
   const i = Math.max(0, Math.min(at, text.length))
   let before = text.slice(0, i)
-  const after = text.slice(i)
+  let after = text.slice(i)
   let lead: string
   let tail: string
   if (ref.includes("\n")) {
-    // Its own line: the spaces the line before ended with go.
+    // Its own lines: the spaces around it on the line it splits go.
     before = before.replace(/[ \t]+$/, "")
+    after = after.replace(/^[ \t]+/, "")
     lead = before && !before.endsWith("\n") ? "\n" : ""
     tail = after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n"
   } else {

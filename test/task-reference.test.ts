@@ -67,6 +67,8 @@ describe("putting it in the draft", () => {
     expect(insertReference("Look at ", 8, block)).toEqual({ text: `Look at\n${block}\n\n`, caret: `Look at\n${block}\n\n`.length })
     expect(insertReference("Look at\n\nthen fix it", 9, block).text).toBe(`Look at\n\n${block}\n\nthen fix it`)
     expect(insertReference("A\nB", 1, block).text).toBe(`A\n${block}\n\nB`)
+    // Mid-sentence: what follows starts its own line, without the space it had.
+    expect(insertReference("Follow up on  and check", 13, block)).toEqual({ text: `Follow up on\n${block}\n\nand check`, caret: `Follow up on\n${block}\n\n`.length })
   })
 })
 
