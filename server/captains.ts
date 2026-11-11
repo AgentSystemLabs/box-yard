@@ -23,6 +23,7 @@ import { sessionLineMeta, type ThreadHost } from "./sideThreads.js"
 import { agentCaptainLabel, captainSourceOf, forwardedFromTask } from "../shared/captain.js"
 import { budgetLine, budgetNotes, noteLine, pruneAdvice, shortTokens } from "../shared/notes.js"
 import {
+  RESET_LEAD,
   SUMMARY_PROMPT,
   afterCompactBlock,
   captainCompactionsDir,
@@ -36,6 +37,7 @@ import {
   readCompactionInfo,
   readCompactionRecords,
   recapBlock,
+  resetPrompt,
   summaryBody,
   summaryLooksValid,
   summaryPrompt,
@@ -1291,8 +1293,9 @@ class Captain {
         .map((m) => `[${m.role}] ${m.content.slice(0, 800)}`)
         .join("\n")
       const last = recapFile ? { file: recapFile } : lastCompaction(this.compactionsDir)
-      const saved = last ? this.recap(last.file, { lead: "Your session was reset. This is the last summary you wrote" }) : null
-      result = await this.run(`${saved ? `${saved}\n\n` : ""}Earlier Captain conversation (your session was reset):\n${recap}\n\n---\n\n${now.text}\n\n${body}`, fresh, false, "turn", ask)
+      const saved = last ? this.recap(last.file, { lead: RESET_LEAD }) : null
+      // The history first and labelled as such; [Project now] (ending with the live defaults) and the messages last.
+      result = await this.run(resetPrompt(saved, "Earlier Captain conversation", recap, `${now.text}\n\n${body}`), fresh, false, "turn", ask)
     }
     if (result.ok) this.store.setKv(notesSeenKey(this.project.id), now.notesHash)
     if (result.ok && recapFile) this.store.setKv(recapKey(this.project.id), null)
@@ -1371,7 +1374,7 @@ class Captain {
       return null
     }
     const live = liveTaskLines(this.store, mentionedTaskIds([summaryBody(markdown)]), { projectId: this.project.id })
-    return opts.compacted ? afterCompactBlock(file, markdown, live) : recapBlock(file, markdown, live, opts.lead)
+    return opts.compacted ? afterCompactBlock(file, markdown, live, this.owner()) : recapBlock(file, markdown, live, opts.lead, this.owner())
   }
 
   private async doCompact() {

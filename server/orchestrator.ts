@@ -17,6 +17,7 @@ import { BadRequestError, queuedChatError, type QueuedChatChange } from "./store
 import { compactThreshold, type SettingsStore } from "./settings.js"
 import { contextTokens, contextWindowOf, formatTokens, parseContextReport, resultUsageObject, sessionUsageOf } from "./usage.js"
 import {
+  RESET_LEAD,
   SUMMARY_PROMPT,
   afterCompactBlock,
   cleanSummary,
@@ -25,6 +26,7 @@ import {
   finishCompaction,
   lastCompaction,
   recapBlock,
+  resetPrompt,
   summaryBody,
   summaryLooksValid,
   summaryPrompt,
@@ -492,7 +494,7 @@ export class Orchestrator {
       return null
     }
     const live = liveTaskLines(this.store, mentionedTaskIds([summaryBody(markdown)]), { statusOnly: this.statusOnly })
-    return opts.compacted ? afterCompactBlock(file, markdown, live) : recapBlock(file, markdown, live, opts.lead)
+    return opts.compacted ? afterCompactBlock(file, markdown, live, this.owner()) : recapBlock(file, markdown, live, opts.lead, this.owner())
   }
 
   /**
@@ -825,8 +827,8 @@ export class Orchestrator {
         .map((m) => `[${m.role}] ${m.content.slice(0, 800)}`)
         .join("\n")
       const last = recapFile ? { file: recapFile } : this.latestSummary()
-      const saved = last ? this.recap(last.file, { lead: "Your session was reset. This is the last summary you wrote" }) : null
-      result = await this.run(`${saved ? `${saved}\n\n` : ""}Earlier conversation (your session was reset):\n${recap}\n\n---\n\n${now}`, fresh, false, "turn", ask)
+      const saved = last ? this.recap(last.file, { lead: RESET_LEAD }) : null
+      result = await this.run(resetPrompt(saved, "Earlier conversation", recap, now), fresh, false, "turn", ask)
     }
     this.turnKey = null
     this.stopping = false
