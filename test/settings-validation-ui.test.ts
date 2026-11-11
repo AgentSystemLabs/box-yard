@@ -79,8 +79,11 @@ const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)))
 const input = (path: string) => document.querySelector<HTMLInputElement>(`[data-setting="${path}"]`)!
 const saveButton = () => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save")!
 const problems = () => document.querySelector("[data-testid=settings-problems]")?.textContent ?? null
+const errorId = (el: HTMLElement) =>
+  (el.getAttribute("aria-describedby") ?? "").split(/\s+/).find((id) => /(^|-)error(-|$)/.test(id)) ?? null
 const errorOf = (el: HTMLElement) => {
-  const id = el.getAttribute("aria-describedby")
+  // aria-describedby may list several ids (help, then error); the error id carries "error".
+  const id = errorId(el)
   return id ? document.getElementById(id)?.textContent ?? null : null
 }
 const puts = () => requests.filter((r) => r.method === "PUT")
@@ -105,7 +108,7 @@ describe("Settings validation", () => {
     expect(input("maxBoxes").getAttribute("aria-invalid")).toBe("true")
     expect(errorOf(input("maxBoxes"))).toBe("Enter a whole number from 1 to 100.")
     // Search indexes a field's label and help, not its problem.
-    expect(document.getElementById(input("maxBoxes").getAttribute("aria-describedby")!)!.hasAttribute("data-settings-search-ignore")).toBe(true)
+    expect(document.getElementById(errorId(input("maxBoxes"))!)!.hasAttribute("data-settings-search-ignore")).toBe(true)
     expect(problems()).toBe("Fix 1 field to save")
     expect(navMark("limits")).toBe("Needs a fix")
     // The phone's category picker says it too.

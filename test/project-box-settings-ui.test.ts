@@ -110,7 +110,7 @@ describe("Project › Settings › Boxes", () => {
     expect(source("agents-per-box")).toBe("Using global: each box's size default (small 1 · medium 2 · large 4).")
     expect(source("tasks-per-box")).toBe("Using global: each box's size default (small 3 · medium 8 · large 18).")
     expect(source("max-boxes")).toBe("Using global: 6 (the whole pool's Max boxes).")
-    expect($<HTMLInputElement>("project-agents-per-box")!.placeholder).toBe("Global: by box size")
+    expect($<HTMLInputElement>("project-agents-per-box")!.placeholder).toBe("By box size")
     expect($<HTMLInputElement>("project-max-boxes")!.placeholder).toBe("Global: 6")
     for (const k of ["box-size", "agents-per-box", "tasks-per-box", "max-boxes"]) expect(clear(k)).toBeNull()
     // The global number when Settings sets one for every box.
@@ -185,7 +185,7 @@ describe("Project › Settings › Boxes", () => {
 
   it("on this computer, says Agents at once still applies there", () => {
     render(project({ runner: "local" }))
-    expect($("project-boxes")!.textContent).toContain("Tasks running at once also limits its tasks here, within Settings › Tasks running at once on this computer")
+    expect($("project-boxes")!.textContent).toContain("Tasks running at once also limits its tasks here, within Tasks running at once on this computer")
   })
 
   // Cody: it wasn't obvious that the setting held back every project. It now says it limits only this project's.
