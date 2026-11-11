@@ -87,6 +87,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/identity-signing.e2e.test.ts": "End-to-end runner/server integration",
   "test/identity-status-only.test.ts": "Full Box Yard server/task-manager fixture",
   "test/identity-tools.test.ts": "Full Box Yard server/task-manager fixture",
+  "test/launcher-install.test.ts": "Real Git repositories/configuration or archive/bundle operations",
   "test/limits.e2e.test.ts": "End-to-end runner/server integration",
   "test/local-onboarding.e2e.test.ts": "End-to-end runner/server integration",
   "test/local-runner.e2e.test.ts": "End-to-end runner/server integration",

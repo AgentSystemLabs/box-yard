@@ -132,6 +132,8 @@ export async function installLatest({ layout, repo, branch = BRANCH, onStep = ()
       hint: `The SQLite driver (better-sqlite3) didn't load on this computer${buildToolsHint ? `. Install the build tools (${buildToolsHint}) and try again` : ""}, or use Node.js 22 or 24 LTS.`,
     })
     fs.writeFileSync(path.join(staging, READY_MARKER), JSON.stringify({ sha, installedAt: new Date().toISOString(), node: process.version }) + "\n")
+    // Another launcher finished the same commit meanwhile (and may run it): keep theirs. Otherwise clear a leftover.
+    if (isInstalled(dir)) return { sha, dir, fresh: false }
     fs.rmSync(dir, { recursive: true, force: true })
     try {
       fs.renameSync(staging, dir)
