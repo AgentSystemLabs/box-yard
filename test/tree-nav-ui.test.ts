@@ -217,12 +217,12 @@ describe("a task's header on a phone", () => {
     expect(search().get("session")).toBe(OMELETTE.id)
   })
 
-  it("row 1 is ☰, the crumbs and ⓘ; row 2 is the task's icon (its state) and whole title, which opens the details; no 🔍, no menu", async () => {
+  it("row 1 is ☰, the crumbs, its cost and ⓘ; row 2 is the task's icon (its state) and whole title, which opens the details; no 🔍, no menu", async () => {
     render(`/?session=${OMELETTE.id}&stack=${CLASSIC.id}`)
     await settle()
     const nav = header(CLASSIC).querySelector<HTMLElement>("[data-testid=task-nav]")!
     // Nothing here waits on Cody, so ☰ has no count. Pin and Close, after ⓘ, show only beside a chat (CSS).
-    expect(labels(nav).slice(0, 5)).toEqual(["Projects and tasks", "Coordinator", "box-yard Captain", `Up to ${OMELETTE.title}`, "Task details and more actions"])
+    expect(labels(nav).slice(0, 6)).toEqual(["Projects and tasks", "Coordinator", "box-yard Captain", `Up to ${OMELETTE.title}`, "Cost breakdown", "Task details and more actions"])
     // No state word: the task's icon, before its title, names it.
     expect(nav.textContent).not.toContain("Waiting on agent")
     expect(header(CLASSIC).querySelector("button[aria-label='Search tasks']")).toBeNull()

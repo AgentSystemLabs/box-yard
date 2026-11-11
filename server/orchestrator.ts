@@ -1151,6 +1151,7 @@ export class Orchestrator {
             costUsd: resultCostUsd,
             resumed: resume,
             loginId: login?.id ?? null,
+            harness: launch.cli,
           })
         }
         if (kind !== "context") this.recordTiming(clock, { kind, sessionId: seenSession ?? sessionId, model: resultModel ?? (runModel || null), effort, resume, ask, ok: !err && code === 0 && !resultError, reply, loginId: login?.id ?? null })
