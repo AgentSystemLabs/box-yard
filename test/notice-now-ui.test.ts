@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Question, PR and failure cards in the Coordinator's transcript (components/NoticeNow.tsx): while the task waits on
-// Cody, a status word and one action (Answer, Review PR, Retry) on a coloured card; once it has moved on, or a newer card
-// took over, "Now" and where the task is, on a gray card. Task updates re-render only the card they change.
+// Cody, one action (Answer, Review PR, Retry) on a coloured card, its status word only for a screen reader; once it has
+// moved on, or a newer card took over, "Now" and the task's status icon, named for where it is, on a gray card. Task updates re-render only the card they change.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, useRef, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -60,6 +60,8 @@ const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("c
 const $ = (sel: string) => host.querySelector<HTMLElement>(sel)
 const card = (id: string) => $(`#chat-${id}`)!
 const row = (id: string) => card(id).querySelector<HTMLElement>('[data-testid="notice-now"]')
+/** What a gray card's line says: "Now", and its status icon's name. */
+const nowSays = (id: string) => [row(id)!.textContent, row(id)!.querySelector('[aria-label^="Now:"]')?.getAttribute("aria-label")]
 // The query cache tells its observers a tick later.
 const flush = () => act(() => new Promise<void>((r) => setTimeout(r, 0)))
 const tasks = async (...list: Task[]) => {
@@ -94,12 +96,15 @@ afterEach(() => {
 })
 
 describe("a card that waits on Cody", () => {
-  it("leads with its status word in the kind's colour, on a coloured card", () => {
+  it("leads with its action on a coloured card; the status word is only for a screen reader", () => {
     render([asks("q1"), pr("p1"), failed("f1")])
     expect(["q1", "p1", "f1"].map((id) => card(id).dataset.now)).toEqual(["live", "live", "live"])
-    expect(row("q1")!.textContent).toContain("Needs your answer")
-    expect(row("p1")!.textContent).toContain("Ready for your review")
-    expect(row("f1")!.textContent).toContain("Failed")
+    // The card's icon and edge already say why it waits: no visible status word.
+    expect(row("q1")!.textContent).toBe("Answer")
+    expect(row("q1")!.querySelector('[data-testid="notice-answer"]')!.getAttribute("aria-description")).toBe("Needs your answer")
+    expect(row("p1")!.querySelector(".sr-only")!.textContent).toBe("Ready for your review")
+    expect(row("f1")!.textContent).toBe("Retry")
+    expect(row("f1")!.querySelector('[data-testid="notice-retry"]')!.getAttribute("aria-description")).toBe("Failed")
     expect(card("q1").querySelector('[role="link"]')!.className).toContain("border-amber-500/40!")
     expect(card("p1").querySelector('[role="link"]')!.className).toContain("border-emerald-500/40!")
     expect(card("f1").querySelector('[role="link"]')!.className).toContain("border-red-500/40!")
@@ -132,7 +137,7 @@ describe("a card that waits on Cody", () => {
     await flush()
     expect(fetches).toContainEqual({ url: "/api/tasks/task_f/retry", method: "POST" })
     expect(card("f1").dataset.now).toBe("past")
-    expect(row("f1")!.textContent).toBe("NowQueued")
+    expect(nowSays("f1")).toEqual(["Now", "Now: Queued"])
   })
 
   it("its action keeps its click: the card doesn't also open the task", async () => {
@@ -148,8 +153,9 @@ describe("a card whose moment has passed", () => {
     render([asks("q1"), pr("p1")])
     await tasks(task("task_q", "working"), task("task_p", "done", { prUrl: PR_URL, prState: "merged" }))
     expect(card("q1").dataset.now).toBe("past")
-    expect(row("q1")!.textContent).toBe("NowWorking")
-    expect(row("p1")!.textContent).toBe("NowMerged")
+    expect(nowSays("q1")).toEqual(["Now", "Now: Working"])
+    // Its PR as GitHub has it, beside the status icon.
+    expect(nowSays("p1")).toEqual(["Now Merged #9", "Now: Merged"])
     expect(card("q1").querySelector('[role="link"]')!.className).not.toContain("border-amber")
     expect(card("q1").querySelector('[data-testid="notice-answer"]')).toBeNull()
     // Still a full card, not folded into the updates.
@@ -159,7 +165,7 @@ describe("a card whose moment has passed", () => {
   it("only a task's newest question, PR or failure asks; older ones say where it is", () => {
     render([asks("q1"), failed("f1"), asks("q2")])
     expect(card("q1").dataset.now).toBe("past")
-    expect(row("q1")!.textContent).toBe("NowNeeds you")
+    expect(nowSays("q1")).toEqual(["Now", "Now: Needs you"])
     expect(card("q2").dataset.now).toBe("live")
     expect(host.querySelectorAll('[data-testid="notice-answer"]')).toHaveLength(1)
   })
