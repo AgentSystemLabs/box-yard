@@ -5,21 +5,26 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type
 import { useLocation, useSearch } from "wouter"
 import { Activity, AlarmClock, Box, CornerDownLeft, ExternalLink, FileText, FolderGit2, GitPullRequest, Hand, History, LayoutGrid, ListTodo, ListTree, Search, Settings, X, Zap } from "lucide-react"
 import { QUIET, useArtifacts, useOwnerName, useProjects, useTasks } from "../lib/queries"
-import { buildItems, pushRecent, recentKeyFor, type PaletteCommand, type PaletteItem } from "../lib/palette"
+import { buildItems, newTaskFrom, pushRecent, recentKeyFor, type PaletteCommand, type PaletteItem } from "../lib/palette"
 import { PREFIXES, bumpUsage, currentUsage, normalizeQuery, paletteIndex, paletteRows, parseQuery, rankPalette, type GroupKey, type PaletteGroup, type PaletteRow, type PaletteScope } from "../lib/paletteRank"
 import { withOwner } from "../../../shared/owner"
 import { subtaskHitsLabel } from "../lib/subtaskSearch"
 import { isFilePath, previewKind } from "../lib/filePreview"
 import { openPreview } from "../lib/preview"
-import { NewTabLink, StatusBadge, TimeAgo, cx } from "./ui"
+import { NewTabLink, PR_STYLE, PrChip, STATUS, TAP_AREA, TimeAgo, cx } from "./ui"
 import { useOpenSettings } from "./SettingsHost"
 import { NewProjectDialog } from "./NewProjectDialog"
+import { NewTaskDialog } from "./NewTask"
+import { Loading } from "./Loading"
+import { clearNewTaskDraft, draftScope, loadDraft, newTaskDraftKey, saveDraft } from "../lib/newTask"
+import { projectOfTask } from "../lib/overlays"
+import { prStateOf } from "../lib/prState"
 import { openShortcuts } from "./ShortcutsHelp"
 import { chordLabel, paletteChord } from "../lib/shortcuts"
 import { isMac } from "../lib/useDictation"
 import { DismissButton, Modal } from "./Modal"
 import { Subtask } from "./ChatIcons"
-import { ProjectAvatar } from "./TaskIcon"
+import { ProjectAvatar, TaskStatusIcon } from "./TaskIcon"
 import { useProjectIcon } from "../lib/taskTiles"
 
 // ------------------------------------------------------------------ open state
@@ -106,6 +111,9 @@ const isTyping = (target: EventTarget | null) =>
 
 // ------------------------------------------------------------------ host
 
+/** The palette's New task dialog has a project picker, so it keeps one draft wherever it opens (lib/newTask.ts). */
+const NEW_TASK_SCOPE = draftScope(null)
+
 /** Mounted once in the app: hotkeys, recent tracking, the palette and the dialogs it opens. */
 export function CommandPalette() {
   const isOpen = usePaletteOpen()
@@ -113,6 +121,8 @@ export function CommandPalette() {
   const search = useSearch()
   const captain = useChatProjectFilter()
   const [dialog, setDialog] = useState<PaletteCommand | null>(null)
+  /** "New task…": the dialog's first project (the one in view) and its text. */
+  const [newTask, setNewTask] = useState<{ projectId: string | null; prompt: string } | null>(null)
   const openSettings = useOpenSettings()
 
   // Recently viewed: a task's panel or a Captain, however it opened (the sidebar, a card, a link, the palette).
@@ -147,6 +157,16 @@ export function CommandPalette() {
     else if (command === "coordinator") {
       // As a pick in the sidebar: the chat (or, with it pinned, nothing moves and a toast says why).
       openChat(null)
+    } else if (command === "new-task") {
+      // On the project in view (the open task's, else the Captain's), which its picker can change. The text is the
+      // draft kept from last time, then what was typed when nothing matched.
+      const [kind, id] = viewing?.split(/:(.*)/) ?? []
+      const kept = loadDraft(NEW_TASK_SCOPE)
+      const typed = item.prompt ?? ""
+      setNewTask({
+        projectId: (kind === "task" && id ? projectOfTask(id) : kind === "project" ? id : null) ?? captain ?? null,
+        prompt: kept && typed && !kept.includes(typed) ? `${kept}\n\n${typed}` : kept || typed,
+      })
     } else setDialog(command)
   }
 
@@ -154,6 +174,21 @@ export function CommandPalette() {
     <>
       {isOpen && <Palette onClose={() => setOpen(false)} onCommand={onCommand} />}
       {dialog === "new-project" && <NewProjectDialog onClose={() => setDialog(null)} />}
+      {newTask && (
+        <NewTaskDialog
+          defaultProjectId={newTask.projectId}
+          initialPrompt={newTask.prompt}
+          draftKey={newTaskDraftKey(NEW_TASK_SCOPE)}
+          onCancel={(prompt) => {
+            saveDraft(NEW_TASK_SCOPE, prompt)
+            setNewTask(null)
+          }}
+          onDone={() => {
+            clearNewTaskDraft(NEW_TASK_SCOPE)
+            setNewTask(null)
+          }}
+        />
+      )}
     </>
   )
 }
@@ -223,7 +258,12 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
   }, [items])
   const query = normalizeQuery(text)
   const groups = useMemo(() => rankPalette(items, { scope, query }, { now, recent, usage, expanded }), [items, scope, query, now, recent, usage, expanded])
-  const rows = useMemo(() => paletteRows(groups), [groups])
+  // Nothing matched what was typed: the one row left starts a task from it. Not in a prefix's scope, which lists one
+  // kind, nor while the tasks load.
+  const typed = text.trim()
+  const offer = useMemo(() => (groups.length === 0 && typed && !scope && !tasks.isLoading ? newTaskFrom(typed) : null), [groups, typed, scope, tasks.isLoading])
+  const rows = useMemo<PaletteRow[]>(() => (offer ? [{ type: "item", item: offer, group: "command" }] : paletteRows(groups)), [groups, offer])
+  const found = useMemo(() => groups.reduce((n, g) => n + g.total, 0), [groups])
   const at = Math.min(active, rows.length - 1)
   const current = rows[at]
   const optionId = (i: number) => `${id}-opt-${i}`
@@ -323,6 +363,7 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
   }
 
   const highlight = scope === "pr" ? query.replace(/^#/, "") : query
+  const noMatches = typed ? `No matches for “${typed}”` : "No matches"
   let index = 0
 
   return (
@@ -336,7 +377,8 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
       className="sm:max-h-[70vh]!"
       bodyClassName="flex min-h-0 flex-1 flex-col"
     >
-      <div className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-zinc-900 px-4">
+      {/* The input always has the focus, so the row says so along its bottom edge: an outline around the input would be clipped by the row. */}
+      <div className="flex min-h-14 shrink-0 items-center gap-2.5 border-b border-zinc-900 px-4 has-[>input:focus-visible]:shadow-[inset_0_-2px_0_var(--focus-ink)]">
         {scope === "command" ? <Zap className="h-4 w-4 shrink-0 text-yard-400" /> : <Search className="h-4 w-4 shrink-0 text-zinc-500" />}
         {scope && (
           <button
@@ -345,7 +387,7 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => pickScope(null)}
             aria-label={`${prefixOf(scope).label} only: remove the ${prefixOf(scope).prefix} filter`}
-            className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-md border border-yard-500/40 bg-yard-500/10 px-2 text-xs font-medium text-yard-300 sm:min-h-0 sm:py-0.5"
+            className={cx(TAP_AREA, "inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-yard-500/40 bg-yard-500/10 px-2 text-xs font-medium text-yard-300 sm:min-h-0 sm:py-0.5")}
           >
             <span className="font-mono">{prefixOf(scope).prefix}</span>
             {prefixOf(scope).label}
@@ -368,7 +410,7 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
           value={text}
           onChange={(e) => onInput(e.target.value)}
           placeholder={scope ? SCOPE_PLACEHOLDER[scope] : "Search tasks, Captains, settings, files…"}
-          className="min-w-0 flex-1 bg-transparent py-3.5 text-base text-zinc-100 placeholder:text-zinc-600 focus:outline-none sm:text-sm"
+          className="min-w-0 flex-1 bg-transparent py-3.5 text-base text-zinc-100 outline-none! placeholder:text-zinc-600 sm:text-sm"
         />
         <kbd className="rounded border border-zinc-800 px-1.5 py-0.5 font-sans text-[10px] text-zinc-500 max-sm:hidden">esc</kbd>
         {/* A phone has no Esc key; a wider screen shows the esc hint instead. */}
@@ -376,15 +418,16 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
       </div>
 
       {!scope && !text && (
-        <div data-testid="palette-prefixes" className="scroll-thin flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-zinc-900 px-4 py-2 text-[11px] text-zinc-500">
-          <span className="shrink-0">Narrow to</span>
+        // A narrow phone drops the label and tightens the chips, so the four fit on one line; narrower still, they wrap.
+        <div data-testid="palette-prefixes" role="group" aria-label="Narrow to" className="@container flex shrink-0 flex-wrap items-center gap-1.5 border-b border-zinc-900 px-4 py-2 text-[11px] text-zinc-500 pointer-coarse:min-h-11">
+          <span aria-hidden className="shrink-0 @max-[22rem]:hidden">Narrow to</span>
           {PREFIXES.map((p) => (
             <button
               key={p.scope}
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pickScope(p.scope)}
-              className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200 sm:min-h-0 sm:py-0.5"
+              className={cx(TAP_AREA, "inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 text-zinc-400 transition hover:border-zinc-700 hover:text-zinc-200 sm:min-h-0 sm:py-0.5 @max-[19rem]:px-1.5")}
             >
               <span className="font-mono text-zinc-300">{p.prefix}</span>
               {p.label}
@@ -394,7 +437,13 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
       )}
 
       <div ref={list} id={`${id}-list`} role="listbox" aria-label="Results" className="scroll-thin min-h-0 flex-1 overflow-y-auto p-2">
-        {rows.length === 0 && <div className="px-3 py-8 text-center text-sm text-zinc-500">{tasks.isLoading ? "Loading…" : "No matches"}</div>}
+        {rows.length === 0 && (tasks.isLoading ? <Loading kind="rows" label="Loading tasks" className="px-2.5 py-3" /> : <div className="px-3 py-8 text-center text-sm wrap-anywhere text-zinc-500">{noMatches}</div>)}
+        {offer && (
+          <>
+            <div className="px-3 pt-6 pb-4 text-center text-sm wrap-anywhere text-zinc-500">{noMatches}</div>
+            <Option id={optionId(0)} index={0} item={offer} query="" selected onHover={() => {}} onChoose={() => choose(offer)} />
+          </>
+        )}
         {/* Groups past the drawn rows wait for them. */}
         {groups.map((g) => index < drawn && (
           <Group key={g.key} group={g} label={withOwner(g.label, ownerName)} id={`${id}-${g.key}`}>
@@ -423,6 +472,11 @@ function Palette({ onClose, onCommand }: { onClose: () => void; onCommand: (c: P
           </Group>
         ))}
         {rows.length > drawn && <div ref={more} data-testid="palette-more-rows" className="h-px" />}
+      </div>
+
+      {/* What a search found, for a screen reader: the rows themselves are read only as the arrows reach them. */}
+      <div role="status" className="sr-only">
+        {offer ? `${noMatches}. Enter starts a new task with it.` : !typed && !scope ? "" : tasks.isLoading && !found ? "" : found ? `${found} result${found === 1 ? "" : "s"}` : noMatches}
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-900 px-4 py-2 text-[11px] text-zinc-500 max-sm:hidden">
@@ -483,6 +537,9 @@ function Option({
 }) {
   const Icon = KIND_ICON[item.kind]
   const icon = useProjectIcon(item.kind === "project" ? item.key.slice("project:".length) : null)
+  const { task } = item
+  const pr = item.kind === "pr" && task ? prStateOf(task) : null
+  const PrIcon = pr ? PR_STYLE[pr].icon : null
   return (
     <div
       id={id}
@@ -497,16 +554,27 @@ function Option({
       onAuxClick={(e) => e.button === 1 && onChoose(true)}
       className={cx("flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-sm", selected ? "bg-zinc-800/80 text-zinc-50" : "text-zinc-300")}
     >
-      <ProjectAvatar src={icon} className="h-4 w-4 rounded-[4px]">
-        <Icon className={cx("h-4 w-4 shrink-0", selected ? "text-yard-400" : "text-zinc-500")} />
-      </ProjectAvatar>
       <div className="min-w-0 flex-1">
-        <div className="truncate">
+        <div className={cx("truncate", item.kind === "task" && item.taskStatus === "failed" && "task-title-failed")}>
           <Highlight text={item.title} query={query} />
         </div>
         <Meta item={item} />
       </div>
-      {item.status && <StatusBadge status={item.status} />}
+      {/* Drawn first, after the title in the DOM: a screen reader reads the task, then its state (as the sidebar's rows). */}
+      <span className="order-first grid h-5 w-5 shrink-0 place-items-center">
+        {item.kind === "task" && task ? (
+          // The task's own tile says its state; a finished one is neutral, so live work stands out.
+          <TaskStatusIcon task={task} label={item.status === "merged" ? "Merged" : STATUS[task.status].label} muted={task.status === "done"} />
+        ) : PrIcon && pr ? (
+          // A pull request's glyph in its state's colour; the line under the title says the state in words.
+          <PrIcon aria-hidden className={cx("h-4 w-4", PR_STYLE[pr].link)} />
+        ) : (
+          <ProjectAvatar src={icon} className="h-4 w-4 rounded-[4px]">
+            <Icon className={cx("h-4 w-4 shrink-0", selected ? "text-yard-400" : "text-zinc-500")} />
+          </ProjectAvatar>
+        )}
+      </span>
+      {item.kind === "task" && task?.prUrl && <PrChip task={task} variant="number" className={cx(TAP_AREA, "text-xs tabular-nums")} />}
       {item.shortcut && (
         <span className="shrink-0 max-sm:hidden">
           <Kbd>{item.shortcut}</Kbd>
@@ -565,7 +633,7 @@ function ShowAll({ id, index, hidden, selected, onHover, onChoose }: { id: strin
       onMouseDown={(e) => e.preventDefault()}
       onMouseMove={() => !selected && onHover()}
       onClick={onChoose}
-      className={cx("flex min-h-11 cursor-pointer items-center rounded-lg px-2.5 py-1.5 pl-9.5 text-xs sm:min-h-8", selected ? "bg-zinc-800/80 text-zinc-100" : "text-zinc-500")}
+      className={cx("flex min-h-11 cursor-pointer items-center rounded-lg px-2.5 py-1.5 pl-10.5 text-xs sm:min-h-8", selected ? "bg-zinc-800/80 text-zinc-100" : "text-zinc-500")}
     >
       Show {hidden} more
     </div>

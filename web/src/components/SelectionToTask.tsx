@@ -2,13 +2,13 @@
 // a Captain's), "Reply quoting selection" opens the message's reply thread (SideThread.tsx) with the passage quoted in
 // its box: the chat's agent routes what Cody writes there, which covers asking about it and starting work from it. In
 // a task's transcript, "Start new task" opens the shared New task popover with the quote and a box for instructions.
-// Enter sends both to whoever routes the work (the Coordinator); "More options" starts the task directly from the
-// full New task dialog.
+// Enter sends both to whoever routes the work (the Coordinator), as its button says; "Start it myself…" starts the task
+// directly from the full New task dialog, which shows the quote and takes the instructions.
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react"
 import { MessageSquarePlus, Reply } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
 import { buildSelectionTaskBrief, buildSelectionTaskPrompt, selectionTarget, type SelectionTaskSource } from "../lib/selectionTask"
-import { clearNewTaskDraft, selectionScope } from "../lib/newTask"
+import { clearNewTaskDraft, newTaskDraftKey, saveDraft, selectionScope } from "../lib/newTask"
 import { toast } from "../lib/toast"
 import { useOwnerName } from "../lib/queries"
 import { NewTaskDialog, NewTaskPopover } from "./NewTask"
@@ -44,7 +44,7 @@ export function SelectionToTask({
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
   /** The New task popover is open on this selection, hanging from where its button was. */
   const [draft, setDraft] = useState<{ text: string; rect: Rect } | null>(null)
-  /** "More options": the full New task dialog for this selection and the instructions typed so far. */
+  /** "Start it myself…": the full New task dialog for this selection and the instructions typed so far. */
   const [dialog, setDialog] = useState<{ text: string; instructions: string } | null>(null)
   const anchor = useRef<HTMLSpanElement>(null)
   const popoverId = useId()
@@ -142,6 +142,8 @@ export function SelectionToTask({
             heading="New task from selection"
             quote={draft.text}
             placeholder="Additional instructions (optional)"
+            submitLabel={`Send to ${selectionTarget(source)}`}
+            moreLabel="Start it myself…"
             scope={selectionScope(draft.text)}
             align="center"
             defaultProjectId={source.project?.id}
@@ -161,8 +163,15 @@ export function SelectionToTask({
       {source && dialog && (
         <NewTaskDialog
           projectId={source.project?.id}
-          initialPrompt={buildSelectionTaskBrief({ source, selectedText: dialog.text, instructions: dialog.instructions })}
-          onCancel={() => setDialog(null)}
+          initialPrompt={dialog.instructions}
+          quote={dialog.text}
+          compose={(instructions) => buildSelectionTaskBrief({ source, selectedText: dialog.text, instructions })}
+          draftKey={newTaskDraftKey(selectionScope(dialog.text))}
+          onCancel={(instructions) => {
+            // Kept for this quote, as the popover keeps them.
+            saveDraft(selectionScope(dialog.text), instructions)
+            setDialog(null)
+          }}
           onDone={() => {
             clearNewTaskDraft(selectionScope(dialog.text))
             setDialog(null)

@@ -123,10 +123,10 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
         { id: "newline", label: "New line", keys: [[caps.shift, "Enter"]] },
         { id: "sidebar", label: "Return focus to the current sidebar row, keeping the draft", keys: [["Esc"]] },
         { id: "history", label: "Earlier prompts, in an empty composer", keys: [["↑"], ["↓"]] },
-        { id: "where", label: "Choose where its tasks run", keys: [["@"]] },
+        { id: "where", label: "Choose where this message's tasks run", keys: [["@"]] },
         { id: "github", label: "Reference a GitHub issue or pull request by number or title", keys: [["#"]] },
         { id: "project", label: "Choose a project in the Coordinator chat", keys: [["%"]] },
-        { id: "harness", label: "Choose the agent that runs them", keys: [["!"]] },
+        { id: "harness", label: "Choose the agent for this message's tasks", keys: [["!"]] },
       ],
     },
     {

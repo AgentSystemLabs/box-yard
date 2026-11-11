@@ -507,8 +507,8 @@ export function bumpUsage(usage: Record<string, number>, key: string): Record<st
   return { ...usage, [key]: (usage[key] ?? 0) + 1 }
 }
 
-/** Command keys since renamed, by their former key: the Coordinator's page was named for the app's former home. */
-const FORMER_KEYS: Readonly<Record<string, string>> = { "page:zen": "page:coordinator" }
+/** Command keys since renamed, by their former key: the Coordinator's page was named for the app's former home, and "Open settings" was a second row for the Settings page. */
+const FORMER_KEYS: Readonly<Record<string, string>> = { "page:zen": "page:coordinator", "action:settings": "page:settings" }
 
 /** Saved usage with a count under a former command key moved to the command's key now, so it still ranks. */
 export function currentUsage(usage: Record<string, number>): Record<string, number> {

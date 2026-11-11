@@ -1,6 +1,7 @@
 // "New task": a button that opens a small popover anchored to it (a bottom sheet on phones) with one textarea.
 // Enter starts the task, titled from its prompt; "More options" opens the full dialog (title, agent, model, effort, files,
-// env vars) with the text in it. Esc, a click outside or More options keep the draft (lib/newTask.ts).
+// env vars) with the text in it. Esc, a click outside or More options keep the draft (lib/newTask.ts). The command
+// palette's "New task…" opens the full dialog itself (CommandPalette.tsx).
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
 import { createPortal } from "react-dom"
 import { useLocation } from "wouter"
@@ -20,7 +21,7 @@ import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS
 import { Modal, focusables } from "./Modal"
 import { formatSize } from "./Attachments"
 import { ComposerAttachments } from "./ComposerAttachments"
-import { Button, Field, LineIcon, Select, cx, inputClass, parseEnv } from "./ui"
+import { Button, Field, LineIcon, Select, TAP_AREA, cx, inputClass, parseEnv } from "./ui"
 
 /** Below Tailwind's `sm`: the popover is a bottom sheet. */
 const NARROW = "(max-width: 639.98px)"
@@ -51,7 +52,7 @@ export function NewTaskButton({
   projectId?: string
   /** The picker's first choice when there's no `projectId` (e.g. the Yard's project filter); else the first project. */
   defaultProjectId?: string | null
-  /** Controlled open state (the command palette's `?new=task` opens it). */
+  /** Controlled open state, for a parent that opens it itself. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
   variant?: "primary" | "subtle" | "ghost"
@@ -138,6 +139,8 @@ export function NewTaskPopover({
   heading = "New task",
   quote,
   placeholder = "What should the agent do?",
+  submitLabel = "Start task",
+  moreLabel = "More options",
   scope: scopeProp,
   align = "end",
   onStart,
@@ -153,6 +156,10 @@ export function NewTaskPopover({
   /** Selected text shown above the textarea as a short preview. */
   quote?: string
   placeholder?: string
+  /** The submit button, when `onStart` does something other than start a task here ("Send to the Coordinator"). */
+  submitLabel?: string
+  /** The way to the full dialog, which then says what it does instead ("Start it myself…"). */
+  moreLabel?: string
   /** Where the draft is kept; defaults to the project's. */
   scope?: string
   /** "end": its right edge on the trigger's (a header button); "center": centred under it (a selection). */
@@ -182,19 +189,10 @@ export function NewTaskPopover({
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   const labelId = `${id}-label`
-  const preview = quote ? quotePreview(quote) : ""
 
   useEffect(() => saveDraft(scope, text), [scope, text])
 
-  // Grow with the text up to 40% of the window, then scroll inside.
-  useLayoutEffect(() => {
-    const el = input.current
-    if (!el) return
-    const max = Math.min(360, Math.max(120, Math.round(window.innerHeight * 0.4)))
-    el.style.height = "auto"
-    el.style.height = `${Math.min(el.scrollHeight, max)}px`
-    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden"
-  }, [text, narrow])
+  useAutoGrow(input, text, narrow)
 
   // A press anywhere outside closes it (the trigger toggles it itself). The sheet's backdrop does this on phones.
   useEffect(() => {
@@ -243,12 +241,7 @@ export function NewTaskPopover({
         submit()
       }}
     >
-      {preview && (
-        <blockquote data-testid="selection-quote" title={quote} className="rounded-lg border border-zinc-800 border-l-2 border-l-yard-500/60 bg-zinc-900/60 px-3 py-2 text-xs leading-5 wrap-anywhere text-zinc-400">
-          {/* Clamped inside the padding, or a fourth line peeks out under the third. */}
-          <span className="line-clamp-3">{preview}</span>
-        </blockquote>
-      )}
+      {quote && <SelectionQuote text={quote} />}
       {files.length > 0 && (
         <div className="-mx-3 -mt-3">
           <ComposerAttachments files={files} onRemove={(f) => removeFile(key, f)} onRetry={(f) => retryFile(key, f)} />
@@ -267,9 +260,10 @@ export function NewTaskPopover({
           }
         }}
         placeholder={placeholder}
-        className={cx(inputClass, "scroll-thin block resize-none overflow-y-hidden leading-6 sm:leading-5")}
+        className={cx(inputClass, GROWS)}
       />
-      <div className="flex items-center gap-2">
+      {/* Wraps when a long label doesn't fit beside the other button; the tap areas keep 44px on a touch screen. */}
+      <div className="flex flex-wrap items-center justify-end gap-2 pointer-coarse:min-h-11 pointer-coarse:gap-y-4">
         {!projectId && !onStart && (
           <Select size="sm" aria-label="Project" className="w-0 min-w-0 flex-1 sm:max-w-[13rem]" value={target} onChange={(e) => setPicked(e.target.value)}>
             {projects.map((p) => (
@@ -284,14 +278,15 @@ export function NewTaskPopover({
           disabled={!target && !onStart}
           onClick={() => onMore(target, text)}
           className={cx(
-            "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs whitespace-nowrap text-zinc-500 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none disabled:opacity-50 sm:min-h-0 sm:py-1",
+            TAP_AREA,
+            "mr-auto inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-xs whitespace-nowrap text-zinc-500 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none disabled:opacity-50 sm:min-h-0 sm:py-1",
             (projectId || onStart) && "-ml-1.5",
           )}
         >
-          <SlidersHorizontal className="h-3.5 w-3.5" /> More options
+          <SlidersHorizontal className="h-3.5 w-3.5" /> {moreLabel}
         </button>
-        <Button type="submit" variant="primary" size="sm" className="ml-auto shrink-0" disabled={onStart ? false : !text.trim() || !target || held}>
-          Start task
+        <Button type="submit" variant="primary" size="sm" title={submitLabel} className={cx(TAP_AREA, "max-w-full")} disabled={onStart ? false : !text.trim() || !target || held}>
+          <span className="min-w-0 truncate">{submitLabel}</span>
         </Button>
       </div>
     </form>
@@ -321,7 +316,7 @@ export function NewTaskPopover({
           {projectId && project && <span className="font-normal text-zinc-500"> in {project.name}</span>}
         </h2>
         <span className="ml-auto shrink-0 text-[11px] text-zinc-600" aria-hidden>
-          Enter to start · Shift+Enter new line
+          Enter to {onStart ? "send" : "start"} · Shift+Enter new line
         </span>
       </div>
       {form}
@@ -334,6 +329,31 @@ export function NewTaskPopover({
 export function quotePreview(text: string, max = 240) {
   const flat = text.replace(/\s+/g, " ").trim()
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
+}
+
+/** Selected text as a read-only preview above the box for instructions (the popover's, and the full dialog's). */
+function SelectionQuote({ text }: { text: string }) {
+  return (
+    <blockquote data-testid="selection-quote" title={text} className="rounded-lg border border-zinc-800 border-l-2 border-l-yard-500/60 bg-zinc-900/60 px-3 py-2 text-xs leading-5 wrap-anywhere text-zinc-400">
+      {/* Clamped inside the padding, or a fourth line peeks out under the third. */}
+      <span className="line-clamp-3">{quotePreview(text)}</span>
+    </blockquote>
+  )
+}
+
+/** A textarea that grows with its text (useAutoGrow) instead of being dragged taller. */
+const GROWS = "scroll-thin block resize-none overflow-y-hidden leading-6 sm:leading-5"
+
+/** Grow with the text up to 40% of the window, then scroll inside. `layout`: what else changes the box's width. */
+function useAutoGrow(ref: RefObject<HTMLTextAreaElement | null>, text: string, layout?: unknown) {
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const max = Math.min(360, Math.max(120, Math.round(window.innerHeight * 0.4)))
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden"
+  }, [ref, text, layout])
 }
 
 /** Esc closes; Tab and Shift+Tab stay inside the panel. */
@@ -397,19 +417,28 @@ function anchorStyle(trigger: HTMLElement | null, height: number, align: Align):
 }
 
 /**
- * The full New task form: an optional title (made from the prompt when blank), the prompt, and the options the
+ * The full New task form: the prompt, an optional title (made from the prompt when blank), and the options the
  * popover leaves out: agent, model, effort, "Run on this computer", files and env vars. `onCancel` gets the prompt so the popover's draft keeps it.
  */
 export function NewTaskDialog({
   projectId: projectProp,
+  defaultProjectId,
   initialPrompt = "",
+  quote,
+  compose,
   draftKey,
   onCancel,
   onDone,
 }: {
-  /** Without one the dialog has a project picker, starting on the first project in the saved order. */
+  /** Without one the dialog has a project picker, starting on `defaultProjectId`, else the first project in the saved order. */
   projectId?: string | null
+  /** The picker's first choice (the command palette: the project in view). */
+  defaultProjectId?: string | null
   initialPrompt?: string
+  /** Selected text the task is about, shown read-only above the prompt, which then holds only the instructions (optional). */
+  quote?: string
+  /** The task's prompt from what's in the box, when more goes with it (a selection's quote and where it came from). */
+  compose?: (text: string) => string
   /** The draft its files are kept in (lib/composerDraft.ts), so Cancel keeps them with the popover's text. Without it, they go with the dialog. */
   draftKey?: string
   onCancel: (prompt: string) => void
@@ -419,7 +448,7 @@ export function NewTaskDialog({
   const [, navigate] = useLocation()
   const projects = useProjects().data ?? []
   const [picked, setPicked] = useState("")
-  const projectId = projectProp || (projects.some((p) => p.id === picked) ? picked : (projects[0]?.id ?? ""))
+  const projectId = projectProp || [picked, defaultProjectId].find((id) => id && projects.some((p) => p.id === id)) || projects[0]?.id || ""
   const project: Project | undefined = projects.find((p) => p.id === projectId)
   const settings = useAgentSettings().data?.settings
   const maxMb = useSettings().data?.maxUploadMb ?? 20
@@ -429,6 +458,8 @@ export function NewTaskDialog({
   const [effort, setEffort] = useState<Effort | "">("")
   const key = useDraftKey(draftKey)
   const files = useDraft(key).files
+  // What it opened with (a kept draft's text and files) isn't a change to lose.
+  const [initialFiles] = useState(files.length)
   const [env, setEnv] = useState("")
   const [showEnv, setShowEnv] = useState(false)
   // Starts on the project's "Runs on"; flipping it pins this task to the other runner (Task.runsOn).
@@ -442,37 +473,41 @@ export function NewTaskDialog({
   const picker = useRef<HTMLInputElement>(null)
   const promptRef = useRef<HTMLTextAreaElement>(null)
 
-  // Opened from the popover with text: continue where it left off.
+  // The prompt has the caret, after any text it opened with (the popover's, a kept draft's).
   useLayoutEffect(() => {
     const el = promptRef.current
-    if (!el || !initialPrompt) return
+    if (!el) return
     el.focus()
     el.setSelectionRange(el.value.length, el.value.length)
-  }, [initialPrompt])
+  }, [])
+  useAutoGrow(promptRef, prompt)
 
   const add = (picked: File[]) => attachFiles(key, picked, maxMb)
 
   const uploading = files.some((f) => f.status === "uploading")
-  const canStart = Boolean(prompt.trim()) && !uploading && Boolean(projectId)
+  // A selection is a task without a word more.
+  const canStart = Boolean(prompt.trim() || quote) && !uploading && Boolean(projectId)
   const autoTitle = prompt.trim() ? titleFromPrompt(prompt) : "Made from the prompt when blank"
 
   return (
     <Modal
       size="lg"
-      title="New task"
-      description={project?.name}
-      dirty={Boolean(title || prompt || env || files.length)}
+      title={quote ? "New task from selection" : "New task"}
+      // The picker already names the project.
+      description={projectProp ? project?.name : undefined}
+      dirty={Boolean(title || env) || prompt !== initialPrompt || files.length !== initialFiles}
       onClose={() => onCancel(prompt)}
       onSubmit={(e) => {
         e.preventDefault()
         if (!canStart) return
         primeSendSound()
         const id = newClientId("task")
+        const full = compose ? compose(prompt) : prompt.trim()
         create.mutate({
           id,
           projectId,
-          title: title.trim() || titleFromPrompt(prompt),
-          prompt: prompt.trim(),
+          title: title.trim() || titleFromPrompt(full),
+          prompt: full,
           env: parseEnv(env),
           ...(model && { model }),
           ...(effort && hasSeparateEffort(agentCli) && { effort }),
@@ -505,11 +540,19 @@ export function NewTaskDialog({
           </Select>
         </Field>
       )}
-      <Field label="Title" hint="Optional.">
-        <input autoFocus={!initialPrompt} className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={autoTitle} />
+      {quote && <SelectionQuote text={quote} />}
+      <Field label="What should the agent do?" hint={quote ? "The task also gets the selected text in full, and where it came from." : undefined}>
+        <textarea
+          ref={promptRef}
+          className={cx(inputClass, GROWS)}
+          rows={4}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={quote ? "Additional instructions (optional)" : "Goal, constraints, and what done looks like."}
+        />
       </Field>
-      <Field label="What should the agent do?">
-        <textarea ref={promptRef} className={inputClass} rows={5} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Goal, constraints, and what done looks like." />
+      <Field label="Title (optional)">
+        <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={autoTitle} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-3">
         <Field label="Agent">

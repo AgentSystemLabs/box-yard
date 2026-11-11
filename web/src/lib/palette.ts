@@ -11,7 +11,7 @@ import type { BarPins } from "./projectBar"
 export type PaletteKind = "action" | "page" | "setting" | "task" | "pr" | "project" | "schedule" | "artifact" | "box"
 
 /** Dialogs the palette opens itself instead of navigating, and what it does in place (a project's pin in the sidebar). */
-export type PaletteCommand = "settings" | "new-project" | "coordinator" | "shortcuts" | "pin-project" | "unpin-project"
+export type PaletteCommand = "settings" | "new-task" | "new-project" | "coordinator" | "shortcuts" | "pin-project" | "unpin-project"
 
 export interface PaletteItem {
   /** Unique across kinds: `<kind>:<id>`. */
@@ -47,7 +47,11 @@ export interface PaletteItem {
   project?: string
   /** The key that does the same from anywhere, shown on the row ("?" for the shortcuts sheet). */
   shortcut?: string
-  /** A task's pill: its status, or "merged" when it is done because its PR merged. */
+  /** What a "new-task" command's dialog starts with: the text typed when nothing matched. */
+  prompt?: string
+  /** A task's and its PR's row: the task itself, which draws its icon and state (TaskStatusIcon) or its PR's glyph. */
+  task?: Task
+  /** A task's state in words, for its icon's name and the PR ordering: its status, or "merged" when it is done because its PR merged. */
   status?: BadgeStatus
   /** A task's raw status, for the empty-query sections and the active boost. */
   taskStatus?: TaskStatus
@@ -85,7 +89,7 @@ export interface PaletteData {
 
 export const PAGES: PaletteItem[] = [
   { key: "page:coordinator", kind: "page", title: "Coordinator", subtitle: "Tasks and chat", command: "coordinator", chat: COORDINATOR_CHAT, aliases: ["home"] },
-  { key: "page:settings", kind: "page", title: "Settings", subtitle: "Credentials, identities, machines, voice and limits", command: "settings", aliases: ["preferences"] },
+  { key: "page:settings", kind: "page", title: "Settings", subtitle: "Credentials, identities, machines, voice and limits", command: "settings", aliases: ["preferences", "open settings"] },
 ]
 
 /** Every Settings section, so "voice" or "identities" opens it without going through Settings first. */
@@ -158,6 +162,7 @@ function taskItems(t: Task, project: string | undefined, place: Place | undefine
       keywords: [project ?? "", ...STATUS_WORDS[t.status].split(" "), ...(t.prUrl ? [`pr ${t.prState ?? "open"}`] : [])],
       href: taskSessionHref(t.id),
       chat: t.id,
+      task: t,
       status: badgeStatus(t),
       taskStatus: t.status,
       at: t.updatedAt,
@@ -177,6 +182,7 @@ function taskItems(t: Task, project: string | undefined, place: Place | undefine
       href: taskSessionHref(t.id),
       chat: t.id,
       externalUrl: t.prUrl,
+      task: t,
       status: badgeStatus(t),
       taskStatus: t.status,
       at: t.updatedAt,
@@ -215,10 +221,16 @@ function artifactItem(a: Artifact, project: string | undefined): PaletteItem {
   }
 }
 
+/** Opens the New task dialog (components/NewTask.tsx) on the project in view, with its project picker. */
+export const NEW_TASK: PaletteItem = { key: "action:new-task", kind: "action", title: "New task…", aliases: ["create task", "add task", "start task"], command: "new-task" }
+
+/** The row offered when nothing matches: the New task dialog, with the typed text as its prompt. */
+export const newTaskFrom = (text: string): PaletteItem => ({ ...NEW_TASK, title: `Start a new task: “${text}”`, prompt: text })
+
 export function buildActions(projects: Project[], pins: BarPins = {}): PaletteItem[] {
   return [
+    NEW_TASK,
     { key: "action:new-project", kind: "action", title: "New project…", command: "new-project" },
-    { key: "action:settings", kind: "action", title: "Open settings", command: "settings" },
     { key: "action:shortcuts", kind: "action", title: "Keyboard shortcuts", aliases: ["hotkeys", "keybindings", "keys", "help"], command: "shortcuts", shortcut: "?" },
     ...projects.map((p) => pinAction(p, pins[p.id] === "pinned")),
   ]
