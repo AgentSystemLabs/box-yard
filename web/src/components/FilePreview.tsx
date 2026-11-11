@@ -25,7 +25,7 @@ import {
 import { PREVIEW_PARAM, closePreview, stepPreview, usePreviewState } from "../lib/preview"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
-import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, isStrip, maxScale, pinchView, swipeAction, zoomAt, zoomStep, type Point, type Size, type Tap, type View } from "../lib/imageGestures"
+import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, isStrip, maxScale, pinchView, shownPercent, swipeAction, zoomAt, zoomStep, type Point, type Size, type Tap, type View } from "../lib/imageGestures"
 import { DismissButton, Modal, type ModalSize } from "./Modal"
 import { Loading } from "./Loading"
 import { MessageMenu, type MenuItem } from "./MessageActions"
@@ -482,7 +482,7 @@ const DOUBLE_CLICK_MS = 500
  * right steps through the gallery (`onStep`) and a swipe down closes. The image follows the finger, with no animation.
  * The view here is the only zoom state: the header asks for a toggle through `toggleRef` and hears the outcome through
  * `onZoom`, never the other way round (two copies kept in step by effects chased each other after a double click).
- * While zoomed, a pill over the stage's bottom edge says how far and how to get back.
+ * While zoomed, a pill over the stage's bottom edge says how big the image is (of its own pixels) and how to get back.
  */
 function ImageView({
   url,
@@ -541,6 +541,8 @@ function ImageView({
   }
 
   const isZoomed = view.scale > 1
+  // Layout sizes, which the transform doesn't change: reading them while it renders costs nothing.
+  const shown = isZoomed && img.current ? shownPercent(view.scale, { width: img.current.naturalWidth, height: img.current.naturalHeight }, { width: img.current.offsetWidth, height: img.current.offsetHeight }) : 0
   useEffect(() => {
     toggleRef.current = () => toggleZoom()
     return () => {
@@ -721,7 +723,7 @@ function ImageView({
       >
         {isZoomed && (
           <>
-            {Math.round(view.scale * 100)}% · <span className="pointer-coarse:hidden">click</span>
+            {shown}% · <span className="pointer-coarse:hidden">click or press Z</span>
             <span className="hidden pointer-coarse:inline">double-tap</span> to fit
           </>
         )}
