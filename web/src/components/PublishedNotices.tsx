@@ -1,6 +1,6 @@
 // Back-to-back "published" file notices as one compact card per task: the task, "published 6 files", then a strip of
 // small thumbnails and titled chips for other files, ending in "+3 more"; that one button swaps the strip for every
-// file as a link row, and "Hide" swaps it back. Every file opens the preview modal, and ←/→ step through the whole
+// file as a link row, with "Hide" beside the first, which swaps it back. Every file opens the preview modal, and ←/→ step through the whole
 // group, in the order of the task's Files drawer. Grouping and order are lib/publishedNotices.ts.
 import { memo, useId, useMemo, useState } from "react"
 import { ChevronDown } from "lucide-react"
@@ -23,15 +23,41 @@ const extOf = (f: PublishedFileRef) => {
   return dot > 0 ? f.filename.slice(dot + 1).toUpperCase().slice(0, 5) : "FILE"
 }
 
-/** How many files a narrow card's strip shows: `max`, or one fewer when all of them would be titled chips, which are wide. */
-function fit(files: readonly PublishedFileRef[], max: number): number {
-  const first = files.slice(0, max)
-  return first.length === max && max > 1 && first.every((f) => kindOf(f) !== "image") ? max - 1 : first.length
+// A narrow card's strip is one row, so what it shows is counted here, in px at a finger's sizes (the larger ones):
+// a thumbnail, a titled chip at the width it never goes under (basis-28), the toggle with each label, and the gap.
+const GAP = 6
+const IMAGE = 58
+const CHIP_FLOOR = 112
+const MORE = 82
+const MORE_WIDE = 90
+const NAMES = 104
+/** The narrowest card of each narrow tier: a 320px phone's, and where the next tier starts (18rem). */
+const TINY_ROOM = 212
+const SMALL_ROOM = 288
+
+const stripWidth = (f: PublishedFileRef) => (kindOf(f) === "image" ? IMAGE : Math.min(CHIP_FLOOR, 30 + 7 * f.title.length))
+
+/**
+ * How many files a narrow card's strip shows: the first ones that fit `room` in one row with the toggle, at least one.
+ * A titled chip that would have to go under its floor is left to "+N more" instead, with every file after it.
+ */
+function fit(files: readonly PublishedFileRef[], room: number): number {
+  let used = 0
+  let n = 0
+  for (const f of files.slice(0, STRIP_MAX)) {
+    const hidden = files.length - n - 1
+    const toggle = hidden === 0 ? NAMES : hidden < 10 ? MORE : MORE_WIDE
+    const width = stripWidth(f) + GAP
+    if (n > 0 && used + width + toggle > room) break
+    used += width
+    n++
+  }
+  return n
 }
 
 /**
  * A file in the strip, the same height whatever it is (28px, 44px to a finger): an image is its thumbnail, any other
- * file its icon and title. In a narrow card a title gives way before the row wraps.
+ * file its icon and title. In a narrow card a long title gives way to the row, down to a floor that still reads.
  * `solo`: the card's only file, so an image shows its title too and nothing caps the title's width but the card.
  */
 function Thumb({ f, gallery, solo, className }: { f: PublishedFileRef; gallery: () => ReturnType<typeof previewGallery>; solo?: boolean; className?: string }) {
@@ -48,7 +74,8 @@ function Thumb({ f, gallery, solo, className }: { f: PublishedFileRef; gallery: 
       aria-label={titled ? undefined : f.title}
       className={cx(
         "inline-flex h-7 max-w-full shrink-0 items-center overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-xs text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11",
-        titled && "@max-md:max-w-max @max-md:min-w-0 @max-md:shrink @max-md:grow @max-md:basis-14",
+        // From its floor (or its own width, when that is less) up to its whole title, never under.
+        titled && !solo && "@max-md:max-w-max @max-md:grow @max-md:basis-28",
         className,
       )}
     >
@@ -65,8 +92,8 @@ function Thumb({ f, gallery, solo, className }: { f: PublishedFileRef; gallery: 
 
 /**
  * A NoticeLayout: the task on its own row, "box-yard · Captain · published 2 files" under it, then the files: a strip
- * (thumbnails and titled chips) that ends in the card's one toggle, "+2 more"; once opened, the whole list under
- * "Hide". The toggle is one button in both states, so it keeps the focus.
+ * (thumbnails and titled chips) that ends in the card's one toggle, "+2 more"; once opened, the whole list, with
+ * "Hide" at the right of its first row. The toggle is one button in both states, so it keeps the focus.
  * `project` adds the task's project and Captain links (the Coordinator's card; the Captain tab is that project already).
  * `time` is the Captain tab's row: the time on the right of the meta line, and that tab's quieter title.
  */
@@ -77,10 +104,10 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
   const gallery = useMemo(() => previewGallery(files), [files])
   const getGallery = () => gallery
   // The strip by the card's width (a phone's, a 320px phone's): each shows what fits one row with the toggle.
-  const small = fit(files, 3)
-  const tiny = fit(files, 2)
-  /** What the toggle says while closed: how many files the strip holds back, or that there is a list. */
-  const more = (shown: number) => (files.length > shown ? `+${files.length - shown} more` : "Show list")
+  const small = fit(files, SMALL_ROOM)
+  const tiny = fit(files, TINY_ROOM)
+  /** What the toggle says while closed: how many files the strip holds back, or what the list adds to it. */
+  const more = (shown: number) => (files.length > shown ? `+${files.length - shown} more` : "Show names")
   return (
     <div data-testid="published-group" data-count={files.length}>
       <NoticeLayout
@@ -100,11 +127,10 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
           </>
         }
       >
-        <div data-testid="published-files" className="mt-1">
-          <div data-testid="published-files-header" className="flex min-w-0 flex-wrap items-center gap-1.5">
-            {open ? (
-              <span className="flex-1" />
-            ) : (
+        <div data-testid="published-files" className="mt-1 flow-root">
+          {/* Open, it holds only the toggle, floated so the list's first row sits beside it: no row of its own. */}
+          <div data-testid="published-files-header" className={open ? "float-right ml-2" : "flex min-w-0 flex-wrap items-center gap-1.5"}>
+            {open ? null : (
               files.slice(0, STRIP_MAX).map((f, i) => <Thumb key={f.id} f={f} gallery={getGallery} solo={files.length === 1} className={cx(i >= small && "@max-md:hidden", i >= tiny && "@max-[18rem]:hidden")} />)
             )}
             {files.length > 1 && (
@@ -131,7 +157,7 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
             )}
           </div>
           {open && (
-            <ul id={listId} className="mt-0.5 space-y-0.5">
+            <ul id={listId} className="space-y-0.5">
               {files.map((f) => {
                 const kind = kindOf(f)
                 return (
