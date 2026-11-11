@@ -8,6 +8,7 @@ import { ChevronLeft, X } from "lucide-react"
 import { cx } from "./ui"
 import { bindPanelSwipeBack } from "../lib/panelSwipeBack"
 import { focusSidebar, isChatComposer } from "../lib/sidebarFocus"
+import { useKeyboardInset } from "../lib/keyboardInset"
 
 export const MODAL_SIZES = {
   sm: "sm:max-w-md",
@@ -168,6 +169,8 @@ export function Modal({
   }, [])
   const step = steps.at(-1)
   const inline = placement === "panel"
+  // A picker's search field brings a phone's keyboard up: the sheet sits on the keys, not under them.
+  const keyboard = useKeyboardInset(placement === "picker")
   const modal = () => !inline || !panel.current || panel.current.getBoundingClientRect().width >= (panel.current.closest("aside")?.parentElement?.getBoundingClientRect().width ?? 0)
 
   useEffect(() => {
@@ -230,6 +233,7 @@ export function Modal({
           : "fixed inset-0 z-50 flex justify-center bg-black/60 backdrop-blur-sm p-[env(safe-area-inset-top)_env(safe-area-inset-right)_env(safe-area-inset-bottom)_env(safe-area-inset-left)] sm:p-4",
         !inline && placement !== "drawer" && (placement === "top" ? "items-stretch sm:items-start sm:pt-[12vh]" : placement === "picker" ? "items-end sm:items-start sm:pt-[12vh]" : placement === "sheet" ? "items-end sm:items-center" : "items-stretch sm:items-center"),
       )}
+      style={keyboard ? { bottom: keyboard } : undefined}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !dirty) {
           // Closing restores focus; the backdrop's default mousedown must not blur it again.

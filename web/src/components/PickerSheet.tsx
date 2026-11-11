@@ -4,14 +4,29 @@
 // - The focus stays in the field (a combobox over a listbox), so a mouse and the keys share one highlight: the row
 //   under the pointer is the row Enter picks.
 // - On a touch screen the field waits for a tap, so the keyboard doesn't cover the list on open.
-// - It is short (it scrolls inside), a sheet on a phone and pinned near the top on a wider window, where the field
-//   stays put while the list changes (Modal placement "picker").
+// - It is short and scrolls inside. On a wider window it is pinned near the top and grows down; on a phone it is a
+//   sheet of one height, over the keyboard once that is up. Either way the field stays put while the list changes
+//   (Modal placement "picker").
+// - One highlight: the keys move it and the pointer takes it along, so there is no second, hover-only shade to tell
+//   from it.
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
 import { Search } from "lucide-react"
 import { cx } from "./ui"
 import { DismissButton, Modal, ModalStep } from "./Modal"
 
 const coarse = () => typeof matchMedia === "function" && Boolean(matchMedia("(pointer: coarse)")?.matches)
+
+/** `items` with the ones that share a key side by side: groups in the order their first item came, each in its own order. */
+export function groupTogether<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const key = keyOf(item)
+    const group = groups.get(key)
+    if (group) group.push(item)
+    else groups.set(key, [item])
+  }
+  return [...groups.values()].flat()
+}
 
 export interface PickerSheetProps<T> {
   /** The sheet's name, a word a level: ["Harness", "Claude Code"]. */
@@ -44,6 +59,8 @@ export interface PickerSheetProps<T> {
   empty: ReactNode
   /** The footer's words: what Default is, what the highlighted row types. */
   note?: ReactNode
+  /** What Enter does to a row, when it isn't "pick": "open" for one with more under it. */
+  enterWord?: (option: T) => string | undefined
   /** After the list, inside the scroll (a "type more to narrow" line). */
   more?: ReactNode
   testId?: string
@@ -52,7 +69,7 @@ export interface PickerSheetProps<T> {
 
 export function PickerSheet<T>({
   trail, onClose, back, returnFocus, query, onQuery, placeholder, searchLabel, listId, options, active, setActive, keyOf,
-  disabled, groupOf, onPick, row, rowProps, status, empty, note, more, testId, kind,
+  disabled, groupOf, onPick, row, rowProps, status, empty, note, enterWord, more, testId, kind,
 }: PickerSheetProps<T>) {
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -137,6 +154,7 @@ export function PickerSheet<T>({
   }
 
   const shown = !status && options.length > 0
+  const current = shown ? options[active] : undefined
   return (
     <Modal
       label={level}
@@ -144,7 +162,7 @@ export function PickerSheet<T>({
       size="md"
       onClose={onClose}
       returnFocus={returnFocus}
-      className="@container/picker max-h-[min(28rem,78dvh)]! max-w-lg! [&_[data-dismiss]]:transition-none"
+      className="@container/picker max-h-[min(28rem,78dvh,100%)]! max-w-lg! max-sm:h-[26rem] [&_[data-dismiss]]:transition-none"
       bodyClassName="flex min-h-0 flex-1 flex-col"
       onKeyDown={onKeyDown}
     >
@@ -162,7 +180,7 @@ export function PickerSheet<T>({
           </h2>
           {!back && <DismissButton kind="close" onClick={onClose} />}
         </div>
-        <label className="mx-2 mb-1.5 flex min-h-11 shrink-0 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-2.5 focus-within:border-yard-500">
+        <label className="mx-2 mb-2 flex min-h-11 shrink-0 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-2.5 focus-within:border-yard-500 focus-within:ring-1 focus-within:ring-yard-500">
           <Search className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
           <input
             ref={input}
@@ -172,7 +190,7 @@ export function PickerSheet<T>({
             aria-autocomplete="list"
             aria-expanded={shown}
             aria-controls={listId}
-            aria-activedescendant={shown && options[active] !== undefined ? `${listId}-${active}` : undefined}
+            aria-activedescendant={current !== undefined ? `${listId}-${active}` : undefined}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="none"
@@ -181,12 +199,13 @@ export function PickerSheet<T>({
             placeholder={placeholder}
             value={query}
             onChange={(e) => search(e.target.value)}
-            className="min-w-0 flex-1 bg-transparent py-2 text-base text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+            // The label around it carries the focus ring.
+            className="min-w-0 flex-1 bg-transparent py-2 text-base text-zinc-100 placeholder:text-zinc-500 focus-visible:outline-none!"
           />
         </label>
         {status}
         {!status && !options.length && <div role="status" className="px-4 py-3 text-sm text-zinc-400">{empty}</div>}
-        <div ref={list} id={listId} role="listbox" tabIndex={-1} aria-label={level} aria-busy={status ? true : undefined} className="scroll-thin min-h-0 flex-1 overflow-y-auto overscroll-contain pb-1.5 focus:outline-none">
+        <div ref={list} id={listId} role="listbox" tabIndex={-1} aria-label={level} aria-busy={status ? true : undefined} className="scroll-thin min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-zinc-800/80 py-1.5 focus-visible:outline-none!">
           {shown && options.map((o, i) => {
             const on = i === active
             const why = disabled?.(o) ?? null
@@ -213,7 +232,7 @@ export function PickerSheet<T>({
                   className={cx(
                     "mx-1.5 flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm",
                     why ? "cursor-not-allowed opacity-50" : "cursor-pointer active:bg-zinc-700/70",
-                    on && !why ? "bg-zinc-800 text-zinc-50" : !why && "text-zinc-200 hover:bg-zinc-800/60",
+                    on && !why ? "bg-zinc-800 text-zinc-50" : "text-zinc-200",
                   )}
                 >
                   {row(o, on && !why)}
@@ -225,7 +244,7 @@ export function PickerSheet<T>({
         </div>
         <div className="flex min-h-8 shrink-0 items-center gap-3 border-t border-zinc-800/80 px-4 py-1.5 text-[11px] text-zinc-500">
           <span className="min-w-0 flex-1 truncate">{note}</span>
-          <span aria-hidden className="shrink-0 pointer-coarse:hidden">↑↓ move · ↵ pick · esc {query ? "clear" : back ? "back" : "close"}</span>
+          <span aria-hidden className="shrink-0 pointer-coarse:hidden">↑↓ move · ↵ {(current !== undefined && enterWord?.(current)) || "pick"} · esc {query ? "clear" : back ? "back" : "close"}</span>
         </div>
       </div>
     </Modal>

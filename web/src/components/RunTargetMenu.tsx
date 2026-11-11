@@ -22,13 +22,14 @@ import { cx } from "./ui"
 import { ComposerMenuItem } from "./ComposerMenu"
 import { Loading } from "./Loading"
 import { DismissButton } from "./Modal"
-import { PickerSheet } from "./PickerSheet"
+import { PickerSheet, groupTogether } from "./PickerSheet"
 import { useAbove } from "../lib/useAbove"
 import { pickerKeyDown } from "../lib/pickerKeys"
 import { useAgentSettings, useCursorModels, useHarnessTargets, useModelCatalog, useProjectRunDefaults, useProjectTargets, useRefreshPicker, useRunTargets } from "../lib/queries"
 import { CURSOR_FALLBACK_MODELS } from "../../../shared/agentCli"
 import { harnessDefaults } from "../../../shared/harnessDefaults"
 import { harnessModelTargets } from "../../../shared/harnessPicks"
+import { MODEL_GROUP_LABEL } from "../../../shared/models"
 import { searchRunTargets } from "../../../shared/runTargetSearch"
 import {
   advancesInto,
@@ -186,17 +187,6 @@ function itemOf(text: string, at: number): string | null {
 }
 const NO_GROUPS: string[] = []
 const NO_OPTIONS: { options: RunTarget[]; groups: string[] } = { options: [], groups: NO_GROUPS }
-/** `items` with the ones that share a key side by side: groups in the order their first item came, each in its own order. */
-function groupTogether<T>(items: T[], keyOf: (item: T) => string): T[] {
-  const groups = new Map<string, T[]>()
-  for (const item of items) {
-    const key = keyOf(item)
-    const group = groups.get(key)
-    if (group) group.push(item)
-    else groups.set(key, [item])
-  }
-  return [...groups.values()].flat()
-}
 const CAPTAIN_KINDS: ListKind[] = ["runsOn", "agent"]
 const COORDINATOR_KINDS: ListKind[] = ["project", "runsOn", "agent"]
 
@@ -294,10 +284,12 @@ export function useChatPicks({
   const { options, groups } = useMemo(() => {
     if (!mention || !source) return NO_OPTIONS
     if (!panel) return { options: filterRunTargets(source, mention.query), groups: NO_GROUPS }
+    // Headings: a browsed level's own groups (a harness's Latest, Aliases, Older). Search results are few, so they
+    // stand under their harness's name only, and a row says itself what it is (SheetRow's "alias", "older").
     const groupOf = (t: RunTarget) => {
       if (kind !== "agent" || !t.under || t.token === parent?.token || parent?.under) return ""
-      const harness = searching && !parent ? source.find((h) => h.token === t.token.split(":")[0]) : undefined
-      return [harness?.label, t.group].filter(Boolean).join(" · ")
+      if (!searching) return t.group ?? ""
+      return parent ? "" : (source.find((h) => h.token === t.token.split(":")[0])?.label ?? "")
     }
     const options = searching ? groupTogether(searchRunTargets(source, panelQuery, parent), groupOf) : filterRunTargets(source, parent?.token ?? "")
     return { options, groups: options.map(groupOf) }
@@ -610,12 +602,16 @@ function searchWords(kind: ListKind, parent: RunTarget | undefined): string {
   return kind === "agent" ? `Search ${parent.label} models` : `Search ${parent.label}`
 }
 
+/** Found by a search, a model has no heading over it to say which kind it is: the row does, unless it's a latest one. */
+const GROUP_TAG: Record<string, string> = { [MODEL_GROUP_LABEL.alias]: "alias", [MODEL_GROUP_LABEL.older]: "older" }
+
 /**
  * One choice in the sheet: its name, then what sets it apart (a model's note or id, a place's specs, why it can't be
  * picked). `model` is the model of an effort the search found: the row is named for the model, with the effort beside it.
  */
-function SheetRow({ t, on, opens, own, model }: { t: RunTarget; on: boolean; opens: boolean; own: boolean; model?: RunTarget }) {
+function SheetRow({ t, on, opens, own, model, tagged }: { t: RunTarget; on: boolean; opens: boolean; own: boolean; model?: RunTarget; tagged: boolean }) {
   const Icon = iconOf(t)
+  const tag = tagged && !own && t.group ? GROUP_TAG[t.group] : undefined
   const title = model ? (model.menuLabel ?? model.label) : (t.menuLabel ?? t.label)
   const second = t.disabled ?? (own || t.kind !== "harness" || !t.under ? t.detail : t.effort && !model ? null : (t.hint ?? (t.model && t.model !== title ? t.model : null)))
   return (
@@ -628,6 +624,7 @@ function SheetRow({ t, on, opens, own, model }: { t: RunTarget; on: boolean; ope
         </span>
         {second && <span className={cx("min-w-0 truncate text-xs", t.disabled ? "text-amber-300/80" : "text-zinc-500")}>{second}</span>}
       </span>
+      {tag && <span className="shrink-0 text-xs text-zinc-500">{tag}</span>}
       {opens && <ChevronRight data-testid="run-target-opens" className="h-4 w-4 shrink-0 text-zinc-500" aria-label="More options" />}
     </>
   )
@@ -663,9 +660,10 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
       disabled={(t) => t.disabled}
       groupOf={(_, i) => groups[i]}
       onPick={pick}
+      enterWord={(t) => (opens(t) ? "open" : undefined)}
       rowProps={(t) => ({ "data-token": t.token })}
       row={(t, on) => (
-        <SheetRow t={t} on={on} opens={opens(t)} own={t.token === parent?.token} model={searching && t.effort ? source?.find((m) => m.token === t.under) : undefined} />
+        <SheetRow t={t} on={on} opens={opens(t)} own={t.token === parent?.token} model={searching && t.effort ? source?.find((m) => m.token === t.under) : undefined} tagged={searching} />
       )}
       status={error ? <PickerStatus error /> : loading ? <Loading kind="rows" label="Checking availability" className="px-3 py-3" /> : undefined}
       empty={<>No matches for “{panelQuery.trim()}”.{kind === "agent" && !parent?.under && " Try a model and an effort: fable high."}</>}
