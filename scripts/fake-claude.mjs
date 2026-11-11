@@ -51,7 +51,8 @@
 // a task done). [noop] calls finish with outcome "noop" (a quiet schedule run), even alongside [ask] or [fail].
 // [pr] ends the turn without finish, like an agent that opened a PR and waits for review.
 // Sub-tasks (server/subtasks.ts): "spawn subtasks: A | B > B1, B2 | C" starts A, B and C with spawn_subtasks (B's
-// prompt starts B1 and B2 of its own; "C {hang}" gives C's prompt the [hang] marker); "use N sub agents" (as Cody would say it) starts N on angles of the topic, the
+// prompt starts B1 and B2 of its own; "C {hang}" gives C's prompt the [hang] marker; "D {model=claude-sonnet-5-5} {effort=high}"
+// asks for D's own model and effort, and {agent=codex} its own harness); "use N sub agents" (as Cody would say it) starts N on angles of the topic, the
 // first of them splitting in two when N is 3 or more. [wait] waits for their reports in the same turn
 // (wait_for_subtasks); [cancel] cancels them all at once (cancel_subtasks) and finishes without their reports;
 // otherwise the turn ends and the reports start the next one. A turn that carries the last report
@@ -730,9 +731,11 @@ function subtaskAsks(prompt) {
       const [own, nested] = item.split(">").map((x) => x.trim())
       // "{hang}" in an item is a marker for that sub-task's own prompt ([hang]), so the parent doesn't act on it.
       const marks = [...own.matchAll(/\{([\w:-]+)\}/g)].map((m) => ` [${m[1]}]`).join("")
-      const title = own.replace(/\s*\{[\w:-]+\}/g, "").trim()
+      // "{model=…}", "{effort=…}" and "{agent=…}" are spawn_subtasks options for that sub-task, not prompt markers.
+      const pins = Object.fromEntries([...own.matchAll(/\{(agent|model|effort)=([^}\s]+)\}/g)].map((m) => [m[1], m[2]]))
+      const title = own.replace(/\s*\{[\w:-]+\}/g, "").replace(/\s*\{(?:agent|model|effort)=[^}\s]+\}/g, "").trim()
       const kids = nested ? nested.split(",").map((x) => x.trim()).filter(Boolean) : []
-      return { title, prompt: `Research this part: ${title}.${marks}${kids.length ? `\nspawn subtasks: ${kids.join(" | ")}` : ""}${/\[wait\]/i.test(prompt) ? " [wait]" : ""}` }
+      return { title, prompt: `Research this part: ${title}.${marks}${kids.length ? `\nspawn subtasks: ${kids.join(" | ")}` : ""}${/\[wait\]/i.test(prompt) ? " [wait]" : ""}`, ...pins }
     })
   }
   const n = Number(prompt.match(/\b(?:use|with|using|spin up|start)\s+(\d+|two|three|four|five|six)\s+sub[- ]?(?:agents?|tasks?)/i)?.[1]?.replace(/^two$/i, "2").replace(/^three$/i, "3").replace(/^four$/i, "4").replace(/^five$/i, "5").replace(/^six$/i, "6"))
