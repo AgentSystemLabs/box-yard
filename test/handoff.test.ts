@@ -139,6 +139,20 @@ describe("namedState", () => {
     expect(block).toMatch(/task_cache001 "Speed: 1-hour prompt cache" working/)
     expect(block).toMatch(/task_timing01 "Speed step 1: per-turn timing" idle · PR #184 open/)
   })
+
+  it("ends a named project's block with its live defaults for new tasks", async () => {
+    const { store, tasks } = seed()
+    const line = "Defaults now (live; they beat any saved summary): runs_on local (project) · agent claude (Settings)."
+    const block = (await namedState(
+      "start the next step in box-yard",
+      { tasks: tasks(), projects: store.listProjects() },
+      { store, projectDefaults: (id) => (id === "prj_yard01" ? line : null) },
+      "H",
+    ))!
+    const lines = block.split("\n")
+    expect(lines.at(-1)).toBe(`  ${line}`)
+    expect(lines.findIndex((l) => l.startsWith("- box-yard (prj_yard01)"))).toBeLessThan(lines.length - 1)
+  })
 })
 
 describe("prompts", () => {
