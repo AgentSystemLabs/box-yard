@@ -150,11 +150,17 @@ export interface UsageSeries {
 export const USAGE_COLORS = ["#3987e5", "#d95926", "#9085e9", "#199e70", "#c98500", "#d55181", "#008300"] as const
 export const OTHER_COLOR = "#71717a"
 /**
- * Token kinds, bottom of the stack first. Cache reads are most of every bar, so they are the neutral one and the other
- * three stand out against it: a teal ramp of a hue no model or provider has, each step 2:1 or more from the next. As
- * stacked neighbours on the dark and the light surface (validate_palette.js): CVD ΔE ≥ 10, normal-vision ΔE ≥ 15.
+ * Token kinds, bottom of the stack first, on the dark surface. Cache reads are most of every bar, so they are the
+ * neutral ground and the other three stand out against it: a teal ramp of a hue no model or provider has, each step
+ * 2:1 or more from the next. Every one is 3:1 or more against the surface, and as stacked neighbours
+ * (validate_palette.js) CVD ΔE ≥ 11, normal-vision ΔE ≥ 15.
  */
-export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#004c5a", cacheWrite: "#00839a", cacheRead: "#a1a1aa", output: "#85e2f1" }
+export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#006b7f", cacheWrite: "#00a1be", cacheRead: "#71717a", output: "#8fe7fd" }
+/**
+ * The same ramp on the light surface, where the dark theme's palest step would be 2:1 against the page: each is a step
+ * darker, so Output is still 3:1 against it. Checked the same way.
+ */
+export const TOKEN_COLORS_LIGHT: Record<TokenKind, string> = { input: "#001d2d", cacheWrite: "#005264", cacheRead: "#6e6e77", output: "#009eb9" }
 const MODEL_SLOTS = 3
 const PROVIDER_COLOR: Partial<Record<ComputeProvider, number>> = { upstash: 3, daytona: 4, runpod: 5, vast: 6 }
 
@@ -410,14 +416,33 @@ function computeGroup(l: UsageLedger, r: UsageComputeRow, group: UsageGroup): Gr
   }
 }
 
-/** The next table after drilling into a row, so each tap goes one level finer. */
-export function nextGroup(group: UsageGroup, filter: UsageFilter): UsageGroup {
+/** The filter a group's rows narrow by; a box and a login have none of their own. */
+const GROUP_FILTER: Partial<Record<UsageGroup, keyof UsageFilter>> = { project: "projectId", task: "taskId", model: "model", provider: "provider", role: "role" }
+
+function finerGroup(group: UsageGroup, filter: UsageFilter): UsageGroup {
   if (group === "project") return "task"
   if (group === "task") return filter.kind === "compute" || filter.provider ? "box" : "model"
   if (group === "role") return filter.role === "agent" ? "project" : "model"
   if (group === "provider") return "box"
   if (group === "model") return "project"
   return group
+}
+
+/**
+ * The next table after drilling into a row, so each tap goes one level finer. It never lands on a group the filter
+ * already narrows to one row (by model, then a project's row, with a task already picked: on to who paid).
+ */
+export function nextGroup(group: UsageGroup, filter: UsageFilter): UsageGroup {
+  const narrowed = (g: UsageGroup) => GROUP_FILTER[g] !== undefined && filter[GROUP_FILTER[g]!] !== undefined
+  const seen = new Set<UsageGroup>([group])
+  let next = finerGroup(group, filter)
+  while (narrowed(next) && !seen.has(next)) {
+    seen.add(next)
+    next = finerGroup(next, filter)
+  }
+  if (!narrowed(next)) return next
+  // Project, task and model are all picked: what is left to split by is the box or the login.
+  return filter.kind === "compute" || filter.provider ? "box" : "login"
 }
 
 /** "Opus 5.5 · RunPod GPU": what a filter narrows to, for its chip. */

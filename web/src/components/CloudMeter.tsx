@@ -105,8 +105,6 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
   const dailyReached = spend.state === "reached" && daily && spend.todayUsd >= spend.dailyLimitUsd - 1e-9
   // Nothing up and nothing costing: one line says so, instead of "$0/h" over "No boxes".
   const quiet = s.boxes.total === 0 && s.list.length === 0 && !(s.hourlyUsd > 0)
-  // The sheet has one primary action: the body's while new boxes wait for a yes, else the way to the history.
-  const asks = (spend.state === "reached" && dailyReached && spend.raiseToUsd !== null) || s.fanout.wanted > 0
   return (
     <Modal
       onClose={onClose}
@@ -124,7 +122,7 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
             <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
             Limits and rates
           </Button>
-          <Button variant={asks ? "subtle" : "primary"} onClick={usage} onPointerEnter={() => prefetchUsage(30)} onFocus={() => prefetchUsage(30)} title="Usage: daily cost and tokens over the last 30 days" data-testid="cloud-usage-history">
+          <Button variant="subtle" onClick={usage} onPointerEnter={() => prefetchUsage(30)} onFocus={() => prefetchUsage(30)} title="Usage: daily cost and tokens over the last 30 days" data-testid="cloud-usage-history">
             <BarChart3 className="h-3.5 w-3.5" aria-hidden />
             Usage history
           </Button>

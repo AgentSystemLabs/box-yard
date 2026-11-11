@@ -95,7 +95,7 @@ export function SubscriptionLimits() {
         // One login has the full width; two or more share it from 48rem.
         <ul className={cx("grid gap-4", logins.length > 1 && "@3xl:grid-cols-2")}>
           {logins.map((l) => (
-            <LoginCard key={l.loginId} login={l} now={now} />
+            <LoginCard key={l.loginId} login={l} now={now} compact={logins.length > 1} />
           ))}
         </ul>
       )}
@@ -103,7 +103,8 @@ export function SubscriptionLimits() {
   )
 }
 
-const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; now: number }) {
+/** `compact`: one of several logins, so its windows share a row at every width and a phone scrolls past it sooner. */
+const LoginCard = memo(function LoginCard({ login, now, compact }: { login: LoginLimits; now: number; compact: boolean }) {
   const at = login.state.atLimit && login.state.resetsAt !== null && login.state.resetsAt > now ? login.state.resetsAt : null
   return (
     <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4" data-testid="limits-login" data-login={login.loginId}>
@@ -119,10 +120,10 @@ const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; 
           At its limit until {midSentence(runDayTime(at, zone(), now))} ({untilText(at, now)}).
         </p>
       )}
-      {/* Side by side once the card is wide enough for both. */}
-      <div className="mt-3 grid gap-3 @md/login:grid-cols-2 @md/login:gap-x-5">
+      {/* Side by side once the card is wide enough for both, or from the start when there are several cards. */}
+      <div className={cx("mt-3 grid gap-3 @md/login:grid-cols-2 @md/login:gap-x-5", compact && "grid-cols-2")}>
         {login.windows.map((w) => (
-          <WindowMeter key={w.window} w={w} now={now} who={HARNESS_LABEL[login.harness]} />
+          <WindowMeter key={w.window} w={w} now={now} who={HARNESS_LABEL[login.harness]} compact={compact} />
         ))}
       </div>
     </li>
@@ -134,7 +135,7 @@ function loginDetail(l: LoginLimits): string {
   return [KIND_LABEL[l.kind], l.fingerprint, l.plan].filter(Boolean).join(" · ")
 }
 
-function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string }) {
+function WindowMeter({ w, now, who, compact }: { w: LimitWindow; now: number; who: string; compact: boolean }) {
   const tone = toneOf(w, now)
   const text = windowText(w, now)
   // A missing percentage or an expired reading is unknown, never an empty (0%) allowance.
@@ -142,6 +143,8 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
   const fill = known ? Math.max(0, Math.min(100, w.usedPct!)) : null
   const remaining = known && !(isFull(w) && w.usedPct! < 100) ? Math.max(0, 100 - w.usedPct!) : null
   const reset = midSentence(text.reset)
+  // In half a phone's width the reset is how long is left ("resets in 2h"); the clock time is in the title.
+  const short = compact && isCurrent(w, now) && w.resetsAt !== null ? `resets ${untilText(w.resetsAt, now)}` : null
   const title = `${who} ${w.label}: ${text.used}.${remaining !== null ? ` ${usedLabel(remaining)} remaining.` : ""} ${reset}. Read ${readAgo(w.asOf, now)}.`
   return (
     <div title={title} data-testid="limits-window" data-window={w.window} className="min-w-0">
@@ -169,7 +172,8 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
         {remaining !== null ? (
           <>
             <span className="whitespace-nowrap">{usedLabel(remaining)} remaining</span>
-            <span className="whitespace-nowrap">{reset[0]!.toLowerCase() + reset.slice(1)}</span>
+            {short && <span className="whitespace-nowrap @md/login:hidden">{short}</span>}
+            <span className={cx("whitespace-nowrap", short && "hidden @md/login:inline")}>{reset[0]!.toLowerCase() + reset.slice(1)}</span>
           </>
         ) : (
           reset
@@ -183,8 +187,9 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
 
 /**
  * The limits of the newest login set at `scope` (`settings`, `identity:<id>`) for `harness`, in one line of chips:
- * "5-hour 64% · Weekly 22% · as of 12m ago". Nothing until a run has read them. It opens Usage (over the settings it
- * is in), where each window has its reset time and the cost history.
+ * "Claude limits · 5-hour 64% · Weekly 22% · as of 12m ago · Usage ›". Nothing until a run has read them. The whole
+ * line opens Usage (over the settings it is in), where each window has its reset time and the cost history. Where it
+ * is too narrow for one line (a phone), the name, the read time and "Usage ›" are the first, the chips the second.
  */
 export function LoginLimitsLine({ scope, harness, className }: { scope: string; harness: LimitHarness; className?: string }) {
   const limits = useLimits()
@@ -194,41 +199,29 @@ export function LoginLimitsLine({ scope, harness, className }: { scope: string; 
   if (!login) return null
   const live = login.windows.filter((w) => isCurrent(w, now))
   const who = HARNESS_LABEL[harness]
-  const asOf = <time dateTime={new Date(login.asOf).toISOString()}>as of {readAgo(login.asOf, now)}</time>
   return (
     <button
       type="button"
       onClick={() => openUsage()}
       title={`Open Usage: reset times and history. Read ${new Date(login.asOf).toLocaleString()}`}
-      className={cx(
-        "group flex w-fit max-w-full items-center gap-1 rounded-md text-left text-xs text-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none pointer-coarse:min-h-11",
-        className,
-      )}
+      className={cx("group @container/limits block w-full rounded-md text-left text-xs text-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none", className)}
       data-testid="limits-line"
       data-login={login.loginId}
     >
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <Gauge className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-        <span className="text-zinc-400 group-hover:text-zinc-200">{who} limits</span>
-        {/* The read time stays with the last chip, so it never wraps to a line of its own. */}
-        {live.length ? (
-          live.map((w, i) =>
-            i < live.length - 1 ? (
-              <WindowChip key={w.window} w={w} now={now} who={who} />
-            ) : (
-              <span key={w.window} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                <WindowChip w={w} now={now} who={who} />
-                {asOf}
-              </span>
-            ),
-          )
-        ) : (
-          <span>
-            <span>every window has reset since the last run</span> {asOf}
-          </span>
-        )}
+      <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 pointer-coarse:min-h-11">
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-zinc-400 group-hover:text-zinc-200">
+          <Gauge className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+          {who} limits
+        </span>
+        <span className="order-last flex basis-full flex-wrap items-center gap-1.5 @lg/limits:order-none @lg/limits:basis-auto">
+          {live.length ? live.map((w) => <WindowChip key={w.window} w={w} now={now} who={who} />) : "every window has reset since the last run"}
+        </span>
+        <time className="whitespace-nowrap" dateTime={new Date(login.asOf).toISOString()}>as of {readAgo(login.asOf, now)}</time>
+        <span className="ml-auto inline-flex items-center whitespace-nowrap text-zinc-400 group-hover:text-zinc-200">
+          Usage
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        </span>
       </span>
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-zinc-300" aria-hidden />
     </button>
   )
 }

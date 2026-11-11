@@ -2,22 +2,24 @@
 // cost stacks LLM spend by model on compute by provider; daily tokens stack input, cache writes, cache reads and output.
 // Tapping a bar segment, a legend item, a day's line or a table row narrows everything to it, and the table goes one
 // level finer each time, down to tasks and boxes. What it's narrowed to stays in a row of chips at the top while the
-// numbers scroll, with its share of the range's total. One request per range: filters fold the ledger in the browser (shared/usageLedger.ts), and every
-// number on screen adds up to the totals above it. Estimates wear "≈".
-import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react"
+// numbers scroll, with its share of the range's total. A picked day narrows the table alone: the tiles and charts keep
+// the range. One request per range: filters fold the ledger in the browser (shared/usageLedger.ts), and every number on
+// screen adds up to the totals above it. Estimates wear "≈".
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { ChevronLeft, ChevronRight, Settings as SettingsIcon, X } from "lucide-react"
+import { Bot, Box, CalendarDays, ChevronLeft, ChevronRight, Filter, FolderGit2, ListTodo, Settings as SettingsIcon, Users, X, type LucideIcon } from "lucide-react"
 import { Modal } from "./Modal"
 import { Loading } from "./Loading"
 import { SubscriptionLimits } from "./LoginLimits"
 import { useUsageToSettings } from "./UsageHost"
-import { Button, Select, TAP_AREA, cx, useMinuteClock } from "./ui"
+import { Button, LineIcon, Select, TAP_AREA, cx, useMinuteClock } from "./ui"
 import { prefetchUsageLedger, useUsageBudget, useUsageLedger } from "../lib/queries"
 import { money, pct } from "../lib/usage"
 import { axisMoney, compact, dayLabel, labelledDays, localDayStarts, longDayLabel, niceScale, roundedParts } from "../lib/usageChart"
 import {
   OTHER_COLOR,
   TOKEN_COLORS,
+  TOKEN_COLORS_LIGHT,
   USAGE_COLORS,
   USAGE_GROUP_LABEL,
   USAGE_RANGES,
@@ -38,6 +40,8 @@ import type { BudgetStatus } from "../../../shared/types"
 const FOCUS = "focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none"
 const GROUPS: UsageGroup[] = ["project", "task", "model", "provider", "role", "box", "login"]
 const FILTER_NAMES: Record<keyof UsageFilter, string> = { projectId: "Project", taskId: "Task", model: "Model", provider: "Provider", role: "Role", kind: "Only" }
+// What kind a chip narrows by, where there is no room for the word: the palette's icons for a project, a task and a box.
+const FILTER_ICONS: Record<keyof UsageFilter, LucideIcon> = { projectId: FolderGit2, taskId: ListTodo, model: Bot, provider: Box, role: Users, kind: Filter }
 const TABLE_ROWS = 20
 
 /** "≈ $3.20" for an estimate. */
@@ -60,6 +64,14 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
   const view = useMemo(() => (ledger && slots ? aggregateUsage(ledger, filter, group, slots) : null), [ledger, slots, filter, group])
   // A day picked in one range means nothing in another.
   const shownDay = view && day !== null && day < view.days.length ? day : null
+  // The table follows a picked day: the same fold over that day's rows alone, so its rows add up to the day's total.
+  const dayView = useMemo(
+    () => (ledger && slots && shownDay !== null ? aggregateUsage({ ...ledger, llm: ledger.llm.filter((r) => r.day === shownDay), compute: ledger.compute.filter((r) => r.day === shownDay) }, filter, group, slots) : null),
+    [ledger, slots, filter, group, shownDay],
+  )
+  const dayName = view && shownDay !== null ? longDayLabel(view.days[shownDay]!) : null
+  // Both charts' readouts keep room for the same number of parts, so side by side their plots start level.
+  const parts = useMemo(() => (view ? Math.max(busiest(view.cost.map((s) => s.daily), view.days.length), busiest(view.tokens.map((t) => t.daily), view.days.length)) : 0), [view])
   // The whole range's cost, added in the ledger's order as aggregateUsage adds it: what a filter's total is a share of.
   const rangeUsd = useMemo(() => {
     let sum = 0
@@ -98,7 +110,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
             </div>
             <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
           </div>
-          {view && <FilterChips set={set} view={view} rangeUsd={rangeUsd} onDrop={drop} onClear={() => setFilter({})} />}
+          {view && <FilterChips set={set} day={dayName} view={view} rangeUsd={rangeUsd} onDrop={drop} onAllDays={() => setDay(null)} onClear={() => setFilter({})} />}
           {!view ? (
             q.isError ? (
               <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-zinc-400">
@@ -116,10 +128,21 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
               )}
               <Totals view={view} />
               <div className="grid items-start gap-4 @4xl:grid-cols-2">
-                <CostChart view={view} day={shownDay} onDay={setDay} onNarrow={narrow} />
-                <TokenChart view={view} day={shownDay} onDay={setDay} />
+                <CostChart view={view} parts={parts} day={shownDay} onDay={setDay} onNarrow={narrow} />
+                <TokenChart view={view} parts={parts} day={shownDay} onDay={setDay} />
               </div>
-              <Breakdown view={view} group={group} said={said} onGroup={setGroup} onDrill={(row) => row.filter && narrow(row.filter, group)} />
+              <Breakdown
+                view={dayView ?? view}
+                split={view.totals.computeUsd > 0 || view.totals.computeHours > 0}
+                day={dayName}
+                days={view.days.length}
+                group={group}
+                filter={filter}
+                said={said}
+                onGroup={setGroup}
+                onDrill={(row) => row.filter && narrow(row.filter, group)}
+                onAllDays={() => setDay(null)}
+              />
               <HowEstimated ledger={ledger!} />
             </div>
           )}
@@ -154,55 +177,115 @@ function RangePicker({ value, onChange, onPrefetch }: { value: UsageRangeDays; o
   )
 }
 
-function FilterChips({ set, view, rangeUsd, onDrop, onClear }: { set: { key: keyof UsageFilter; label: string }[]; view: UsageView; rangeUsd: number; onDrop: (k: keyof UsageFilter) => void; onClear: () => void }) {
-  // How to narrow is said in each chart's readout line.
+function FilterChips({
+  set,
+  day,
+  view,
+  rangeUsd,
+  onDrop,
+  onAllDays,
+  onClear,
+}: {
+  set: { key: keyof UsageFilter; label: string }[]
+  /** The picked day ("Sat, Nov 7"), which narrows the table below the charts. */
+  day: string | null
+  view: UsageView
+  rangeUsd: number
+  onDrop: (k: keyof UsageFilter) => void
+  onAllDays: () => void
+  onClear: () => void
+}) {
+  const scroller = useRef<HTMLDivElement>(null)
+  const chips = set.length + (day ? 1 : 0)
+  const had = useRef(chips)
+  // A chip that joins the row is scrolled to, where the row has no room for all of them.
+  useEffect(() => {
+    if (chips > had.current && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth
+    had.current = chips
+  }, [chips])
+  // How to narrow is said in each chart's readout line. A day alone brings no bar: it would push the chart down under
+  // the pointer that picked it. The table it narrows says the day itself.
   if (!set.length) return null
   const t = view.totals
+  const chip = "inline-flex min-h-11 items-center gap-1.5 rounded-full border pr-2 pl-2.5 text-xs"
+  // One chip gives way to the share down to 5rem. Several keep 7rem each, enough to tell them apart by name. A short
+  // name's chip is narrower than that already, so its floor is about its own width (the icon, the × and 0.36rem a letter).
+  const least = set.map(({ label }) => Math.min(set.length > 1 ? 7 : 5, 3.75 + label.length * 0.36))
   return (
     // Stays at the top of the dialog's scrolling body (over its padding, bleeding to its edges), so a tap on a table row far below shows
-    // what it did and how much of the range is left. The chips shrink to a few letters, then scroll sideways; "Clear all"
-    // stays put. Their share of the range is a line of its own under them until the dialog is wide enough for one row.
-    <div role="group" aria-label="Filters" className="sticky -top-5 z-10 -mx-4 flex min-w-0 flex-wrap items-center gap-x-1.5 border-b border-zinc-800 bg-zinc-950 px-4 py-1.5 sm:-mx-5 sm:px-5 @lg:flex-nowrap @lg:gap-x-3" data-testid="usage-filters">
-      <div className="scroll-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto p-0.5">
-        {set.map(({ key: k, label }) => (
+    // what it did and how much of the range is left: the chips, then their share of the range's total, on one row while
+    // each chip has its least width (they shrink to that, then scroll sideways) and on a row of its own after that. The
+    // day's chip joins the row without a say in that, so picking a day never changes the bar's height.
+    <div role="group" aria-label="Filters" className="sticky -top-5 z-10 -mx-4 flex min-w-0 flex-wrap items-center gap-x-2 border-b border-zinc-800 bg-zinc-950 px-4 py-1.5 sm:-mx-5 sm:px-5" data-testid="usage-filters">
+      <div ref={scroller} className="scroll-thin flex flex-1 items-center gap-1.5 overflow-x-auto p-0.5" style={{ minWidth: `min(100%, ${least.reduce((a, b) => a + b, 0) + (set.length - 1) * 0.375 + 0.25}rem)` }}>
+        {set.map(({ key: k, label }, i) => {
+          const Icon = FILTER_ICONS[k]
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onDrop(k)}
+              aria-label={`Remove filter ${FILTER_NAMES[k]}: ${label}`}
+              title={`Remove the filter ${FILTER_NAMES[k]}: ${label}`}
+              style={{ minWidth: `${least[i]}rem` }}
+              className={cx(chip, "max-w-56 shrink border-yard-500/40 bg-yard-500/10 text-yard-100 hover:bg-yard-500/20", FOCUS)}
+            >
+              {/* The kind is an icon at every width, and a word too once there is room for it. */}
+              <Icon className="h-3.5 w-3.5 shrink-0 text-yard-300/80" aria-hidden />
+              <span className="hidden shrink-0 text-yard-300/80 @md:inline">{FILTER_NAMES[k]}</span>
+              <span className="min-w-0 flex-1 truncate text-left font-medium">{label}</span>
+              <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            </button>
+          )
+        })}
+        {day && (
           <button
-            key={k}
             type="button"
-            onClick={() => onDrop(k)}
-            aria-label={`Remove filter ${FILTER_NAMES[k]}: ${label}`}
-            title={`Remove the filter ${FILTER_NAMES[k]}: ${label}`}
-            className={cx("inline-flex min-h-11 max-w-56 min-w-28 shrink items-center gap-1.5 rounded-full border border-yard-500/40 bg-yard-500/10 pr-2 pl-3 text-xs text-yard-100 hover:bg-yard-500/20", FOCUS)}
+            onClick={onAllDays}
+            aria-label={`Breakdown of ${day} only: back to all ${view.days.length} days`}
+            title={`The breakdown shows ${day} only. Back to all ${view.days.length} days`}
+            className={cx(chip, "shrink-0 border-zinc-700 bg-zinc-800/60 whitespace-nowrap text-zinc-200 tabular-nums hover:bg-zinc-800", FOCUS)}
+            data-testid="usage-day-chip"
           >
-            {/* The value says what kind it is ("Opus 5.5", "Task agents"): on a phone the room goes to it. */}
-            <span className="hidden shrink-0 text-yard-300/80 @md:inline">{FILTER_NAMES[k]}</span>
-            <span className="min-w-0 flex-1 truncate text-left font-medium">{label}</span>
+            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
+            <span className="font-medium">{day}</span>
             <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
           </button>
-        ))}
+        )}
       </div>
-      <p
-        className="order-last basis-full px-0.5 pb-0.5 text-xs text-zinc-400 tabular-nums @lg:order-none @lg:shrink-0 @lg:basis-auto @lg:pb-0"
-        title={set.length > 1 ? "These filters' share of the range's total" : "This filter's share of the range's total"}
-        data-testid="usage-filter-share"
-      >
-        <span className="font-medium text-zinc-200">{usd(t.costUsd, t.estimatedUsd > 0)}</span> of {money(rangeUsd)} · {pct(t.costUsd, rangeUsd)}
-      </p>
-      {set.length > 1 && (
-        <button type="button" onClick={onClear} aria-label="Clear all filters" className={cx("min-h-11 shrink-0 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
-          <span className="@md:hidden">Clear</span>
-          <span className="hidden @md:inline">Clear all</span>
-        </button>
-      )}
+      <div className="ml-auto flex min-w-0 items-center gap-x-1">
+        <p
+          className="px-0.5 text-xs whitespace-nowrap text-zinc-400 tabular-nums"
+          title={set.length > 1 ? "These filters' share of the range's total" : "This filter's share of the range's total"}
+          data-testid="usage-filter-share"
+        >
+          <span className="font-medium text-zinc-200">{usd(t.costUsd, t.estimatedUsd > 0)}</span> of {money(rangeUsd)} · {pct(t.costUsd, rangeUsd)}
+        </p>
+        {set.length > 1 && (
+          <button type="button" onClick={onClear} aria-label="Clear all filters" className={cx("min-h-11 shrink-0 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
+            <span className="@md:hidden">Clear</span>
+            <span className="hidden @md:inline">Clear all</span>
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
-function Tile({ label, value, sub, testId }: { label: string; value: string; sub: ReactNode; testId?: string }) {
+/** `sub` is the line under the figure, in parts: it wraps between them (after a "·"), never inside one. */
+function Tile({ label, value, sub, testId }: { label: string; value: string; sub: string[]; testId?: string }) {
   return (
     <div className="min-w-0 rounded-xl border border-zinc-800/80 bg-zinc-900/40 px-3 py-2.5">
       <div className="text-xs text-zinc-400">{label}</div>
       <div data-testid={testId} className="mt-0.5 truncate text-xl font-semibold text-zinc-50 tabular-nums">{value}</div>
-      <div className="text-xs text-zinc-500 tabular-nums">{sub}</div>
+      <div className="text-xs text-zinc-500 tabular-nums">
+        {/* A part goes to the next line whole, and breaks inside only where the tile is narrower than it. */}
+        {sub.map((part, i) => (
+          <span key={i}>
+            <span className="inline-block max-w-full">{part}{i < sub.length - 1 && " ·"}</span>{" "}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
@@ -212,12 +295,12 @@ function Totals({ view }: { view: UsageView }) {
   const n = view.days.length
   const estimated = t.estimatedUsd > 0
   const runs = `${t.turns.toLocaleString("en-US")} ${t.turns === 1 ? "run" : "runs"}`
-  const tokens = <Tile testId="usage-tokens" label="Tokens" value={compact(t.tokens.total)} sub={`${compact(t.tokens.total / n)} a day on average`} />
+  const tokens = <Tile testId="usage-tokens" label="Tokens" value={compact(t.tokens.total)} sub={[`${compact(t.tokens.total / n)} a day on average`]} />
   // Without box time the total is the model cost: one tile says it, not three with the same figure.
   if (!(t.computeUsd > 0) && !(t.computeHours > 0))
     return (
       <div className="grid grid-cols-2 gap-2">
-        <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={`${usd(t.costUsd / n, estimated)} a day · ${runs} · no box time`} />
+        <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={[`${usd(t.costUsd / n, estimated)} a day`, runs, "no box time"]} />
         {tokens}
       </div>
     )
@@ -225,36 +308,41 @@ function Totals({ view }: { view: UsageView }) {
   const computeEstimated = view.cost.some((s) => s.kind === "compute" && s.estimated)
   return (
     <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-4">
-      <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={`${usd(t.costUsd / n, estimated)} a day on average`} />
-      <Tile label="Model cost" value={usd(t.llmUsd, llmEstimated)} sub={`${runs} · ${pct(t.llmUsd, t.costUsd)}`} />
-      <Tile label="Box cost" value={usd(t.computeUsd, computeEstimated)} sub={`${t.computeHours.toFixed(1)} box-hours · ${pct(t.computeUsd, t.costUsd)}`} />
+      <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={[`${usd(t.costUsd / n, estimated)} a day on average`]} />
+      <Tile label="Model cost" value={usd(t.llmUsd, llmEstimated)} sub={[runs, pct(t.llmUsd, t.costUsd)]} />
+      <Tile label="Box cost" value={usd(t.computeUsd, computeEstimated)} sub={[`${t.computeHours.toFixed(1)} box-hours`, pct(t.computeUsd, t.costUsd)]} />
       {tokens}
     </div>
   )
 }
 
 /** One stack of a chart: its colour, its daily values, and what tapping it does. */
-type Stack = { key: string; label: string; color: string; daily: number[]; total: number; estimated?: boolean; pressed?: boolean; onPick?: () => void }
+type Stack = { key: string; label: string; color: string; light?: string; daily: number[]; total: number; estimated?: boolean; pressed?: boolean; onPick?: () => void }
 
 const colorOf = (i: number) => (i < 0 ? OTHER_COLOR : USAGE_COLORS[i]!)
 
-function CostChart({ view, day, onDay, onNarrow }: { view: UsageView; day: number | null; onDay: (d: number | null) => void; onNarrow: (f: UsageFilter) => void }) {
+/** A bar's or swatch's colour for `.usage-fill` (styles.css): its own light-theme colour where it has one. */
+const fill = (s: Stack) => ({ "--series-color": s.color, ...(s.light && { "--series-light": s.light }) }) as CSSProperties
+
+/** The most series any one day has: the parts a readout keeps room for. */
+const busiest = (series: number[][], n: number) => Math.max(0, ...Array.from({ length: n }, (_, i) => series.reduce((c, daily) => c + ((daily[i] ?? 0) > 0 ? 1 : 0), 0)))
+
+function CostChart({ view, parts, day, onDay, onNarrow }: { view: UsageView; parts: number; day: number | null; onDay: (d: number | null) => void; onNarrow: (f: UsageFilter) => void }) {
   const plot = useRef<HTMLDivElement>(null)
   const stacks: Stack[] = view.cost.map((s) => ({ key: s.key, label: s.label, color: colorOf(s.color), daily: s.daily, total: s.totalUsd, estimated: s.estimated, onPick: s.filter ? () => onNarrow(s.filter!) : undefined }))
   return (
     <ChartCard title="Daily cost" sub="Models and boxes · US dollars" testId="usage-cost-chart" action={day !== null && <AllDays n={view.days.length} plot={plot} onDay={onDay} />}>
-      <StackedBars plot={plot} days={view.days} stacks={stacks} byDay={view.costByDay} format={(n) => money(n)} unit={0.01} axis={axisMoney} day={day} onDay={onDay} noun="cost" />
+      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} byDay={view.costByDay} format={(n) => money(n)} unit={0.01} axis={axisMoney} day={day} onDay={onDay} noun="cost" />
     </ChartCard>
   )
 }
 
-function TokenChart({ view, day, onDay }: { view: UsageView; day: number | null; onDay: (d: number | null) => void }) {
+function TokenChart({ view, parts, day, onDay }: { view: UsageView; parts: number; day: number | null; onDay: (d: number | null) => void }) {
   const plot = useRef<HTMLDivElement>(null)
   // Cache reads dwarf the rest; tapping a kind shows it alone, on its own scale.
   const [only, setOnly] = useState<TokenKind | null>(null)
-  const stacks: Stack[] = view.tokens
-    .filter((t) => !only || t.kind === only)
-    .map((t) => ({ key: t.kind, label: t.label, color: TOKEN_COLORS[t.kind], daily: t.daily, total: t.total, pressed: only === t.kind, onPick: () => setOnly(only === t.kind ? null : t.kind) }))
+  const legend: Stack[] = view.tokens.map((t) => ({ key: t.kind, label: t.label, color: TOKEN_COLORS[t.kind], light: TOKEN_COLORS_LIGHT[t.kind], daily: t.daily, total: t.total, pressed: only === t.kind, onPick: () => setOnly(only === t.kind ? null : t.kind) }))
+  const stacks = legend.filter((s) => !only || s.key === only)
   const byDay = only ? view.tokens.find((t) => t.kind === only)!.daily : view.tokensByDay
   if (view.totals.tokens.total === 0)
     return (
@@ -262,7 +350,6 @@ function TokenChart({ view, day, onDay }: { view: UsageView; day: number | null;
         <p className="mt-3 text-sm text-zinc-500">No model calls here: boxes use no tokens.</p>
       </ChartCard>
     )
-  const legend: Stack[] = view.tokens.map((t) => ({ key: t.kind, label: t.label, color: TOKEN_COLORS[t.kind], daily: t.daily, total: t.total, pressed: only === t.kind, onPick: () => setOnly(only === t.kind ? null : t.kind) }))
   return (
     <ChartCard
       title="Daily tokens"
@@ -270,7 +357,7 @@ function TokenChart({ view, day, onDay }: { view: UsageView; day: number | null;
       testId="usage-token-chart"
       action={day !== null && <AllDays n={view.days.length} plot={plot} onDay={onDay} />}
     >
-      <StackedBars plot={plot} days={view.days} stacks={stacks} legend={legend} legendFormat={compact} byDay={byDay} format={(n) => `${compact(n)} tokens`} axis={compact} day={day} onDay={onDay} noun="tokens" />
+      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} legend={legend} legendFormat={compact} byDay={byDay} format={(n) => `${compact(n)} tokens`} axis={compact} day={day} onDay={onDay} noun="tokens" />
     </ChartCard>
   )
 }
@@ -290,15 +377,18 @@ function ChartCard({ title, sub, testId, action, children }: { title: string; su
   )
 }
 
-/** In a chart's title row while a day is picked: lets the day go. Focus goes to the plot, where ←/→ pick one again. */
-function AllDays({ n, plot, onDay }: { n: number; plot: RefObject<HTMLDivElement | null>; onDay: (d: number | null) => void }) {
+/**
+ * In a card's title row while a day is picked: lets the day go. From a chart, focus goes to its plot, where ←/→ pick
+ * one again.
+ */
+function AllDays({ n, plot, onDay }: { n: number; plot?: RefObject<HTMLDivElement | null>; onDay: (d: number | null) => void }) {
   return (
     <button
       type="button"
       title={`Back to all ${n} days`}
       onClick={() => {
         onDay(null)
-        plot.current?.focus()
+        plot?.current?.focus()
       }}
       className={cx(TAP_AREA, "inline-flex h-7 shrink-0 items-center rounded-md bg-zinc-800 px-2 text-xs font-medium whitespace-nowrap text-zinc-200 hover:bg-zinc-700", FOCUS)}
       data-testid="usage-all-days"
@@ -318,6 +408,7 @@ function StackedBars({
   plot,
   days,
   stacks,
+  parts,
   legend = stacks,
   legendFormat,
   byDay,
@@ -332,6 +423,8 @@ function StackedBars({
   plot: RefObject<HTMLDivElement | null>
   days: number[]
   stacks: Stack[]
+  /** How many parts of a day the readout keeps room for. */
+  parts: number
   legend?: Stack[]
   /** The legend's figures when they can be shorter than the readout's ("94M", not "94M tokens"). */
   legendFormat?: (n: number) => string
@@ -399,14 +492,14 @@ function StackedBars({
 
   return (
     <div className="mt-3">
-      <Readout id={readoutId} days={days} day={shown} picked={day} onDay={onDay} stacks={stacks} byDay={byDay} total={total} format={format} partFormat={legendFormat} unit={unit} />
+      <Readout id={readoutId} days={days} day={shown} picked={day} onDay={onDay} stacks={stacks} most={parts} byDay={byDay} total={total} format={format} partFormat={legendFormat} unit={unit} />
       {/* Spoken for a picked day only: a mouse passing over the bars changes the line above without a word. */}
       <span className="sr-only" aria-live="polite" data-testid="usage-day-live">
         {day === null ? "" : `${longDayLabel(days[day]!)}: ${format(byDay[day]!)}`}
       </span>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-4 flex gap-2">
         {/* y-axis labels */}
-        <div aria-hidden className="relative h-40 w-10 shrink-0 text-right text-[11px] text-zinc-500 tabular-nums @lg/chart:h-52 @lg/chart:w-12">
+        <div aria-hidden className="relative h-40 w-10 shrink-0 text-right text-[11px] text-zinc-400 tabular-nums @lg/chart:h-52 @lg/chart:w-12">
           {ticks.map((t) => (
             <span key={t} className="absolute right-0 -translate-y-1/2 leading-none" style={{ top: `${(1 - t / top) * 100}%` }}>
               {axis(t)}
@@ -428,7 +521,7 @@ function StackedBars({
               <div key={t} aria-hidden className={cx("absolute inset-x-0 border-t", t === 0 ? "border-zinc-600" : "border-zinc-800/80")} style={{ top: `${(1 - t / top) * 100}%` }} />
             ))}
             <div
-              className={cx("absolute inset-0 flex items-end", n > 31 ? "gap-px" : "gap-0.5 @lg/chart:gap-1")}
+              className={cx("absolute inset-0 flex items-end", n > 31 ? "gap-0 @sm/chart:gap-px" : "gap-0.5 @lg/chart:gap-1")}
               onPointerDown={onPress}
               onPointerMove={onDrag}
               onPointerUp={() => (press.current = null)}
@@ -462,7 +555,7 @@ function StackedBars({
                         data-series={s.key}
                         onClick={() => pickSegment(i, s)}
                         className={cx("usage-fill w-full shrink-0 border-t border-zinc-950 first:border-t-0", last && "rounded-t-[2px]")}
-                        style={{ height: `${(v / top) * 100}%`, "--series-color": s.color, minHeight: 1 } as CSSProperties}
+                        style={{ height: `${(v / top) * 100}%`, minHeight: 1, ...fill(s) }}
                       />
                     )
                   })}
@@ -471,7 +564,7 @@ function StackedBars({
             </div>
           </div>
           {/* x-axis labels */}
-          <div aria-hidden className="relative mt-1 h-4 text-[11px] text-zinc-500">
+          <div aria-hidden className="relative mt-1 h-4 text-[11px] text-zinc-400">
             {labels.map((i, k) => (
               <span
                 key={i}
@@ -504,6 +597,7 @@ function Readout({
   picked,
   onDay,
   stacks,
+  most,
   byDay,
   total,
   format,
@@ -517,6 +611,8 @@ function Readout({
   picked: number | null
   onDay: (d: number) => void
   stacks: Stack[]
+  /** The most parts a day has, in this chart or the one beside it. */
+  most: number
   byDay: number[]
   total: number
   format: (n: number) => string
@@ -531,7 +627,6 @@ function Readout({
   const figures = unit ? roundedParts(parts.map((p) => p.v), value, unit) : parts.map((p) => p.v)
   const approx = (day === null ? stacks.filter((s) => s.total > 0) : parts.map((p) => p.s)).some((s) => s.estimated) ? "≈ " : ""
   // Room for the busiest day's parts, two, three or four to a row by the card's width; the hint is two lines on a phone.
-  const most = Math.max(0, ...days.map((_, i) => stacks.reduce((c, s) => c + ((s.daily[i] ?? 0) > 0 ? 1 : 0), 0)))
   const rows = { "--rows-2": Math.max(2, Math.ceil(most / 2)), "--rows-3": Math.max(1, Math.ceil(most / 3)), "--rows-4": Math.max(1, Math.ceil(most / 4)) } as CSSProperties
   const label = <span className="font-medium text-zinc-200">{day === null ? `All ${n} days` : longDayLabel(days[day]!)}</span>
   // At an end the arrow stays focusable (aria-disabled, not disabled), so the keyboard doesn't lose its place.
@@ -568,7 +663,7 @@ function Readout({
         ) : (
           parts.map(({ s }, i) => (
             <span key={s.key} className="flex min-w-0 items-center gap-1" title={`${s.label}: ${partFormat(figures[i]!)}`}>
-              <span aria-hidden className="usage-fill h-2 w-2 shrink-0 rounded-[2px]" style={{ "--series-color": s.color } as CSSProperties} />
+              <span aria-hidden className="usage-fill h-2 w-2 shrink-0 rounded-[2px]" style={fill(s)} />
               <span className="min-w-0 truncate">{s.label}</span>
               <span className="shrink-0 text-zinc-300">{partFormat(figures[i]!)}</span>
             </span>
@@ -592,7 +687,8 @@ function Legend({ stacks, format, short = format }: { stacks: Stack[]; format: (
         const figure = `${s.estimated ? "≈ " : ""}${format(s.total)}`
         const body = (
           <>
-            <span aria-hidden className="usage-fill h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ "--series-color": s.color } as CSSProperties} />
+            {/* The ring keeps the darkest and the palest swatch's edge on either surface. */}
+            <span aria-hidden className="usage-fill h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-zinc-500/60" style={fill(s)} />
             <span className="flex min-w-0 flex-col text-left @sm/chart:flex-row @sm/chart:items-center @sm/chart:gap-1.5">
               <span className="min-w-0 truncate text-zinc-200">{s.label}</span>
               <span className="text-zinc-500 tabular-nums">{s.estimated ? "≈ " : ""}{short(s.total)}</span>
@@ -625,33 +721,56 @@ function Legend({ stacks, format, short = format }: { stacks: Stack[]; format: (
 
 /**
  * The table's columns, shared by its header, rows and Total so the figures line up. Narrow: the name, then total and
- * share. From 42rem: name, models, boxes, tokens, total, share.
+ * share. From 42rem: name, models, boxes, tokens, total, share; without box time the total is the models' cost, so
+ * models and boxes go (`split` false).
  */
-const COLS = "grid grid-cols-[minmax(0,1fr)_auto_3rem] gap-x-3 px-1 @2xl:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_4.5rem_6rem_3.5rem]"
+const COLS = "grid grid-cols-[minmax(0,1fr)_auto_3rem] gap-x-3 px-1"
+const colsOf = (split: boolean) => cx(COLS, split ? "@2xl:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_4.5rem_6rem_3.5rem]" : "@2xl:grid-cols-[minmax(0,1fr)_4.5rem_6rem_3.5rem]")
 const WIDE_CELL = "hidden text-right @2xl:block"
 
 function Breakdown({
   view,
+  split,
+  day,
+  days,
   group,
+  filter,
   said,
   onGroup,
   onDrill,
+  onAllDays,
 }: {
+  /** The range's view, or the picked day's: its rows and totals are the table. */
   view: UsageView
+  /** The range has box time, so every row's cost is split into models and boxes. */
+  split: boolean
+  /** The picked day the table is of ("Sat, Nov 7"), or null for the range. */
+  day: string | null
+  days: number
   group: UsageGroup
+  filter: UsageFilter
   /** The active filters' labels: a row's detail that repeats one is left out. */
   said: string[]
   onGroup: (g: UsageGroup) => void
   onDrill: (r: UsageTableRow) => void
+  onAllDays: () => void
 }) {
   const [all, setAll] = useState(false)
   const id = useId()
   const rows = all ? view.rows : view.rows.slice(0, TABLE_ROWS)
   const t = view.totals
+  const cols = colsOf(split)
+  // A row narrows unless everything it would narrow to is already a filter: then it is the one row, and plain.
+  const drills = (r: UsageTableRow) => r.filter !== null && (Object.keys(r.filter) as (keyof UsageFilter)[]).some((k) => filter[k] !== r.filter![k])
   return (
     <section aria-labelledby={id} data-testid="usage-breakdown" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 id={id} className="text-sm font-semibold text-zinc-100">Breakdown</h4>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <h4 id={id} className="text-sm font-semibold text-zinc-100">
+            Breakdown{day && <span className="whitespace-nowrap tabular-nums" data-testid="usage-breakdown-day"> · {day}</span>}
+          </h4>
+          {day && <AllDays n={days} onDay={onAllDays} />}
+        </div>
         <label className="flex items-center gap-2 text-xs text-zinc-400">
           By
           <Select size="sm" value={group} onChange={(e) => { onGroup(e.target.value as UsageGroup); setAll(false) }} aria-label="Break down by" className="min-h-11 rounded-md sm:min-h-11">
@@ -661,10 +780,10 @@ function Breakdown({
           </Select>
         </label>
       </div>
-      <div className={cx(COLS, "mt-2 border-b border-zinc-800 pb-1 text-[11px] text-zinc-500 uppercase")}>
+      <div className={cx(cols, "mt-2 border-b border-zinc-800 pb-1 text-[11px] text-zinc-400 uppercase")}>
         <span className="min-w-0 truncate">{USAGE_GROUP_LABEL[group]}</span>
-        <span className={WIDE_CELL}>Models</span>
-        <span className={WIDE_CELL}>Boxes</span>
+        {split && <span className={WIDE_CELL}>Models</span>}
+        {split && <span className={WIDE_CELL}>Boxes</span>}
         <span className={WIDE_CELL}>Tokens</span>
         <span className="text-right">Total</span>
         <span className="text-right">Share</span>
@@ -672,12 +791,12 @@ function Breakdown({
       <ul className="divide-y divide-zinc-800/60">
         {rows.map((r) => (
           <li key={r.key}>
-            {r.filter ? (
+            {drills(r) ? (
               <button type="button" onClick={() => onDrill(r)} title={`Narrow to ${r.label}`} className={cx("block min-h-11 w-full rounded-md text-left hover:bg-zinc-800/40", FOCUS)} data-testid="usage-row">
-                <RowBody r={r} total={t.costUsd} said={said} />
+                <RowBody r={r} cols={cols} split={split} total={t.costUsd} said={said} drills />
               </button>
             ) : (
-              <div data-testid="usage-row"><RowBody r={r} total={t.costUsd} said={said} /></div>
+              <div data-testid="usage-row"><RowBody r={r} cols={cols} split={split} total={t.costUsd} said={said} /></div>
             )}
           </li>
         ))}
@@ -688,25 +807,25 @@ function Breakdown({
             </button>
           </li>
         )}
-        <li className={cx(COLS, "items-baseline py-2.5 text-sm")} data-testid="usage-total-row">
+        <li className={cx(cols, "items-baseline py-2.5 text-sm")} data-testid="usage-total-row">
           <span className="font-medium text-zinc-300">Total</span>
-          <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{money(t.llmUsd)}</span>
-          <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{usd(t.computeUsd, t.computeUsd > 0)}</span>
+          {split && <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{money(t.llmUsd)}</span>}
+          {split && <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{usd(t.computeUsd, t.computeUsd > 0)}</span>}
           <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{compact(t.tokens.total)}</span>
           <span className="text-right font-semibold text-zinc-50 tabular-nums">{usd(t.costUsd, t.estimatedUsd > 0)}</span>
           <span className="text-right text-xs text-zinc-500 tabular-nums">{pct(t.costUsd, t.costUsd)}</span>
         </li>
       </ul>
-      {view.rows.length === 0 && <p className="py-3 text-sm text-zinc-500">Nothing in this range.</p>}
+      {view.rows.length === 0 && <p className="py-3 text-sm text-zinc-500">{day ? "Nothing on this day." : "Nothing in this range."}</p>}
     </section>
   )
 }
 
 /**
  * Narrow: the name gets the full width, its numbers go on the line below, with the total and its share in the header's
- * columns. From 42rem: one row of columns.
+ * columns. From 42rem: one row of columns. A row that narrows ends its name with a ›.
  */
-function RowBody({ r, total, said }: { r: UsageTableRow; total: number; said: string[] }) {
+function RowBody({ r, cols, split, total, said, drills = false }: { r: UsageTableRow; cols: string; split: boolean; total: number; said: string[]; drills?: boolean }) {
   const est = r.estimated
   const boxes = r.computeUsd > 0 || r.computeHours > 0
   // The line under the name says what the total doesn't: its split when it has both parts, a box's hours, the tokens.
@@ -716,14 +835,17 @@ function RowBody({ r, total, said }: { r: UsageTableRow; total: number; said: st
     r.tokens > 0 ? `${compact(r.tokens)} tokens` : null,
   ]
   return (
-    <span className={cx(COLS, "items-baseline py-2.5 @2xl:items-center")}>
+    <span className={cx(cols, "items-baseline py-2.5 @2xl:items-center")}>
       <span className="col-span-3 min-w-0 @2xl:col-span-1">
-        <span className="line-clamp-2 text-sm text-zinc-100 wrap-anywhere" title={r.label}>{r.label}</span>
+        <span className="flex items-start gap-1 text-sm">
+          <span className="line-clamp-2 min-w-0 text-zinc-100 wrap-anywhere" title={r.label}>{r.label}</span>
+          {drills && <LineIcon icon={ChevronRight} className="h-3.5 w-3.5 text-zinc-500" />}
+        </span>
         {r.detail && !said.includes(r.detail) && <span className="line-clamp-1 text-xs text-zinc-500 wrap-anywhere">{r.detail}</span>}
       </span>
       <span className="mt-0.5 min-w-0 text-xs text-zinc-500 tabular-nums @2xl:hidden">{parts.filter(Boolean).join(" · ")}</span>
-      <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{r.llmUsd > 0 ? money(r.llmUsd) : "—"}</span>
-      <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{boxes ? usd(r.computeUsd, est) : "—"}</span>
+      {split && <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{r.llmUsd > 0 ? money(r.llmUsd) : "—"}</span>}
+      {split && <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{boxes ? usd(r.computeUsd, est) : "—"}</span>}
       <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{r.tokens > 0 ? compact(r.tokens) : "—"}</span>
       <span className="mt-0.5 text-right text-sm font-medium text-zinc-100 tabular-nums @2xl:mt-0">{usd(r.costUsd, est)}</span>
       <span className="mt-0.5 text-right text-xs text-zinc-500 tabular-nums @2xl:mt-0">{pct(r.costUsd, total)}</span>
