@@ -1070,6 +1070,33 @@ export function Chip({ on, onClick, children, ...props }: { on: boolean; onClick
   )
 }
 
+/**
+ * Button, Select and inputClass go compact from `sm`, which a tablet or a phone on its side also is. On a surface that
+ * a finger must work at any width, add this to them: 44px again wherever the pointer is coarse.
+ */
+export const TOUCH_SIZE = "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+
+/**
+ * A form dialog's footer line: why its button is off (role=status) and why a save failed (role=alert). Put it last in
+ * the Modal's `footer`: on a phone it sits just above the primary button, and from `sm` (the footer's own breakpoint)
+ * left of Cancel. `quiet` is a form nobody has touched yet: the reason reads as a hint, not a warning.
+ */
+export function FormNote({ id, reason, failure, quiet }: { id?: string; reason?: string | null; failure?: string | null; quiet?: boolean }) {
+  return (
+    // The status line stays mounted, so screen readers hear it change; with nothing to say it takes no room.
+    <div className={cx("min-w-0 space-y-1 text-xs sm:order-first sm:mr-auto sm:flex-1", !reason && !failure && "sr-only")}>
+      {failure && (
+        <p role="alert" className="wrap-anywhere text-red-300">
+          {failure}
+        </p>
+      )}
+      <p id={id} role="status" className={quiet ? "text-zinc-500" : "text-amber-300"}>
+        {reason}
+      </p>
+    </div>
+  )
+}
+
 /** Parse KEY=value lines into an env map. */
 export function parseEnv(text: string): Record<string, string> {
   const env: Record<string, string> = {}

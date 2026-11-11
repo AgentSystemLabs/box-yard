@@ -140,7 +140,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
     key: "hooks",
     label: "Hooks",
     description:
-      "Global hooks run on every project's task events. Switches wait for Save; New hook and Edit save on their own.",
+      "Global hooks run on every project's task events. Project hooks are on each project's Hooks tab.",
     fields: [],
   },
   {

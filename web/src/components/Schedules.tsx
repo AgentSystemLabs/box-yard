@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import { Link, useSearchParams } from "wouter"
 import { AlarmClock, Bot, Check, ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Trash2, Zap } from "lucide-react"
 import {
@@ -20,6 +20,8 @@ import { isValidTimeZone, nextRuns, parseCron } from "../../../shared/cron"
 import { nextRunText, plannedRun, runDayTime, scheduleWhen, zoneTime } from "../lib/scheduleText"
 import {
   DEFAULT_WHEN,
+  HOUR_STEPS,
+  MINUTE_STEPS,
   REPEAT_KINDS,
   WEEKDAY_LONG,
   WEEKDAY_SHORT,
@@ -34,7 +36,7 @@ import {
   type WhenParts,
 } from "../lib/scheduleForm"
 import { failureSummary } from "../lib/failure"
-import { Button, Chip, Empty, Field, FieldGroup, PrChip, QuietPill, Select, TAP_AREA, TimeAgo, cx, inputClass, useMinuteClock } from "./ui"
+import { Button, Chip, Empty, Field, FieldGroup, FormNote, PrChip, QuietPill, Select, TAP_AREA, TOUCH_SIZE, TimeAgo, cx, inputClass, useMinuteClock } from "./ui"
 import { QuietSwitch } from "./TaskFilters"
 import { TaskStatusIcon } from "./TaskIcon"
 import { isQuietRun, withoutQuiet } from "../../../shared/quiet"
@@ -109,7 +111,7 @@ export function SchedulesView() {
           <h1 className="sr-only">Schedules</h1>
           <p className="max-w-2xl text-sm text-zinc-500">Run a prompt on a timer: each run starts a fresh task in a project, or messages the Coordinator.</p>
         </div>
-        <Button variant="primary" onClick={() => setCreating({})} className="w-full @lg:w-auto">
+        <Button variant="primary" onClick={() => setCreating({})} className={cx(TOUCH_SIZE, "w-full @lg:w-auto")}>
           <Plus className="h-4 w-4" /> New schedule
         </Button>
       </header>
@@ -121,7 +123,7 @@ export function SchedulesView() {
           <p>Start from an example, or tell the Coordinator something like "every morning, summarize open PRs across all repos".</p>
           <div role="group" aria-label="Example schedules" className="mt-4 flex flex-wrap justify-center gap-2">
             {STARTERS.map(({ label, ...prefill }) => (
-              <Button key={label} size="sm" className="max-w-full text-left whitespace-normal" onClick={() => setCreating(prefill)}>
+              <Button key={label} size="sm" className={cx(TOUCH_SIZE, "max-w-full text-left whitespace-normal")} onClick={() => setCreating(prefill)}>
                 {label}
               </Button>
             ))}
@@ -162,7 +164,7 @@ function ScheduleGroup({ title, icon, schedules, newLabel, onNew }: { title: str
           <span className="min-w-0 truncate">{title}</span>
           <span className="text-xs font-normal text-zinc-600">{schedules.length}</span>
         </h2>
-        <Button size="sm" variant="ghost" className="shrink-0" aria-label={newLabel} title={newLabel} onClick={onNew}>
+        <Button size="sm" variant="ghost" className={cx(TOUCH_SIZE, "shrink-0")} aria-label={newLabel} title={newLabel} onClick={onNew}>
           <Plus className="h-3.5 w-3.5" /> New
         </Button>
       </div>
@@ -177,13 +179,6 @@ function ScheduleGroup({ title, icon, schedules, newLabel, onNew }: { title: str
 
 /** How long a card's action feedback stays ("Started" on the Run now button). */
 export const FLASH_MS = 4000
-
-const CHAT_RUN: Record<ScheduleRun["status"], { label: string; chip: string }> = {
-  queued: { label: "Queued", chip: "bg-zinc-800 text-zinc-300" },
-  running: { label: "Running", chip: "bg-sky-500/15 text-sky-300" },
-  done: { label: "Done", chip: "bg-emerald-500/15 text-emerald-300" },
-  failed: { label: "Failed", chip: "bg-red-500/15 text-red-300" },
-}
 
 const CHAT_REASON: Record<ScheduleRun["reason"], string | null> = { scheduled: null, manual: "Run now", "catch-up": "Catch-up" }
 
@@ -284,7 +279,7 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
 
       {/* Four buttons don't fit a 320px phone on one line: there Run now takes its own. */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="subtle" className="@max-[21rem]:basis-full" loading={run.isPending} onClick={() => void runNow()}>
+        <Button size="sm" variant="subtle" className={cx(TOUCH_SIZE, "@max-[19rem]:basis-full")} loading={run.isPending} onClick={() => void runNow()}>
           {run.isPending ? (
             "Starting…"
           ) : flash?.kind === "run" ? (
@@ -297,16 +292,17 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
             </>
           )}
         </Button>
-        <Button size="sm" variant={s.enabled ? "ghost" : "subtle"} onClick={togglePaused}>
+        <Button size="sm" variant={s.enabled ? "ghost" : "subtle"} className={TOUCH_SIZE} onClick={togglePaused}>
           {s.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} {s.enabled ? "Pause" : "Resume"}
         </Button>
-        <Button size="sm" variant="ghost" title="Edit schedule" aria-label={`Edit ${s.name}`} onClick={() => setEditing(true)}>
+        <Button size="sm" variant="ghost" className={TOUCH_SIZE} title="Edit schedule" aria-label={`Edit ${s.name}`} onClick={() => setEditing(true)}>
           <Pencil className="h-3.5 w-3.5" />
+          <span className="hidden @lg:inline">Edit</span>
         </Button>
         <Button
           size="sm"
           variant="ghost"
-          className="ml-auto"
+          className={cx(TOUCH_SIZE, "ml-auto")}
           title="Delete schedule"
           aria-label={`Delete ${s.name}`}
           onClick={() => {
@@ -322,7 +318,7 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
         </span>
       </div>
 
-      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx(COMPACT, "mt-2 flex items-center gap-1 rounded-lg text-left text-xs text-zinc-500 hover:text-zinc-300")}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx(COMPACT, "mt-1 flex items-center gap-1 rounded-lg text-left text-xs text-zinc-500 hover:text-zinc-300")}>
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         {open ? "Hide" : "Show"} prompt and {s.runCount > 0 ? `${s.runCount} ${s.runCount === 1 ? "run" : "runs"}` : "runs"}
       </button>
@@ -330,9 +326,12 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
         <div className="mt-2 space-y-3">
           <div className="rounded-lg bg-zinc-950/60 px-3 py-2 text-sm whitespace-pre-wrap text-zinc-300">{s.prompt}</div>
           <div className="space-y-1 text-xs text-zinc-500">
-            <div>
-              Cron <code className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[11px] text-zinc-400">{s.cron}</code> in <span title={s.timezone}>{zoneTime(s.timezone)}</span>
-            </div>
+            {/* A timing the form's plain words can make needs no cron: When above already says it. */}
+            {partsFromCron(s.cron).kind === "custom" && (
+              <div>
+                Cron <code className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[11px] text-zinc-400">{s.cron}</code> in <span title={s.timezone}>{zoneTime(s.timezone)}</span>
+              </div>
+            )}
             <div>If the server was down: {s.catchUp === "once" ? "run once when it's back" : "skip the missed runs"}</div>
             <div>
               {orchestrator ? "If the last prompt is still queued or running" : "If the last run is still going"}: {s.allowOverlap ? (orchestrator ? "send this one anyway" : "start this one anyway") : "skip this one"}
@@ -350,7 +349,7 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
 /** "Tomorrow 2:00 AM · in 7h", or why nothing is planned. */
 function NextRun({ schedule: s }: { schedule: Schedule }) {
   const now = useMinuteClock()
-  if (!s.enabled) return <span className="text-amber-300/90">Paused. Nothing runs until you resume it.</span>
+  if (!s.enabled) return <span className="text-amber-300/90">Paused</span>
   const at = plannedRun(s, now)
   if (at === null) return <span className="text-zinc-400">Never: no date matches this schedule.</span>
   // "· in 6d" stays in one piece when the line wraps.
@@ -417,25 +416,27 @@ function ChatRunList({ runs }: { runs: ScheduleRun[] }) {
   const zone = readerZone()
   return (
     <ul className="divide-y divide-zinc-900 rounded-lg border border-zinc-800/80">
-      {runs.slice(0, 15).map((r) => (
-        <li key={r.id} className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
-          <span className="min-w-0 flex-1">
-            <span className={r.status === "failed" ? "task-title-failed" : "text-zinc-200"} title={new Date(r.dueAt).toLocaleString()}>
-              {runDayTime(r.dueAt, zone, now)}
+      {runs.slice(0, 15).map((r) => {
+        const failed = r.status === "failed"
+        return (
+          // Like a project's runs: a finished run is just its time, and a failed one is red with why below.
+          <li key={r.id} className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+            <span className="min-w-0 flex-1">
+              <span className={failed ? "task-title-failed" : "text-zinc-200"} title={new Date(r.dueAt).toLocaleString()}>
+                {runDayTime(r.dueAt, zone, now)}
+              </span>
+              {CHAT_REASON[r.reason] && <span className="ml-2 text-xs text-zinc-500">{CHAT_REASON[r.reason]}</span>}
+              {(failed || r.error) && <span className="block truncate text-xs text-red-300/90">{r.error ?? "Failed"}</span>}
             </span>
-            {CHAT_REASON[r.reason] && <span className="ml-2 text-xs text-zinc-500">{CHAT_REASON[r.reason]}</span>}
-            {r.error && <span className="block truncate text-xs text-red-300/90">{r.error}</span>}
-          </span>
-          <span className={cx("rounded px-1.5 py-0.5 text-[11px] font-medium", CHAT_RUN[r.status].chip)}>{CHAT_RUN[r.status].label}</span>
-          {r.chatMessageId ? (
-            <button type="button" className={cx(COMPACT, "inline-flex items-center text-xs text-yard-400 hover:text-yard-300")} onClick={() => revealChatMessage(r.chatMessageId!)}>
-              View in chat
-            </button>
-          ) : (
-            <span className="text-xs text-zinc-600">waiting</span>
-          )}
-        </li>
-      ))}
+            {(r.status === "queued" || r.status === "running") && <span className="text-xs text-sky-300">{r.status === "queued" ? "Queued" : "Running"}</span>}
+            {r.chatMessageId && (
+              <button type="button" className={cx(COMPACT, "inline-flex items-center text-xs text-yard-400 hover:text-yard-300")} onClick={() => revealChatMessage(r.chatMessageId!)}>
+                View in chat
+              </button>
+            )}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -473,7 +474,7 @@ function RunList({ runs, showQuiet, onShowQuiet }: { runs: Task[]; showQuiet: bo
   const zone = readerZone()
   return (
     <div className="space-y-2">
-      {quiet > 0 && <QuietSwitch checked={showQuiet} onChange={onShowQuiet} count={quiet} />}
+      {quiet > 0 && <QuietSwitch checked={showQuiet} onChange={onShowQuiet} count={quiet} className="pointer-coarse:min-h-11" />}
       {shown.length ? (
         <ul className="divide-y divide-zinc-900 rounded-lg border border-zinc-800/80">
           {shown.slice(0, 15).map((t) => {
@@ -506,6 +507,9 @@ function RunList({ runs, showQuiet, onShowQuiet }: { runs: Task[]; showQuiet: bo
 }
 
 const OTHER_ZONE = "__other"
+/** The When grid's cells that need a whole row in a narrow form: until 32rem, and until 24rem. */
+const WIDE = "col-span-full @lg:col-span-1"
+const EVERY = "col-span-full @sm:col-span-1"
 
 /**
  * The schedule form: a new one, or `schedule` to edit. It stays open until the server answers, so a refused save
@@ -547,25 +551,34 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
     }
   }, [otherZone])
 
-  const preview = useMemo((): { error: string } | { runs: string; next: string[] } => {
-    if (!isValidTimeZone(tz)) return { error: tz.trim() ? `Unknown time zone "${tz}".` : "Type a time zone, like Europe/Paris." }
+  // Each problem shows under its own field: the zone's under the zone, the cron's under the cron.
+  const zoneError = isValidTimeZone(tz) ? null : tz.trim() ? `Unknown time zone "${tz}".` : "Type a time zone, like Europe/Paris."
+  const preview = useMemo((): { error: string } | { runs: string; next: string[] } | null => {
+    if (zoneError) return null
     if (!cron) return { error: "Type a cron expression, like 0 9 * * 1-5." }
     try {
       parseCron(cron)
       const next = nextRuns(cron, now, tz, 3)
-      if (!next.length) return { error: "This never runs: no date matches it." }
+      if (!next.length) return { error: "Check the cron: no date ever matches it." }
       return { runs: runsText(cron, tz), next: next.map((ts) => runDayTime(ts, tz, now)) }
     } catch (err) {
-      return { error: (err as Error).message }
+      const why = (err as Error).message
+      return { error: `Check the cron: ${why.charAt(0).toLowerCase()}${why.slice(1)}.` }
     }
-  }, [cron, tz, now])
-  const whenError = "error" in preview ? preview.error : null
+  }, [cron, tz, now, zoneError])
+  const cronError = preview && "error" in preview ? preview.error : null
+  const ids = useId()
+  const cronErrorId = `${ids}-cron`
+  const zoneErrorId = `${ids}-zone`
+  const reasonId = `${ids}-reason`
 
   // Only what the reader changed: a list that loads late (projects, the default zone) doesn't count.
   const typed = JSON.stringify([target, project, name, when, timezone, prompt, catchUp, allowOverlap])
   const [opened] = useState(typed)
   const [openedWhen] = useState(when)
   const dirty = typed !== opened
+  // Nothing nags on open: the reason below the form is a quiet hint until a field was changed or left.
+  const [blurred, setBlurred] = useState(false)
 
   const saving = create.isPending || update.isPending
   const failure = (create.error ?? update.error) as Error | null
@@ -579,7 +592,13 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
         ? "Give the schedule a name."
         : !prompt.trim()
           ? "Say what to do each run."
-          : whenError
+          : zoneError
+            ? "Fix the time zone above."
+            : cronError
+              ? when.kind === "custom"
+                ? "Fix the cron expression above."
+                : cronError
+              : null
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -603,6 +622,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
     update.mutate(patch, { onSuccess: onDone })
   }
 
+  const every = when.kind === "minutes" || when.kind === "hours"
   const set = (parts: Partial<WhenParts>) => setWhen((w) => ({ ...w, ...parts }))
   const setKind = (kind: RepeatKind) =>
     // Custom opens with the cron the plain words made, ready to adjust.
@@ -614,11 +634,15 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
       return days.length ? { ...w, weekdays: days } : w
     })
 
+  // Where it runs can't change here. A schedule without a runner of its own follows its project's "Runs on".
+  const inProject = `Runs in ${projects.data?.find((p) => p.id === schedule?.projectId)?.name ?? "its project"}`
   const where = !schedule
     ? undefined
     : schedule.target === "orchestrator"
       ? "Messages the Coordinator"
-      : `Runs in ${projects.data?.find((p) => p.id === schedule.projectId)?.name ?? "its project"}${schedule.runsOn ? ` · ${RUNNER_LABEL[schedule.runsOn]}` : ""}`
+      : schedule.runsOn
+        ? `${inProject} · ${RUNNER_LABEL[schedule.runsOn]} (this schedule's own setting)`
+        : `${inProject}. Change where it runs in the project's settings.`
 
   return (
     <Modal
@@ -630,16 +654,22 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
       onSubmit={submit}
       footer={
         <>
-          <Button type="button" variant="ghost" onClick={onDone}>
+          <Button type="button" variant="ghost" className={TOUCH_SIZE} onClick={onDone}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={Boolean(reason)} loading={saving}>
+          <Button type="submit" variant="primary" className={TOUCH_SIZE} disabled={Boolean(reason)} loading={saving} aria-describedby={reason ? reasonId : undefined}>
             {schedule ? "Save schedule" : "Create schedule"}
           </Button>
+          <FormNote
+            id={reasonId}
+            reason={reason}
+            quiet={!dirty && !blurred}
+            failure={failure && `${schedule ? "Couldn't save the schedule" : "Couldn't create the schedule"}: ${failure.message}`}
+          />
         </>
       }
     >
-      <div className="@container space-y-4">
+      <div className="@container space-y-4" onBlur={() => setBlurred(true)}>
         {!schedule && (
           <FieldGroup label="Target">
             <div className="flex flex-wrap gap-1.5">
@@ -654,11 +684,11 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
         )}
         <div className={cx("grid gap-3", !schedule && !orchestrator && "@lg:grid-cols-2")}>
           <Field label="Name">
-            <input autoFocus={!schedule} className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Morning issue triage" />
+            <input autoFocus={!schedule} className={cx(inputClass, TOUCH_SIZE)} value={name} onChange={(e) => setName(e.target.value)} placeholder="Morning issue triage" />
           </Field>
           {!schedule && !orchestrator && (
             <Field label="Project">
-              <Select className="w-full" value={projectId} onChange={(e) => setProject(e.target.value)}>
+              <Select className={cx(TOUCH_SIZE, "w-full")} value={projectId} onChange={(e) => setProject(e.target.value)}>
                 {projects.data?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -669,22 +699,54 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
           )}
         </div>
 
-        <div className="grid gap-3 @lg:grid-cols-2">
-          <Field label="Repeats">
-            <Select className="w-full" value={when.kind} onChange={(e) => setKind(e.target.value as RepeatKind)}>
-              {REPEAT_KINDS.map((k) => (
-                <option key={k.kind} value={k.kind}>
-                  {k.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+        {/*
+          Repeats and its time share a row from 20rem; a 320px phone keeps one column. The wider fields get a row each
+          until 32rem, and "Every … minutes" needs 24rem before half a row holds its words.
+        */}
+        <div className="grid gap-3 @xs:grid-cols-2">
+          <div className={cx(when.kind === "custom" && WIDE, every && EVERY)}>
+            <Field label="Repeats">
+              <Select className={cx(TOUCH_SIZE, "w-full")} value={when.kind} onChange={(e) => setKind(e.target.value as RepeatKind)}>
+                {REPEAT_KINDS.map((k) => (
+                  <option key={k.kind} value={k.kind}>
+                    {k.label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          {when.kind === "minutes" && (
+            <div className={EVERY}>
+              <Field label="How often">
+                <Select className={cx(TOUCH_SIZE, "w-full")} value={when.everyMinutes} onChange={(e) => set({ everyMinutes: Number(e.target.value) })}>
+                  {MINUTE_STEPS.map((n) => (
+                    <option key={n} value={n}>
+                      {n} minutes
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          )}
+          {when.kind === "hours" && (
+            <div className={EVERY}>
+              <Field label="How often">
+                <Select className={cx(TOUCH_SIZE, "w-full")} value={when.everyHours} onChange={(e) => set({ everyHours: Number(e.target.value) })}>
+                  {HOUR_STEPS.map((n) => (
+                    <option key={n} value={n}>
+                      {n === 1 ? "1 hour" : `${n} hours`}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          )}
           {hasTime(when.kind) && (
             <Field label="At">
               <input
                 type="time"
                 required
-                className={inputClass}
+                className={cx(inputClass, TOUCH_SIZE)}
                 value={timeValue(when)}
                 onChange={(e) => {
                   const at = timeParts(e.target.value)
@@ -708,7 +770,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
           )}
           {when.kind === "monthly" && (
             <Field label="On day" hint={when.day > 28 ? `Months without a day ${when.day} are skipped.` : undefined}>
-              <Select className="w-full" value={when.day} onChange={(e) => set({ day: Number(e.target.value) })}>
+              <Select className={cx(TOUCH_SIZE, "w-full")} value={when.day} onChange={(e) => set({ day: Number(e.target.value) })}>
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
                   <option key={day} value={day}>
                     {day}
@@ -718,24 +780,33 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
             </Field>
           )}
           {when.kind === "custom" && (
-            <Field label="Cron expression" hint="Five fields: minute, hour, day, month, weekday.">
-              <input
-                className={cx(inputClass, "font-mono")}
-                value={when.cron}
-                onChange={(e) => set({ cron: e.target.value })}
-                placeholder="0 9 * * 1-5"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                aria-invalid={whenError !== null && isValidTimeZone(tz)}
-              />
-            </Field>
+            <div className={cx(WIDE, "space-y-1.5")}>
+              <Field label="Cron expression" hint="Five fields: minute, hour, day, month, weekday.">
+                <input
+                  className={cx(inputClass, TOUCH_SIZE, "font-mono")}
+                  value={when.cron}
+                  onChange={(e) => set({ cron: e.target.value })}
+                  placeholder="0 9 * * 1-5"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-invalid={cronError !== null}
+                  aria-describedby={cronError ? cronErrorId : undefined}
+                />
+              </Field>
+              {cronError && (
+                <p id={cronErrorId} className="text-xs text-red-300">
+                  {cronError}
+                </p>
+              )}
+            </div>
           )}
-          <div className="space-y-1.5">
+          <div className={cx(WIDE, "space-y-1.5")}>
             <Field label="Time zone">
               <Select
-                className="w-full"
+                className={cx(TOUCH_SIZE, "w-full")}
                 value={otherZone ? OTHER_ZONE : tz}
+                aria-describedby={zoneError && !otherZone ? zoneErrorId : undefined}
                 onChange={(e) => {
                   const other = e.target.value === OTHER_ZONE
                   setOtherZone(other)
@@ -753,7 +824,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
             {otherZone && (
               <>
                 <input
-                  className={inputClass}
+                  className={cx(inputClass, TOUCH_SIZE)}
                   aria-label="Time zone name"
                   value={tz}
                   onChange={(e) => setTimezone(e.target.value)}
@@ -762,7 +833,8 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
                   autoCapitalize="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  aria-invalid={!isValidTimeZone(tz)}
+                  aria-invalid={zoneError !== null}
+                  aria-describedby={zoneError ? zoneErrorId : undefined}
                 />
                 <datalist id="box-yard-zones">
                   {allZones.map((z) => (
@@ -771,11 +843,15 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
                 </datalist>
               </>
             )}
+            {zoneError && (
+              <p id={zoneErrorId} className="text-xs text-red-300">
+                {zoneError}
+              </p>
+            )}
           </div>
-          <p aria-live="polite" className={cx("col-span-full text-xs", whenError ? "text-red-300" : "text-zinc-400")}>
-            {"error" in preview ? (
-              preview.error
-            ) : (
+          {/* Only the sentence: a problem shows under its field, and the line keeps its place meanwhile. */}
+          <p aria-live="polite" className="col-span-full min-h-4 text-xs text-zinc-400">
+            {preview && "runs" in preview && (
               <>
                 {preview.runs} <span className="text-zinc-500">· Next: {preview.next.join(", ")}</span>
               </>
@@ -791,12 +867,12 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
               : "Each run is a new task with this prompt, plus a note on how the previous run ended."
           }
         >
-          <textarea className={inputClass} rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Look at issues opened since the last run, label them, and post a summary as an artifact." />
+          <textarea className={cx(inputClass, TOUCH_SIZE)} rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Look at issues opened since the last run, label them, and post a summary as an artifact." />
         </Field>
 
         <div className="grid gap-3 @lg:grid-cols-2 @lg:items-end">
           <Field label="If the server was down">
-            <Select className="w-full" value={catchUp} onChange={(e) => setCatchUp(e.target.value as CatchUp)}>
+            <Select className={cx(TOUCH_SIZE, "w-full")} value={catchUp} onChange={(e) => setCatchUp(e.target.value as CatchUp)}>
               <option value="once">Run once when it's back</option>
               <option value="skip">Skip the missed runs</option>
             </Select>
@@ -806,16 +882,6 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
             {orchestrator ? "Send it even if the last prompt is still queued or running" : "Start it even if the last run is still going"}
           </label>
         </div>
-
-        {failure && (
-          <p role="alert" className="text-xs text-red-300">
-            {schedule ? "Couldn't save the schedule" : "Couldn't create the schedule"}: {failure.message}
-          </p>
-        )}
-        {/* Why the button below is off. The line keeps its place, so the form doesn't jump as it comes and goes. */}
-        <p role="status" className="min-h-4 text-xs text-amber-300">
-          {reason}
-        </p>
       </div>
     </Modal>
   )

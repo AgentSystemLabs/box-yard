@@ -51,7 +51,8 @@ export function scheduleWhen(cron: string, tz: string, locale?: string): string 
   })
   if (clock) return `${words} ${zoneLabel(tz)}`
   if (words === source) return `${source} (${zoneLabel(tz)} time)`
-  return words
+  // "Every 6 hours at :00" is just "Every 6 hours".
+  return words.replace(/^(Every \d+ hours) at :00$/, "$1")
 }
 
 /** Days since the epoch of `ts`'s calendar date in `tz`, so two times can be compared by day. */

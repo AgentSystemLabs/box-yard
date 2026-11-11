@@ -15,17 +15,22 @@ export function runsText(cron: string, tz: string, locale?: string): string {
 }
 
 /** How a schedule repeats in the form's plain-word builder. "custom" is a typed cron. */
-export type RepeatKind = "15min" | "hourly" | "daily" | "weekdays" | "weekly" | "monthly" | "custom"
+export type RepeatKind = "minutes" | "hours" | "daily" | "weekdays" | "weekly" | "monthly" | "custom"
 
+/** "Every … minutes" and "Every … hours" ask how many in the field beside them. */
 export const REPEAT_KINDS: { kind: RepeatKind; label: string }[] = [
-  { kind: "15min", label: "Every 15 minutes" },
-  { kind: "hourly", label: "Every hour" },
+  { kind: "minutes", label: "Every … minutes" },
+  { kind: "hours", label: "Every … hours" },
   { kind: "daily", label: "Every day" },
   { kind: "weekdays", label: "Weekdays" },
   { kind: "weekly", label: "Every week" },
   { kind: "monthly", label: "Every month" },
   { kind: "custom", label: "Custom (cron)" },
 ]
+
+/** The intervals the builder offers: each divides its hour or day evenly, so the runs never bunch up at the turn. */
+export const MINUTE_STEPS = [5, 10, 15, 20, 30]
+export const HOUR_STEPS = [1, 2, 3, 4, 6, 8, 12]
 
 /** Sunday first, like cron's 0-6. The form shows them Monday first. */
 export const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
@@ -39,6 +44,10 @@ export interface WhenParts {
   kind: RepeatKind
   hour: number
   minute: number
+  /** One of MINUTE_STEPS. "Every … minutes" runs this often. */
+  everyMinutes: number
+  /** One of HOUR_STEPS. "Every … hours" runs this often, on the hour. */
+  everyHours: number
   /** 0-6, Sunday is 0. "Every week" runs on these. */
   weekdays: number[]
   /** 1-31. "Every month" runs on this day. */
@@ -46,7 +55,7 @@ export interface WhenParts {
   cron: string
 }
 
-export const DEFAULT_WHEN: WhenParts = { kind: "weekdays", hour: 9, minute: 0, weekdays: [1], day: 1, cron: "0 9 * * 1-5" }
+export const DEFAULT_WHEN: WhenParts = { kind: "weekdays", hour: 9, minute: 0, everyMinutes: 15, everyHours: 1, weekdays: [1], day: 1, cron: "0 9 * * 1-5" }
 
 /** Whether this kind asks for a time of day. */
 export const hasTime = (kind: RepeatKind) => kind === "daily" || kind === "weekdays" || kind === "weekly" || kind === "monthly"
@@ -55,10 +64,10 @@ export const hasTime = (kind: RepeatKind) => kind === "daily" || kind === "weekd
 export function cronFromParts(p: WhenParts): string {
   const at = `${p.minute} ${p.hour}`
   switch (p.kind) {
-    case "15min":
-      return "*/15 * * * *"
-    case "hourly":
-      return "0 * * * *"
+    case "minutes":
+      return `*/${MINUTE_STEPS.includes(p.everyMinutes) ? p.everyMinutes : 15} * * * *`
+    case "hours":
+      return HOUR_STEPS.includes(p.everyHours) && p.everyHours > 1 ? `0 */${p.everyHours} * * *` : "0 * * * *"
     case "daily":
       return `${at} * * *`
     case "weekdays":
@@ -73,6 +82,9 @@ export function cronFromParts(p: WhenParts): string {
 }
 
 const sameSet = (a: Set<number>, b: Set<number>) => a.size === b.size && [...a].every((n) => b.has(n))
+
+/** The step whose multiples below `limit` are exactly `set`: 15 for minutes 0, 15, 30 and 45. */
+const stepOf = (set: Set<number>, steps: number[], limit: number) => steps.find((n) => set.size === limit / n && [...set].every((v) => v % n === 0))
 
 /**
  * The builder's fields for a saved cron. A shape the builder can't make (two times a day, a month list, an invalid
@@ -92,9 +104,14 @@ export function partsFromCron(cron: string): WhenParts {
   const everyWeekday = c.weekdays.size === 7
   const base = { ...custom, cron: c.source }
   let parts: WhenParts | null = null
+  const onTheHour = c.minutes.size === 1 && c.minutes.has(0)
+  const everyMinutes = stepOf(c.minutes, MINUTE_STEPS, 60)
+  const everyHours = stepOf(c.hours, HOUR_STEPS, 24)
   if (c.hours.size === 24 && everyDay && everyWeekday) {
-    if (sameSet(c.minutes, new Set([0, 15, 30, 45]))) parts = { ...base, kind: "15min" }
-    else if (sameSet(c.minutes, new Set([0]))) parts = { ...base, kind: "hourly" }
+    if (everyMinutes) parts = { ...base, kind: "minutes", everyMinutes }
+    else if (onTheHour) parts = { ...base, kind: "hours", everyHours: 1 }
+  } else if (onTheHour && everyHours && everyDay && everyWeekday) {
+    parts = { ...base, kind: "hours", everyHours }
   } else if (c.minutes.size === 1 && c.hours.size === 1) {
     const at = { ...base, hour: [...c.hours][0]!, minute: [...c.minutes][0]! }
     const weekdays = [...c.weekdays].sort((a, b) => a - b)
