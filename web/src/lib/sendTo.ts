@@ -1,4 +1,5 @@
 import type { Project, Task } from "../../../shared/types"
+import { wordTier } from "../../../shared/runTargetSearch"
 import { projectChatHref, taskCardHref } from "./navigation"
 
 export type SendDestination = {
@@ -30,7 +31,27 @@ export function sendDestinations(projects: Project[], tasks: Task[], query: stri
     ...projects.map((p): SendDestination => ({ key: `captain:${p.id}`, kind: "captain", id: p.id, label: `${p.name} Captain`, detail: p.repo ?? "Project chat", href: projectChatHref(p.id) })),
     ...tasks.filter((t) => names.has(t.projectId)).map((t): SendDestination => ({ key: `task:${t.id}`, kind: "task", id: t.id, label: t.title, detail: `${names.get(t.projectId)} · ${t.status}${t.status === "done" ? " · Sending reopens this task" : ""}`, href: taskCardHref(t.id) })),
   ]
-  const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean)
-  return all.filter((d) => words.every((w) => `${d.label} ${d.detail} ${d.id}`.toLocaleLowerCase().includes(w)))
-    .sort((a, b) => Number(b.label.toLocaleLowerCase().startsWith(query.toLocaleLowerCase())) - Number(a.label.toLocaleLowerCase().startsWith(query.toLocaleLowerCase())))
+  return rankDestinations(all, query)
+}
+
+/**
+ * The destinations `query`'s words name, best first. Every word must be in a destination's name, its detail or its ID.
+ * A hit in the name counts double, and a whole word more than a word's start or its inside (wordTier), so "fix up"
+ * puts "Fix uploads" before a task of the Uploads project. Equal hits keep the list's order; no words is the whole list.
+ */
+function rankDestinations(all: SendDestination[], query: string): SendDestination[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!words.length) return all
+  const hits: { d: SendDestination; score: number; at: number }[] = []
+  all.forEach((d, at) => {
+    let score = 0
+    for (const word of words) {
+      const hit = Math.max(wordTier(d.label, word) * 2, wordTier(d.detail, word), wordTier(d.id, word))
+        || (`${d.label} ${d.detail} ${d.id}`.toLowerCase().includes(word) ? 0.25 : 0)
+      if (!hit) return
+      score += hit
+    }
+    hits.push({ d, score, at })
+  })
+  return hits.sort((a, b) => b.score - a.score || a.at - b.at).map((h) => h.d)
 }
