@@ -7,8 +7,8 @@ import { ChevronRight, Gauge } from "lucide-react"
 import { useLimits } from "../lib/queries"
 import { runDayTime, untilText } from "../lib/scheduleText"
 import { Loading } from "./Loading"
-import { useOpenUsage } from "./UsageHost"
-import { Button, cx, timeAgo, useMinuteClock } from "./ui"
+import { useOpenUsage, useUsageToSettings } from "./UsageHost"
+import { Button, TAP_AREA, cx, timeAgo, useMinuteClock } from "./ui"
 import { WARN_PCT, isCurrent, isFull, type LimitHarness, type LimitWindow, type LoginLimits } from "../../../shared/loginLimits"
 
 const HARNESS_LABEL: Record<LimitHarness, string> = { claude: "Claude", codex: "Codex" }
@@ -106,11 +106,30 @@ export function SubscriptionLimits() {
 /** `compact`: one of several logins, so its windows share a row at every width and a phone scrolls past it sooner. */
 const LoginCard = memo(function LoginCard({ login, now, compact }: { login: LoginLimits; now: number; compact: boolean }) {
   const at = login.state.atLimit && login.state.resetsAt !== null && login.state.resetsAt > now ? login.state.resetsAt : null
+  const toSettings = useUsageToSettings()
+  // Where the login is set, when that is a Settings section (Credentials has its own login and the extra ones): its
+  // source is then the way there. A project's env vars and this computer's own login stay words.
+  const section = login.scope === "settings" || login.scope.startsWith("login:") ? "credentials" : login.scope.startsWith("identity:") ? "identities" : null
   return (
     <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4" data-testid="limits-login" data-login={login.loginId}>
       <div className="flex flex-wrap items-baseline gap-x-2">
         <h4 className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</h4>
-        <span className="min-w-0 text-xs text-zinc-500 wrap-anywhere">Source: {login.source}</span>
+        <span className="min-w-0 text-xs text-zinc-500 wrap-anywhere">
+          Source:{" "}
+          {section ? (
+            <button
+              type="button"
+              onClick={() => toSettings(section)}
+              title={`Open Settings › ${section === "credentials" ? "Credentials" : "Identities"}`}
+              className={cx(TAP_AREA, "rounded-sm text-yard-400 underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none")}
+              data-testid="limits-source"
+            >
+              {login.source}
+            </button>
+          ) : (
+            login.source
+          )}
+        </span>
       </div>
       <div className="mt-0.5 text-xs text-zinc-500 wrap-anywhere">
         {loginDetail(login)} · <time title={new Date(login.asOf).toLocaleString()}>as of {readAgo(login.asOf, now)}</time>
@@ -204,7 +223,7 @@ export function LoginLimitsLine({ scope, harness, className }: { scope: string; 
       type="button"
       onClick={() => openUsage()}
       title={`Open Usage: reset times and history. Read ${new Date(login.asOf).toLocaleString()}`}
-      className={cx("group @container/limits block w-full rounded-md text-left text-xs text-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none", className)}
+      className={cx("group @container/limits block w-full rounded-md py-1.5 text-left text-xs text-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none", className)}
       data-testid="limits-line"
       data-login={login.loginId}
     >

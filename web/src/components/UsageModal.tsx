@@ -2,17 +2,17 @@
 // cost stacks LLM spend by model on compute by provider; daily tokens stack input, cache writes, cache reads and output.
 // Tapping a bar segment, a legend item, a day's line or a table row narrows everything to it, and the table goes one
 // level finer each time, down to tasks and boxes. What it's narrowed to stays in a row of chips at the top while the
-// numbers scroll, with its share of the range's total. A picked day narrows the table alone: the tiles and charts keep
-// the range. One request per range: filters fold the ledger in the browser (shared/usageLedger.ts), and every number on
+// numbers scroll, with its share of the range's total. A picked day narrows the table alone, which says the day in its
+// heading: the tiles and charts keep the range. One request per range: filters fold the ledger in the browser (shared/usageLedger.ts), and every number on
 // screen adds up to the totals above it. Estimates wear "≈".
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react"
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Bot, Box, CalendarDays, ChevronLeft, ChevronRight, Filter, FolderGit2, ListTodo, Settings as SettingsIcon, Users, X, type LucideIcon } from "lucide-react"
+import { Bot, Box, ChevronLeft, ChevronRight, Filter, FolderGit2, ListTodo, Settings as SettingsIcon, Users, X, type LucideIcon } from "lucide-react"
 import { Modal } from "./Modal"
 import { Loading } from "./Loading"
 import { SubscriptionLimits } from "./LoginLimits"
 import { useUsageToSettings } from "./UsageHost"
-import { Button, LineIcon, Select, TAP_AREA, cx, useMinuteClock } from "./ui"
+import { Button, Select, TAP_AREA, cx, useMinuteClock } from "./ui"
 import { prefetchUsageLedger, useUsageBudget, useUsageLedger } from "../lib/queries"
 import { money, pct } from "../lib/usage"
 import { axisMoney, compact, dayLabel, labelledDays, localDayStarts, longDayLabel, niceScale, roundedParts } from "../lib/usageChart"
@@ -43,6 +43,15 @@ const FILTER_NAMES: Record<keyof UsageFilter, string> = { projectId: "Project", 
 // What kind a chip narrows by, where there is no room for the word: the palette's icons for a project, a task and a box.
 const FILTER_ICONS: Record<keyof UsageFilter, LucideIcon> = { projectId: FolderGit2, taskId: ListTodo, model: Bot, provider: Box, role: Users, kind: Filter }
 const TABLE_ROWS = 20
+
+/** The dialog's scrolling body, found from something in it. */
+function scrollerOf(el: HTMLElement | null): HTMLElement | null {
+  for (let p = el?.parentElement ?? null; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY
+    if (o === "auto" || o === "scroll") return p
+  }
+  return null
+}
 
 /** "≈ $3.20" for an estimate. */
 const usd = (n: number, estimate = false) => `${estimate && n > 0 ? "≈ " : ""}${money(n)}`
@@ -83,16 +92,47 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
   // A row's second line that only repeats a filter (every task's project, once narrowed to that project) says nothing.
   const said = useMemo(() => set.map((f) => f.label), [set])
 
+  // A filter's bar comes, goes and changes height above the charts, and the tiles and legends change with it. What was
+  // tapped stays where it is on screen: the charts under a legend's or a segment's tap, whatever is under a stuck bar
+  // when a chip goes. A row's tap brings the table's next level to the top, under the bar.
+  const bar = useRef<HTMLDivElement>(null)
+  const charts = useRef<HTMLDivElement>(null)
+  const table = useRef<HTMLElement>(null)
+  const held = useRef<{ el: HTMLElement; top: number } | "table" | null>(null)
+  const hold = (el: HTMLElement | null) => void (held.current = el && { el, top: el.getBoundingClientRect().top })
+  /** Before a chip goes: holds what is under the bar, when the bar is stuck over the numbers. */
+  const holdUnderBar = () => {
+    const scroller = scrollerOf(bar.current)
+    if (!scroller || !bar.current || !charts.current) return
+    const edge = scroller.getBoundingClientRect().top
+    if (bar.current.getBoundingClientRect().top > edge + 1) return
+    hold(charts.current.getBoundingClientRect().bottom > edge + bar.current.offsetHeight + 48 ? charts.current : table.current)
+  }
+  useLayoutEffect(() => {
+    const h = held.current
+    held.current = null
+    const scroller = scrollerOf(table.current)
+    if (!h || !scroller) return
+    if (h !== "table") return void (scroller.scrollTop += h.el.getBoundingClientRect().top - h.top)
+    if (table.current) scroller.scrollTop += table.current.getBoundingClientRect().top - (scroller.getBoundingClientRect().top + (bar.current?.offsetHeight ?? 0) + 8)
+  }, [filter])
+
   const narrow = (f: UsageFilter, drillFrom?: UsageGroup) => {
     const next = { ...filter, ...f }
     setFilter(next)
     if (drillFrom) setGroup(nextGroup(drillFrom, next))
   }
-  const drop = (key: keyof UsageFilter) =>
+  const drop = (key: keyof UsageFilter) => {
+    holdUnderBar()
     setFilter((f) => {
       const { [key]: _, ...rest } = f
       return rest
     })
+  }
+  const clear = () => {
+    holdUnderBar()
+    setFilter({})
+  }
 
   return (
     <Modal size="wide" title="Usage" description="Subscription allowances, model usage and box costs" onClose={onClose} className="max-sm:h-dvh [&_[data-dismiss]]:h-11 [&_[data-dismiss]]:w-11">
@@ -110,7 +150,7 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
             </div>
             <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
           </div>
-          {view && <FilterChips set={set} day={dayName} view={view} rangeUsd={rangeUsd} onDrop={drop} onAllDays={() => setDay(null)} onClear={() => setFilter({})} />}
+          {view && <FilterChips bar={bar} set={set} view={view} rangeUsd={rangeUsd} onDrop={drop} onClear={clear} />}
           {!view ? (
             q.isError ? (
               <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-zinc-400">
@@ -127,11 +167,12 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
                 <p className="text-sm text-zinc-400" data-testid="usage-empty">No recorded usage in this range{Object.keys(filter).length ? " for these filters" : ""}.</p>
               )}
               <Totals view={view} />
-              <div className="grid items-start gap-4 @4xl:grid-cols-2">
-                <CostChart view={view} parts={parts} day={shownDay} onDay={setDay} onNarrow={narrow} />
+              <div ref={charts} className="grid items-start gap-4 @4xl:grid-cols-2">
+                <CostChart view={view} parts={parts} day={shownDay} onDay={setDay} onNarrow={(f) => { hold(charts.current); narrow(f) }} />
                 <TokenChart view={view} parts={parts} day={shownDay} onDay={setDay} />
               </div>
               <Breakdown
+                section={table}
                 view={dayView ?? view}
                 split={view.totals.computeUsd > 0 || view.totals.computeHours > 0}
                 day={dayName}
@@ -140,7 +181,11 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
                 filter={filter}
                 said={said}
                 onGroup={setGroup}
-                onDrill={(row) => row.filter && narrow(row.filter, group)}
+                onDrill={(row) => {
+                  if (!row.filter) return
+                  held.current = "table"
+                  narrow(row.filter, group)
+                }}
                 onAllDays={() => setDay(null)}
               />
               <HowEstimated ledger={ledger!} />
@@ -178,46 +223,43 @@ function RangePicker({ value, onChange, onPrefetch }: { value: UsageRangeDays; o
 }
 
 function FilterChips({
+  bar,
   set,
-  day,
   view,
   rangeUsd,
   onDrop,
-  onAllDays,
   onClear,
 }: {
+  bar: RefObject<HTMLDivElement | null>
   set: { key: keyof UsageFilter; label: string }[]
-  /** The picked day ("Sat, Nov 7"), which narrows the table below the charts. */
-  day: string | null
   view: UsageView
   rangeUsd: number
   onDrop: (k: keyof UsageFilter) => void
-  onAllDays: () => void
   onClear: () => void
 }) {
   const scroller = useRef<HTMLDivElement>(null)
-  const chips = set.length + (day ? 1 : 0)
-  const had = useRef(chips)
-  // A chip that joins the row is scrolled to, where the row has no room for all of them.
+  const had = useRef(new Map<string, string>())
+  // A chip that joins the row, or changes what it says, is scrolled to where the row has no room for all of them.
   useEffect(() => {
-    if (chips > had.current && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth
-    had.current = chips
-  }, [chips])
-  // How to narrow is said in each chart's readout line. A day alone brings no bar: it would push the chart down under
-  // the pointer that picked it. The table it narrows says the day itself.
+    const now = new Map<string, string>(set.map((f) => [f.key, f.label]))
+    const fresh = set.filter((f) => had.current.get(f.key) !== f.label).pop()
+    had.current = now
+    if (fresh) scroller.current?.querySelector(`[data-filter="${fresh.key}"]`)?.scrollIntoView?.({ inline: "nearest", block: "nearest" })
+  }, [set])
+  // How to narrow is said in each chart's readout line. A picked day is not a chip here: the share beside the chips is
+  // of the range, and the table the day narrows says it in its own heading.
   if (!set.length) return null
   const t = view.totals
-  const chip = "inline-flex min-h-11 items-center gap-1.5 rounded-full border pr-2 pl-2.5 text-xs"
   // One chip gives way to the share down to 5rem. Several keep 7rem each, enough to tell them apart by name. A short
   // name's chip is narrower than that already, so its floor is about its own width (the icon, the × and 0.36rem a letter).
   const least = set.map(({ label }) => Math.min(set.length > 1 ? 7 : 5, 3.75 + label.length * 0.36))
   return (
     // Stays at the top of the dialog's scrolling body (over its padding, bleeding to its edges), so a tap on a table row far below shows
     // what it did and how much of the range is left: the chips, then their share of the range's total, on one row while
-    // each chip has its least width (they shrink to that, then scroll sideways) and on a row of its own after that. The
-    // day's chip joins the row without a say in that, so picking a day never changes the bar's height.
-    <div role="group" aria-label="Filters" className="sticky -top-5 z-10 -mx-4 flex min-w-0 flex-wrap items-center gap-x-2 border-b border-zinc-800 bg-zinc-950 px-4 py-1.5 sm:-mx-5 sm:px-5" data-testid="usage-filters">
-      <div ref={scroller} className="scroll-thin flex flex-1 items-center gap-1.5 overflow-x-auto p-0.5" style={{ minWidth: `min(100%, ${least.reduce((a, b) => a + b, 0) + (set.length - 1) * 0.375 + 0.25}rem)` }}>
+    // each chip has its least width (they shrink to that, then scroll sideways) and on a shorter row of its own after that.
+    <div ref={bar} role="group" aria-label="Filters" className="sticky -top-5 z-10 -mx-4 flex min-w-0 flex-wrap items-center gap-x-2 border-b border-zinc-800 bg-zinc-950 px-4 py-1.5 sm:-mx-5 sm:px-5" data-testid="usage-filters">
+      {/* Above the Clear button's tap area, which reaches up into this row on a touch screen: a chip keeps its own. */}
+      <div ref={scroller} className="scroll-thin relative z-[1] flex flex-1 items-center gap-1.5 overflow-x-auto p-0.5" style={{ minWidth: `min(100%, ${least.reduce((a, b) => a + b, 0) + (set.length - 1) * 0.375 + 0.25}rem)` }}>
         {set.map(({ key: k, label }, i) => {
           const Icon = FILTER_ICONS[k]
           return (
@@ -226,9 +268,11 @@ function FilterChips({
               type="button"
               onClick={() => onDrop(k)}
               aria-label={`Remove filter ${FILTER_NAMES[k]}: ${label}`}
-              title={`Remove the filter ${FILTER_NAMES[k]}: ${label}`}
+              // The kind in words first: at a phone's width the chip itself has only its icon.
+              title={`${FILTER_NAMES[k]}: ${label}. Remove this filter`}
               style={{ minWidth: `${least[i]}rem` }}
-              className={cx(chip, "max-w-56 shrink border-yard-500/40 bg-yard-500/10 text-yard-100 hover:bg-yard-500/20", FOCUS)}
+              className={cx("inline-flex min-h-11 max-w-56 shrink items-center gap-1.5 rounded-full border border-yard-500/40 bg-yard-500/10 pr-2 pl-2.5 text-xs text-yard-100 hover:bg-yard-500/20", FOCUS)}
+              data-filter={k}
             >
               {/* The kind is an icon at every width, and a word too once there is room for it. */}
               <Icon className="h-3.5 w-3.5 shrink-0 text-yard-300/80" aria-hidden />
@@ -238,20 +282,6 @@ function FilterChips({
             </button>
           )
         })}
-        {day && (
-          <button
-            type="button"
-            onClick={onAllDays}
-            aria-label={`Breakdown of ${day} only: back to all ${view.days.length} days`}
-            title={`The breakdown shows ${day} only. Back to all ${view.days.length} days`}
-            className={cx(chip, "shrink-0 border-zinc-700 bg-zinc-800/60 whitespace-nowrap text-zinc-200 tabular-nums hover:bg-zinc-800", FOCUS)}
-            data-testid="usage-day-chip"
-          >
-            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
-            <span className="font-medium">{day}</span>
-            <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          </button>
-        )}
       </div>
       <div className="ml-auto flex min-w-0 items-center gap-x-1">
         <p
@@ -262,7 +292,7 @@ function FilterChips({
           <span className="font-medium text-zinc-200">{usd(t.costUsd, t.estimatedUsd > 0)}</span> of {money(rangeUsd)} · {pct(t.costUsd, rangeUsd)}
         </p>
         {set.length > 1 && (
-          <button type="button" onClick={onClear} aria-label="Clear all filters" className={cx("min-h-11 shrink-0 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
+          <button type="button" onClick={onClear} aria-label="Clear all filters" className={cx(TAP_AREA, "inline-flex h-7 shrink-0 items-center rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
             <span className="@md:hidden">Clear</span>
             <span className="hidden @md:inline">Clear all</span>
           </button>
@@ -295,12 +325,13 @@ function Totals({ view }: { view: UsageView }) {
   const n = view.days.length
   const estimated = t.estimatedUsd > 0
   const runs = `${t.turns.toLocaleString("en-US")} ${t.turns === 1 ? "run" : "runs"}`
-  const tokens = <Tile testId="usage-tokens" label="Tokens" value={compact(t.tokens.total)} sub={[`${compact(t.tokens.total / n)} a day on average`]} />
-  // Without box time the total is the model cost: one tile says it, not three with the same figure.
+  const tokens = <Tile testId="usage-tokens" label="Tokens" value={compact(t.tokens.total)} sub={[`${compact(t.tokens.total / n)} a day`]} />
+  // Without box time the total is the model cost: one tile says it, not three with the same figure. Both figures' second
+  // lines are per day, the range's average.
   if (!(t.computeUsd > 0) && !(t.computeHours > 0))
     return (
       <div className="grid grid-cols-2 gap-2">
-        <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={[`${usd(t.costUsd / n, estimated)} a day`, runs, "no box time"]} />
+        <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={[`${usd(t.costUsd / n, estimated)} a day`, runs]} />
         {tokens}
       </div>
     )
@@ -308,7 +339,7 @@ function Totals({ view }: { view: UsageView }) {
   const computeEstimated = view.cost.some((s) => s.kind === "compute" && s.estimated)
   return (
     <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-4">
-      <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={[`${usd(t.costUsd / n, estimated)} a day on average`]} />
+      <Tile testId="usage-total" label="Total" value={usd(t.costUsd, estimated)} sub={[`${usd(t.costUsd / n, estimated)} a day`]} />
       <Tile label="Model cost" value={usd(t.llmUsd, llmEstimated)} sub={[runs, pct(t.llmUsd, t.costUsd)]} />
       <Tile label="Box cost" value={usd(t.computeUsd, computeEstimated)} sub={[`${t.computeHours.toFixed(1)} box-hours`, pct(t.computeUsd, t.costUsd)]} />
       {tokens}
@@ -332,7 +363,7 @@ function CostChart({ view, parts, day, onDay, onNarrow }: { view: UsageView; par
   const stacks: Stack[] = view.cost.map((s) => ({ key: s.key, label: s.label, color: colorOf(s.color), daily: s.daily, total: s.totalUsd, estimated: s.estimated, onPick: s.filter ? () => onNarrow(s.filter!) : undefined }))
   return (
     <ChartCard title="Daily cost" sub="Models and boxes · US dollars" testId="usage-cost-chart" action={day !== null && <AllDays n={view.days.length} plot={plot} onDay={onDay} />}>
-      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} byDay={view.costByDay} format={(n) => money(n)} unit={0.01} axis={axisMoney} day={day} onDay={onDay} noun="cost" />
+      <StackedBars plot={plot} days={view.days} stacks={stacks} parts={parts} byDay={view.costByDay} format={(n) => money(n)} unit={0.01} axis={axisMoney} day={day} onDay={onDay} noun="cost" tells />
     </ChartCard>
   )
 }
@@ -418,6 +449,7 @@ function StackedBars({
   day,
   onDay,
   noun,
+  tells = false,
 }: {
   /** The focusable plot, for the card's "All N days". */
   plot: RefObject<HTMLDivElement | null>
@@ -436,6 +468,8 @@ function StackedBars({
   day: number | null
   onDay: (d: number | null) => void
   noun: string
+  /** Says, with a picked day's total, that the table below follows it: one of the two charts does. */
+  tells?: boolean
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const pointer = useRef<string>("mouse")
@@ -495,7 +529,7 @@ function StackedBars({
       <Readout id={readoutId} days={days} day={shown} picked={day} onDay={onDay} stacks={stacks} most={parts} byDay={byDay} total={total} format={format} partFormat={legendFormat} unit={unit} />
       {/* Spoken for a picked day only: a mouse passing over the bars changes the line above without a word. */}
       <span className="sr-only" aria-live="polite" data-testid="usage-day-live">
-        {day === null ? "" : `${longDayLabel(days[day]!)}: ${format(byDay[day]!)}`}
+        {day === null ? "" : `${longDayLabel(days[day]!)}: ${format(byDay[day]!)}${tells ? ". Breakdown shows this day." : ""}`}
       </span>
       <div className="mt-4 flex gap-2">
         {/* y-axis labels */}
@@ -578,7 +612,7 @@ function StackedBars({
           </div>
         </div>
       </div>
-      <Legend stacks={legend} format={format} short={legendFormat} />
+      <Legend stacks={legend} days={n} format={format} short={legendFormat} />
     </div>
   )
 }
@@ -626,8 +660,12 @@ function Readout({
   // To the cent, the parts add up to the day's total beside them.
   const figures = unit ? roundedParts(parts.map((p) => p.v), value, unit) : parts.map((p) => p.v)
   const approx = (day === null ? stacks.filter((s) => s.total > 0) : parts.map((p) => p.s)).some((s) => s.estimated) ? "≈ " : ""
-  // Room for the busiest day's parts, two, three or four to a row by the card's width; the hint is two lines on a phone.
-  const rows = { "--rows-2": Math.max(2, Math.ceil(most / 2)), "--rows-3": Math.max(1, Math.ceil(most / 3)), "--rows-4": Math.max(1, Math.ceil(most / 4)) } as CSSProperties
+  // Room for the busiest day's parts, two to a row, or four from 32rem. The hint fills the same room while no day is
+  // picked: two lines of it wherever the parts have two rows or more, so no blank row waits over the bars.
+  const rows = { "--rows-2": Math.max(2, Math.ceil(most / 2)), "--rows-4": Math.max(1, Math.ceil(most / 4)) } as CSSProperties
+  const then = cx("@md/chart:block", most > 4 ? "@lg/chart:block" : "@lg/chart:inline")
+  // Two words fewer in a card under 17rem (a 320px phone zoomed to 125%), where they would make a third line.
+  const also = <span className="hidden @[17rem]/chart:inline"> and breakdown</span>
   const label = <span className="font-medium text-zinc-200">{day === null ? `All ${n} days` : longDayLabel(days[day]!)}</span>
   // At an end the arrow stays focusable (aria-disabled, not disabled), so the keyboard doesn't lose its place.
   const step = (to: number) => to >= 0 && to < n && onDay(to)
@@ -652,13 +690,17 @@ function Readout({
       </div>
       <div
         style={rows}
-        className="grid min-h-[calc(var(--rows-2)*1.125rem)] grid-cols-2 content-start gap-x-2 gap-y-0.5 @md/chart:min-h-[calc(var(--rows-3)*1.125rem)] @md/chart:grid-cols-3 @lg/chart:min-h-[calc(var(--rows-4)*1.125rem)] @lg/chart:grid-cols-4"
+        className={cx(
+          "grid min-h-[calc(var(--rows-2)*1.125rem)] grid-cols-2 gap-x-2 gap-y-0.5 @lg/chart:min-h-[calc(var(--rows-4)*1.125rem)] @lg/chart:grid-cols-4",
+          day === null ? "content-center" : "content-start",
+        )}
       >
         {day === null ? (
-          // The tiles above have the daily average and the legend below each series' total: this line says how to go finer.
+          // The tiles above have the daily average and the legend below each series' total: this says how to go finer.
+          // A phone wraps it where it will; from 28rem its second half starts the second line.
           <span className="col-span-full">
-            <span className="pointer-coarse:hidden">Hover or drag for a day's numbers, click a colour to narrow it</span>
-            <span className="hidden pointer-coarse:inline">Tap or drag for a day's numbers, then a colour to narrow it</span>
+            <span className="pointer-coarse:hidden">Hover or drag a day for its numbers{also}, <span className={then}>click a colour to narrow</span></span>
+            <span className="hidden pointer-coarse:inline">Tap or drag a day for its numbers{also}, <span className={then}>then a colour to narrow</span></span>
           </span>
         ) : (
           parts.map(({ s }, i) => (
@@ -675,47 +717,52 @@ function Readout({
 }
 
 /**
- * Each series' colour, name and total, as buttons where a series narrows: two columns of name over figure while the
- * card is narrow (a phone), chips in a row from 24rem. `short` formats the figures on show, the title has `format`'s.
+ * Each series' colour, name and total over the range (its caption says so), as buttons where a series narrows: two
+ * columns of name over figure while the card is narrow (a phone), chips in a row from 24rem. `short` formats the figures on show, the title has `format`'s.
  */
-function Legend({ stacks, format, short = format }: { stacks: Stack[]; format: (n: number) => string; short?: (n: number) => string }) {
+function Legend({ stacks, days, format, short = format }: { stacks: Stack[]; days: number; format: (n: number) => string; short?: (n: number) => string }) {
+  const id = useId()
   if (!stacks.length) return <p className="mt-3 text-sm text-zinc-500">Nothing in this range.</p>
   const item = "flex min-h-11 w-full max-w-full items-center gap-1.5 rounded-md border px-2 text-xs @sm/chart:inline-flex @sm/chart:w-auto"
   return (
-    <ul className="mt-3 grid grid-cols-2 gap-1.5 @sm/chart:flex @sm/chart:flex-wrap" aria-label="Legend">
-      {stacks.map((s) => {
-        const figure = `${s.estimated ? "≈ " : ""}${format(s.total)}`
-        const body = (
-          <>
-            {/* The ring keeps the darkest and the palest swatch's edge on either surface. */}
-            <span aria-hidden className="usage-fill h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-zinc-500/60" style={fill(s)} />
-            <span className="flex min-w-0 flex-col text-left @sm/chart:flex-row @sm/chart:items-center @sm/chart:gap-1.5">
-              <span className="min-w-0 truncate text-zinc-200">{s.label}</span>
-              <span className="text-zinc-500 tabular-nums">{s.estimated ? "≈ " : ""}{short(s.total)}</span>
-            </span>
-          </>
-        )
-        return (
-          <li key={s.key} className="min-w-0">
-            {s.onPick ? (
-              <button
-                type="button"
-                aria-pressed={s.pressed}
-                onClick={s.onPick}
-                title={`${s.label}: ${figure}. ${s.pressed ? "Show all" : `Narrow to ${s.label}`}`}
-                className={cx(item, FOCUS, s.pressed ? "border-yard-500/50 bg-yard-500/10" : "border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/60")}
-              >
-                {body}
-              </button>
-            ) : (
-              <span className={cx(item, "border-transparent")} title={`${s.label}: ${figure}. Several models together: narrow by the table's Model rows`}>
-                {body}
+    <>
+      {/* Its figures are the range's, whichever day the readout above is on. There with no day picked too, so a pick moves nothing. */}
+      <p id={id} className="mt-3 text-[11px] text-zinc-400" data-testid="usage-legend-caption">All {days} days</p>
+      <ul className="mt-1 grid grid-cols-2 gap-1.5 @sm/chart:flex @sm/chart:flex-wrap" aria-label="Legend" aria-describedby={id}>
+        {stacks.map((s) => {
+          const figure = `${s.estimated ? "≈ " : ""}${format(s.total)}`
+          const body = (
+            <>
+              {/* The ring keeps the darkest and the palest swatch's edge on either surface. */}
+              <span aria-hidden className="usage-fill h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-zinc-500/60" style={fill(s)} />
+              <span className="flex min-w-0 flex-col text-left @sm/chart:flex-row @sm/chart:items-center @sm/chart:gap-1.5">
+                <span className="min-w-0 truncate text-zinc-200">{s.label}</span>
+                <span className="text-zinc-500 tabular-nums">{s.estimated ? "≈ " : ""}{short(s.total)}</span>
               </span>
-            )}
-          </li>
-        )
-      })}
-    </ul>
+            </>
+          )
+          return (
+            <li key={s.key} className="min-w-0">
+              {s.onPick ? (
+                <button
+                  type="button"
+                  aria-pressed={s.pressed}
+                  onClick={s.onPick}
+                  title={`${s.label}: ${figure}. ${s.pressed ? "Show all" : `Narrow to ${s.label}`}`}
+                  className={cx(item, FOCUS, s.pressed ? "border-yard-500/50 bg-yard-500/10" : "border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/60")}
+                >
+                  {body}
+                </button>
+              ) : (
+                <span className={cx(item, "border-transparent")} title={`${s.label}: ${figure}. Several models together: narrow by the table's Model rows`}>
+                  {body}
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </>
   )
 }
 
@@ -729,6 +776,7 @@ const colsOf = (split: boolean) => cx(COLS, split ? "@2xl:grid-cols-[minmax(0,1f
 const WIDE_CELL = "hidden text-right @2xl:block"
 
 function Breakdown({
+  section,
   view,
   split,
   day,
@@ -740,6 +788,8 @@ function Breakdown({
   onDrill,
   onAllDays,
 }: {
+  /** The table's section, for the dialog to scroll to. */
+  section: RefObject<HTMLElement | null>
   /** The range's view, or the picked day's: its rows and totals are the table. */
   view: UsageView
   /** The range has box time, so every row's cost is split into models and boxes. */
@@ -763,7 +813,7 @@ function Breakdown({
   // A row narrows unless everything it would narrow to is already a filter: then it is the one row, and plain.
   const drills = (r: UsageTableRow) => r.filter !== null && (Object.keys(r.filter) as (keyof UsageFilter)[]).some((k) => filter[k] !== r.filter![k])
   return (
-    <section aria-labelledby={id} data-testid="usage-breakdown" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
+    <section ref={section} aria-labelledby={id} data-testid="usage-breakdown" className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <h4 id={id} className="text-sm font-semibold text-zinc-100">
@@ -780,50 +830,58 @@ function Breakdown({
           </Select>
         </label>
       </div>
-      <div className={cx(cols, "mt-2 border-b border-zinc-800 pb-1 text-[11px] text-zinc-400 uppercase")}>
-        <span className="min-w-0 truncate">{USAGE_GROUP_LABEL[group]}</span>
-        {split && <span className={WIDE_CELL}>Models</span>}
-        {split && <span className={WIDE_CELL}>Boxes</span>}
-        <span className={WIDE_CELL}>Tokens</span>
-        <span className="text-right">Total</span>
-        <span className="text-right">Share</span>
-      </div>
-      <ul className="divide-y divide-zinc-800/60">
-        {rows.map((r) => (
-          <li key={r.key}>
-            {drills(r) ? (
-              <button type="button" onClick={() => onDrill(r)} title={`Narrow to ${r.label}`} className={cx("block min-h-11 w-full rounded-md text-left hover:bg-zinc-800/40", FOCUS)} data-testid="usage-row">
-                <RowBody r={r} cols={cols} split={split} total={t.costUsd} said={said} drills />
-              </button>
-            ) : (
-              <div data-testid="usage-row"><RowBody r={r} cols={cols} split={split} total={t.costUsd} said={said} /></div>
+      {view.rows.length === 0 ? (
+        // No header and no Total over nothing: one line says what is empty.
+        <p className="mt-2 py-3 text-sm text-zinc-400" data-testid="usage-breakdown-empty">
+          Nothing{said.length ? ` for ${said.join(", ")}` : ""} {day ? `on ${day}` : "in this range"}.
+        </p>
+      ) : (
+        <>
+          <div className={cx(cols, "mt-2 border-b border-zinc-800 pb-1 text-[11px] text-zinc-400 uppercase")}>
+            <span className="min-w-0 truncate">{USAGE_GROUP_LABEL[group]}</span>
+            {split && <span className={WIDE_CELL}>Models</span>}
+            {split && <span className={WIDE_CELL}>Boxes</span>}
+            <span className={WIDE_CELL}>Tokens</span>
+            <span className="text-right">Total</span>
+            <span className="text-right">Share</span>
+          </div>
+          <ul className="divide-y divide-zinc-800/60">
+            {rows.map((r) => (
+              <li key={r.key}>
+                {drills(r) ? (
+                  <button type="button" onClick={() => onDrill(r)} title={`Narrow to ${r.label}`} className={cx("block min-h-11 w-full rounded-md text-left hover:bg-zinc-800/40", FOCUS)} data-testid="usage-row">
+                    <RowBody r={r} cols={cols} split={split} total={t.costUsd} said={said} drills />
+                  </button>
+                ) : (
+                  <div data-testid="usage-row"><RowBody r={r} cols={cols} split={split} total={t.costUsd} said={said} /></div>
+                )}
+              </li>
+            ))}
+            {view.rows.length > TABLE_ROWS && (
+              <li className="py-1">
+                <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className={cx("min-h-11 text-sm text-sky-400 hover:underline", FOCUS)}>
+                  {all ? `Show the top ${TABLE_ROWS} only` : `Show all ${view.rows.length}`}
+                </button>
+              </li>
             )}
-          </li>
-        ))}
-        {view.rows.length > TABLE_ROWS && (
-          <li className="py-1">
-            <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className={cx("min-h-11 text-sm text-sky-400 hover:underline", FOCUS)}>
-              {all ? `Show the top ${TABLE_ROWS} only` : `Show all ${view.rows.length}`}
-            </button>
-          </li>
-        )}
-        <li className={cx(cols, "items-baseline py-2.5 text-sm")} data-testid="usage-total-row">
-          <span className="font-medium text-zinc-300">Total</span>
-          {split && <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{money(t.llmUsd)}</span>}
-          {split && <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{usd(t.computeUsd, t.computeUsd > 0)}</span>}
-          <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{compact(t.tokens.total)}</span>
-          <span className="text-right font-semibold text-zinc-50 tabular-nums">{usd(t.costUsd, t.estimatedUsd > 0)}</span>
-          <span className="text-right text-xs text-zinc-500 tabular-nums">{pct(t.costUsd, t.costUsd)}</span>
-        </li>
-      </ul>
-      {view.rows.length === 0 && <p className="py-3 text-sm text-zinc-500">{day ? "Nothing on this day." : "Nothing in this range."}</p>}
+            <li className={cx(cols, "items-baseline py-2.5 text-sm")} data-testid="usage-total-row">
+              <span className="font-medium text-zinc-300">Total</span>
+              {split && <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{money(t.llmUsd)}</span>}
+              {split && <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{usd(t.computeUsd, t.computeUsd > 0)}</span>}
+              <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{compact(t.tokens.total)}</span>
+              <span className="text-right font-semibold text-zinc-50 tabular-nums">{usd(t.costUsd, t.estimatedUsd > 0)}</span>
+              <span className="text-right text-xs text-zinc-500 tabular-nums">{pct(t.costUsd, t.costUsd)}</span>
+            </li>
+          </ul>
+        </>
+      )}
     </section>
   )
 }
 
 /**
  * Narrow: the name gets the full width, its numbers go on the line below, with the total and its share in the header's
- * columns. From 42rem: one row of columns. A row that narrows ends its name with a ›.
+ * columns. From 42rem: one row of columns. A row that narrows ends its name with a ›, inside the name's two lines.
  */
 function RowBody({ r, cols, split, total, said, drills = false }: { r: UsageTableRow; cols: string; split: boolean; total: number; said: string[]; drills?: boolean }) {
   const est = r.estimated
@@ -834,12 +892,24 @@ function RowBody({ r, cols, split, total, said, drills = false }: { r: UsageTabl
     boxes && !(r.llmUsd > 0) ? `${r.computeHours.toFixed(1)} box-hours` : null,
     r.tokens > 0 ? `${compact(r.tokens)} tokens` : null,
   ]
+  const word = r.label.lastIndexOf(" ") + 1
+  const tail = r.label.length - word <= 16 ? word : r.label.length - 6
   return (
     <span className={cx(cols, "items-baseline py-2.5 @2xl:items-center")}>
       <span className="col-span-3 min-w-0 @2xl:col-span-1">
-        <span className="flex items-start gap-1 text-sm">
-          <span className="line-clamp-2 min-w-0 text-zinc-100 wrap-anywhere" title={r.label}>{r.label}</span>
-          {drills && <LineIcon icon={ChevronRight} className="h-3.5 w-3.5 text-zinc-500" />}
+        <span className="line-clamp-2 text-sm text-zinc-100 wrap-anywhere" title={r.label}>
+          {drills ? (
+            <>
+              {r.label.slice(0, tail)}
+              {/* The › stays on the line of the name's last word (or its last letters, where that is long). */}
+              <span className="whitespace-nowrap">
+                {r.label.slice(tail)}
+                <ChevronRight className="ml-0.5 inline h-3.5 w-3.5 align-[-0.15em] text-zinc-500" aria-hidden />
+              </span>
+            </>
+          ) : (
+            r.label
+          )}
         </span>
         {r.detail && !said.includes(r.detail) && <span className="line-clamp-1 text-xs text-zinc-500 wrap-anywhere">{r.detail}</span>}
       </span>

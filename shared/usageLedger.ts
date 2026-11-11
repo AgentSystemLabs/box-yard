@@ -152,10 +152,10 @@ export const OTHER_COLOR = "#71717a"
 /**
  * Token kinds, bottom of the stack first, on the dark surface. Cache reads are most of every bar, so they are the
  * neutral ground and the other three stand out against it: a teal ramp of a hue no model or provider has, each step
- * 2:1 or more from the next. Every one is 3:1 or more against the surface, and as stacked neighbours
- * (validate_palette.js) CVD ΔE ≥ 11, normal-vision ΔE ≥ 15.
+ * 1.9:1 or more from the next. Every one is 3:1 or more against the surface (Input, the darkest, 3.4:1: any lighter
+ * and it is too near Cache write), and as stacked neighbours (validate_palette.js) CVD ΔE ≥ 11, normal-vision ΔE ≥ 15.
  */
-export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#006b7f", cacheWrite: "#00a1be", cacheRead: "#71717a", output: "#8fe7fd" }
+export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#007086", cacheWrite: "#00a1be", cacheRead: "#71717a", output: "#8fe7fd" }
 /**
  * The same ramp on the light surface, where the dark theme's palest step would be 2:1 against the page: each is a step
  * darker, so Output is still 3:1 against it. Checked the same way.
