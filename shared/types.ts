@@ -290,6 +290,11 @@ export interface Task {
   subtaskDepth?: number
   /** Runs where its parent runs and shares its parent's slot (spawn_subtasks' runs_on "same"). */
   withParent?: boolean
+  /**
+   * The owner's place for it among its siblings in the sidebar (PUT /api/projects/:id/tasks/order): lower is higher
+   * up. Null: the automatic order (lib/sidebar.ts).
+   */
+  sortOrder?: number | null
   /** When it last joined the queue (a new task, a message): FIFO within a priority (queueOrder). */
   lastActiveAt?: number
   createdAt: number

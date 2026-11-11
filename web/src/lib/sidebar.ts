@@ -67,6 +67,18 @@ export function rowMeta(t: Task): string {
 
 const byAttention = (a: Task, b: Task) => ORDER[a.status] - ORDER[b.status] || b.createdAt - a.createdAt
 
+/** Cody gave it a place among its siblings (lib/sidebarOrder.ts). */
+const placed = (t: Task) => typeof t.sortOrder === "number"
+/**
+ * A project's tasks: the ones Cody placed keep his order whatever their state, below the ones he hasn't, which stay in
+ * the automatic order. So a list nobody rearranged is as it was, and a new task shows on top of one somebody did.
+ */
+const byPlace = (a: Task, b: Task) =>
+  placed(a) && placed(b) ? a.sortOrder! - b.sortOrder! || b.createdAt - a.createdAt : placed(a) || placed(b) ? (placed(a) ? 1 : -1) : byAttention(a, b)
+/** A task's sub-tasks: the ones Cody placed first, in his order, then the rest in spawn order, so a new one goes last. */
+const bySpawn = (a: Task, b: Task) =>
+  placed(a) && placed(b) ? a.sortOrder! - b.sortOrder! || a.createdAt - b.createdAt : placed(a) || placed(b) ? (placed(a) ? -1 : 1) : a.createdAt - b.createdAt
+
 /** A sub-task on its way to a report (the server's LIVE_SUBTASK): the tree's "running" count. */
 const SUBTASK_RUNNING: ReadonlySet<TaskStatus> = new Set(["queued", "starting", "working", "waiting"])
 
@@ -85,7 +97,7 @@ function subtaskTrees(tasks: readonly Task[], shownAlone: (t: Task) => boolean) 
     list.push(t)
     kidsOf.set(t.parentTaskId, list)
   }
-  for (const list of kidsOf.values()) list.sort((a, b) => a.createdAt - b.createdAt)
+  for (const list of kidsOf.values()) list.sort(bySpawn)
   const liveBelow = new Map<string, boolean>()
   const running = (id: string, seen = new Set<string>()): boolean => {
     const known = liveBelow.get(id)
@@ -159,7 +171,7 @@ export function sidebarGroups(
   const shown: SidebarGroup[] = []
   const others: SidebarGroup[] = []
   for (const g of groups.values()) {
-    g.rows = (byProject.get(g.project.id) ?? []).sort(byAttention).map(trees.row)
+    g.rows = (byProject.get(g.project.id) ?? []).sort(byPlace).map(trees.row)
     if (g.project.id === opts.current || g.pin === "pinned" || (g.pin === null && g.rows.length > 0)) shown.push(g)
     else others.push(g)
   }

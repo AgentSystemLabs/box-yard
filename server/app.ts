@@ -198,6 +198,7 @@ const schemas = {
     ...projectNotesBudget,
   }),
   projectOrder: z.object({ ids: z.array(z.string().max(64)).max(1000) }).strict(),
+  taskOrder: z.object({ parentTaskId: z.string().max(64).nullable().optional(), ids: z.array(z.string().max(64)).max(1000), auto: z.boolean().optional() }).strict(),
   projectPatch: z.object({
     name: z.string().trim().min(1).max(80).optional(),
     description: z.string().max(4000).optional(),
@@ -1076,6 +1077,13 @@ export function createBoxYard(
     const ids = projects.map((p) => p.id)
     hub.broadcast({ type: "projects.order", ids })
     res.json({ ids })
+  })
+  // The owner's order for one list of the sidebar: a project's tasks, or one task's sub-tasks (Store.orderTasks). Each
+  // task whose place changed goes out as its own event, which the stream sends as a one-field patch.
+  api.put("/projects/:id/tasks/order", (req, res) => {
+    const changed = store.orderTasks(req.params.id!, parse(schemas.taskOrder, req.body))
+    for (const task of changed) hub.broadcast({ type: "task", task })
+    res.json({ changed: changed.map((t) => t.id) })
   })
   api.patch("/projects/:id", (req, res) => {
     const body = parse(schemas.projectPatch, req.body)

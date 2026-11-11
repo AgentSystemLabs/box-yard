@@ -62,6 +62,7 @@ import {
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
 import { TREE_ACTION, TREE_OPEN, TREE_TOGGLE, treeItems, useTreeView } from "../lib/treeView"
+import { useSidebarReorder } from "./SidebarReorder"
 import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { DismissButton, isDialogOpen } from "./Modal"
@@ -447,6 +448,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   }, [current, overlay, picked, rail, waiting.shown, groups.shown, folds, treeFolds, chatHidden])
   const selection = useKept(computed, keepSelection)
   const { focusCurrent, ...tree } = useTreeView(currentTreeKey(selection))
+  const reorder = useSidebarReorder(tree, groups)
   const navigation = useRef<HTMLElement>(null)
   useEffect(() => {
     const take = (e: Event) => {
@@ -634,7 +636,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
       {/* With no project yet, the tree is the Coordinator alone; what to do about it is under it, not one of its rows. */}
       <InTree.Provider value>
         <div
-          {...tree}
+          {...reorder.tree}
           role="tree"
           aria-label="Projects and tasks"
           aria-describedby={empty === "unpinned" ? emptyId : undefined}
@@ -682,6 +684,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
           </div>
         </div>
       </InTree.Provider>
+      {reorder.layer}
       {empty === "none" && (
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <NoProjects onCreate={() => setCreating(true)} />
