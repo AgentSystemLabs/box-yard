@@ -1,21 +1,58 @@
-import { useId } from "react"
+import { useId, useRef, type KeyboardEvent } from "react"
+import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
 import { setTheme, useTheme, type ThemePreference } from "../lib/theme"
 import { useDraft } from "../lib/settingsDraft"
 import { Panel, Row } from "./SettingsBlocks"
-import { Select } from "./ui"
+import { cx } from "./ui"
+
+const THEMES: { value: ThemePreference; label: string; icon: LucideIcon }[] = [
+  { value: "system", label: "System", icon: Monitor },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+]
 
 export function AppearancePanel() {
   const id = useId()
   const saved = useTheme()
   const [theme, set] = useDraft("theme", "appearance", saved, setTheme)
+  const group = useRef<HTMLDivElement>(null)
+  // Arrows move the choice, as in a native radio group. It's a draft like the rest: Save applies it.
+  const onKey = (e: KeyboardEvent) => {
+    const delta = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+    if (!delta) return
+    e.preventDefault()
+    const at = THEMES.findIndex((t) => t.value === theme)
+    const next = THEMES[(at + delta + THEMES.length) % THEMES.length]!.value
+    set(next)
+    group.current?.querySelector<HTMLElement>(`[data-theme-choice=${next}]`)?.focus()
+  }
   return (
     <Panel section="appearance">
-      <Row id={id} label="Theme" help="Light or dark colors across the app. System follows your device's appearance, including changes while the app is open. Save applies your choice and remembers it in this browser.">
-        <Select id={id} value={theme} onChange={(e) => set(e.target.value as ThemePreference)} className="w-full">
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </Select>
+      <Row id={id} label="Theme" help="System follows your device. Saved in this browser.">
+        <div ref={group} role="radiogroup" aria-label="Theme" onKeyDown={onKey} className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
+          {THEMES.map(({ value, label, icon: Icon }, i) => {
+            const on = value === theme
+            return (
+              <button
+                key={value}
+                id={i === 0 ? id : undefined}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                tabIndex={on ? 0 : -1}
+                data-theme-choice={value}
+                onClick={() => set(value)}
+                className={cx(
+                  "flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-1 text-sm focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none",
+                  on ? "bg-zinc-700 font-medium text-zinc-50" : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200",
+                )}
+              >
+                <Icon aria-hidden className={cx("h-4 w-4 shrink-0", on ? "text-yard-400" : "text-zinc-500")} />
+                <span className="truncate">{label}</span>
+              </button>
+            )
+          })}
+        </div>
       </Row>
     </Panel>
   )

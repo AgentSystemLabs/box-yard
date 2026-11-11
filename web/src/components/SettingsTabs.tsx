@@ -27,6 +27,7 @@ export function SettingsTabs<K extends string>({
   idPrefix,
   navHidden,
   className,
+  selectClassName,
   panelRef,
   panelRole = "tabpanel",
   panelLabel,
@@ -44,6 +45,8 @@ export function SettingsTabs<K extends string>({
   /** Hides the tabs, not the panel (Settings while it shows search results). */
   navHidden?: boolean
   className?: string
+  /** On the dropdown's band, e.g. "pt-0" under a search field that shares it. */
+  selectClassName?: string
   panelRef?: Ref<HTMLDivElement>
   panelRole?: "tabpanel" | "region"
   panelLabel: string
@@ -67,7 +70,7 @@ export function SettingsTabs<K extends string>({
     // A container of its own, by name: the tabs fold by it, and a panel's title hides by it (PanelFrame).
     <div className="@container/settings-tabs flex min-h-0 flex-1 flex-col">
       <div className={cx("settings-layout flex min-h-0 flex-1 flex-col @3xl/settings-tabs:flex-row", className)}>
-        <div hidden={navHidden} className="shrink-0 border-b border-zinc-900 p-3 @3xl/settings-tabs:hidden">
+        <div hidden={navHidden} className={cx("shrink-0 border-b border-zinc-900 p-3 @3xl/settings-tabs:hidden", selectClassName)}>
           <Select aria-label={selectLabel} className="w-full" value={selected} onChange={(e) => onSelect(e.target.value as K)}>
             {tabs.map((t) => {
               const m = mark(t.key)
@@ -82,7 +85,7 @@ export function SettingsTabs<K extends string>({
           aria-label={label}
           aria-orientation="vertical"
           onKeyDown={onNavKey}
-          className="scroll-thin hidden w-52 shrink-0 flex-col gap-1 overflow-y-auto border-r border-zinc-900 p-3 @3xl/settings-tabs:flex"
+          className="scroll-thin hidden w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-zinc-900 p-3 @3xl/settings-tabs:flex"
         >
           {tabs.map(({ key, label, icon: Icon }) => {
             const on = key === selected
@@ -99,7 +102,9 @@ export function SettingsTabs<K extends string>({
                 tabIndex={on ? 0 : -1}
                 onClick={() => onSelect(key)}
                 className={cx(
-                  "flex min-h-11 shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none motion-reduce:transition-none",
+                  // 36px to a mouse, so all of Settings' categories fit a 900px-tall window; 44px to a finger. The `!`
+                  // is over .settings-body's 44px for every button (styles.css).
+                  "flex min-h-9! shrink-0 items-center gap-2.5 rounded-lg px-3 py-1.5 text-left pointer-coarse:min-h-11! text-sm whitespace-nowrap transition focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none motion-reduce:transition-none",
                   on ? "bg-zinc-800/80 font-medium text-zinc-50" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
                 )}
               >
@@ -121,7 +126,8 @@ export function SettingsTabs<K extends string>({
           aria-label={panelLabel}
           // Focusable from code only: a dialog can open with focus here, not on its ×, and Tab then starts at the first field.
           tabIndex={-1}
-          className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 focus-visible:outline-none! @3xl/settings-tabs:px-7 @3xl/settings-tabs:py-6"
+          // scroll-pb: a field scrolled into view (a field to fix, a search result) brings what's under it too, its error first.
+          className="scroll-thin min-h-0 flex-1 scroll-pb-24 overflow-y-auto px-4 py-5 focus-visible:outline-none! @3xl/settings-tabs:px-7 @3xl/settings-tabs:py-6"
         >
           {children}
         </div>

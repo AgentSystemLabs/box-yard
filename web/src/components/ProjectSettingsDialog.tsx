@@ -1,13 +1,17 @@
 // Keep write-only project configuration available without exposing the retired project page.
 import { useState } from "react"
 import { useSearchParams } from "wouter"
+import { ChevronRight } from "lucide-react"
 import { useProjects } from "../lib/queries"
+import { useProjectColor } from "../lib/taskTiles"
 import { PROJECT_SETTINGS_PARAM, useOpenProjectSettings } from "../lib/projectSettings"
 import { confirmDialog } from "../lib/confirm"
 import { Modal } from "./Modal"
 import { LoadFailed, lazyPart } from "./LazyPart"
-import { Button, Select } from "./ui"
+import { Button } from "./ui"
 import { Loading } from "./Loading"
+import { ProjectAvatar, projectColorStyle } from "./TaskIcon"
+import type { Project } from "../../../shared/types"
 
 // The project page's settings are most of ProjectView.tsx: a chunk of their own, out of the first load.
 const ProjectSettings = lazyPart(() => import("./ProjectView").then((m) => m.ProjectSettings), {
@@ -15,23 +19,42 @@ const ProjectSettings = lazyPart(() => import("./ProjectView").then((m) => m.Pro
   Failed: () => <div className="p-4 sm:p-5"><LoadFailed /></div>,
 })
 
+/** Settings › Projects: every project as a row that opens its settings. */
 export function ProjectSettingsPicker() {
   const projects = useProjects()
-  const [picked, setPicked] = useState("")
-  const open = useOpenProjectSettings()
-  const id = picked || projects.data?.[0]?.id || ""
   if (projects.isError) return <div role="alert">Couldn't load projects. <Button onClick={() => void projects.refetch()}>Retry</Button></div>
-  if (projects.isLoading) return <Loading count={1} label="Loading projects" />
-  if (!id) return <p className="text-sm text-zinc-400">No projects yet. Ask the Coordinator to create one, or choose New project in the command palette.</p>
+  if (projects.isLoading) return <Loading label="Loading projects" />
+  if (!projects.data?.length) return <p className="text-sm text-zinc-400">No projects yet. Ask the Coordinator to create one, or choose New project in the command palette.</p>
   return (
-    <div className="@container space-y-3">
-      <label className="block space-y-2 text-sm text-zinc-300">Project
-        <Select className="min-h-11 w-full" value={id} onChange={(e) => setPicked(e.target.value)}>
-          {projects.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </Select>
-      </label>
-      <Button onClick={() => open(id)}>Configure project</Button>
-    </div>
+    <ul aria-label="Projects" className="-mx-2.5 space-y-0.5" data-testid="project-settings-list">
+      {projects.data.map((p) => <ProjectRow key={p.id} project={p} />)}
+    </ul>
+  )
+}
+
+function ProjectRow({ project }: { project: Project }) {
+  const open = useOpenProjectSettings()
+  const color = useProjectColor(project.id)
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => open(project.id)}
+        title={`${project.name} settings`}
+        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+      >
+        <ProjectAvatar src={project.iconUrl} className="h-6 w-6 rounded-md">
+          <span aria-hidden style={projectColorStyle(color)} className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-(--pc)/15 text-xs font-semibold text-(--pc) uppercase">
+            {project.name.trim().charAt(0)}
+          </span>
+        </ProjectAvatar>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{project.name}</span>
+          <span className="block truncate text-xs text-zinc-500">{project.repo ?? "No repo"}</span>
+        </span>
+        <ChevronRight aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />
+      </button>
+    </li>
   )
 }
 

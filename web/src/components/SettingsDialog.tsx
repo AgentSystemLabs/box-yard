@@ -45,7 +45,7 @@ import { EFFORT_LABEL } from "../../../shared/models"
 import { CodexModelSelect } from "./CodexModelSelect"
 import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
-import { Button, LineIcon, NewTabLink, Select, cx, inputClass } from "./ui"
+import { Button, LineIcon, NewTabLink, Select, TAP_AREA, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { BOX_SIZE_SPECS } from "../../../shared/boxSizes"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
@@ -78,8 +78,11 @@ const TOP_TABS: SettingsTab<SettingsSection>[] = SETTINGS_TOP_SECTIONS.map((s) =
 
 /** A field's problem, under its control, which points at it with aria-describedby. Search doesn't index it. */
 function FieldError({ id, children }: { id: string; children: ReactNode }) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  // It can appear under the fold, below a field at the bottom of the panel: the panel scrolls just enough to show it.
+  useEffect(() => ref.current?.scrollIntoView?.({ block: "nearest" }), [])
   return (
-    <p id={id} data-settings-search-ignore className="flex basis-full items-start gap-1.5 text-xs leading-relaxed text-red-300">
+    <p ref={ref} id={id} data-settings-search-ignore className="flex basis-full items-start gap-1.5 text-xs leading-relaxed text-red-300">
       <LineIcon icon={CircleAlert} className="h-3.5 w-3.5" />
       <span className="min-w-0">{children}</span>
     </p>
@@ -244,19 +247,24 @@ export function SettingsDialog({
     for (const p of partList) p.discard()
   }
 
+  const mayDiscard = () =>
+    confirmDialog({
+      title: "Discard unsaved changes?",
+      body: `${changeCount === 1 ? "1 change" : `${changeCount} changes`} to settings haven't been saved.`,
+      confirmLabel: "Discard",
+      cancelLabel: "Keep editing",
+      danger: true,
+    })
+
   const close = async () => {
-    if (
-      dirty &&
-      !(await confirmDialog({
-        title: "Discard unsaved changes?",
-        body: `${changeCount === 1 ? "1 change" : `${changeCount} changes`} to settings haven't been saved.`,
-        confirmLabel: "Discard",
-        cancelLabel: "Keep editing",
-        danger: true,
-      }))
-    )
-      return
+    if (dirty && !(await mayDiscard())) return
     onClose()
+  }
+
+  // One change is as quick to make again as to confirm; more than one asks first, as closing does.
+  const discardAsked = async () => {
+    if (changeCount > 1 && !(await mayDiscard())) return
+    discard()
   }
 
   useEffect(() => {
@@ -439,7 +447,7 @@ export function SettingsDialog({
               <span role="status" data-testid="settings-problems">
                 <button
                   type="button"
-                  className="min-h-11 rounded text-left text-red-300 underline underline-offset-2 hover:text-red-200"
+                  className={cx(TAP_AREA, "rounded text-left text-red-300 underline underline-offset-2 hover:text-red-200")}
                   title="Show the first field to fix"
                   onClick={(e) => e.currentTarget.form && showProblem(e.currentTarget.form)}
                 >
@@ -457,7 +465,7 @@ export function SettingsDialog({
             ) : null}
           </div>
           {dirty ? (
-            <Button type="button" variant="ghost" onClick={discard}>
+            <Button type="button" variant="ghost" onClick={() => void discardAsked()}>
               Discard
             </Button>
           ) : (
@@ -473,7 +481,8 @@ export function SettingsDialog({
       }
     >
       <SettingsSearchProvider value={searchRegistry}>
-      <div className="shrink-0 border-b border-zinc-900 p-3">
+      {/* Where the tabs fold into a dropdown (SettingsTabs), search and the dropdown are one band: no line between them. */}
+      <div className={cx("shrink-0 px-3 pt-3", searching ? "border-b border-zinc-900 pb-3" : "pb-2 @3xl:border-b @3xl:border-zinc-900 @3xl:pb-3")}>
         {/* One focus ring, the box's (as the composer's): the field inside draws none of its own. */}
         <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 has-[>input:focus-visible]:border-yard-500 has-[>input:focus-visible]:outline-2 has-[>input:focus-visible]:outline-offset-2 has-[>input:focus-visible]:outline-(color:--focus-ink)">
           <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-zinc-500" />
@@ -499,6 +508,7 @@ export function SettingsDialog({
         selectLabel="Settings category"
         idPrefix={ids}
         navHidden={searching}
+        selectClassName="pt-0"
         className={searching ? "settings-searching" : undefined}
         panelRef={panelRef}
         panelRole={searching ? "region" : "tabpanel"}
@@ -546,7 +556,7 @@ export function SettingsDialog({
                   <HooksPanel projectId={null} intro={false} />
                 </Panel>
               ) : category === "projects" ? (
-                <Panel section="projects"><SettingsField label="Project" keywords="configure repository project settings"><ProjectSettingsPicker /></SettingsField></Panel>
+                <Panel section="projects"><SettingsField label="Projects" keywords="configure repository project settings"><ProjectSettingsPicker /></SettingsField></Panel>
               ) : category === "appearance" ? (
                 <AppearancePanel />
               ) : category === "about" ? (
@@ -595,7 +605,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("oac")}
                     label="Auto-compact"
-                    help={`Compacts the Coordinator and every Captain between turns once context usage passes this. A summary is saved to the compaction log first and shown again after the compaction. Default: ${DEFAULT_AUTOCOMPACT_TOKENS / 1000}k tokens; every turn re-sends the whole context, so a lower threshold makes turns cheaper. Off: only the CLI's own last-resort compaction near the window limit.`}
+                    help="Compacts the Coordinator and every Captain between turns once context usage passes this." more={`A summary is saved to the compaction log first and shown again after the compaction. Default: ${DEFAULT_AUTOCOMPACT_TOKENS / 1000}k tokens; every turn re-sends the whole context, so a lower threshold makes turns cheaper. Off: only the CLI's own last-resort compaction near the window limit.`}
                     hint={hint("orchestratorAutoCompact")}
                   >
                     <AutoCompactControl
@@ -612,7 +622,7 @@ export function SettingsDialog({
                     <Row
                       id={fid("orl")}
                       label="Relay turns"
-                      help="Runs the Coordinator's relay-only turns (woken by task updates and Captain replies, with no message from you) on this model and effort. Off by default: another model or effort can't reuse the last turn's prompt cache, so each relay turn sends the whole context again. That's quick and cheap on a small model, slow and costly on a big one. Your own messages always use the model above."
+                      help="Runs the Coordinator's relay-only turns (woken by task updates and Captain replies, with no message from you) on this model and effort." more="Off by default: another model or effort can't reuse the last turn's prompt cache, so each relay turn sends the whole context again. That's quick and cheap on a small model, slow and costly on a big one. Your own messages always use the model above."
                       hint={hint("orchestratorRelay", ["orchestratorRelay.model"])}
                     >
                       <div className="space-y-2">
@@ -703,14 +713,24 @@ export function SettingsDialog({
                   <Row
                     id={fid("qqm")}
                     label="Quick question model"
-                    help="The Claude model quick questions run on. Same as its chat: the Coordinator's model in its chat and for a task's side questions, the Captain model in a Captain's chat. Another model can't reuse the chat's prompt cache, so a thread's first answer reads the chat's whole context again, which is cheap on Haiku. A chat on Codex keeps its own model."
-                    hint={hint("quickQuestionModel")}
+                    help="The Claude model quick questions run on." more="Same as chat: the Coordinator's model in its chat and for a task's side questions, the Captain model in a Captain's chat. Another model can't reuse the chat's prompt cache, so a thread's first answer reads the chat's whole context again, which is cheap on Haiku. A chat on Codex keeps its own model."
+                    hint={
+                      <>
+                        {/* The option says only "Same as chat", so it fits a phone: which model that is goes here. */}
+                        {!s.quickQuestionModel && (
+                          <span className="basis-full text-xs text-zinc-500" data-testid="quick-question-model-resolved">
+                            {s.orchestratorModel === s.captainModel ? `Now ${s.orchestratorModel}.` : `Now ${s.orchestratorModel} for the Coordinator, ${s.captainModel} for Captains.`}
+                          </span>
+                        )}
+                        {hint("quickQuestionModel")}
+                      </>
+                    }
                   >
                     <ModelPicker
                       id={fid("qqm")}
                       value={s.quickQuestionModel}
                       onChange={(v) => set("quickQuestionModel", v)}
-                      defaultLabel={s.orchestratorModel === s.captainModel ? `Same as its chat (${s.orchestratorModel})` : "Same as its chat"}
+                      defaultLabel="Same as chat"
                       testId="quick-question-model"
                       customInputProps={field("quickQuestionModel")}
                     />
@@ -718,7 +738,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("qqe")}
                     label="Quick question effort"
-                    help="How hard quick questions think before answering. Same as its chat: the Coordinator's or Captain effort above."
+                    help="How hard quick questions think before answering. Same as chat: the Coordinator's or Captain effort above."
                     hint={hint("quickQuestionEffort")}
                   >
                     <EffortPicker
@@ -727,7 +747,7 @@ export function SettingsDialog({
                       onChange={(v) => set("quickQuestionEffort", v as Settings["quickQuestionEffort"])}
                       model={s.quickQuestionModel}
                       effective={s.quickQuestionEffort || s.orchestratorEffort}
-                      lead={<option value="">Same as its chat{s.orchestratorEffort === s.captainEffort ? ` (${EFFORT_LABEL[s.orchestratorEffort]})` : ""}</option>}
+                      lead={<option value="">Same as chat{s.orchestratorEffort === s.captainEffort ? ` (${EFFORT_LABEL[s.orchestratorEffort]})` : ""}</option>}
                       testId="quick-question-effort"
                     />
                   </Row>
@@ -750,7 +770,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("nmc")}
                     label="Max notes"
-                    help="Most notes an agent's first prompt gets; Captains keep their project under it. Over it, agents get the newest notes that fit, their prompt says how many were left out, and the Captain is asked to prune. A project can set its own on its Settings tab."
+                    help="Most notes an agent's first prompt gets; Captains keep their project under it." more="Over it, agents get the newest notes that fit, their prompt says how many were left out, and the Captain is asked to prune. A project can set its own on its Settings tab."
                     hint={hint("notesMaxCount")}
                   >
                     <input
@@ -784,7 +804,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("adm")}
                     label="Done when its PR merges"
-                    help="When a task's pull request merges and its turn is over (it's idle or waiting for review), it moves to done and its workspace is archived, as Mark done does. It stays as it is while messages are queued for it, while it has another PR open, or when it's set to stay open. Turning it on also moves resting tasks whose PR has already merged. Off: a merged PR leaves its task idle until you mark it done. Messaging a done task picks it back up."
+                    help="When a task's pull request merges and its turn is over (it's idle or waiting for review), it moves to done and its workspace is archived, as Mark done does." more="It stays as it is while messages are queued for it, while it has another PR open, or when it's set to stay open. Turning it on also moves resting tasks whose PR has already merged. Off: a merged PR leaves its task idle until you mark it done. Messaging a done task picks it back up."
                     hint={hint("autoDoneOnMerge")}
                   >
                     <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -826,7 +846,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("acli")}
                     label="Agent"
-                    help="The coding agent new tasks run on: a project can pick its own. Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given provider/model runs on OpenCode, one given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
+                    help="The coding agent new tasks run on: a project can pick its own." more="Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given provider/model runs on OpenCode, one given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
                     hint={hint("agentCli")}
                   >
                     <AgentCliSelect id={fid("acli")} clis={AGENT_CLIS} value={s.agentCli} onChange={(v) => set("agentCli", v)} testId="agent-cli" />
@@ -839,7 +859,7 @@ export function SettingsDialog({
                     <Row
                       id={fid("acu")}
                       label="Cursor model"
-                      help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has. Auto lets Cursor pick per request. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
+                      help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has." more="Auto lets Cursor pick per request. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
                       hint={hint("agentCursorModel")}
                     >
                       <CursorModelSelect id={fid("acu")} value={s.agentCursorModel} onChange={(v) => set("agentCursorModel", v)} testId="agent-cursor-model" />
@@ -849,7 +869,7 @@ export function SettingsDialog({
                       <CodexModelSelect id={fid("acm")} value={s.agentCodexModel} onChange={(v) => set("agentCodexModel", v)} testId="agent-codex-model" />
                     </Row>
                   ) : (
-                    <Row id={fid("am")} label="Model" help="The Claude model each task's agent runs on, unless the task or its project's Routing YAML entry picks one. Once saved here or set by an env var, it wins over the YAML's defaults and fallback." hint={hint("agentModel")}>
+                    <Row id={fid("am")} label="Model" help="The Claude model each task's agent runs on, unless the task or its project's Routing YAML entry picks one." more="Once saved here or set by an env var, it wins over the YAML's defaults and fallback." hint={hint("agentModel")}>
                       <ModelPicker id={fid("am")} value={s.agentModel} onChange={(v) => set("agentModel", v)} testId="agent-model" customInputProps={field("agentModel")} />
                     </Row>
                   )}
@@ -878,7 +898,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("arc")}
                     label="Routing YAML"
-                    help="Optional rules for task model and effort, also read from routing.yaml in the data directory. Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (OpenCode: provider/model above, no generic effort; Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
+                    help="Optional rules for task model and effort, also read from routing.yaml in the data directory." more="Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (OpenCode: provider/model above, no generic effort; Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
                     hint={hint("agentRoutingConfig")}
                   >
                     <textarea
@@ -994,7 +1014,7 @@ function LimitsPanel({
           <Row
             id={fid("bcc")}
             label="Boxes created at once"
-            help="When many tasks wait for a box (say a Captain starts a batch of tasks), Box Yard creates up to this many boxes in parallel, still within Max boxes. Lower it if your box provider rate-limits box creation; Box Yard also backs off by itself when a create fails or is rate-limited."
+            help="When many tasks wait for a box (say a Captain starts a batch of tasks), Box Yard creates up to this many boxes in parallel, still within Max boxes." more="Lower it if your box provider rate-limits box creation; Box Yard also backs off by itself when a create fails or is rate-limited."
             hint={hint("boxCreateConcurrency")}
           >
             <input
@@ -1026,7 +1046,7 @@ function LimitsPanel({
       <Row
         id={fid("ard")}
         label="Archive retention"
-        help="After this many days, orphan archives and long-done task archives are pruned. Archives of tasks with an open or unmerged PR are always kept. A done task whose archive was pruned restarts from a recap on its next message. 0 keeps archives."
+        help="After this many days, orphan archives and long-done task archives are pruned. 0 keeps archives." more="Archives of tasks with an open or unmerged PR are always kept. A done task whose archive was pruned restarts from a recap on its next message."
         hint={hint("archiveRetentionDays")}
       >
         <input id={fid("ard")} type="number" min={0} max={3650} className={inputClass} {...num("archiveRetentionDays")} />
@@ -1093,7 +1113,7 @@ function LimitsPanel({
       <Row
         id={fid("bci")}
         label="Build output cleanup (idle minutes)"
-        help="Once a done task has sat idle this long, its git-ignored build output (node_modules, dist, .cache, tmp, perf captures) is removed from its Upstash box (this computer and SSH machines have their own settings below). A task that isn't done keeps it, and so does a folder a process still uses (a dev server, a shell); only low-disk cleanup frees an idle task's build output, and the task's log says what went. Only folders git ignores and doesn't track; uncommitted work is never touched. 0 = off (low-disk cleanup still runs)."
+        help="Once a done task has sat idle this long, its git-ignored build output (node_modules, dist, .cache, tmp, perf captures) is removed from its Upstash box (this computer and SSH machines have their own settings below). 0 = off (low-disk cleanup still runs)." more="A task that isn't done keeps it, and so does a folder a process still uses (a dev server, a shell); only low-disk cleanup frees an idle task's build output, and the task's log says what went. Only folders git ignores and doesn't track; uncommitted work is never touched."
         hint={hint("buildCleanupIdleMinutes")}
       >
         <input id={fid("bci")} type="number" min={0} max={43_200} className={inputClass} {...num("buildCleanupIdleMinutes")} />
@@ -1101,7 +1121,7 @@ function LimitsPanel({
       <Row
         id={fid("dce")}
         label="Dependency cache (npm)"
-        help="Each box keeps the node_modules its agents installed, one per package-lock.json, next to the task folders. A task with that lockfile and no node_modules (a fresh clone, or one the build output cleanup emptied) gets it hard-linked in before its turn, in under a second, and its prompt says it needn't run npm ci. The shared files are read-only, so a task can't change another's. A project can override it."
+        help="Each box keeps the node_modules its agents installed, one per package-lock.json, next to the task folders." more="A task with that lockfile and no node_modules (a fresh clone, or one the build output cleanup emptied) gets it hard-linked in before its turn, in under a second, and its prompt says it needn't run npm ci. The shared files are read-only, so a task can't change another's. A project can override it."
         hint={hint("depCacheEnabled")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -1131,7 +1151,7 @@ function LimitsPanel({
       <Row
         id={fid("gpt")}
         label="Push at turn end"
-        help="After every agent turn in a repo project, Box Yard pushes the task's branch and saves uncommitted work (untracked files too) to a hidden ref on origin, refs/boxyard/wip/<task>, without committing in the task's repo. Archives then carry only what git can't, so a box can go at any time without losing code. Without write access it quietly keeps full archives. A project can override it."
+        help="After every agent turn in a repo project, Box Yard pushes the task's branch and saves uncommitted work (untracked files too) to a hidden ref on origin, refs/boxyard/wip/<task>, without committing in the task's repo." more="Archives then carry only what git can't, so a box can go at any time without losing code. Without write access it quietly keeps full archives. A project can override it."
         hint={hint("gitPushAtTurnEnd")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -1150,7 +1170,7 @@ function LimitsPanel({
       <Row
         id={fid("la")}
         label="Tasks running at once on this computer"
-        help={`Tasks of projects that run on this computer (project settings › Runs on) that may run at once here, every project's together; a project's own Tasks running at once limits only its own tasks within this. They have their own queue: they never take a box slot or count toward Max tasks running at once. Each task works in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"} (BOXYARD_LOCAL_DIR). ${LOCAL_UNSANDBOXED}`}
+        help={`Tasks of projects that run on this computer (project settings › Runs on) that may run at once here, every project's together; a project's own Tasks running at once limits only its own tasks within this. ${LOCAL_UNSANDBOXED}`} more={`They have their own queue: they never take a box slot or count toward Max tasks running at once. Each task works in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"} (BOXYARD_LOCAL_DIR).`}
         hint={hint("localAgents")}
       >
         <input
@@ -1174,7 +1194,7 @@ function LimitsPanel({
       <Row
         id={fid("lbc")}
         label="Free a finished task's build output"
-        help="Once a task is done and all its work is pushed, remove the dependency and build output git ignores (node_modules, dist, build, .next, caches) from its folder within a couple of minutes. A task that isn't done keeps it (only low-disk cleanup frees it), and so does a folder a process still uses. Scratch folders and captures (tmp, shots, perf, reports) stay. The task's log and the agent's next prompt say what went, so it reinstalls first."
+        help="Once a task is done and all its work is pushed, remove the dependency and build output git ignores (node_modules, dist, build, .next, caches) from its folder within a couple of minutes." more="A task that isn't done keeps it (only low-disk cleanup frees it), and so does a folder a process still uses. Scratch folders and captures (tmp, shots, perf, reports) stay. The task's log and the agent's next prompt say what went, so it reinstalls first."
         hint={hint("localBuildCleanup")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -1265,7 +1285,7 @@ function UpstashBoxRows({
       <Row
         id={fid("are")}
         label="Size and resize boxes automatically"
-        help="Box Yard sizes each project's new boxes from what its runs used (from 3 runs: the smallest with RAM for 1.25 × the peak of the last 14 days, bigger for disk or busy CPU), unless the project sets its own Box size, and a turn that runs out of memory carries on once on a bigger box. The Coordinator, and Captains for boxes their project uses, may also resize a box with resize_box: up when it keeps running low on disk, down when it sits mostly empty. They never stop running tasks for it, and every resize they make sends you a notice with their reason."
+        help="Box Yard sizes each project's new boxes from what its runs used (from 3 runs: the smallest with RAM for 1.25 × the peak of the last 14 days, bigger for disk or busy CPU), unless the project sets its own Box size, and a turn that runs out of memory carries on once on a bigger box." more="The Coordinator, and Captains for boxes their project uses, may also resize a box with resize_box: up when it keeps running low on disk, down when it sits mostly empty. They never stop running tasks for it, and every resize they make sends you a notice with their reason."
         hint={hint("autoResizeEnabled")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -1532,7 +1552,7 @@ function CostsPanel({
       <Row
         id={fid("daily-budget")}
         label="Daily cloud limit"
-        help="What boxes may cost per day, by the CPU they use (Claude isn't counted). At 80% Box Yard says so; at the limit new boxes wait until midnight while work already running goes on, and the cloud meter (on the Boxes page, and in the Coordinator's header if shown) offers Raise today's limit. 0: no daily limit."
+        help="What boxes may cost per day, by the CPU they use (Claude isn't counted). 0: no daily limit." more="At 80% Box Yard says so; at the limit new boxes wait until midnight while work already running goes on, and the cloud meter (on the Boxes page, and in the Coordinator's header if shown) offers Raise today's limit."
         hint={hint("budget", ["budget.dailyUsd"])}
       >
         {money("budget.dailyUsd", s.budget.dailyUsd, (n) => set("budget", { ...s.budget, dailyUsd: n }), fid("daily-budget"))}
@@ -1547,7 +1567,7 @@ function CostsPanel({
       </Row>
       <Row
         label="Active CPU rates"
-        help="Upstash bills the CPU a box uses, per core-hour: a box busy on 2 cores for an hour uses 2. Box Yard measures each box's CPU and prices it at these rates, unless Upstash reports its own charge for the box. Defaults match the public Small / Medium / Large rates."
+        help="Upstash bills the CPU a box uses, per core-hour: a box busy on 2 cores for an hour uses 2." more="Box Yard measures each box's CPU and prices it at these rates, unless Upstash reports its own charge for the box. Defaults match the public Small / Medium / Large rates."
         hint={hint("costRates", rates("boxActiveCpuHourlyUsd"))}
       >
         <div className="grid grid-cols-3 gap-2">

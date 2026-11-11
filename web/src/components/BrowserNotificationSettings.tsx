@@ -79,7 +79,7 @@ export function BrowserNotificationsRow({ fid }: { fid: (k: string) => string })
     <Row
       id={fid("bn")}
       label="Browser notifications"
-      help="A system notification when a task needs your input, opens a PR or fails while Box Yard is in the background. It shows the task, its project and one line, never anything that looks like a key or token. In-app toasts and the sidebar's Recent list work either way."
+      help="A system notification when a task needs your input, opens a PR or fails while Box Yard is in the background." more="It shows the task, its project and one line, never anything that looks like a key or token. In-app toasts and the sidebar's Recent list work either way."
       hint={
         status || test ? (
           <div className="w-full space-y-2" aria-live="polite">

@@ -109,7 +109,7 @@ export function VastPanel({ fid, active = true, gpuDefault }: { fid: (k: string)
           <Row
             id={fid("vast-image")}
             label="Instance image"
-            help="The Docker image instances start from. Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built (it has the agent tools baked in), else RunPod's stock PyTorch image, which installs them in about a minute each start. It must be public so Vast's hosts can pull it."
+            help="The Docker image instances start from." more="Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built (it has the agent tools baked in), else RunPod's stock PyTorch image, which installs them in about a minute each start. It must be public so Vast's hosts can pull it."
           >
             <input
               id={fid("vast-image")}

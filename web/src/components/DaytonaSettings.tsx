@@ -224,7 +224,7 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
           <Row
             id={fid("daytona-image")}
             label="GPU sandbox image"
-            help="The image GPU sandboxes are built from. Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built, else RunPod's stock CUDA image. Box Yard adds its agent tools on top when Daytona builds the sandbox (or installs them on start when that build fails)."
+            help="The image GPU sandboxes are built from." more="Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built, else RunPod's stock CUDA image. Box Yard adds its agent tools on top when Daytona builds the sandbox (or installs them on start when that build fails)."
           >
             <input
               id={fid("daytona-image")}
@@ -330,7 +330,7 @@ function SandboxesRow({ status }: { status: DaytonaStatus }) {
   return (
     <Row
       label="Sandboxes"
-      help={`Running now, at about ${usd(total)}/hr together (Box Yard's estimate; Daytona's billing page has the real figure). A project gets up to its Max boxes sandboxes, within the caps. Each is deleted after ${status.settings.idleMinutes} idle minutes; Keep warm holds it up between follow-ups. Terminate runs the delete safety check and archives every workspace first; it asks before stopping a running agent.`}
+      help={`Running now, at about ${usd(total)}/hr together (Box Yard's estimate; Daytona's billing page has the real figure).`} more={`A project gets up to its Max boxes sandboxes, within the caps. Each is deleted after ${status.settings.idleMinutes} idle minutes; Keep warm holds it up between follow-ups. Terminate runs the delete safety check and archives every workspace first; it asks before stopping a running agent.`}
     >
       {!status.sandboxes.length ? (
         <p className="text-xs text-zinc-500">No sandboxes running.</p>
