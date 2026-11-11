@@ -10,19 +10,23 @@ import { fetchTasks, keys, useRetryTask } from "../lib/queries"
 import { isAskKind, noticeNow, useIsNewestAsk, type AskKind, type NoticeNow, type NoticeTask } from "../lib/noticeNow"
 import type { NoticeKind } from "../lib/captainTranscript"
 import { focusComposer } from "../lib/chatSwitch"
+import { focusAsk } from "../lib/askAnswers"
 import { navigateApp, taskSessionHref } from "../lib/navigation"
 import { TaskStatusIcon } from "./TaskIcon"
 import { MERGED_BADGE, PrChip, STATUS, TAP_AREA, cx } from "./ui"
 import type { Task } from "../../../shared/types"
 
-type CardTask = NoticeTask & Pick<Task, "id" | "title" | "icon" | "projectId" | "prMergedAt" | "prMergedBy">
+type CardTask = NoticeTask & Pick<Task, "id" | "title" | "icon" | "projectId" | "prMergedAt" | "prMergedBy"> & {
+  /** It asks several questions (Task.questions): Answer takes the focus to their form, not the box. */
+  asksForm: boolean
+}
 
 /** What the card needs of its task, the same object until one of these changes, so other task updates skip it. */
 function useCardTask(taskId: string | null): CardTask | null {
   const select = useCallback(
     (list: Task[]): CardTask | null => {
       const t = taskId ? list.find((x) => x.id === taskId) : undefined
-      return t ? { id: t.id, title: t.title, icon: t.icon, projectId: t.projectId, status: t.status, prUrl: t.prUrl, prState: t.prState, prMergedAt: t.prMergedAt, prMergedBy: t.prMergedBy } : null
+      return t ? { id: t.id, title: t.title, icon: t.icon, projectId: t.projectId, status: t.status, prUrl: t.prUrl, prState: t.prState, prMergedAt: t.prMergedAt, prMergedBy: t.prMergedBy, asksForm: Boolean(t.questions?.length) } : null
     },
     [taskId],
   )
@@ -72,7 +76,7 @@ export const NoticeNowRow = memo(function NoticeNowRow({ now, task, taskId, titl
           <PrChip task={task} verb="Review" className={PR_ACTION} />
         </>
       ) : now.kind === "needs_input" ? (
-        <AnswerButton taskId={taskId} title={title} description={now.label} className={cx(ACTION, TONE.needs_input)} />
+        <AnswerButton taskId={taskId} title={title} form={task.asksForm} description={now.label} className={cx(ACTION, TONE.needs_input)} />
       ) : (
         <RetryButton taskId={taskId} title={title} description={now.label} className={cx(ACTION, TONE.failed)} />
       )}
@@ -80,11 +84,15 @@ export const NoticeNowRow = memo(function NoticeNowRow({ now, task, taskId, titl
   )
 })
 
-/** Opens the task beside the chat with its box focused: the question is its newest message, right above it. */
-function AnswerButton({ taskId, title, description, className }: { taskId: string; title: string | null; description: string; className: string }) {
+/**
+ * Opens the task beside the chat with its box focused: the question is its newest message, right above it. Several
+ * questions (`form`) are answered in their card instead, so that takes the focus.
+ */
+function AnswerButton({ taskId, title, form, description, className }: { taskId: string; title: string | null; form: boolean; description: string; className: string }) {
   const answer = () => {
     navigateApp(taskSessionHref(taskId))
-    focusComposer(taskId)
+    if (form) focusAsk(taskId)
+    else focusComposer(taskId)
   }
   return (
     <button type="button" data-testid="notice-answer" onClick={answer} aria-description={description} title={`Open ${title ?? "the task"} and answer it`} className={className}>

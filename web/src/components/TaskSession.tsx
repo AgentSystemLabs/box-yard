@@ -137,6 +137,7 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
                   working={onTurn(task) ? workingLabel(task.status) : null}
                   workingSince={onTurn(task) ? runningSince(task) : null}
                   ask={task.status === "needs_input" ? task.question : null}
+                  questions={task.status === "needs_input" ? (task.questions ?? null) : null}
                   selectionSource={selectionSource} selectionAsk={selectionAsk} onFollowUp={followUp}
                 />
               )}

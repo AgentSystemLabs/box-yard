@@ -80,13 +80,27 @@ export function questionChoices(q: AskQuestion): string[] {
  * default and options, so whoever reads only text (a parent agent, the Coordinator, a notification) can answer it.
  */
 export function questionsText(intro: string | null, questions: readonly AskQuestion[]): string {
-  const lines = questions.map((q, i) => {
-    const head = `${i + 1}. ${oneLine(q.question)}`
-    const choices = [q.defaultAnswer ? `default: ${oneLine(q.defaultAnswer)}` : "", q.options.length ? `or: ${q.options.map(oneLine).join(" / ")}` : ""].filter(Boolean)
-    return choices.length ? `${head} (${choices.join("; ")})` : head
-  })
-  const lead = intro?.trim() || `${questions.length} ${questions.length === 1 ? "question" : "questions"}:`
-  return `${lead}\n\n${lines.join("\n")}`
+  return `${intro?.trim() || countLead(questions)}\n\n${questionLines(questions)}`
+}
+
+/** The intro the agent gave its several questions (ask_user's `question`), out of their text: null when it gave none. */
+export function questionsIntro(text: string | null, questions: readonly AskQuestion[]): string | null {
+  const tail = `\n\n${questionLines(questions)}`
+  if (!text?.endsWith(tail)) return null
+  const lead = text.slice(0, -tail.length).trim()
+  return lead && lead !== countLead(questions) ? lead : null
+}
+
+const countLead = (questions: readonly AskQuestion[]) => `${questions.length} ${questions.length === 1 ? "question" : "questions"}:`
+
+function questionLines(questions: readonly AskQuestion[]): string {
+  return questions
+    .map((q, i) => {
+      const head = `${i + 1}. ${oneLine(q.question)}`
+      const choices = [q.defaultAnswer ? `default: ${oneLine(q.defaultAnswer)}` : "", q.options.length ? `or: ${q.options.map(oneLine).join(" / ")}` : ""].filter(Boolean)
+      return choices.length ? `${head} (${choices.join("; ")})` : head
+    })
+    .join("\n")
 }
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim()

@@ -1289,6 +1289,29 @@ export function useSendTaskMessage(taskId: string, { quiet }: { quiet?: (err: Er
 }
 
 /**
+ * Answer a task's several questions (ask_user's `questions`, components/AskQuestions.tsx): the server writes them as
+ * one message to the task's session (TaskManager.answerQuestions), queued like a typed answer. `key` is the askKey of
+ * the questions shown; a 409 means they were answered or replaced meanwhile. The form shows the error itself.
+ */
+export function useAnswerQuestions(taskId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { key: string; answers: string[] }) =>
+      api<Task & { inputId?: string }>(`/api/tasks/${encodeURIComponent(taskId)}/answers`, { body: { id: clientId("chat"), key: input.key, answers: input.answers } }),
+    onSuccess: (task) => {
+      playSendSound()
+      if (!staleAfterStop(task)) qc.setQueryData<Task[]>(keys.tasks, (list) => upsert(list, task))
+      void qc.invalidateQueries({ queryKey: keys.taskQueue(taskId) })
+      void qc.invalidateQueries({ queryKey: keys.taskMessages(taskId) })
+    },
+    onError: () => {
+      playSendSound("failed")
+      void qc.invalidateQueries({ queryKey: keys.tasks })
+    },
+  })
+}
+
+/**
  * Send a task-chat message to the task's project's Captain instead of its agent (TaskManager.forwardToCaptain). Shows
  * at once as a pending "→ Captain" line; the server's task.message replaces it (stream.ts matches tmp- by content).
  */

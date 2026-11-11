@@ -28,6 +28,8 @@ import { toolBrief } from "../../../shared/activity"
 import { TurnTimingChip, timingOf } from "./TurnTimingChip"
 import { Loading } from "./Loading"
 import { SubtaskReportLine, SubtasksLine } from "./SubtaskLines"
+import { ASK_CARD, AskQuestions } from "./AskQuestions"
+import type { AskQuestion } from "../../../shared/askQuestions"
 
 /** The live line's words while a turn runs: what is going on, never the task's state (its icon says that). */
 export const workingLabel = (status: TaskStatus) => (status === "starting" ? "Preparing the workspace" : "Turn running")
@@ -55,6 +57,7 @@ export const TaskThread = memo(function TaskThread({
   working,
   workingSince = null,
   ask = null,
+  questions = null,
   selectionSource,
   selectionAsk,
   onFollowUp,
@@ -71,6 +74,8 @@ export const TaskThread = memo(function TaskThread({
   workingSince?: number | null
   /** The question the task waits on (needs_input), as a card at the thread's foot until it's answered. */
   ask?: string | null
+  /** Its several questions, when the ask had them (Task.questions): the card asks them one at a time (AskQuestions). */
+  questions?: readonly AskQuestion[] | null
   /** Where its lines are, for the selection's Create task (its project's Captain gets it). */
   selectionSource: SelectionTaskSource | null
   /** Where the selection's Ask goes: a thread of its project's Captain chat, shown in the task's panel. Null: no Ask. */
@@ -172,9 +177,11 @@ export const TaskThread = memo(function TaskThread({
           ]}
           <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={historyHandle} />
           {working && <WorkingLine label={working} since={workingSince} tool={tool} steps={stepsSoFar} />}
-          {ask && (
-            // At the foot, where the working line was, so it's the last thing above the box however long the thread.
-            <div role="group" aria-label="The agent asks" data-testid="pending-ask" className="flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-sm">
+          {/* At the foot, where the working line was, so it's the last thing above the box however long the thread. */}
+          {ask && questions?.length ? (
+            <AskQuestions taskId={id} question={ask} questions={questions} askedAt={asked?.createdAt ?? null} />
+          ) : ask && (
+            <div role="group" aria-label="The agent asks" data-testid="pending-ask" className={ASK_CARD}>
               {/* Its first row is as tall as Answer (h-7), and so is the icon's box. A narrow card (a small phone) drops
                   the time and Answer's icon, so the label is never cut. */}
               <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" box="h-7!" />
