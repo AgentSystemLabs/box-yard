@@ -26,6 +26,7 @@ export const DockComposer = memo(function DockComposer({
   chat,
   onSubmit,
   placeholder,
+  label,
   historyKey,
   textareaRef,
   handleRef,
@@ -40,6 +41,8 @@ export const DockComposer = memo(function DockComposer({
   /** The chat's own box: what it sends to and says. */
   onSubmit: (text: string, attachments: Attachment[], extra?: ComposerExtra) => Promise<unknown> | void
   placeholder: string
+  /** The text field's name to a screen reader (Composer `label`). */
+  label: string
   historyKey: string
   textareaRef: RefObject<HTMLTextAreaElement | null>
   handleRef: RefObject<ComposerHandle | null>
@@ -70,6 +73,7 @@ export const DockComposer = memo(function DockComposer({
         <Composer
           onSubmit={onSubmit}
           placeholder={placeholder}
+          label={label}
           textareaRef={textareaRef}
           handleRef={handleRef}
           panelRef={panelRef}

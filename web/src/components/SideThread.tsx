@@ -393,6 +393,7 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
         stop={thread && busy ? { label: `Stop the ${router}'s answer`, onStop: () => control.stop(id) } : null}
         icon={<ComposerIcon kind="side-question" label={`Side question to the ${router}`} />}
         placeholder={reply ? (busy ? "Queue another reply…" : "Reply…") : busy ? "Queue a follow-up…" : "Reply in this thread…"}
+        label="Reply in this side thread"
         panelRef={pane}
         className={cx(COMPOSER_FOOTER, "px-3", open.expanded && "mx-auto w-full max-w-3xl")}
       />

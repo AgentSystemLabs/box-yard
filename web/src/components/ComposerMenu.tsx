@@ -60,6 +60,14 @@ export function useMoreMenu(): MoreMenuState {
 const CloseMore = createContext<() => void>(() => {})
 export const useCloseMore = () => useContext(CloseMore)
 
+/**
+ * Per tool the caller passed in (Composer `toolSlots` as a list), the box width it folds into the menu below
+ * (lib/composerRow.ts): a tool's button takes `onRow` of its own, and its menu line `inMenu`. Outside a box, or for
+ * tools that fold together, there's none (null), which leaves a button on the row.
+ */
+export const ToolFolds = createContext<readonly (number | null)[]>([])
+export const useToolFold = (tool: number) => useContext(ToolFolds)[tool] ?? null
+
 function firstShown(menu: HTMLElement | null): HTMLElement | undefined {
   const lines = Array.from(menu?.querySelectorAll<HTMLElement>("button") ?? [])
   return lines.find((b) => (typeof b.checkVisibility === "function" ? b.checkVisibility() : true))
@@ -84,7 +92,7 @@ export function MoreButton({ more, className, dot }: { more: MoreMenuState; clas
       size="sm"
       data-testid="composer-more"
       className={cx("relative", className, more.open && "bg-zinc-800 text-zinc-100")}
-      aria-label={dot ? `More (${dot.label})` : "More"}
+      aria-label={dot ? `More actions (${dot.label})` : "More actions"}
       title="More actions"
       aria-expanded={more.open}
       aria-controls={more.open ? more.id : undefined}
@@ -115,7 +123,7 @@ export function MoreMenu({ more, anchor, children }: { more: MoreMenuState; anch
         ref={more.menu}
         id={more.id}
         role="group"
-        aria-label="More"
+        aria-label="More actions"
         data-testid="composer-more-menu"
         style={{ maxHeight: at.maxHeight }}
         className="scroll-thin pointer-events-auto flex w-72 max-w-full flex-col overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-900 p-1 shadow-xl shadow-black/40"
