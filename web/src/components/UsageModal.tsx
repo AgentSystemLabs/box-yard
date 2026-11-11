@@ -1,15 +1,17 @@
 // Usage: what Box Yard cost over the last 7, 30, 60 or 90 days, from the sidebar's Usage button (UsageHost.tsx). Daily
 // cost stacks LLM spend by model on compute by provider; daily tokens stack input, cache writes, cache reads and output.
 // Tapping a bar segment, a legend item, a day's line or a table row narrows everything to it, and the table goes one
-// level finer each time, down to tasks and boxes. One request per range: filters fold the ledger in the browser
-// (shared/usageLedger.ts), and every number on screen adds up to the totals above it. Estimates wear "≈".
+// level finer each time, down to tasks and boxes. What it's narrowed to stays in a row of chips at the top while the
+// numbers scroll. One request per range: filters fold the ledger in the browser (shared/usageLedger.ts), and every
+// number on screen adds up to the totals above it. Estimates wear "≈".
 import { useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Settings as SettingsIcon, X } from "lucide-react"
 import { Modal } from "./Modal"
 import { Loading } from "./Loading"
 import { SubscriptionLimits } from "./LoginLimits"
-import { Button, Select, cx, useMinuteClock } from "./ui"
+import { useUsageToSettings } from "./UsageHost"
+import { Button, Select, TAP_AREA, cx, useMinuteClock } from "./ui"
 import { prefetchUsageLedger, useUsageBudget, useUsageLedger } from "../lib/queries"
 import { money, pct } from "../lib/usage"
 import { axisMoney, compact, dayLabel, labelledDays, localDayStarts, longDayLabel, niceScale } from "../lib/usageChart"
@@ -79,11 +81,13 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 id={spendingId} className="text-base font-semibold text-zinc-100">Cost &amp; tokens</h3>
-              <p className="mt-1 text-xs text-zinc-500">{ledger ? `${dayLabel(ledger.days[0]!)} – ${dayLabel(ledger.to - 1)} · ` : ""}US dollars · ≈ means estimated</p>
+              {/* The dates are the picked range's, not the loaded one's: they change with the button, before the numbers do. */}
+              <p className="mt-1 text-xs text-zinc-500">
+                {dayLabel(days[0]!)} – {dayLabel(days[days.length - 1]!)} · API-equivalent US dollars, not your subscription bill · ≈ estimated
+              </p>
             </div>
             <RangePicker value={range} onChange={(d) => { onDays(d); setDay(null) }} onPrefetch={prefetch} />
           </div>
-          <p className="text-sm text-zinc-400">Model costs are reported or estimated API-equivalent values, not your subscription bill. Box costs are tracked separately.</p>
           {ledger && <FilterChips ledger={ledger} filter={filter} onDrop={drop} onClear={() => setFilter({})} />}
           {!view ? (
             q.isError ? (
@@ -95,7 +99,8 @@ export function UsageModal({ days: range, onDays, onClose }: { days: UsageRangeD
               <Loading kind="rows" label="Loading usage" />
             )
           ) : (
-            <div aria-busy={q.isPlaceholderData} className="space-y-4">
+            // Dimmed while they are still the last range's numbers.
+            <div aria-busy={q.isPlaceholderData} className={cx("space-y-4", q.isPlaceholderData && "opacity-60")}>
               {view.totals.turns === 0 && view.totals.computeHours === 0 && view.totals.costUsd === 0 && view.totals.tokens.total === 0 && (
                 <p className="text-sm text-zinc-400" data-testid="usage-empty">No recorded usage in this range{Object.keys(filter).length ? " for these filters" : ""}.</p>
               )}
@@ -141,28 +146,33 @@ function RangePicker({ value, onChange, onPrefetch }: { value: UsageRangeDays; o
 
 function FilterChips({ ledger, filter, onDrop, onClear }: { ledger: UsageLedger; filter: UsageFilter; onDrop: (k: keyof UsageFilter) => void; onClear: () => void }) {
   const set = (Object.keys(filter) as (keyof UsageFilter)[]).filter((k) => filter[k] !== undefined)
-  if (!set.length) return <p className="text-xs text-zinc-500">Tap a bar, a legend item or a row to narrow it down.</p>
+  // How to narrow is said in each chart's readout line.
+  if (!set.length) return null
   return (
-    <div role="group" aria-label="Filters" className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="usage-filters">
-      {set.map((k) => {
-        const label = filterLabel(ledger, k, filter[k]!)
-        return (
-          <button
-            key={k}
-            type="button"
-            onClick={() => onDrop(k)}
-            aria-label={`Remove filter ${FILTER_NAMES[k]}: ${label}`}
-            title="Remove this filter"
-            className={cx("inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-yard-500/40 bg-yard-500/10 pr-2 pl-3 text-xs text-yard-100 hover:bg-yard-500/20", FOCUS)}
-          >
-            <span className="text-yard-300/80">{FILTER_NAMES[k]}</span>
-            <span className="min-w-0 truncate font-medium">{label}</span>
-            <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          </button>
-        )
-      })}
+    // Stays at the top of the dialog's scrolling body (over its padding, bleeding to its edges), so a tap on a table row far below shows
+    // what it did. One line whatever is set: the chips scroll sideways and "Clear all" stays put.
+    <div role="group" aria-label="Filters" className="sticky -top-5 z-10 -mx-4 flex min-w-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-950 px-4 py-1.5 sm:-mx-5 sm:px-5" data-testid="usage-filters">
+      <div className="scroll-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto p-0.5">
+        {set.map((k) => {
+          const label = filterLabel(ledger, k, filter[k]!)
+          return (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onDrop(k)}
+              aria-label={`Remove filter ${FILTER_NAMES[k]}: ${label}`}
+              title={`Remove the filter ${FILTER_NAMES[k]}: ${label}`}
+              className={cx("inline-flex min-h-11 max-w-56 shrink-0 items-center gap-1.5 rounded-full border border-yard-500/40 bg-yard-500/10 pr-2 pl-3 text-xs text-yard-100 hover:bg-yard-500/20", FOCUS)}
+            >
+              <span className="text-yard-300/80">{FILTER_NAMES[k]}</span>
+              <span className="min-w-0 truncate font-medium">{label}</span>
+              <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            </button>
+          )
+        })}
+      </div>
       {set.length > 1 && (
-        <button type="button" onClick={onClear} className={cx("min-h-11 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
+        <button type="button" onClick={onClear} className={cx("min-h-11 shrink-0 rounded-md px-2 text-xs text-zinc-400 hover:text-zinc-100", FOCUS)}>
           Clear all
         </button>
       )}
@@ -187,9 +197,9 @@ function Totals({ view }: { view: UsageView }) {
   const computeEstimated = view.cost.some((s) => s.kind === "compute" && s.estimated)
   return (
     <div className="grid grid-cols-2 gap-2 @3xl:grid-cols-4">
-      <Tile testId="usage-total" label="Tracked cost" value={usd(t.costUsd, t.estimatedUsd > 0)} sub={`${usd(t.costUsd / n, t.estimatedUsd > 0)} a day on average`} />
+      <Tile testId="usage-total" label="Total" value={usd(t.costUsd, t.estimatedUsd > 0)} sub={`${usd(t.costUsd / n, t.estimatedUsd > 0)} a day on average`} />
       <Tile label="Model cost" value={usd(t.llmUsd, llmEstimated)} sub={`${t.turns.toLocaleString("en-US")} runs · ${pct(t.llmUsd, t.costUsd)}`} />
-      <Tile label="Box cost" value={usd(t.computeUsd, computeEstimated)} sub={`${t.computeHours.toFixed(1)} box-hours · ${pct(t.computeUsd, t.costUsd)}`} />
+      <Tile label="Box cost" value={usd(t.computeUsd, computeEstimated)} sub={t.computeUsd > 0 || t.computeHours > 0 ? `${t.computeHours.toFixed(1)} box-hours · ${pct(t.computeUsd, t.costUsd)}` : "No box time"} />
       <Tile testId="usage-tokens" label="Tokens" value={compact(t.tokens.total)} sub={`${compact(t.tokens.total / n)} a day on average`} />
     </div>
   )
@@ -225,7 +235,7 @@ function TokenChart({ view, day, onDay }: { view: UsageView; day: number | null;
   const legend: Stack[] = view.tokens.map((t) => ({ key: t.kind, label: t.label, color: TOKEN_COLORS[t.kind], daily: t.daily, total: t.total, pressed: only === t.kind, onPick: () => setOnly(only === t.kind ? null : t.kind) }))
   return (
     <ChartCard title="Daily tokens" sub={only ? `${legend.find((s) => s.pressed)!.label} only: tap it again for all four` : "Input, cache writes, cache reads and output"} testId="usage-token-chart">
-      <StackedBars days={view.days} stacks={stacks} legend={legend} byDay={byDay} format={(n) => `${compact(n)} tokens`} axis={compact} day={day} onDay={onDay} noun="tokens" />
+      <StackedBars days={view.days} stacks={stacks} legend={legend} legendFormat={compact} legendGrid byDay={byDay} format={(n) => `${compact(n)} tokens`} axis={compact} day={day} onDay={onDay} noun="tokens" />
     </ChartCard>
   )
 }
@@ -243,14 +253,16 @@ function ChartCard({ title, sub, testId, children }: { title: string; sub: strin
 
 /**
  * Stacked daily bars with a y-axis, a legend and a readout line. The readout shows the hovered day (mouse), else the
- * picked one (tap, click, or ←/→ on the focused chart), else the whole range; its lines and the legend narrow to a
- * series, like a tap on a segment does. On a touch screen the first tap on a day picks it and a second tap on a
+ * picked one (tap, click, ‹ ›, or ←/→ on the focused chart), else the whole range; its lines and the legend narrow to
+ * a series, like a tap on a segment does. On a touch screen the first tap on a day picks it and a second tap on a
  * segment narrows, so a 3px bar of a 90-day chart never filters by accident.
  */
 function StackedBars({
   days,
   stacks,
   legend = stacks,
+  legendFormat,
+  legendGrid,
   byDay,
   format,
   axis,
@@ -261,6 +273,10 @@ function StackedBars({
   days: number[]
   stacks: Stack[]
   legend?: Stack[]
+  /** The legend's figures when they can be shorter than the readout's ("94M", not "94M tokens"). */
+  legendFormat?: (n: number) => string
+  /** A fixed set of series: two columns in a narrow card instead of chips of uneven widths. */
+  legendGrid?: boolean
   byDay: number[]
   format: (n: number) => string
   axis: (n: number) => string
@@ -270,6 +286,7 @@ function StackedBars({
 }) {
   const [hover, setHover] = useState<number | null>(null)
   const pointer = useRef<string>("mouse")
+  const chart = useRef<HTMLDivElement>(null)
   const readoutId = useId()
   const n = days.length
   const { top, ticks } = niceScale(Math.max(0, ...byDay))
@@ -294,7 +311,27 @@ function StackedBars({
 
   return (
     <div className="mt-3">
-      <Readout id={readoutId} days={days} day={shown} stacks={stacks} byDay={byDay} total={total} format={format} noun={noun} />
+      <Readout
+        id={readoutId}
+        days={days}
+        day={shown}
+        picked={day}
+        onDay={(d) => {
+          onDay(d)
+          // "All N days" leaves with the picked day: focus goes to the chart, where ←/→ pick one again.
+          if (d === null) chart.current?.focus()
+        }}
+        stacks={stacks}
+        byDay={byDay}
+        total={total}
+        format={format}
+        partFormat={legendFormat}
+        noun={noun}
+      />
+      {/* Spoken for a picked day only: a mouse passing over the bars changes the line above without a word. */}
+      <span className="sr-only" aria-live="polite" data-testid="usage-day-live">
+        {day === null ? "" : `${longDayLabel(days[day]!)}: ${format(byDay[day]!)}`}
+      </span>
       <div className="mt-2 flex gap-2">
         {/* y-axis labels */}
         <div aria-hidden className="relative h-40 w-10 shrink-0 text-right text-[11px] text-zinc-500 tabular-nums @lg/chart:h-52 @lg/chart:w-12">
@@ -306,6 +343,7 @@ function StackedBars({
         </div>
         <div className="min-w-0 flex-1">
           <div
+            ref={chart}
             role="group"
             tabIndex={0}
             aria-label={`Daily ${noun}: ←/→ pick a day`}
@@ -363,47 +401,109 @@ function StackedBars({
           </div>
         </div>
       </div>
-      <Legend stacks={legend} format={format} />
+      <Legend stacks={legend} format={format} short={legendFormat} grid={legendGrid} />
     </div>
   )
 }
 
-/** The picked or hovered day's numbers, or the range's: text, so nothing is hover-only. */
-function Readout({ id, days, day, stacks, byDay, total, format, noun }: { id: string; days: number[]; day: number | null; stacks: Stack[]; byDay: number[]; total: number; format: (n: number) => string; noun: string }) {
+const STEP = cx(TAP_AREA, "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-zinc-400 pointer-coarse:w-11", FOCUS)
+
+/**
+ * The picked or hovered day's numbers, or the range's: text, so nothing is hover-only. A picked day gets ‹ › to step to
+ * its neighbours and "All N days" to let it go.
+ */
+function Readout({
+  id,
+  days,
+  day,
+  picked,
+  onDay,
+  stacks,
+  byDay,
+  total,
+  format,
+  partFormat = format,
+  noun,
+}: {
+  id: string
+  days: number[]
+  /** The day whose numbers show: the hovered one, else the picked one. */
+  day: number | null
+  picked: number | null
+  onDay: (d: number | null) => void
+  stacks: Stack[]
+  byDay: number[]
+  total: number
+  format: (n: number) => string
+  /** Each series' figure, when the unit is already on the day's total ("54.7K" after "1.2M tokens"). */
+  partFormat?: (n: number) => string
+  noun: string
+}) {
+  const n = days.length
   const value = day === null ? total : byDay[day]!
   const parts = stacks.map((s) => ({ s, v: day === null ? s.total : (s.daily[day] ?? 0) })).filter((p) => p.v > 0)
   const approx = noun === "cost" && parts.some((p) => p.s.estimated) ? "≈ " : ""
+  const label = <span className="font-medium text-zinc-200">{day === null ? `All ${n} days` : longDayLabel(days[day]!)}</span>
+  // At an end the arrow stays focusable (aria-disabled, not disabled), so the keyboard doesn't lose its place.
+  const step = (to: number) => to >= 0 && to < n && onDay(to)
   return (
-    <div id={id} aria-live="polite" className="flex min-h-11 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zinc-400 tabular-nums" data-testid="usage-readout">
-      <span className="font-medium text-zinc-200">{day === null ? `All ${days.length} days` : longDayLabel(days[day]!)}</span>
+    <div id={id} className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-zinc-400 tabular-nums" data-testid="usage-readout">
+      {picked === null ? (
+        label
+      ) : (
+        <span role="group" aria-label="Day" className="inline-flex items-center gap-0.5">
+          <button type="button" aria-label="Previous day" title="Previous day" aria-disabled={picked === 0} onClick={() => step(picked - 1)} className={STEP}>
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </button>
+          {/* Room for "Wed, Sep 30", so › doesn't move under a finger stepping through days. */}
+          <span className="min-w-19 text-center">{label}</span>
+          <button type="button" aria-label="Next day" title="Next day" aria-disabled={picked === n - 1} onClick={() => step(picked + 1)} className={STEP}>
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
+        </span>
+      )}
       <span className="text-sm font-semibold text-zinc-50">{approx}{format(value)}</span>
       {day === null ? (
-        // The legend below has each series' total: until a day is picked, say what a day averages and how to pick one.
+        // The tiles above have the daily average and the legend below each series' total: this line says how to go finer.
         <span>
-          {approx}{format(total / days.length)} a day on average · <span className="pointer-coarse:hidden">hover or </span>tap a day for its numbers
+          <span className="pointer-coarse:hidden">hover a day for its numbers, click a colour to narrow it</span>
+          <span className="hidden pointer-coarse:inline">tap a day for its numbers, then a colour to narrow it</span>
         </span>
       ) : (
         parts.map(({ s, v }) => (
           <span key={s.key} className="inline-flex min-w-0 items-center gap-1">
             <span aria-hidden className="usage-fill h-2 w-2 shrink-0 rounded-[2px]" style={{ "--series-color": s.color } as CSSProperties} />
-            <span className="min-w-0 truncate">{s.label}</span> {format(v)}
+            <span className="min-w-0 truncate">{s.label}</span> {partFormat(v)}
           </span>
         ))
+      )}
+      {picked !== null && (
+        <Button type="button" size="sm" variant="ghost" className="ml-auto" onClick={() => onDay(null)} title={`Back to all ${n} days`}>
+          All {n} days
+        </Button>
       )}
     </div>
   )
 }
 
-function Legend({ stacks, format }: { stacks: Stack[]; format: (n: number) => string }) {
+/**
+ * Each series' colour, name and total, as buttons where a series narrows. `grid`: two columns of name over figure while
+ * the card is narrow (a phone), chips again from 24rem; `short` formats the figures on show, the title has `format`'s.
+ */
+function Legend({ stacks, format, short = format, grid }: { stacks: Stack[]; format: (n: number) => string; short?: (n: number) => string; grid?: boolean }) {
   if (!stacks.length) return <p className="mt-3 text-sm text-zinc-500">Nothing in this range.</p>
+  const item = cx("min-h-11 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs", grid ? "flex w-full @sm/chart:inline-flex @sm/chart:w-auto" : "inline-flex")
   return (
-    <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Legend">
+    <ul className={cx("mt-3 gap-1.5", grid ? "grid grid-cols-2 @sm/chart:flex @sm/chart:flex-wrap" : "flex flex-wrap")} aria-label="Legend">
       {stacks.map((s) => {
+        const figure = `${s.estimated ? "≈ " : ""}${format(s.total)}`
         const body = (
           <>
             <span aria-hidden className="usage-fill h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ "--series-color": s.color } as CSSProperties} />
-            <span className="min-w-0 truncate text-zinc-200">{s.label}</span>
-            <span className="text-zinc-500 tabular-nums">{s.estimated ? "≈ " : ""}{format(s.total)}</span>
+            <span className={cx("min-w-0", grid ? "flex flex-col text-left @sm/chart:flex-row @sm/chart:items-center @sm/chart:gap-1.5" : "contents")}>
+              <span className="min-w-0 truncate text-zinc-200">{s.label}</span>
+              <span className="text-zinc-500 tabular-nums">{s.estimated ? "≈ " : ""}{short(s.total)}</span>
+            </span>
           </>
         )
         return (
@@ -413,17 +513,13 @@ function Legend({ stacks, format }: { stacks: Stack[]; format: (n: number) => st
                 type="button"
                 aria-pressed={s.pressed}
                 onClick={s.onPick}
-                title={s.pressed ? "Show all" : `Narrow to ${s.label}`}
-                className={cx(
-                  "inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs",
-                  FOCUS,
-                  s.pressed ? "border-yard-500/50 bg-yard-500/10" : "border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/60",
-                )}
+                title={`${s.label}: ${figure}. ${s.pressed ? "Show all" : `Narrow to ${s.label}`}`}
+                className={cx(item, FOCUS, s.pressed ? "border-yard-500/50 bg-yard-500/10" : "border-zinc-800 hover:border-zinc-600 hover:bg-zinc-800/60")}
               >
                 {body}
               </button>
             ) : (
-              <span className="inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-md border border-transparent px-2 text-xs" title="Several models together: narrow by the table's Model rows">
+              <span className={cx(item, "border-transparent")} title={`${s.label}: ${figure}. Several models together: narrow by the table's Model rows`}>
                 {body}
               </span>
             )}
@@ -433,6 +529,13 @@ function Legend({ stacks, format }: { stacks: Stack[]; format: (n: number) => st
     </ul>
   )
 }
+
+/**
+ * The table's columns, shared by its header, rows and Total so the figures line up. Narrow: the name, then total and
+ * share. From 42rem: name, models, boxes, tokens, total, share.
+ */
+const COLS = "grid grid-cols-[minmax(0,1fr)_auto_3rem] gap-x-3 px-1 @2xl:grid-cols-[minmax(0,1fr)_5.5rem_5.5rem_4.5rem_6rem_3.5rem]"
+const WIDE_CELL = "hidden text-right @2xl:block"
 
 function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: UsageGroup; onGroup: (g: UsageGroup) => void; onDrill: (r: UsageTableRow) => void }) {
   const [all, setAll] = useState(false)
@@ -452,12 +555,13 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
           </Select>
         </label>
       </div>
-      <div className="mt-2 hidden grid-cols-[minmax(0,1fr)_6rem_6rem_5rem_8.5rem] gap-x-3 border-b border-zinc-800 pb-1 text-[11px] text-zinc-500 uppercase @2xl:grid">
-        <span>{USAGE_GROUP_LABEL[group]}</span>
-        <span className="text-right">Models</span>
-        <span className="text-right">Boxes</span>
-        <span className="text-right">Tokens</span>
+      <div className={cx(COLS, "mt-2 border-b border-zinc-800 pb-1 text-[11px] text-zinc-500 uppercase")}>
+        <span className="min-w-0 truncate">{USAGE_GROUP_LABEL[group]}</span>
+        <span className={WIDE_CELL}>Models</span>
+        <span className={WIDE_CELL}>Boxes</span>
+        <span className={WIDE_CELL}>Tokens</span>
         <span className="text-right">Total</span>
+        <span className="text-right">Share</span>
       </div>
       <ul className="divide-y divide-zinc-800/60">
         {rows.map((r) => (
@@ -478,12 +582,13 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
             </button>
           </li>
         )}
-        <li className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 py-2.5 text-sm @2xl:grid-cols-[minmax(0,1fr)_6rem_6rem_5rem_8.5rem]" data-testid="usage-total-row">
+        <li className={cx(COLS, "items-baseline py-2.5 text-sm")} data-testid="usage-total-row">
           <span className="font-medium text-zinc-300">Total</span>
-          <span className="hidden text-right text-zinc-300 tabular-nums @2xl:block">{money(t.llmUsd)}</span>
-          <span className="hidden text-right text-zinc-300 tabular-nums @2xl:block">{usd(t.computeUsd, t.computeUsd > 0)}</span>
-          <span className="hidden text-right text-zinc-300 tabular-nums @2xl:block">{compact(t.tokens.total)}</span>
+          <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{money(t.llmUsd)}</span>
+          <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{usd(t.computeUsd, t.computeUsd > 0)}</span>
+          <span className={cx(WIDE_CELL, "text-zinc-300 tabular-nums")}>{compact(t.tokens.total)}</span>
           <span className="text-right font-semibold text-zinc-50 tabular-nums">{usd(t.costUsd, t.estimatedUsd > 0)}</span>
+          <span className="text-right text-xs text-zinc-500 tabular-nums">{pct(t.costUsd, t.costUsd)}</span>
         </li>
       </ul>
       {view.rows.length === 0 && <p className="py-3 text-sm text-zinc-500">Nothing in this range.</p>}
@@ -491,27 +596,31 @@ function Breakdown({ view, group, onGroup, onDrill }: { view: UsageView; group: 
   )
 }
 
-/** Narrow: the name gets the full width, its numbers go on the line below. From 42rem: one row of columns. */
+/**
+ * Narrow: the name gets the full width, its numbers go on the line below, with the total and its share in the header's
+ * columns. From 42rem: one row of columns.
+ */
 function RowBody({ r, total }: { r: UsageTableRow; total: number }) {
   const est = r.estimated
+  const boxes = r.computeUsd > 0 || r.computeHours > 0
+  // The line under the name says what the total doesn't: its split when it has both parts, a box's hours, the tokens.
+  const parts = [
+    boxes && r.llmUsd > 0 ? `Models ${money(r.llmUsd)} · Boxes ${usd(r.computeUsd, est)}` : null,
+    boxes && !(r.llmUsd > 0) ? `${r.computeHours.toFixed(1)} box-hours` : null,
+    r.tokens > 0 ? `${compact(r.tokens)} tokens` : null,
+  ]
   return (
-    <span className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 px-1 py-2.5 @2xl:grid-cols-[minmax(0,1fr)_6rem_6rem_5rem_8.5rem] @2xl:items-center">
-      <span className="col-span-2 min-w-0 @2xl:col-span-1">
+    <span className={cx(COLS, "items-baseline py-2.5 @2xl:items-center")}>
+      <span className="col-span-3 min-w-0 @2xl:col-span-1">
         <span className="line-clamp-2 text-sm text-zinc-100 wrap-anywhere" title={r.label}>{r.label}</span>
         {r.detail && <span className="line-clamp-1 text-xs text-zinc-500 wrap-anywhere">{r.detail}</span>}
       </span>
-      <span className="mt-0.5 text-xs text-zinc-500 tabular-nums @2xl:hidden">
-        {[r.llmUsd > 0 ? `Models ${money(r.llmUsd)}` : null, r.computeUsd > 0 || r.computeHours > 0 ? `Boxes ${usd(r.computeUsd, est)}` : null, r.tokens > 0 ? `${compact(r.tokens)} tokens` : null].filter(Boolean).join(" · ")}
-      </span>
-      <span className="mt-0.5 text-right text-sm font-medium text-zinc-100 tabular-nums @2xl:hidden">
-        {usd(r.costUsd, est)} <span className="text-xs font-normal text-zinc-500">{pct(r.costUsd, total)}</span>
-      </span>
-      <span className="hidden text-right text-sm text-zinc-300 tabular-nums @2xl:block">{r.llmUsd > 0 ? money(r.llmUsd) : "—"}</span>
-      <span className="hidden text-right text-sm text-zinc-300 tabular-nums @2xl:block">{r.computeUsd > 0 || r.computeHours > 0 ? usd(r.computeUsd, est) : "—"}</span>
-      <span className="hidden text-right text-sm text-zinc-300 tabular-nums @2xl:block">{r.tokens > 0 ? compact(r.tokens) : "—"}</span>
-      <span className="hidden text-right text-sm font-medium text-zinc-100 tabular-nums @2xl:block">
-        {usd(r.costUsd, est)} <span className="text-xs font-normal text-zinc-500">{pct(r.costUsd, total)}</span>
-      </span>
+      <span className="mt-0.5 min-w-0 text-xs text-zinc-500 tabular-nums @2xl:hidden">{parts.filter(Boolean).join(" · ")}</span>
+      <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{r.llmUsd > 0 ? money(r.llmUsd) : "—"}</span>
+      <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{boxes ? usd(r.computeUsd, est) : "—"}</span>
+      <span className={cx(WIDE_CELL, "text-sm text-zinc-300 tabular-nums")}>{r.tokens > 0 ? compact(r.tokens) : "—"}</span>
+      <span className="mt-0.5 text-right text-sm font-medium text-zinc-100 tabular-nums @2xl:mt-0">{usd(r.costUsd, est)}</span>
+      <span className="mt-0.5 text-right text-xs text-zinc-500 tabular-nums @2xl:mt-0">{pct(r.costUsd, total)}</span>
     </span>
   )
 }
@@ -523,11 +632,12 @@ function HowEstimated({ ledger }: { ledger: UsageLedger }) {
     <details className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 text-sm text-zinc-400 @lg:px-4" data-testid="usage-estimates">
       <summary className={cx("min-h-11 cursor-pointer content-center font-medium text-zinc-200", FOCUS)}>How these numbers are made (≈ marks an estimate)</summary>
       <ul className="mt-2 list-disc space-y-1.5 pl-5">
-        <li><strong className="text-zinc-200">Models</strong>: each run's cost as the Claude CLI reported it, on the day the run started. A run it didn't price (Codex) is an estimate.</li>
+        <li><strong className="text-zinc-200">Models</strong>: each run's cost as the Claude CLI reported it, on the day the run started: what its tokens cost at API prices, not what your subscription bills you. A run it didn't price (Codex) is an estimate.</li>
         <li><strong className="text-zinc-200">Upstash boxes</strong>: the CPU each box used, at Settings › Usage's rate per active CPU hour ({up}), plus storage; Upstash's own figure where it reports one. ≈ unless it's Upstash's own.</li>
         <li><strong className="text-zinc-200">Daytona sandboxes</strong> ≈: each sandbox's size at Daytona's list price while it was up: ${r.daytona.vcpuHour}/vCPU-hour + ${r.daytona.memoryGibHour}/GiB-hour of memory, plus its GPU's hourly price.</li>
         <li><strong className="text-zinc-200">RunPod and Vast.ai GPUs</strong> ≈: the pod's $/hr when it started (from the box history), from then until it was terminated.</li>
         <li><strong className="text-zinc-200">Docker, this computer and SSH machines</strong> are your own hardware: $0, with their hours listed.</li>
+        <li>Box costs are tracked apart from model costs, and only they count toward the box spending limits below.</li>
         <li>A box's cost goes to the tasks whose turns ran on it, split evenly while several ran at once (≈). Time no turn ran is <em>Idle box time</em>.</li>
         {ledger.repriced.runs > 0 && (
           <li data-testid="usage-repriced">
@@ -543,9 +653,16 @@ function HowEstimated({ ledger }: { ledger: UsageLedger }) {
 function CloudLimits() {
   const q = useUsageBudget()
   const budget = q.data
+  const toSettings = useUsageToSettings()
   return (
     <section className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:px-4" aria-label="Boxes against your cloud limits">
-      <h3 className="text-base font-semibold text-zinc-100">Box spending limits</h3>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <h3 className="text-base font-semibold text-zinc-100">Box spending limits</h3>
+        <Button type="button" size="sm" onClick={() => toSettings("costs")} title="Settings › Usage: the daily and monthly limits and the box rates" data-testid="usage-open-limits">
+          <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
+          Limits and rates
+        </Button>
+      </div>
       <p className="mt-1 mb-2 text-xs text-zinc-500">Current box spending only. Model costs and subscription allowances do not count toward these limits.</p>
       {budget ? (
         <ul className="divide-y divide-zinc-800/60">

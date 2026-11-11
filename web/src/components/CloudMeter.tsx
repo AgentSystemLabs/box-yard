@@ -1,12 +1,13 @@
 // The cloud meter: how many boxes run, what they cost an hour now, and today's box spend against the daily cloud limit.
-// It opens a sheet with the limits, "Raise today's limit" and every box. The Boxes page always has it; the Coordinator's
-// header only with Settings › Usage › Box spend in the header.
+// It opens a sheet with the limits, "Raise today's limit", every box, and the ways on to Settings › Usage and to Usage's
+// history. The Boxes page always has it; the Coordinator's header only with Settings › Usage › Box spend in the header.
 import { memo, useState } from "react"
-import { Boxes, ChevronRight, Cpu, Settings as SettingsIcon } from "lucide-react"
+import { BarChart3, Boxes, ChevronRight, Cpu, Settings as SettingsIcon } from "lucide-react"
 import type { CloudStatus } from "../../../shared/types"
 import { useAgentSettings, useAllowMoreBoxes, useCloud, useRaiseCloudLimit } from "../lib/queries"
 import { BAR_TONE, METER_TONE, boxState, countsLine, dollars, limitPct, meterLabel, meterState, newBoxes, perHour, todayLine } from "../lib/cloud"
 import { useOpenSettings } from "./SettingsHost"
+import { useOpenUsage, usePrefetchUsage } from "./UsageHost"
 import { Modal } from "./Modal"
 import { Button, cx } from "./ui"
 
@@ -14,7 +15,7 @@ import { Button, cx } from "./ui"
 const CHIP = "inline-flex min-w-0 items-center gap-1 rounded-md border text-xs font-medium whitespace-nowrap tabular-nums transition"
 const VARIANT = {
   inline: "min-h-11 px-2 sm:h-6 sm:min-h-0 sm:px-1.5 @max-[26rem]:hidden",
-  strip: "mb-2 h-8 w-full px-2.5 @min-[26rem]:hidden",
+  strip: "mb-2 min-h-11 w-full px-2.5 @min-[26rem]:hidden",
   page: "min-h-11 max-w-full px-2.5 sm:h-8 sm:min-h-0",
 }
 type Variant = keyof typeof VARIANT
@@ -26,10 +27,11 @@ export function useShowCloudMeter(): boolean {
 
 /**
  * The meter, read by the header's width (the header is a container). `inline` sits beside the title from 26rem:
- * "$8.50 of $10 · 3 boxes · $0.49/h" from 56rem, "$8.50 of $10 · 3 boxes" from 34rem (the chat's column is 48rem),
- * "$8.50/$10 · 3" below, its text truncating when the header is full. `strip` is the full reading as a row under the
- * header below 26rem (phones), where the header's buttons leave no room. `page` is the full reading as a chip on the
- * Boxes page. Calm, then amber from 80% of a limit, rose at it. Each opens the sheet.
+ * "Today $8.50 of $10 · 3 boxes · $0.49/h" from 56rem, "Today $8.50 of $10 · 3 boxes" from 34rem (the chat's column is
+ * 48rem), "Today $8.50 of $10" below, its text truncating when the header is full. `strip` is the full reading as a
+ * row under the header below 26rem (phones), where the header's buttons leave no room. `page` is the full reading as a
+ * chip on the Boxes page. Every reading says its money is today's. Calm, then amber from 80% of a limit, rose at it.
+ * Each opens the sheet.
  */
 export const CloudMeter = memo(function CloudMeter({ variant }: { variant: Variant }) {
   const cloud = useCloud()
@@ -38,9 +40,9 @@ export const CloudMeter = memo(function CloudMeter({ variant }: { variant: Varia
   if (!s) return null
   const label = meterLabel(s)
   const boxes = s.boxes.total === 1 ? "1 box" : `${s.boxes.total} boxes`
-  // Today against the limit first: it's what stays when the text truncates.
-  const full = `${todayLine(s.spend)} · ${boxes} · ${perHour(s.hourlyUsd)}`
-  const short = `${s.spend.dailyLimitUsd > 0 ? `${dollars(s.spend.todayUsd)}/${dollars(s.spend.dailyLimitUsd)}` : dollars(s.spend.todayUsd)} · ${s.boxes.total}`
+  // Today against the limit first: it's what stays when the text truncates. Without a limit todayLine says "today" itself.
+  const today = s.spend.dailyLimitUsd > 0 ? `Today ${todayLine(s.spend)}` : todayLine(s.spend)
+  const full = `${today} · ${boxes} · ${perHour(s.hourlyUsd)}`
   return (
     <>
       <button
@@ -58,9 +60,9 @@ export const CloudMeter = memo(function CloudMeter({ variant }: { variant: Varia
           <>
             <span className="truncate @max-[56rem]:hidden">{full}</span>
             <span className="truncate @max-[34rem]:hidden @min-[56rem]:hidden">
-              {todayLine(s.spend)} · {boxes}
+              {today} · {boxes}
             </span>
-            <span className="truncate @min-[34rem]:hidden">{short}</span>
+            <span className="truncate @min-[34rem]:hidden">{today}</span>
           </>
         ) : variant === "strip" ? (
           <>
@@ -68,7 +70,7 @@ export const CloudMeter = memo(function CloudMeter({ variant }: { variant: Varia
             <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden />
           </>
         ) : (
-          <span className="truncate">{s.spend.dailyLimitUsd > 0 ? `Today ${full}` : full}</span>
+          <span className="truncate">{full}</span>
         )}
       </button>
       {open && <CloudSheet status={s} onClose={() => setOpen(false)} />}
@@ -79,6 +81,8 @@ export const CloudMeter = memo(function CloudMeter({ variant }: { variant: Varia
 /** Today's spend and limit, the boxes now, and each box with what it's doing and what it cost today. */
 function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () => void }) {
   const openSettings = useOpenSettings()
+  const openUsage = useOpenUsage()
+  const prefetchUsage = usePrefetchUsage()
   const raise = useRaiseCloudLimit()
   const allow = useAllowMoreBoxes()
   const now = Date.now()
@@ -88,7 +92,12 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
     onClose()
     openSettings("costs")
   }
+  const usage = () => {
+    onClose()
+    openUsage(30)
+  }
   const daily = spend.dailyLimitUsd > 0
+  const meterText = `${dollars(spend.todayUsd)} of today's ${dollars(spend.dailyLimitUsd)} cloud limit (${pct ?? 0}% used)`
   const dailyReached = spend.state === "reached" && daily && spend.todayUsd >= spend.dailyLimitUsd - 1e-9
   return (
     <Modal
@@ -103,6 +112,10 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
       }
       footer={
         <>
+          <Button variant="subtle" onClick={usage} onPointerEnter={() => prefetchUsage(30)} onFocus={() => prefetchUsage(30)} title="Usage: daily cost and tokens over the last 30 days" data-testid="cloud-usage-history">
+            <BarChart3 className="h-3.5 w-3.5" aria-hidden />
+            Usage history
+          </Button>
           <Button variant="subtle" onClick={settings}>
             <SettingsIcon className="h-3.5 w-3.5" />
             Limits and rates
@@ -127,7 +140,9 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
                 aria-label="Today's cloud limit"
                 aria-valuemin={0}
                 aria-valuemax={spend.dailyLimitUsd}
-                aria-valuenow={spend.todayUsd}
+                aria-valuenow={Math.min(spend.todayUsd, spend.dailyLimitUsd)}
+                aria-valuetext={meterText}
+                title={meterText}
               >
                 <div className={cx("h-full rounded-full", BAR_TONE[spend.state])} style={{ width: `${pct ?? 0}%` }} />
               </div>

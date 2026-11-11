@@ -51,6 +51,9 @@ export function windowText(w: LimitWindow, now: number, tz = zone()): { used: st
   return { used, reset: when ? `Resets ${when} (${untilText(w.resetsAt!, now)})` : "Reset time not reported" }
 }
 
+/** "Resets today 3:11 AM": runDayTime's day names are written for the start of a line, these come mid-sentence. */
+const midSentence = (s: string) => s.replace(/\b(Today|Tomorrow)\b/g, (day) => day.toLowerCase())
+
 /** When a reading was made, "12m ago". The clock is to the minute, so one from this minute is "just now", never "in <1m". */
 const readAgo = (asOf: number, now: number) => timeAgo(Math.min(asOf, now), now)
 
@@ -73,7 +76,7 @@ export function SubscriptionLimits() {
         <h3 id={headingId} className="text-base font-semibold text-zinc-100">
           Subscription allowances
         </h3>
-        <p className="mt-1 text-xs text-zinc-500 wrap-anywhere">Claude and Codex limits per login, from their latest runs. Separate from the dollar costs below; date and project filters do not apply.</p>
+        <p className="mt-1 text-xs text-zinc-500 wrap-anywhere">Each login's 5-hour and weekly windows, from its latest run. The range and filters below don't apply.</p>
       </div>
       {limits.isLoading ? (
         <Loading kind="rows" count={2} label="Loading subscription limits" />
@@ -102,19 +105,19 @@ const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; 
   const at = login.state.atLimit && login.state.resetsAt !== null && login.state.resetsAt > now ? login.state.resetsAt : null
   return (
     <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4" data-testid="limits-login" data-login={login.loginId}>
-      <div className="space-y-0.5">
+      <div className="flex flex-wrap items-baseline gap-x-2">
         <h4 className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</h4>
-        <span className="block min-w-0 text-sm text-zinc-300 wrap-anywhere">{login.source}</span>
+        <span className="min-w-0 text-xs text-zinc-400 wrap-anywhere">{login.source}</span>
       </div>
-      <div className="mt-1 text-xs text-zinc-500 wrap-anywhere">
+      <div className="mt-0.5 text-xs text-zinc-500 wrap-anywhere">
         {loginDetail(login)} · <time title={new Date(login.asOf).toLocaleString()}>as of {readAgo(login.asOf, now)}</time>
       </div>
       {at !== null && (
         <p className="mt-2 rounded-md border border-red-900/50 bg-red-950/40 px-2 py-1 text-xs text-red-200" data-testid="limits-at-limit">
-          At its limit until {runDayTime(at, zone(), now)} ({untilText(at, now)}).
+          At its limit until {midSentence(runDayTime(at, zone(), now))} ({untilText(at, now)}).
         </p>
       )}
-      {/* Side by side once the card is wide enough for both ("Resets Tomorrow 12:00 AM (in 22h)" in each). */}
+      {/* Side by side once the card is wide enough for both; a narrow column breaks "78% remaining · resets tomorrow 12:00 AM (in 22h)" at the dot. */}
       <div className="mt-3 grid gap-3 @md/login:grid-cols-2 @md/login:gap-x-5">
         {login.windows.map((w) => (
           <WindowMeter key={w.window} w={w} now={now} who={HARNESS_LABEL[login.harness]} />
@@ -136,13 +139,14 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
   const known = isCurrent(w, now) && w.usedPct !== null
   const fill = known ? Math.max(0, Math.min(100, w.usedPct!)) : null
   const remaining = known && !(isFull(w) && w.usedPct! < 100) ? Math.max(0, 100 - w.usedPct!) : null
-  const title = `${who} ${w.label}: ${text.used}.${remaining !== null ? ` ${usedLabel(remaining)} remaining.` : ""} ${text.reset}. Read ${readAgo(w.asOf, now)}.`
+  const reset = midSentence(text.reset)
+  const title = `${who} ${w.label}: ${text.used}.${remaining !== null ? ` ${usedLabel(remaining)} remaining.` : ""} ${reset}. Read ${readAgo(w.asOf, now)}.`
   return (
     <div title={title} data-testid="limits-window" data-window={w.window} className="min-w-0">
-      <div className="text-sm font-medium text-zinc-300">{w.label}</div>
-      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-sm tabular-nums">
+      {/* Two lines around the bar: what and how much, then what's left and when it comes back. */}
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm tabular-nums">
+        <span className="font-medium text-zinc-300">{w.label}</span>
         <span className={cx("font-semibold", TEXT_TONE[tone])}>{text.used}</span>
-        {remaining !== null && <span className="text-xs text-zinc-400">{usedLabel(remaining)} remaining</span>}
       </div>
       {fill !== null && (
         <div
@@ -158,7 +162,15 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
           <div className={cx("h-full rounded-full", BAR_TONE[tone])} style={{ width: `${fill}%` }} />
         </div>
       )}
-      <div className={cx("mt-1.5 text-xs", tone === "full" ? "text-red-300" : "text-zinc-500")}>{text.reset}</div>
+      <div className={cx("mt-1.5 text-xs tabular-nums", tone === "full" ? "text-red-300" : "text-zinc-400")}>
+        {remaining !== null ? (
+          <>
+            <span className="whitespace-nowrap">{usedLabel(remaining)} remaining ·</span> <span className="whitespace-nowrap">{reset[0]!.toLowerCase() + reset.slice(1)}</span>
+          </>
+        ) : (
+          reset
+        )}
+      </div>
     </div>
   )
 }
@@ -178,7 +190,7 @@ export function LoginLimitsLine({ scope, harness, className }: { scope: string; 
   return (
     <div className={cx("flex flex-wrap items-center gap-1.5 text-xs text-zinc-500", className)} data-testid="limits-line" data-login={login.loginId}>
       <Gauge className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-      <span className="sr-only">{HARNESS_LABEL[harness]} limits:</span>
+      <span className="text-zinc-400">{HARNESS_LABEL[harness]} limits</span>
       {live.length ? (
         live.map((w) => <WindowChip key={w.window} w={w} now={now} who={HARNESS_LABEL[harness]} />)
       ) : (

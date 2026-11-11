@@ -149,19 +149,24 @@ export interface UsageSeries {
  */
 export const USAGE_COLORS = ["#3987e5", "#d95926", "#9085e9", "#199e70", "#c98500", "#d55181", "#008300"] as const
 export const OTHER_COLOR = "#71717a"
-export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#3987e5", cacheWrite: "#d95926", cacheRead: "#199e70", output: "#9085e9" }
+/**
+ * Token kinds are parts of one thing, so they wear one hue no model or provider has: a cyan ramp, darkest at the bottom
+ * of the stack (validate_palette.js --ordinal: monotone lightness, every step ≥ 2:1 on the dark and the light surface).
+ */
+export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#006478", cacheWrite: "#00859a", cacheRead: "#22a7bc", output: "#52cae0" }
 const MODEL_SLOTS = 3
 const PROVIDER_COLOR: Partial<Record<ComputeProvider, number>> = { upstash: 3, daytona: 4, runpod: 5, vast: 6 }
 
 /**
  * Which models get their own colour: the dearest three over the whole loaded range, unfiltered, so a filter never
- * repaints a model. The rest fold into "Other models".
+ * repaints a model. The rest fold into "Other models". The three take their colours in name order, not cost order, so
+ * a model keeps its colour from one range to the next while the same three lead.
  */
 export function modelSlots(ledger: UsageLedger): Map<string, number> {
   const cost = new Map<string, number>()
   for (const r of ledger.llm) cost.set(r.model, (cost.get(r.model) ?? 0) + r.costUsd)
   const top = [...cost.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MODEL_SLOTS)
-  return new Map(top.map(([m], i) => [m, i]))
+  return new Map(top.map(([m]) => m).sort((a, b) => a.localeCompare(b)).map((m, i) => [m, i]))
 }
 
 export type UsageGroup = "project" | "task" | "model" | "provider" | "role" | "login" | "box"
