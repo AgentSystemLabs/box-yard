@@ -39,6 +39,8 @@ import {
   revealSidebarGroup,
   revealSidebarTask,
   rowPath,
+  runningFigure,
+  runningLabel,
   setPickedRow,
   setSidebarCollapsed,
   sidebarGroups,
@@ -813,11 +815,11 @@ function RailButton({ label, title = label, mark, captain, onClick, onDoubleClic
  * A Captain on the rail: its project's image, or its project's letters in its colour (lib/sidebar.ts railInitials: every
  * Captain's default icon is the same cap, so the tiles would differ by colour alone), or the icon the project picked for
  * its Captain. It says the Captain's status as its expanded row does, with a dot at its corner for its tasks: amber
- * when one asks Cody (as the folded row's count), else red when one failed. A click opens its Captain; a double click
- * (or tap) also expands the sidebar on its tasks.
+ * when one asks Cody (as the folded row's count), else red when one failed; and how many run, in blue (RunningBadge).
+ * A click opens its Captain; a double click (or tap) also expands the sidebar on its tasks.
  */
 const RailProject = memo(function RailProject({ group, initials, mark, onPick, onExpand }: { group: SidebarGroup; initials: string; mark: Mark; onPick: (projectId: string, e: PickEvent) => void; onExpand: (projectId: string) => void }) {
-  const { project, needs, failed } = group
+  const { project, needs, failed, running } = group
   // One dot: what asks Cody comes before what broke.
   const cue = needs ? "asks" : failed ? "failed" : null
   const color = useTiles().colors.get(project.id)
@@ -825,7 +827,7 @@ const RailProject = memo(function RailProject({ group, initials, mark, onPick, o
   const state = useCaptainState(project.id).data
   const status = agentIconLabel(state)
   const working = Boolean(state?.busy || state?.compacting)
-  const label = `${project.name} Captain${status ? `, ${status}` : ""}${needs ? `, ${needs} asking you` : ""}${failed ? `, ${failed} failed` : ""}`
+  const label = `${project.name} Captain${status ? `, ${status}` : ""}${running ? `, ${runningLabel(running)}` : ""}${needs ? `, ${needs} asking you` : ""}${failed ? `, ${failed} failed` : ""}`
   return (
     <RailButton
       label={label}
@@ -849,7 +851,9 @@ const RailProject = memo(function RailProject({ group, initials, mark, onPick, o
           <CueDot cue={agentIconCue(state)} />
         </span>
       )}
-      {cue && <span aria-hidden data-testid="rail-project-cue" data-cue={cue} className={cx("absolute top-1 right-1 h-2 w-2 rounded-full ring-2 ring-zinc-950", CUE_DOT[cue])} />}
+      {/* Its running count takes the top right corner; then the asks or failed dot moves to the top left. */}
+      <RunningBadge count={running} corner />
+      {cue && <span aria-hidden data-testid="rail-project-cue" data-cue={cue} className={cx("absolute top-1 h-2 w-2 rounded-full ring-2 ring-zinc-950", running ? "left-1" : "right-1", CUE_DOT[cue])} />}
     </RailButton>
   )
 })
@@ -898,6 +902,7 @@ const ProjectGroup = memo(function ProjectGroup({ group, folded, treeFolds, sele
           <span className="min-w-0 flex-1 truncate">{project.name}</span>
           <span className="sr-only">, Captain</span>
           {folded && <GroupCountChip group={group} />}
+          <RunningBadge count={group.running} />
           {state === "behind" && !drawer && <BehindMark />}
         </button>
         <ProjectSettingsButton id={project.id} name={project.name} bright={state === "selected"} />
@@ -927,6 +932,33 @@ function GroupCountChip({ group }: { group: SidebarGroup }) {
       {group.needs > 0 && <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", CUE_DOT.asks)} />}
       {count}
       <span className="sr-only"> {count === 1 ? "task" : "tasks"}{group.needs > 0 ? `, ${group.needs} asking you` : ""}</span>
+    </span>
+  )
+}
+
+/**
+ * How many of a project's tasks are running (SidebarGroup.running: working or starting, sub-tasks at any depth): a
+ * blue count in the working dot's colour, with dark figures in either theme (the light one turns zinc over), gone at
+ * 0. It stays still: the working icons' pulse is the only motion. Past 9 it says "9+"; its tooltip and a screen
+ * reader get the whole count ("12 tasks running"). It never shrinks: the project's name truncates first.
+ */
+function RunningBadge({ count, corner = false }: { count: number; corner?: boolean }) {
+  if (!count) return null
+  const label = runningLabel(count)
+  return (
+    <span
+      title={label}
+      data-testid="project-running"
+      className={cx(
+        "grid shrink-0 place-items-center rounded-full leading-none font-semibold tracking-normal tabular-nums",
+        // On the rail, the top right corner of its project's tile, sized as the Inbox's count there.
+        corner ? "absolute top-0 right-0 h-4 min-w-4 px-1 text-[10px] ring-2 ring-zinc-950" : "h-5 min-w-5 px-1.5 text-[11px]",
+        CUE_DOT.working,
+        "text-zinc-50 dark:text-zinc-950",
+      )}
+    >
+      <span aria-hidden>{runningFigure(count)}</span>
+      <span className="sr-only">, {label}</span>
     </span>
   )
 }
@@ -1492,6 +1524,7 @@ function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGrou
         </span>
         <span className="min-w-0 flex-1 truncate">{g.project.name}</span>
         <GroupCountChip group={g} />
+        <RunningBadge count={g.running} />
       </button>
       <ProjectSettingsButton id={g.project.id} name={g.project.name} bright={selected} />
       <PinButton id={g.project.id} name={g.project.name} pinned={false} bright={selected} />

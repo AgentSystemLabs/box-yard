@@ -174,7 +174,8 @@ describe("the sidebar's tree: roles and attributes", () => {
       // The PR number has its own named link beside the button that names the treeitem; ", PR #19" (PrName) only
       // joins the name where that link yields on a narrow touch sidebar (display:none otherwise, which jsdom ignores).
       "  Refresh the portfolio, marketing-site, PR #19 (2/2)",
-      "box-yard, Captain ▾ (3/5)",
+      // Its blue count: the tasks running in it, sub-tasks at any depth.
+      "box-yard, Captain4, 4 tasks running ▾ (3/5)",
       "  Check SSH into the bench (1/2)",
       "  Plan the launch ▾ (2/2)",
       "    Write the launch post ▾ (1/2)",
