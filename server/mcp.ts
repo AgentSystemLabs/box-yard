@@ -63,6 +63,7 @@ import type { CaptainIconId } from "../shared/captainIcons.js"
 import { TASK_ICONS, type TaskIconName } from "../shared/taskIcons.js"
 import { READ_ONLY_REFUSAL, THREAD_TOOLS } from "./sideThreads.js"
 import { timingReport, type McpHandshakes } from "./turnTimings.js"
+import { overridesDefault, runsOnSetting, type AskedPlacement } from "./projectDefaults.js"
 import { formatMs, TURN_ROLES, TURN_STAGES, type Quantiles, type TurnRole } from "../shared/turnTimings.js"
 import { chatAround, DEFAULT_HISTORY_SOURCES, HISTORY_SOURCES, parseTerms, searchHistory, TRANSCRIPT_SCAN_ROWS, type HistoryHit, type HistorySource } from "./history.js"
 
@@ -451,6 +452,17 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
   const agentPickNote = (pick: RunTargetPick, overridden: boolean) => ({
     agent_pick: overridden ? `${owner("Cody")} picked !${pick.token} (${pick.label}) for this prompt, so it runs on that, not the agent or model you asked for` : `!${pick.token} (${pick.label}): ${owner("Cody")}'s pick for this prompt`,
   })
+  /**
+   * { overridesDefault } when the call's own runs_on or agent leaves its project's live defaults (server/projectDefaults.ts),
+   * so a caller following a stale rule sees it did. Not under Cody's picks: runs_on_pick and agent_pick report those.
+   */
+  const overrides = (projectId: string, asked: AskedPlacement): { overridesDefault?: string } => {
+    const d = tasks.projectDefaults(projectId)
+    const line = d ? overridesDefault(d, asked) : null
+    return line ? { overridesDefault: line } : {}
+  }
+  /** runs_on as the call wrote it, for overridesDefault: machine_label alone is "label:<label>". */
+  const askedRunsOn = (runsOn: RunsOn | undefined, machineLabel: string | undefined) => runsOn ?? (machineLabel !== undefined ? `label:${machineLabel}` : undefined)
   /** What a reply says when "local" went to SSH machines (Settings › Machines › Local means). */
   const viaLocal = (p: { viaLocal: boolean; machineLabel: string | null }) =>
     p.viaLocal ? { runs_on: `${labelPhrase(p.machineLabel)}: that's what "local" means in ${owner("Cody")}'s Settings › Machines (runs_on "this_computer" is this computer)` } : {}
@@ -759,7 +771,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     envKeys: p.envKeys,
     // The CLI its new tasks run on (its own, else Settings › Box agents'); existing tasks keep their saved choice unless explicitly continued on another harness.
     agent: p.agentCli ?? `${(deps.settings?.get() ?? DEFAULT_SETTINGS).agentCli} (Settings)`,
-    boxSettings: tasks.projectBoxSettings(p),
+    // Runs on first: where new tasks go when a call passes no runs_on.
+    boxSettings: { runsOn: runsOnSetting({ runner: p.runner, machineLabel: p.runner === "ssh" ? p.machineLabel : null }), ...tasks.projectBoxSettings(p) },
     // Its GPU cloud, pods and $/hr caps, when it runs on GPU.
     ...(p.runner === "gpu" && tasks ? { gpu: await tasks.projectGpuSettings(p, true) } : {}),
     // Its Docker container, image and limits, when it runs in a Docker container.
@@ -1331,7 +1344,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         priority: a.priority ?? null,
         stayOpenOnMerge: a.stay_open_on_merge,
       })
-      return ok({ ...brief(t), ...viaLocal(where), ...pin.note, ...cli.note, next: "The agent starts as soon as a box slot is free. Use wait_for_tasks to wait for its result if the work is quick." })
+      const own = overrides(projectId, {
+        ...(turnPick() ? {} : { runsOn: askedRunsOn(a.runs_on, a.machine_label), runner: where.runner, machineLabel: where.machineLabel }),
+        ...(picksNow().agent ? {} : { agent: a.agent, model: a.model }),
+      })
+      return ok({ ...brief(t), ...viaLocal(where), ...pin.note, ...cli.note, ...own, next: "The agent starts as soon as a box slot is free. Use wait_for_tasks to wait for its result if the work is quick." })
     }),
   )
 
@@ -1496,7 +1513,22 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           ...pinNote,
           ...agentNote,
           created: created.length,
-          tasks: created.map((t) => ({ id: t.id, title: t.title, status: t.status, agent: t.agentCli, ...(t.priority === "high" ? { priority: t.priority } : {}) })),
+          tasks: created.map((t, i) => {
+            const item = a.tasks[i]!
+            const own = item.runs_on !== undefined || item.machine_label !== undefined
+            const asked = own ? askedRunsOn(item.runs_on, item.machine_label) : askedRunsOn(a.runs_on, a.machine_label)
+            return {
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              agent: t.agentCli,
+              ...(t.priority === "high" ? { priority: t.priority } : {}),
+              ...overrides(p.id, {
+                ...(pick ? {} : { runsOn: asked, runner: places[i]!.runner, machineLabel: places[i]!.machineLabel }),
+                ...(agentPick ? {} : { agent: item.agent ?? a.agent, model: item.model ?? a.model }),
+              }),
+            }
+          }),
           next: "Every task is queued. Each agent starts as soon as a box slot is free, and Box Yard creates the boxes they need in parallel. Follow them with list_tasks, or wait_for_tasks when the work is quick.",
         })
       },
@@ -1536,6 +1568,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
           : {}
       await tasks.requireRunner(where.runner, before.projectId, store.taskEnv(before.id), { agentCli: before.agentCli, machineLabel: where.machineLabel, gpu: where.gpu })
       if (where.runner) tasks.setRunsOn(before.id, where.runner, where.machineLabel, where.gpu, where.boxSize)
+      const moved = overrides(before.projectId, turnPick() ? {} : { runsOn: askedRunsOn(a.runs_on, a.machine_label), runner: where.runner, machineLabel: where.machineLabel })
       // Before the message: queuing it runs the scheduler, which must already see the new priority.
       if (a.priority) tasks.setTaskPriority(before.id, a.priority, prioritySetter)
       const how = delivery(before)
@@ -1548,11 +1581,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       // Only a turn that's running is steered; otherwise the message is on its way already (the delivery says how).
       if ((a.steer || a.interrupt) && (t.status === "working" || t.status === "starting")) {
         const now = await tasks.steerQueued(t.id, { by: scopeId ? "captain" : "coordinator" })
-        return ok({ ...brief(now.task), ...viaLocal(where), ...pin.note, ...keeps, delivery: now.delivery === "steering" || now.delivery === "after_turn" ? steerDelivery(now) : how })
+        return ok({ ...brief(now.task), ...viaLocal(where), ...pin.note, ...moved, ...keeps, delivery: now.delivery === "steering" || now.delivery === "after_turn" ? steerDelivery(now) : how })
       }
       // Until a turn takes it, the message can still be changed or withdrawn by this id.
       const queued = store.getQueuedInput(t.id, inputId) ? inputId : undefined
-      return ok({ ...brief(t), ...viaLocal(where), ...pin.note, ...keeps, delivery: how, queuedMessageId: queued })
+      return ok({ ...brief(t), ...viaLocal(where), ...pin.note, ...moved, ...keeps, delivery: how, queuedMessageId: queued })
     }),
   )
 

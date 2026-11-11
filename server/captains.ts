@@ -12,6 +12,7 @@ import { contextTokens, contextWindowOf, formatTokens, parseContextReport, resul
 import { routingInstructions } from "./routing.js"
 import { updatesBlock } from "./noticeBatch.js"
 import { NAMED_TASKS_HEADING, namedState, type PrLookup } from "./handoff.js"
+import { projectDefaultsLine, type ProjectDefaults } from "./projectDefaults.js"
 import { uploadsDir } from "./uploads.js"
 import { captainPrompt } from "./prompts.js"
 import { DEFAULT_LOOP_GUARD, WakeLoopGuard, type LoopGuardOptions } from "./loopGuard.js"
@@ -263,6 +264,8 @@ export class CaptainManager {
   gitAuth: ((projectId: string) => GitAuth) | null = null
   /** The external MCP connectors a session gets (docs/connectors.md › Sessions); app.ts wires them in. */
   connectors: ((ref: SessionRef) => Promise<SessionConnectors>) | null = null
+  /** A project's live defaults for new tasks, for its [Project now] (app.ts: TaskManager.projectDefaults). */
+  projectDefaults: ((projectId: string) => ProjectDefaults | null) | null = null
   /** Read when a Captain is created; tests shorten these. */
   readonly tuning: CaptainTuning = { wakeDebounceMs: 3000, loopGuard: { ...DEFAULT_LOOP_GUARD }, repo: { ...DEFAULT_REPO_TUNING } }
   private sweepTimer: NodeJS.Timeout | null = null
@@ -300,6 +303,7 @@ export class CaptainManager {
         () => this.logins,
         () => this.gitAuth?.(project.id) ?? null,
         () => (this.connectors ? this.connectors({ kind: "captain", projectId: project.id }) : Promise.resolve(NO_SESSION_CONNECTORS)),
+        () => this.projectDefaults?.(project.id) ?? null,
       )
       this.captains.set(project.id, captain)
     }
@@ -655,6 +659,8 @@ class Captain {
     gitAuth: () => GitAuth | null = () => null,
     /** The connectors its sessions get: its project's Captain's (docs/connectors.md › Scope). */
     private readonly connectors: () => Promise<SessionConnectors> = () => Promise.resolve(NO_SESSION_CONNECTORS),
+    /** Its project's live defaults for new tasks (TaskManager.projectDefaults), the last line of [Project now]. */
+    private readonly defaults: () => ProjectDefaults | null = () => null,
   ) {
     this.loopGuard = new WakeLoopGuard(tuning.loopGuard)
     this.mcp = mcp
@@ -1193,8 +1199,9 @@ class Captain {
   }
 
   /**
-   * The project as it stands, at the top of every Captain prompt. The notes (exactly what agents get) are
-   * listed when they changed since this session last saw them; otherwise one line says they're unchanged.
+   * The project as it stands, right before every Captain prompt's messages. The notes (exactly what agents get) are
+   * listed when they changed since this session last saw them; otherwise one line says they're unchanged. It ends
+   * with the live defaults for new tasks: last, next to the messages, so they beat a saved summary read earlier.
    */
   private projectNow(): { text: string; notesHash: string } {
     const tasks = this.store
@@ -1202,13 +1209,17 @@ class Captain {
       .filter((t) => t.status !== "done")
       .map((t) => briefTask(t, this.owner()))
     const notes = this.notesNow()
+    const defaults = this.defaults()
     return {
       text: [
         `[Project now: ${this.project.name}]`,
         this.project.repo ? `Repo: ${this.project.repo} (${this.project.baseBranch})${this.cloneLine()}` : "No repo.",
         notes.text,
         tasks.length ? `Open tasks:\n${tasks.join("\n")}` : "No open tasks.",
-      ].join("\n"),
+        defaults ? projectDefaultsLine(defaults) : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
       notesHash: notes.hash,
     }
   }
