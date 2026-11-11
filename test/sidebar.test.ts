@@ -11,6 +11,8 @@ import {
   revealScroll,
   rowMeta,
   rowPath,
+  runningFigure,
+  runningLabel,
   setTreeFolds,
   sidebarGroups,
   sidebarSelection,
@@ -98,6 +100,54 @@ describe("sidebarGroups", () => {
     const other = task("o", YARD.id, "idle")
     expect(ids(sidebarGroups([YARD], [parent, kid, grandkid, other], {}, opts).shown[0]!)).toEqual(["p", "o"])
     expect(ids(sidebarGroups([YARD], [parent, kid, grandkid, other], {}, { ...opts, closing: new Set(["p"]) }).shown[0]!)).toEqual(["o"])
+  })
+})
+
+describe("a project's running count (its blue badge)", () => {
+  const running = (tasks: Task[], extra: Partial<Parameters<typeof sidebarGroups>[3]> = {}) =>
+    sidebarGroups([YARD, SITE], tasks, { [YARD.id]: "pinned", [SITE.id]: "pinned" }, { ...opts, ...extra }).shown.map((g) => g.running)
+
+  it("counts tasks working or starting, the ones whose icon wears the blue dot; nothing else runs", () => {
+    const statuses: TaskStatus[] = ["queued", "starting", "working", "needs_input", "waiting", "idle", "pr_ready", "done", "failed"]
+    expect(running(statuses.map((s) => task(`t_${s}`, YARD.id, s)))).toEqual([2, 0])
+    expect(running([task("a", YARD.id, "working"), task("b", YARD.id, "working"), task("c", SITE.id, "starting")])).toEqual([2, 1])
+  })
+
+  it("counts sub-tasks at any depth, under any parent, in their own project", () => {
+    const top = task("top", YARD.id, "waiting")
+    const kid = task("kid", YARD.id, "working", { parentTaskId: "top" })
+    const grandkid = task("grand", YARD.id, "starting", { parentTaskId: "kid" })
+    const deep = task("deep", YARD.id, "working", { parentTaskId: "grand" })
+    const resting = task("rest", YARD.id, "idle", { parentTaskId: "kid" })
+    // A finished parent still shows while its tree runs; its running sub-task counts.
+    const done = task("done", SITE.id, "done")
+    const late = task("late", SITE.id, "working", { parentTaskId: "done" })
+    expect(running([top, kid, grandkid, deep, resting, done, late])).toEqual([3, 1])
+    // A folded tree hides its rows, never its count: the count doesn't read the folds.
+    setTreeFolds({ top: true, kid: true })
+    expect(running([top, kid, grandkid, deep, resting, done, late])).toEqual([3, 1])
+    setTreeFolds({})
+  })
+
+  it("leaves out a tree being marked done, and is 0 (no badge) for a project with nothing running", () => {
+    const parent = task("p", YARD.id, "idle")
+    const kid = task("k", YARD.id, "working", { parentTaskId: "p" })
+    expect(running([parent, kid, task("s", SITE.id, "pr_ready")])).toEqual([1, 0])
+    expect(running([parent, kid], { closing: new Set(["p"]) })).toEqual([0, 0])
+  })
+
+  it("a change in the count is a new group, so its row draws it; the same count keeps the group", () => {
+    const first = sidebarGroups([YARD], [task("a", YARD.id, "working"), task("b", YARD.id, "idle")], {}, opts).shown
+    const same = keepGroups(first, sidebarGroups([YARD], [first[0]!.rows[0]!.task, first[0]!.rows[1]!.task], {}, opts).shown)
+    expect(same).toBe(first)
+    const more = keepGroups(first, sidebarGroups([YARD], [first[0]!.rows[0]!.task, task("b", YARD.id, "starting")], {}, opts).shown)
+    expect(more[0]).not.toBe(first[0])
+    expect(more[0]!.running).toBe(2)
+  })
+
+  it("draws up to 9, then 9+; its words say the whole count", () => {
+    expect([1, 2, 9, 10, 42].map(runningFigure)).toEqual(["1", "2", "9", "9+", "9+"])
+    expect([1, 2, 12].map(runningLabel)).toEqual(["1 task running", "2 tasks running", "12 tasks running"])
   })
 })
 
