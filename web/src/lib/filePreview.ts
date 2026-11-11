@@ -165,7 +165,6 @@ export function lineCount(text: string): number {
   return Math.max(1, n)
 }
 
-/** The text's lines, as many as lineCount says. */
 /** Tab stops in the monospace view, in columns: the stylesheet's `tab-size` (Tailwind's preflight sets 4). */
 const TAB_COLUMNS = 4
 
@@ -186,6 +185,7 @@ export function hangingIndent(line: string, max = 8): number {
   return line.includes("\t") ? n - (n % TAB_COLUMNS) : n
 }
 
+/** The text's lines, as many as lineCount says. */
 export function splitLines(text: string): string[] {
   const lines = text.split("\n")
   if (lines.length > 1 && lines.at(-1) === "") lines.pop()

@@ -3,7 +3,7 @@
 // links open it through <FileLink> and lib/preview.ts.
 import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
 import { useSearchParams } from "wouter"
-import { ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, ChevronRight, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, RotateCw, WrapText, ZoomIn, ZoomOut } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, RotateCw, WrapText, ZoomIn, ZoomOut } from "lucide-react"
 import { useArtifacts } from "../lib/queries"
 import {
   CSV_ROW_LIMIT,
@@ -105,8 +105,8 @@ type TextFile = { text: string; lines: number } | "loading" | "failed"
 /** Text with more lines than this (a log) gets Jump to end. */
 const JUMP_MIN_LINES = 200
 
-/** The text's scroller, so the header can jump in it, and whether it is scrolled past its first screen. */
-type Scroll = { box: RefObject<HTMLDivElement | null>; onPast: (past: boolean) => void }
+/** The text's scroller, so the header can jump in it, and whether it is scrolled to its end. */
+type Scroll = { box: RefObject<HTMLDivElement | null>; onEnd: (atEnd: boolean) => void }
 
 /** In the header only where it is wide (42rem); narrower, the same action is in the header's ⋯. */
 const WIDE_ONLY = "@max-2xl/preview:hidden"
@@ -139,12 +139,12 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const text = typeof file === "object" ? file.text : null
   const lines = typeof file === "object" ? file.lines : 0
   const failed = file === "failed"
-  // The file that turned out to be deleted (its URL): nothing can be done with it but copying its link.
+  // The file that turned out to be deleted (its URL): nothing can be done with it, so it gets no actions.
   const [goneUrl, setGoneUrl] = useState<string | null>(null)
   const gone = goneUrl === item.url
   const box = useRef<HTMLDivElement>(null)
-  const [past, setPast] = useState(false)
-  const scroll = useMemo<Scroll>(() => ({ box, onPast: setPast }), [])
+  const [atEnd, setAtEnd] = useState(false)
+  const scroll = useMemo<Scroll>(() => ({ box, onEnd: setAtEnd }), [])
   // An image's own size once it loads, with its URL: the last image's must never show under the next one's name.
   const [pixels, setPixels] = useState<(Size & { url: string }) | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
@@ -193,9 +193,9 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   // each): each layout's own control says so.
   const wrapWide = wrap ?? false
   const wrapNarrow = wrap ?? lines <= LINE_ROWS_MAX
-  /** A long file (a log): its end is what matters, and then the way back. */
-  const jump = code && lines > JUMP_MIN_LINES
-  const jumpTo = (end: boolean) => box.current?.scrollTo({ top: end ? box.current.scrollHeight : 0, behavior: "instant" })
+  /** A long file (a log): its end is what matters, and from there the way back. One control, for whichever applies. */
+  const jump = code && lines > JUMP_MIN_LINES ? { icon: atEnd ? ChevronsUp : ChevronsDown, label: atEnd ? "Jump to start" : "Jump to end", word: atEnd ? "Start" : "End" } : null
+  const jumpNow = () => box.current?.scrollTo({ top: atEnd ? 0 : box.current.scrollHeight, behavior: "instant" })
 
   /** Switches the view, so it names the one it goes to. `bar`: the narrow bar's, which keeps the word only while it fits. */
   const rawToggle = (bar: boolean) =>
@@ -218,17 +218,17 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
         {!bar && <span className={WIDE_ONLY}>Download</span>}
       </a>
     )
-  const jumps: MenuItem[] = jump
-    ? [{ icon: ArrowDownToLine, label: "Jump to end", run: () => jumpTo(true) }, ...(past ? [{ icon: ArrowUpToLine, label: "Jump to start", run: () => jumpTo(false) }] : [])]
-    : []
+  const jumps: MenuItem[] = jump ? [{ icon: jump.icon, label: jump.label, run: jumpNow }] : []
   const copyLink: MenuItem = { icon: LinkIcon, label: "Copy link", run: () => void copy("link") }
   const more: MenuItem[] = [
     ...jumps,
     ...(code ? [{ icon: WrapText, label: wrapNarrow ? "Don't wrap lines" : "Wrap lines", run: () => setWrap(!wrapNarrow) }] : []),
     ...(text !== null ? [{ icon: Copy, label: "Copy contents", run: () => void copy("contents") }] : []),
-    ...(gone ? [] : [{ icon: ExternalLink, label: "Open in new tab", run: () => void window.open(item.url, "_blank", "noopener") }]),
+    { icon: ExternalLink, label: "Open in new tab", run: () => void window.open(item.url, "_blank", "noopener") },
     copyLink,
   ]
+  /** The header has controls for the view (the divider's left), not only the file's actions. */
+  const views = hasRaw || code || (image && !gone) || (isTextKind(kind) && !failed)
 
   return (
     <Modal
@@ -250,18 +250,8 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
             </p>
           )}
         </div>
+        {/* The view's controls, a divider, then the file's actions. A deleted file has neither. */}
         <div className="flex shrink-0 items-center gap-2 @max-[30rem]/preview:hidden">
-          {/* First in the row, so the one that comes and goes moves nothing but the title's edge. */}
-          {jump && past && (
-            <ToolButton label="Jump to start" className={WIDE_ONLY} onClick={() => jumpTo(false)}>
-              <ArrowUpToLine className="h-4 w-4" />
-            </ToolButton>
-          )}
-          {jump && (
-            <ToolButton label="Jump to end" className={WIDE_ONLY} onClick={() => jumpTo(true)}>
-              <ArrowDownToLine className="h-4 w-4" />
-            </ToolButton>
-          )}
           {rawToggle(false)}
           {/* Worded from 32rem: a bare Copy would be a guess at what it copies. */}
           {code && (
@@ -277,16 +267,26 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
               <span className="@max-lg/preview:hidden">Copy</span>
             </ToolButton>
           )}
-          {!gone && (
-            <NewTabLink href={item.url} mark={false} className={TOOL} title="Open in new tab" aria-label="Open in new tab">
-              <ExternalLink className="h-4 w-4" />
-            </NewTabLink>
+          {jump && (
+            <ToolButton label={jump.label} className={WIDE_ONLY} onClick={jumpNow}>
+              <jump.icon className="h-4 w-4" />
+              {/* As wide as the longer word, so the swap moves nothing. */}
+              <span className="min-w-8 text-left">{jump.word}</span>
+            </ToolButton>
           )}
-          {download(false)}
-          <ToolButton label={copied("link") ? "Copied" : "Copy link"} className={WIDE_ONLY} onClick={() => void copy("link")}>
-            {copied("link") ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className="h-4 w-4" />}
-          </ToolButton>
-          <MoreActions items={[...jumps, copyLink]} className="@2xl/preview:hidden" />
+          {!gone && (
+            <>
+              {views && <span aria-hidden className="h-5 border-l border-zinc-800" />}
+              {download(false)}
+              <NewTabLink href={item.url} mark={false} className={TOOL} title="Open in new tab" aria-label="Open in new tab">
+                <ExternalLink className="h-4 w-4" />
+              </NewTabLink>
+              <ToolButton label={copied("link") ? "Copied" : "Copy link"} className={WIDE_ONLY} onClick={() => void copy("link")}>
+                {copied("link") ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className="h-4 w-4" />}
+              </ToolButton>
+              <MoreActions items={[...jumps, copyLink]} className="@2xl/preview:hidden" />
+            </>
+          )}
         </div>
         <DismissButton kind="close" onClick={closePreview} />
       </header>
@@ -319,8 +319,8 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
           {flash ? FLASH_TEXT[flash.what][flash.ok ? 0 : 1] : ""}
         </p>
       </div>
-      {/* Wide, only a gallery has this bar, for its pager. */}
-      <footer className={cx("flex shrink-0 items-center gap-1 border-t border-zinc-900 px-2 py-1", !position && "@[30rem]/preview:hidden")}>
+      {/* Wide, only a gallery has this bar, for its pager; so does a deleted file at any width. */}
+      <footer className={cx("flex shrink-0 items-center gap-1 border-t border-zinc-900 px-2 py-1", !position && (gone ? "hidden" : "@[30rem]/preview:hidden"))}>
         {position && (
           <nav aria-label="Files" className="flex items-center gap-1 @[30rem]/preview:mx-auto">
             <StepButton side="left" noun={noun} />
@@ -330,12 +330,14 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
             <StepButton side="right" noun={noun} />
           </nav>
         )}
-        <div className="ml-auto flex items-center gap-1 @[30rem]/preview:hidden">
-          {rawToggle(true)}
-          {zoom}
-          {download(true)}
-          <MoreActions items={more} />
-        </div>
+        {!gone && (
+          <div className="ml-auto flex items-center gap-1 @[30rem]/preview:hidden">
+            {rawToggle(true)}
+            {zoom}
+            {download(true)}
+            <MoreActions items={more} />
+          </div>
+        )}
       </footer>
     </Modal>
   )
@@ -408,8 +410,8 @@ function StepButton({ side, noun }: { side: "left" | "right"; noun: "image" | "f
 function FileLoading({ stage = false }: { stage?: boolean }) {
   if (stage) return <Loading kind="field" label="Loading file" className="absolute inset-4 h-auto! sm:h-auto!" />
   return (
-    <div className="min-w-0 flex-1 px-4 py-5 @[30rem]/preview:px-6">
-      <Loading kind="rows" label="Loading file" className="mx-auto max-w-4xl" />
+    <div className="min-w-0 flex-1 px-4 py-5 @[30rem]/preview:px-5">
+      <Loading kind="rows" label="Loading file" className="max-w-3xl" />
     </div>
   )
 }
@@ -505,7 +507,7 @@ function PreviewBody({
     case "json":
     case "csv":
     case "text":
-      return <TextPreview item={item} kind={kind} raw={raw} wrap={wrap} onText={onText} onGone={onGone} scroll={scroll} />
+      return <TextPreview item={item} kind={kind} name={name} raw={raw} wrap={wrap} onText={onText} onGone={onGone} scroll={scroll} />
     default:
       return <Problem message="This file type can't be previewed." url={item.url} />
   }
@@ -754,7 +756,9 @@ function ImageView({
       onPointerCancel={onPointerEnd}
       className={cx(
         // touch-none: the stage, not the page, takes pinches and swipes.
-        "relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden bg-[repeating-conic-gradient(#18181b_0%_25%,#111113_0%_50%)] bg-[length:24px_24px] p-4 select-none",
+        "relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden p-4 select-none",
+        // The checkerboard is for an image's transparency: with no image to show, the stage is plain.
+        status === "gone" || status === "error" ? "bg-[#18181b]" : "bg-[repeating-conic-gradient(#18181b_0%_25%,#111113_0%_50%)] bg-[length:24px_24px]",
         isZoomed && "cursor-grab active:cursor-grabbing",
       )}
     >
@@ -872,6 +876,7 @@ function useFileText(url: string, size?: number): [TextState, () => void] {
 function TextPreview({
   item,
   kind,
+  name,
   raw,
   wrap,
   onText,
@@ -880,6 +885,7 @@ function TextPreview({
 }: {
   item: PreviewItem
   kind: "markdown" | "json" | "csv" | "text"
+  name: string
   raw: boolean
   wrap: Wrap
   onText: (file: TextFile) => void
@@ -909,19 +915,19 @@ function TextPreview({
   if (text === null) return null
   if (!raw && kind === "markdown")
     return (
-      <div className="prose-doc scroll-thin min-h-0 flex-1 overflow-auto px-4 py-5 text-sm text-zinc-200 @[30rem]/preview:px-6">
-        {/* A readable column, centred in a gallery's wide frame. */}
-        <div className="mx-auto max-w-4xl">
+      <div className="prose-doc scroll-thin min-h-0 flex-1 overflow-auto px-4 py-5 text-sm text-zinc-200 @[30rem]/preview:px-5">
+        {/* A readable column on the header's left edge, however wide the frame. */}
+        <div className="max-w-3xl">
           <Markdown>{text}</Markdown>
         </div>
       </div>
     )
   if (!raw && kind === "csv") return <CsvTable text={text} tsv={/\.tsv$/i.test(item.name || item.url)} />
   if (!raw && kind === "json") {
-    if (pretty !== null) return <CodeView text={pretty} wrap={wrap} scroll={scroll} />
-    return <CodeView text={text} wrap={wrap} scroll={scroll} note="This isn't valid JSON, so it's shown as is." />
+    if (pretty !== null) return <CodeView text={pretty} name={name} wrap={wrap} scroll={scroll} />
+    return <CodeView text={text} name={name} wrap={wrap} scroll={scroll} note="This isn't valid JSON, so it's shown as is." />
   }
-  return <CodeView text={text} wrap={wrap} scroll={scroll} />
+  return <CodeView text={text} name={name} wrap={wrap} scroll={scroll} />
 }
 
 // CodeView's classes by Wrap: on, off, and (null) on only where the frame is narrow.
@@ -942,22 +948,32 @@ const CODE_NUMBER = "sticky left-0 border-r border-zinc-900 bg-zinc-950 pr-2 pl-
  * its number beside its first row and the rows under it are plainly its own. Over LINE_ROWS_MAX lines it is two text
  * nodes instead, so even a 2 MB log renders quickly: those don't wrap unless asked to, and then without the gutter (its
  * numbers would no longer line up). `wrap` null: wrapped only where the frame is narrow.
- * `scroll`: where it leaves its scroller for Jump to end, and says when it is scrolled past the first screen.
+ * `scroll`: where it leaves its scroller for Jump to end, and says when it is scrolled to its end.
+ * The scroller takes the focus (named after the file), so the keyboard can scroll it.
  */
-const CodeView = memo(function CodeView({ text, note, wrap, scroll }: { text: string; note?: string; wrap: Wrap; scroll: Scroll }) {
+const CodeView = memo(function CodeView({ text, name, note, wrap, scroll }: { text: string; name: string; note?: string; wrap: Wrap; scroll: Scroll }) {
   const rows = useMemo(() => (lineCount(text) > LINE_ROWS_MAX ? null : splitLines(text)), [text])
   const mode = wrap === null ? "auto" : wrap ? "on" : "off"
-  const past = useRef(false)
-  // Gone with this view (another file, the rendered form): so is "scrolled past".
-  useEffect(() => () => scroll.onPast(false), [scroll])
+  const atEnd = useRef(false)
+  const check = () => {
+    const el = scroll.box.current
+    // Not a text that fits its frame: that one is at its start.
+    const now = !!el && el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2
+    if (now !== atEnd.current) scroll.onEnd((atEnd.current = now))
+  }
+  // Wrapping (or another form of the text) changes its height under the same scroll position.
+  useEffect(check, [text, mode])
+  // Gone with this view (another file, the rendered form): so is "at its end".
+  useEffect(() => () => scroll.onEnd(false), [scroll])
   return (
     <div
       ref={scroll.box}
-      onScroll={(e) => {
-        const now = e.currentTarget.scrollTop > e.currentTarget.clientHeight
-        if (now !== past.current) scroll.onPast((past.current = now))
-      }}
-      className="scroll-thin min-h-0 flex-1 overflow-auto bg-zinc-950"
+      tabIndex={0}
+      role="region"
+      aria-label={name}
+      onScroll={check}
+      // The focus outline inside the frame: the dialog would clip one drawn around it.
+      className="scroll-thin min-h-0 flex-1 overflow-auto bg-zinc-950 focus-visible:-outline-offset-2!"
     >
       {note && <div className="border-b border-zinc-900 px-4 py-2 text-xs text-amber-300/80">{note}</div>}
       {rows ? (
