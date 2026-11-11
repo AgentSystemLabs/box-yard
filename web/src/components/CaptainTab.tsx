@@ -849,7 +849,7 @@ function CaptainMenu({ project, meter, model, lastActive }: { project: Project; 
         variant="ghost"
         className="px-1.5"
         aria-label={`${project.name} Captain menu${cue ? `, context ${pct}% used` : ""}`}
-        title={cue ? `Context ${pct}% full` : "More"}
+        title={cue ? `Context ${pct}% used` : "More"}
         data-context-cue={cue || undefined}
         aria-haspopup="dialog"
         aria-expanded={open}
