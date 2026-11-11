@@ -106,6 +106,7 @@ export function Composer({
   runTargetsProject = null,
   githubProject = runTargetsProject,
   stop = null,
+  sendLabel: sendName = "Send",
   onDestinationPick,
 }: {
   onDestinationPick?: () => void
@@ -160,6 +161,8 @@ export function Composer({
   githubProject?: string | null
   /** While a turn runs: Stop, before Send, ends it (the task's agent, the Coordinator or a Captain). `label` says whose. */
   stop?: { label: string; onStop: () => void } | null
+  /** What Send does here when it isn't a plain send ("Queue message" while a task's agent works): its name and tooltip. */
+  sendLabel?: string
 }) {
   // The same slim box with a target or an icon: the text only moves over for it.
   const textMetrics = cx(TEXT, target || icon ? "pl-11" : null)
@@ -324,7 +327,7 @@ export function Composer({
   // Sent while the live stream is down: it waits in the box (Send now tries anyway) instead of failing.
   const [held, setHeld] = useState(false)
   // What Send says of itself, also while it can't be pressed.
-  const sendLabel = held ? "Waiting to send" : uploading ? "Uploading files…" : "Send"
+  const sendLabel = held ? "Waiting to send" : uploading ? "Uploading files…" : sendTo.chosen ? "Send" : sendName
   const live = useConnectionLive()
   const submit = (now = false) => {
     // Still listening: stop, let the last words land, then send (dictation calls submit again).
@@ -654,7 +657,7 @@ export function Composer({
                 <PickButtons picks={picks} className={TOOL} />
               </span>
             )}
-            <MicButton machine={dictation} />
+            <MicButton machine={dictation} touch={touch} />
             {/* A mouse's chips are drawn smaller than their slot, so they keep their gap. */}
             {tools && (
               <span className={cx("flex shrink-0 items-center gap-1 pointer-coarse:gap-0 empty:hidden", toolsMenu ? onRow(firstTool) : null)}>
