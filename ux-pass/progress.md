@@ -17,7 +17,7 @@ Status is the mean of the 8 category means (Clarity, Discoverability, Efficiency
 | 7 | Settings & project settings | [task_2d089595f1b8](/tasks/task_2d089595f1b8) | [baseline](/artifacts/art_eb3cd4985d5e/report-round-0.html) | 6.8 → 8.2, round 3 being scored ([report](/artifacts/art_10ec9645ec21/report-round-3.html)) |
 | 8 | Schedules & Hooks | [task_b6e0b706f6df](/tasks/task_b6e0b706f6df) | [baseline](/artifacts/art_6a2d66816da9/report-round-0.html) | 6.1 → 8.6, round 2 ([report](/artifacts/art_baad85bf47ff/report-round-2.html)) |
 | 9 | Usage & meters | [task_a463f3af99e6](/tasks/task_a463f3af99e6) | [baseline](/artifacts/art_6753f5439573/report-round-0.html) | 6.9 → 8.4, 3rd revision landed and round 3 being scored |
-| 10 | Files, artifacts & previews | [task_ac31327224f8](/tasks/task_ac31327224f8) | [baseline](/artifacts/art_fa7de58a1a8c/report-round-0.html) | in progress, no scores reported yet |
+| 10 | Files, artifacts & previews | [task_ac31327224f8](/tasks/task_ac31327224f8) | [baseline](/artifacts/art_fa7de58a1a8c/report-round-0.html) | 6.8 → 8.3, 3rd revision in and round 3 being scored |
 
 Biggest jumps so far:
 - **Command palette, Discoverability:** 4.3 → 8.0.
