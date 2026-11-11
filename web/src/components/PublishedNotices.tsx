@@ -6,6 +6,7 @@ import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { TimeAgo, cx } from "./ui"
 import { FileLink } from "./FileLink"
+import { scrollIntoList } from "./StickyScroll"
 import { KindIcon, Thumbnail } from "./TaskFiles"
 import { NOTICE_CLASS, NoticeCard, NoticeLayout, NoticeProject } from "./ChatLine"
 import { previewKind } from "../lib/filePreview"
@@ -110,10 +111,11 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
   const tiny = fit(files, TINY_ROOM, NAMES_SHORT)
   /** What the toggle says while closed: how many files the strip holds back, or what the list adds to it. */
   const more = (shown: number, names = "Show names") => (files.length > shown ? `+${files.length - shown} more` : names)
-  // The list opens downwards, and a chat that follows its newest row would push this card's top out of view.
+  // The list opens downwards, and a chat that follows its newest row would push this card's top out of view: the chat
+  // lets go of its bottom, and scrolls only as far as shows the card.
   const card = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    if (open) card.current?.scrollIntoView({ block: "nearest", behavior: "instant" })
+    if (open && card.current) scrollIntoList(card.current, { block: "nearest", behavior: "instant" })
   }, [open])
   return (
     <div ref={card} data-testid="published-group" data-count={files.length}>
