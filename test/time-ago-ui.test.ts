@@ -150,7 +150,7 @@ describe("a working task's thread", () => {
   afterEach(() => qc.clear())
   const thread = (working: string | null, workingSince: number | null) =>
     createElement(QueryClientProvider, { client: qc },
-      createElement(TaskThread, { id: taskId, handle: null, working, workingSince, selectionSource: null, onStartFromSelection: () => {}, onFollowUp: () => {} }),
+      createElement(TaskThread, { id: taskId, handle: null, working, workingSince, selectionSource: null, selectionAsk: null, onFollowUp: () => {} }),
     )
 
   it("says how long it has been working, live, with when it started on a tap", () => {

@@ -131,8 +131,8 @@ export function NewTaskButton({
 }
 
 /**
- * The popover itself. NewTaskButton opens it on a project; SelectionToTask opens it on selected output with
- * `quote`, its own draft `scope` and `onStart`, which then gets the text instead of a task being created here.
+ * The popover itself. NewTaskButton opens it on a project; SelectionToTask opens it on selected text ("Create task")
+ * with `quote`, its own draft `scope` and `onStart`, which then gets the text instead of a task being created here.
  */
 export function NewTaskPopover({
   id,
@@ -143,7 +143,6 @@ export function NewTaskPopover({
   quote,
   placeholder = "What should the agent do?",
   submitLabel = "Start task",
-  moreLabel = "More options",
   scope: scopeProp,
   align = "end",
   onStart,
@@ -161,8 +160,6 @@ export function NewTaskPopover({
   placeholder?: string
   /** The submit button, when `onStart` does something other than start a task here ("Send to the Coordinator"). */
   submitLabel?: string
-  /** The way to the full dialog, which then says what it does instead ("Start it myself…"). */
-  moreLabel?: string
   /** Where the draft is kept; defaults to the project's. */
   scope?: string
   /** "end": its right edge on the trigger's (a header button); "center": centred under it (a selection). */
@@ -171,7 +168,8 @@ export function NewTaskPopover({
   onStart?: (text: string) => void
   /** `refocus`: put focus back on the trigger (Esc, the close button); not after a click elsewhere. */
   onClose: (refocus: boolean) => void
-  onMore: (projectId: string, prompt: string) => void
+  /** "More options": the full dialog. Left out, there's no such button (a selection's Create task only sends). */
+  onMore?: (projectId: string, prompt: string) => void
 }) {
   const narrow = useNarrow()
   const scope = scopeProp ?? draftScope(projectId)
@@ -279,7 +277,7 @@ export function NewTaskPopover({
             ))}
           </Select>
         )}
-        <button
+        {onMore && <button
           type="button"
           disabled={!target && !onStart}
           onClick={() => onMore(target, text)}
@@ -289,8 +287,8 @@ export function NewTaskPopover({
             (projectId || onStart) && "-ml-1.5",
           )}
         >
-          <SlidersHorizontal className="h-3.5 w-3.5" /> {moreLabel}
-        </button>
+          <SlidersHorizontal className="h-3.5 w-3.5" /> More options
+        </button>}
         <Button type="submit" variant="primary" size="sm" title={submitLabel} className={cx(TAP_AREA, "max-w-full")} disabled={onStart ? false : !text.trim() || !target || held}>
           <span className="min-w-0 truncate">{submitLabel}</span>
         </Button>
@@ -478,8 +476,6 @@ export function NewTaskDialog({
   projectId: projectProp,
   defaultProjectId,
   initialPrompt = "",
-  quote,
-  compose,
   draftKey,
   onCancel,
   onDone,
@@ -489,10 +485,6 @@ export function NewTaskDialog({
   /** The picker's first choice (the command palette: the project in view). */
   defaultProjectId?: string | null
   initialPrompt?: string
-  /** Selected text the task is about, shown read-only above the prompt, which then holds only the instructions (optional). */
-  quote?: string
-  /** The task's prompt from what's in the box, when more goes with it (a selection's quote and where it came from). */
-  compose?: (text: string) => string
   /** The draft its files are kept in (lib/composerDraft.ts), so Cancel keeps them with the popover's text. Without it, they go with the dialog. */
   draftKey?: string
   onCancel: (prompt: string) => void
@@ -563,9 +555,9 @@ export function NewTaskDialog({
 
   const uploading = files.some((f) => f.status === "uploading")
   // A selection is a task without a word more.
-  const canStart = Boolean(prompt.trim() || quote) && !uploading && Boolean(projectId)
+  const canStart = Boolean(prompt.trim()) && !uploading && Boolean(projectId)
   // What Start task waits for, said beside it.
-  const why = loaded && !projectId ? "Create a project first." : !(prompt.trim() || quote) ? "Describe the task to start it." : uploading ? "Files are still uploading." : ""
+  const why = loaded && !projectId ? "Create a project first." : !prompt.trim() ? "Describe the task to start it." : uploading ? "Files are still uploading." : ""
   const autoTitle = prompt.trim() ? titleFromPrompt(prompt) : "Made from the prompt when blank"
 
   return (
@@ -575,7 +567,7 @@ export function NewTaskDialog({
       // screen, so a short phone's keyboard still leaves the prompt in view.
       placement="sheet"
       className="max-sm:max-h-dvh!"
-      title={quote ? "New task from selection" : "New task"}
+      title="New task"
       // The picker already names the project.
       description={projectProp ? project?.name : undefined}
       dirty={Boolean(title || env) || prompt !== initialPrompt || files.length !== initialFiles}
@@ -591,7 +583,7 @@ export function NewTaskDialog({
         if (!canStart) return
         primeSendSound()
         const id = newClientId("task")
-        const full = compose ? compose(prompt) : prompt.trim()
+        const full = prompt.trim()
         create.mutate({
           id,
           projectId,
@@ -642,15 +634,14 @@ export function NewTaskDialog({
           </Select>
         </Field>
       )}
-      {quote && <SelectionQuote text={quote} />}
-      <Field label="What should the agent do?" hint={quote ? "The task also gets the selected text in full, and where it came from." : undefined}>
+      <Field label="What should the agent do?">
         <textarea
           ref={promptRef}
           className={cx(inputClass, GROWS)}
           rows={4}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder={quote ? "Additional instructions (optional)" : "Goal, constraints, and what done looks like."}
+          placeholder="Goal, constraints, and what done looks like."
         />
       </Field>
       <Field label="Title (optional)">

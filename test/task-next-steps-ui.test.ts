@@ -13,7 +13,6 @@ let root: Root
 let host: HTMLElement
 let qc: QueryClient
 const followUp = vi.fn()
-const startFromSelection = () => {}
 const taskId = "task_steps001"
 const msg = (id: string, role: TaskMessage["role"], nextSteps?: string[]): TaskMessage => ({
   id, taskId, role, content: `Reply ${id}`, createdAt: 1, meta: nextSteps ? { nextSteps } : null,
@@ -22,7 +21,7 @@ const old = msg("old", "assistant", ["An earlier suggestion"])
 const latest = msg("latest", "assistant", ["Open the phone preview", "Start a follow-up task"])
 const steps = () => [...host.querySelectorAll('[aria-label="Recommended next steps"] button')].map((b) => b.textContent)
 const render = (id = taskId) => act(() => root.render(createElement(QueryClientProvider, { client: qc },
-  createElement(TaskThread, { id, handle: null, working: null, selectionSource: null, onStartFromSelection: startFromSelection, onFollowUp: followUp }),
+  createElement(TaskThread, { id, handle: null, working: null, selectionSource: null, selectionAsk: null, onFollowUp: followUp }),
 )))
 const update = (messages: TaskMessage[]) => act(async () => {
   qc.setQueryData(keys.taskMessages(taskId), messages)

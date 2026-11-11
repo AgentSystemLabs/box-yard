@@ -1,18 +1,24 @@
-// Side threads in a chat: Reply to a message in the Coordinator's (or a Captain's) chat, or to a passage of it (the
-// selection's "Reply quoting selection"), and the replies stay out of the chat, which shows "↰ N replies" under the
-// message, and open in a panel on the right (Slack's and Claude's threads). The chat's agent routes each reply: it
-// answers a question there, or sends it on to the task's agent or into its own chat, and a line under the reply says
-// where it went (ThreadRoute.tsx). Older threads asked about a highlighted passage show the same way. A thread sees
-// the chat up to that message (server/sideThreads.ts) but shows only the message or highlight and the replies.
+// Side threads in a chat: Reply to a message in the Coordinator's (or a Captain's) chat, and the replies stay out of
+// the chat, which shows "↰ N replies" under the message, and open in a panel on the right (Slack's and Claude's
+// threads). The chat's agent routes each reply: it answers a question there, or sends it on to the task's agent or into
+// its own chat, and a line under the reply says where it went (ThreadRoute.tsx).
+//
+// "Ask" on a highlighted passage (SelectionToTask.tsx) opens a thread about it the same way: the passage on top, and
+// the chat's agent answers the questions there, read-only. Text in a thread can be highlighted too, with the same Ask
+// and Create task: a question asked there is a thread nested under this one, to any depth. A nested thread says which
+// thread it was asked in and goes back to it (the row under its header, a sheet's Back, Esc), and a thread lists the
+// ones asked from inside it above its box. A thread sees the chat up to its message, and a nested one its parent too
+// (server/sideThreads.ts), but shows only the message or highlight and the replies.
 //
 // The panel lives inside the chat's section, which is a `coord` container: from 35.5rem wide (a 125%-zoomed laptop; a 560px phone stays a sheet) it's a column beside the
 // chat (the Coordinator's dock widens to make room, App.tsx), below that a full-height sheet over it.
-import { Fragment, createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { flushSync } from "react-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   CircleCheck,
+  CornerLeftUp,
   Loader2,
   Maximize2,
   MessageCircle,
@@ -35,24 +41,31 @@ import { LineIcon, Markdown, TAP_AREA, cx } from "./ui"
 import { quotePreview } from "./NewTask"
 import { confirmDialog } from "../lib/confirm"
 import { revealChatMessage } from "../lib/reveal"
-import { newClientId } from "../lib/queries"
+import { newClientId, useProjects } from "../lib/queries"
 import {
+  COORDINATOR_CHAT,
   closeThread,
+  leaveThread,
   openReply,
   openThread,
   threadDraftKey,
   toggleExpanded,
   useAskThread,
+  useChildThreads,
   useMessageThreads,
   useOpenThread,
   useSendThreadMessage,
   useThread,
+  useThreadChat,
   useThreadControl,
   useThreadMessages,
   useThreadStream,
   type OpenThread,
   type ThreadChat,
+  type ThreadSlot,
 } from "../lib/threads"
+import { SelectionToTask, type SelectionAsk } from "./SelectionToTask"
+import type { SelectionTaskSource } from "../lib/selectionTask"
 import { caretAt, findQuoteRange, setOpenHighlight, setThreadRange, threadRange } from "../lib/threadHighlight"
 import { ResizeHandle, useElementWidth, useResizable } from "../lib/resize"
 import { THREAD_MAX, THREAD_MIN, THREAD_ROOM, stripWidthCss, threadLimit, threadWidthCss } from "../lib/layout"
@@ -60,22 +73,17 @@ import { useChatRoom, usePanelWidths } from "../lib/panelWidths"
 import { useColumnLayout } from "../lib/columns"
 import type { ChatMessage, SideThread, SideThreadMessage } from "../../../shared/types"
 
-const ThreadChatContext = createContext<ThreadChat | null>(null)
-
-/** Turns on side threads for the chat lines inside (ChatLine's markers, the Ask actions). */
-export const ThreadChatProvider = ThreadChatContext.Provider
-/** The chat whose lines these are, or null where there are no threads (a task's transcript). */
-export const useThreadChat = () => useContext(ThreadChatContext)
+export { ThreadChatProvider, useThreadChat } from "../lib/threads"
 
 /**
- * Reply to a whole message in its reply thread (MessageActions' Reply, the selection's "Reply quoting selection"):
- * `quote` goes in the thread's box, ready to add to. Null where the chat has no threads. Call it from the press: the
- * panel mounts and its box takes the caret before the handler returns, which is what brings up a phone's keyboard.
+ * Reply to a whole message in its reply thread (MessageActions' Reply). Null where the chat has no threads. Call it
+ * from the press: the panel mounts and its box takes the caret before the handler returns, which is what brings up a
+ * phone's keyboard.
  */
-export function useReplyTo(): ((anchorId: string, text: string, quote?: string) => void) | null {
+export function useReplyTo(): ((anchorId: string, text: string) => void) | null {
   const chat = useThreadChat()
   const qc = useQueryClient()
-  const reply = useCallback((anchorId: string, text: string, quote?: string) => chat && flushSync(() => openReply(qc, chat, anchorId, text, quote)), [qc, chat])
+  const reply = useCallback((anchorId: string, text: string) => chat && flushSync(() => openReply(qc, chat, anchorId, text)), [qc, chat])
   return chat ? reply : null
 }
 
@@ -88,6 +96,7 @@ export function useReplyTo(): ((anchorId: string, text: string, quote?: string) 
  */
 export function SideThreadPane({ chat, headerClassName = "min-h-12", panel }: { chat: ThreadChat; headerClassName?: string; panel?: ReactNode }) {
   const cur = useOpenThread(chat)
+  const qc = useQueryClient()
   const id = panel ? "panel-conversation" : cur?.id ?? null
   const expanded = !panel && Boolean(cur?.expanded)
   // A column's left edge drags (one width for every chat's panel); the chat it sits in caps the drag.
@@ -127,7 +136,8 @@ export function SideThreadPane({ chat, headerClassName = "min-h-12", panel }: { 
       onKeyDown={(e) => {
         if (panel || e.key !== "Escape" || e.defaultPrevented) return
         e.stopPropagation()
-        closeThread(chat)
+        // A nested thread goes back to the one it was asked in first.
+        leaveThread(qc, chat)
       }}
       ref={setAside}
       style={{ "--thread-w": panel ? stripWidthCss(strip, chatRoom, strips) : threadWidthCss(size.width) } as React.CSSProperties}
@@ -188,64 +198,115 @@ const PANEL_WIDE = "hidden @min-[35.5rem]/coord:grid"
 /** Resolve says its name where the panel's header has the room (its container); narrower, it's the ✓ alone. */
 const RESOLVE_ROOM = "@min-[24rem]/thread:flex @min-[24rem]/thread:w-auto! @min-[24rem]/thread:items-center @min-[24rem]/thread:gap-1.5 @min-[24rem]/thread:px-2.5"
 
-/** The panel's header: ‹ on a sheet, its heading (`title`), its own buttons (`children`), and × in a column. */
+/**
+ * The panel's header: ‹ on a sheet, its heading (`title`), its own buttons (`children`), and × in a column. `sheet`:
+ * always a sheet (a level inside a task's panel), so always ‹ and never ×.
+ */
 function PanelHeader({
-  chat,
   open,
+  sheet,
   className,
   title,
+  onBack,
+  backLabel,
+  onClose,
   closeLabel,
   closeTitle,
   children,
 }: {
-  chat: ThreadChat
   open: OpenThread
+  sheet: boolean
   className: string
   title: ReactNode
+  onBack: () => void
+  backLabel: string
+  onClose: () => void
   closeLabel: string
   closeTitle: string
   children?: ReactNode
 }) {
-  const close = () => closeThread(chat)
   return (
     <header className={cx(className, "@container/thread flex shrink-0 items-center gap-1 border-b border-zinc-900 pt-[env(safe-area-inset-top)] pr-[max(0.5rem,env(safe-area-inset-right))] pl-2")}>
-      {/* A sheet goes back to the chat; a column closes with the × on the right. */}
-      <DismissButton kind="back" onClick={close} label="Back to the chat" className={open.expanded ? "hidden" : "@min-[35.5rem]/coord:hidden"} />
+      {/* A sheet goes back (to the chat, or the thread this one was asked in); a column closes with the × on the right. */}
+      <DismissButton kind="back" onClick={onBack} label={backLabel} className={sheet ? undefined : open.expanded ? "hidden" : "@min-[35.5rem]/coord:hidden"} />
       {title}
       <div className="flex shrink-0 items-center gap-0.5">
         {children}
-        <DismissButton kind="close" onClick={close} label={closeLabel} title={closeTitle} className={open.expanded ? undefined : PANEL_WIDE} />
+        {!sheet && <DismissButton kind="close" onClick={onClose} label={closeLabel} title={closeTitle} className={open.expanded ? undefined : PANEL_WIDE} />}
       </div>
     </header>
   )
 }
 
+/** A thread's highlighted passage, on top of it. */
+const QUOTE_CARD = "block rounded-lg border border-zinc-800 border-l-2 border-l-yard-500/70 bg-zinc-900/60 px-3 py-2 text-xs leading-5 wrap-anywhere whitespace-pre-wrap text-zinc-300"
+
 /** The last Reply whose caret was placed (OpenThread.focus), so showing the panel again leaves the focus be. */
 let caretPlaced = 0
 
-function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: OpenThread; headerClassName: string }) {
+/**
+ * A thread, open: its header, what it's about, its messages and its box. `slot`: where it shows, when that isn't the
+ * chat's own panel. `sheet`: a level inside a task's panel (TaskSession.tsx), which it covers: its header has Back and
+ * no × or Expand. `source`: where its lines are for the selection's Create task, when that isn't the chat (a task).
+ */
+export function ThreadView({
+  chat,
+  slot = chat,
+  open,
+  headerClassName,
+  sheet = false,
+  backLabel = "Back to the chat",
+  source,
+}: {
+  chat: ThreadChat
+  slot?: ThreadSlot
+  open: OpenThread
+  headerClassName: string
+  sheet?: boolean
+  backLabel?: string
+  source?: SelectionTaskSource | null
+}) {
   const id = open.id
   const draft = open.draft ?? null
   const thread = useThread(chat, id)
   const messages = useThreadMessages(id, Boolean(thread)).data ?? NO_MESSAGES
   const send = useSendThreadMessage(chat, id)
-  const start = useAskThread(chat)
-  const control = useThreadControl(chat)
+  const start = useAskThread(chat, { slot })
+  const control = useThreadControl(chat, slot)
+  const qc = useQueryClient()
+  // The thread this one was asked in (a passage of its messages), and the ones asked from inside this one.
+  const parentId = thread?.parentId ?? draft?.parentId ?? null
+  const parent = useThread(chat, parentId)
+  const nested = useChildThreads(chat, thread ? id : null)
+  const projects = useProjects()
   const pane = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const more = useRef<HTMLButtonElement>(null)
   const list = useRef<StickyScrollHandle>(null)
   const [menu, setMenu] = useState(false)
   const busy = Boolean(thread?.busy)
-  const reply = draft !== null || thread?.kind === "reply"
+  const reply = thread ? thread.kind === "reply" : draft !== null && (draft.kind ?? "reply") === "reply"
   const anchorId = thread?.anchorId ?? draft?.anchorId ?? null
   const original = thread?.quote ?? draft?.text ?? ""
   const resolved = thread?.resolvedAt != null
   const router = routerName(chat)
+  // In the chat's own panel, on a message of that chat: "Show in the chat" finds it. Not for a task's transcript.
+  const inChat = slot === chat
 
-  // Opened from Reply: straight to the composer, the caret after anything in it ("Reply quoting selection" put the
-  // quote there, openReply), once, not on every mount. In the commit Reply's press makes (useReplyTo), so a phone's
-  // keyboard comes up with it.
+  // The selection's actions on this thread's own lines: Ask nests a thread under this one (under the same parent,
+  // while this one isn't started), and Create task goes to this chat's agent, or the task's Captain.
+  const projectName = chat === COORDINATOR_CHAT ? null : (projects.data?.find((p) => p.id === chat)?.name ?? null)
+  const selectionSource = useMemo<SelectionTaskSource | null>(
+    () => (source !== undefined ? source : chat === COORDINATOR_CHAT ? { kind: "orchestrator" } : projectName ? { kind: "captain", project: { id: chat, name: projectName } } : null),
+    [source, chat, projectName],
+  )
+  const started = Boolean(thread)
+  const askParent = started ? id : draft?.parentId
+  const askOn = useMemo<SelectionAsk | null>(() => (anchorId ? { chat, slot, anchorId, parentId: askParent } : null), [chat, slot, anchorId, askParent])
+  const inThread = useMemo(() => (started ? { id, quote: original } : null), [started, id, original])
+
+  // Opened from Reply or the selection's Ask: straight to the composer, the caret after anything in it, once, not on
+  // every mount. In the commit the press makes (useReplyTo, SelectionToTask), so a phone's keyboard comes up with it.
   const focus = open.focus
   useLayoutEffect(() => {
     const el = input.current
@@ -279,13 +340,14 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
     const content = text.trim()
     if (!content) return
     list.current?.scrollToEnd()
-    if (!thread && draft) return start.mutateAsync({ id, messageId: newClientId("thm"), anchorId: draft.anchorId, quote: draft.text, question: content, kind: "reply" })
+    if (!thread && draft) return start.mutateAsync({ id, messageId: newClientId("thm"), anchorId: draft.anchorId, quote: draft.text, question: content, kind: draft.kind ?? "reply", parentId: draft.parentId })
     return send.mutateAsync({ id: newClientId("thm"), content })
   }
   const remove = async () => {
+    const under = nested.length ? ` The ${nested.length === 1 ? "thread" : "threads"} asked from inside it ${nested.length === 1 ? "goes" : "go"} too.` : ""
     const ok = await confirmDialog({
       title: "Delete this thread?",
-      body: reply ? "Its replies are deleted. The main chat isn't affected." : "Its question and replies are deleted, and the highlight goes. The main chat isn't affected.",
+      body: `${reply ? "Its replies are deleted." : "Its question and replies are deleted, and the highlight goes."}${under} The main chat isn't affected.`,
       confirmLabel: "Delete",
       danger: true,
     })
@@ -296,8 +358,9 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
     if (chat === "coordinator") return revealChatMessage(anchorId)
     document.querySelector(`[data-chat-id="${CSS.escape(anchorId)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" })
   }
+  const back = () => leaveThread(qc, chat, slot)
   const items: MenuItem[] = [
-    { icon: TextSearch, label: "Show in the chat", run: reveal },
+    ...(inChat ? [{ icon: TextSearch, label: "Show in the chat", run: reveal }] : []),
     ...(thread && busy ? [{ icon: Square, label: "Stop answering", run: () => control.stop(id) }] : []),
     ...(thread ? [{ icon: Trash2, label: "Delete thread", run: () => void remove() }] : []),
   ]
@@ -305,9 +368,12 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
   return (
     <div ref={pane} className="relative flex h-full min-h-0 flex-col">
       <PanelHeader
-        chat={chat}
         open={open}
+        sheet={sheet}
         className={headerClassName}
+        onBack={back}
+        backLabel={parentId ? "Back to the thread this was asked in" : backLabel}
+        onClose={() => closeThread(slot)}
         closeLabel="Close thread"
         closeTitle="Close (Esc). It stays under the message."
         title={
@@ -342,38 +408,57 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
             <span className="hidden text-xs font-medium @min-[24rem]/thread:inline">{resolved ? "Reopen" : "Resolve"}</span>
           </button>
         )}
-        <button ref={more} type="button" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu} aria-label="More thread actions" title="More" className={PANEL_ICON}>
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
+        {items.length > 0 && (
+          <button ref={more} type="button" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu} aria-label="More thread actions" title="More" className={PANEL_ICON}>
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        )}
         {menu && <MessageMenu trigger={more} items={items} onClose={() => setMenu(false)} />}
-        <button
-          type="button"
-          data-testid="side-thread-expand"
-          onClick={() => toggleExpanded(chat)}
-          aria-pressed={Boolean(open.expanded)}
-          aria-label={open.expanded ? "Back beside the chat" : "Expand over the chat"}
-          title={open.expanded ? "Back beside the chat" : "Expand over the chat"}
-          className={cx(PANEL_ICON, PANEL_WIDE)}
-        >
-          {open.expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-        </button>
-      </PanelHeader>
-      {!reply && thread && (
-        <div className="shrink-0 border-b border-zinc-900 px-3 py-2.5">
+        {!sheet && (
           <button
             type="button"
-            onClick={reveal}
-            title="Show it in the chat"
-            data-testid="side-thread-quote"
-            className="block w-full rounded-lg border border-zinc-800 border-l-2 border-l-yard-500/70 bg-zinc-900/60 px-3 py-2 text-left text-xs leading-5 wrap-anywhere whitespace-pre-wrap text-zinc-300 hover:border-zinc-700"
+            data-testid="side-thread-expand"
+            onClick={() => toggleExpanded(slot)}
+            aria-pressed={Boolean(open.expanded)}
+            aria-label={open.expanded ? "Back beside the chat" : "Expand over the chat"}
+            title={open.expanded ? "Back beside the chat" : "Expand over the chat"}
+            className={cx(PANEL_ICON, PANEL_WIDE)}
           >
-            <span className="line-clamp-4">{thread.quote}</span>
+            {open.expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
           </button>
-          {thread.context === "summary" && (
+        )}
+      </PanelHeader>
+      {parentId && (
+        // Where this one was asked, and the way back to it at any width (a column's × closes the whole panel).
+        <button
+          type="button"
+          data-testid="side-thread-parent"
+          onClick={() => openThread(slot, parentId)}
+          title="Back to the thread this was asked in"
+          className="flex min-h-11 w-full shrink-0 items-center gap-1.5 border-b border-zinc-900 px-3 text-left text-xs text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none focus-visible:ring-inset [@media(pointer:fine)]:min-h-9"
+        >
+          <CornerLeftUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="shrink-0">Asked in</span>
+          <span className="min-w-0 truncate text-zinc-200">{parent ? `“${threadTitle(parent.quote)}”` : "another thread"}</span>
+        </button>
+      )}
+      {!reply && (thread || draft) && (
+        <div className="shrink-0 border-b border-zinc-900 px-3 py-2.5">
+          {inChat && !parentId ? (
+            <button type="button" onClick={reveal} title="Show it in the chat" data-testid="side-thread-quote" className={cx(QUOTE_CARD, "block w-full text-left hover:border-zinc-700")}>
+              <span className="line-clamp-4">{original}</span>
+            </button>
+          ) : (
+            <blockquote data-testid="side-thread-quote" className={QUOTE_CARD}>
+              <span className="line-clamp-4">{original}</span>
+            </blockquote>
+          )}
+          {thread?.context === "summary" && (
             <p className="mt-1.5 text-[11px] leading-4 text-zinc-400">{SUMMARY_NOTE}</p>
           )}
         </div>
       )}
+      <SelectionToTask source={selectionSource} askOn={askOn} thread={inThread}>
       <StickyScroll handle={list} count={messages.length} resetKey={id} className={cx("px-3 py-3", open.expanded && "mx-auto w-full max-w-3xl")} contentClassName="space-y-3">
         {reply && (
           <div data-testid="side-thread-original" className="space-y-2.5">
@@ -402,8 +487,23 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
             <ThreadLine key={m.id} m={m} />
           ),
         )}
+        {!reply && !thread && draft && (
+          <p data-testid="side-thread-ask-hint" className="text-[11px] leading-4 text-zinc-400">
+            Ask the {router} about the highlighted text. It answers here, and the {sheet ? "task" : "chat"} isn&apos;t interrupted. Highlight text in an answer to ask about that too, or to create a task from it.
+          </p>
+        )}
         <ThreadStreaming id={id} busy={busy} />
       </StickyScroll>
+      </SelectionToTask>
+      {nested.length > 0 && (
+        // The questions asked from inside this thread: each opens in this panel, and leads back here.
+        <div data-testid="side-thread-children" role="group" aria-label="Threads asked from here" className={cx("flex max-h-28 shrink-0 flex-wrap items-center gap-1.5 overflow-y-auto border-t border-zinc-900 px-3 py-2 pointer-coarse:gap-y-5 pointer-coarse:py-3", open.expanded && "mx-auto w-full max-w-3xl")}>
+          <span className="shrink-0 text-[11px] text-zinc-400">Asked from here</span>
+          {nested.map((t) => (
+            <ThreadChip key={t.id} t={t} active={false} onOpen={() => openThread(slot, t.id)} />
+          ))}
+        </div>
+      )}
       <Composer
         onSubmit={submit}
         draftKey={threadDraftKey(id)}
@@ -412,8 +512,8 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
         textareaRef={input}
         stop={thread && busy ? { label: `Stop the ${router}'s answer`, onStop: () => control.stop(id) } : null}
         icon={<ComposerIcon kind="side-question" label={`Side question to the ${router}`} />}
-        placeholder={reply ? (busy ? "Queue another reply…" : "Reply…") : busy ? "Queue a follow-up…" : "Reply in this thread…"}
-        label="Reply in this side thread"
+        placeholder={reply ? (busy ? "Queue another reply…" : "Reply…") : busy ? "Queue a follow-up…" : thread ? "Reply in this thread…" : "Ask about the highlighted text…"}
+        label={thread || reply ? "Reply in this side thread" : "Ask about the highlighted text"}
         panelRef={pane}
         className={cx(COMPOSER_FOOTER, "px-3", open.expanded && "mx-auto w-full max-w-3xl")}
       />
@@ -567,8 +667,8 @@ function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; 
   )
 }
 
-/** A question about a highlight, under its message: the passage, how many replies it has, and the same marks as "N replies". */
-function ThreadChip({ t, active, onOpen }: { t: SideThread; active: boolean; onOpen: () => void }) {
+/** A question about a highlight, under its message (or its thread, or a task's box): the passage, how many replies it has, and the same marks as "N replies". */
+export function ThreadChip({ t, active, onOpen }: { t: SideThread; active: boolean; onOpen: () => void }) {
   const resolved = t.resolvedAt != null
   const state = t.busy ? "answering" : t.unread ? "unread" : resolved ? "resolved" : null
   const quote = quotePreview(t.quote, 48)

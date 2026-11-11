@@ -1,14 +1,20 @@
 // A task's panel: its full history in TaskView's memoized, paged transcript (TaskThread), without the task page.
 // The box's "Side question" swaps the transcript for the task's side questions to the Coordinator (TaskAsk.tsx).
-import { useCallback, useMemo, useRef, useState } from "react"
-import { useArtifacts, useProjects, useSchedules, useSendChat, useSendTaskMessage, useTask, newClientId } from "../lib/queries"
-import { projectContext, taskContext } from "../lib/selectionTask"
-import { Button, InRepo, cx } from "./ui"
+// Text highlighted in the transcript has Ask and Create task (SelectionToTask.tsx): both go to the project's Captain.
+// An Ask is a thread of the Captain's chat about that passage, which opens over the panel as a level of its own
+// (TaskQuestion), and the questions asked so far stay as chips above the box (TaskQuestions).
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
+import { useArtifacts, useProjects, useSchedules, useSendTaskMessage, useTask } from "../lib/queries"
+import { taskContext, type SelectionTaskSource } from "../lib/selectionTask"
+import type { SelectionAsk } from "./SelectionToTask"
+import { ThreadChip, ThreadView } from "./SideThread"
+import { Button, InRepo, TAP_AREA, cx } from "./ui"
 import { TaskThread, workingLabel } from "./TaskView"
 import { CHAT_COLUMN, TaskHeader } from "./TaskHeader"
 import { TaskComposer, type TaskAskTarget } from "./CaptainForward"
 import { TaskAsk } from "./TaskAsk"
-import { useAskAboutTask, useTaskThread } from "../lib/threads"
+import { leaveThread, openThread, taskSlot, useAskAboutTask, useOpenThread, useTaskAsks, useTaskThread, type OpenThread } from "../lib/threads"
 import type { StickyScrollHandle } from "./StickyScroll"
 import { WaitFixButton, WaitReason } from "./WaitReason"
 import { TaskFailure } from "./TaskFailure"
@@ -42,7 +48,6 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
   const handle = useRef<StickyScrollHandle>(null)
   const panel = useRef<HTMLDivElement>(null)
   const send = useSendTaskMessage(id)
-  const chat = useSendChat()
   const submit = useCallback((content: string, attachments: Parameters<typeof send.mutateAsync>[0]["attachments"]) => {
     const sending = send.mutateAsync({ content, attachments })
     handle.current?.scrollToEnd()
@@ -50,7 +55,22 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
   }, [send.mutateAsync])
   const followUp = useCallback((content: string) => { void submit(content, []).catch(() => {}) }, [submit])
   const scrollToEnd = useCallback(() => handle.current?.scrollToEnd(), [])
-  const selection = useCallback((content: string) => chat.mutate({ id: newClientId("chat"), content, attachments: [] }), [chat.mutate])
+  // Highlighted text: Ask is a thread of the project's Captain chat on this task, shown here; Create task goes to that
+  // Captain. Stable, so the transcript (memo'd) doesn't re-render with the header.
+  const slot = taskSlot(id)
+  const projectId = project?.id
+  const projectName = project?.name
+  const selectionAsk = useMemo<SelectionAsk | null>(() => (projectId ? { chat: projectId, slot, anchorId: id } : null), [projectId, slot, id])
+  const taskRef = taskContext(task)
+  const selectionSource = useMemo<SelectionTaskSource | null>(
+    () => (projectId && projectName && taskRef ? { kind: "task", project: { id: projectId, name: projectName }, task: taskRef } : null),
+    [projectId, projectName, taskRef?.id, taskRef?.title, taskRef?.branch, taskRef?.prUrl], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const question = useOpenThread(slot)
+  const qc = useQueryClient()
+  const leaveQuestion = useCallback(() => projectId && leaveThread(qc, projectId, slot), [qc, projectId, slot])
+  // A level inside the panel, as the side questions are: Esc goes back to the thread it was asked in, then to the task.
+  useModalStep(Boolean(question && projectId), leaveQuestion, "Back to the task")
   const schedule = schedules.data?.find((s) => s.id === task?.scheduleId)
   // Side questions: the box asks the Coordinator about the task, and its answers show in place of the transcript.
   const [asking, setAsking] = useState(false)
@@ -98,7 +118,7 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
         </>
       ) : (
         <InRepo taskId={id}>
-          <div ref={panel} className="flex min-h-0 flex-1 flex-col">
+          <div ref={panel} className="relative flex min-h-0 flex-1 flex-col">
             <TaskHeader task={task} project={project} schedule={schedule} files={files} onBack={asking ? back : onClose} backLabel={asking ? "Back to the task" : backLabel} backClassName={inPanel && !asking ? BACK_ON_SHEET : undefined} controls={asking ? undefined : controls} tree={!asking} />
             <TaskStatusAnnouncer task={task} />
             {/* pb-0.5: the column clips from sm, and the button's focus ring stays inside it. */}
@@ -117,17 +137,64 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
                   working={onTurn(task) ? workingLabel(task.status) : null}
                   workingSince={onTurn(task) ? runningSince(task) : null}
                   ask={task.status === "needs_input" ? task.question : null}
-                  selectionSource={project ? { kind: "task", project: projectContext(project)!, task: taskContext(task)! } : null}
-                  onStartFromSelection={selection} onFollowUp={followUp}
+                  selectionSource={selectionSource} selectionAsk={selectionAsk} onFollowUp={followUp}
                 />
               )}
             </div>
+            {projectId && !asking && <TaskQuestions taskId={id} projectId={projectId} openId={question?.id ?? null} />}
             <div className="shrink-0">
               <TaskComposer task={task} project={project} panelRef={panel} onSubmit={submit} onForwarded={scrollToEnd} ask={ask} className="chat-column overflow-hidden" />
             </div>
+            {question && projectId && <TaskQuestion key={question.id} projectId={projectId} slot={slot} open={question} source={selectionSource} />}
           </div>
         </InRepo>
       )}
     </>
+  )
+}
+
+/**
+ * A question about a passage of the task's transcript, open: the thread covers the panel (its header's Back, or Esc,
+ * returns to the thread it was asked in, then to the task), and what's under it is out of reach of Tab meanwhile.
+ */
+function TaskQuestion({ projectId, slot, open, source }: { projectId: string; slot: string; open: OpenThread; source: SelectionTaskSource | null }) {
+  const sheet = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const el = sheet.current
+    const under = el?.parentElement ? [...el.parentElement.children].filter((c) => c !== el) : []
+    for (const c of under) c.setAttribute("inert", "")
+    return () => {
+      for (const c of under) c.removeAttribute("inert")
+    }
+  }, [])
+  return (
+    <section ref={sheet} data-testid="task-question" aria-label="Thread" className="absolute inset-0 z-30 flex flex-col bg-zinc-950">
+      <ThreadView chat={projectId} slot={slot} open={open} headerClassName="min-h-12" sheet backLabel="Back to the task" source={source} />
+    </section>
+  )
+}
+
+/**
+ * The questions asked about passages of this task's transcript, as chips above its box: each opens its thread again.
+ * Resolved ones fold into a count, which shows them.
+ */
+function TaskQuestions({ taskId, projectId, openId }: { taskId: string; projectId: string; openId: string | null }) {
+  const asks = useTaskAsks(projectId, taskId)
+  const [all, setAll] = useState(false)
+  if (!asks.length) return null
+  const folded = asks.filter((t) => t.resolvedAt != null && !t.unread && !t.busy)
+  const shown = all ? asks : asks.filter((t) => !folded.includes(t))
+  return (
+    <div data-testid="task-questions" role="group" aria-label="Questions about this transcript" className="chat-column flex max-h-24 shrink-0 flex-wrap items-center gap-1.5 overflow-y-auto pt-1.5 pb-1 pointer-coarse:gap-y-5 pointer-coarse:py-3">
+      <span className="shrink-0 text-[11px] text-zinc-400">Asked here</span>
+      {shown.map((t) => (
+        <ThreadChip key={t.id} t={t} active={openId === t.id} onOpen={() => openThread(taskSlot(taskId), t.id)} />
+      ))}
+      {folded.length > 0 && (
+        <button type="button" onClick={() => setAll(!all)} aria-expanded={all} className={cx(TAP_AREA, "inline-flex h-6 shrink-0 items-center rounded-full px-2 text-xs text-zinc-400 hover:text-zinc-100")}>
+          {all ? "Hide resolved" : `${folded.length} resolved`}
+        </button>
+      )}
+    </div>
   )
 }

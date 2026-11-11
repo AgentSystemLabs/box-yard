@@ -17,7 +17,7 @@ import { focusComposer } from "../lib/chatSwitch"
 import { AttachmentList } from "./Attachments"
 import { TaskQueue } from "./QueuedMessages"
 import { RecommendedNextSteps, nextStepsFromMeta } from "./RecommendedNextSteps"
-import { SelectionToTask } from "./SelectionToTask"
+import { SelectionToTask, type SelectionAsk } from "./SelectionToTask"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import type { SelectionTaskSource } from "../lib/selectionTask"
 import type { TaskMessage, TaskStatus } from "../../../shared/types"
@@ -56,7 +56,7 @@ export const TaskThread = memo(function TaskThread({
   workingSince = null,
   ask = null,
   selectionSource,
-  onStartFromSelection,
+  selectionAsk,
   onFollowUp,
   bare = false,
   scrollKey,
@@ -71,8 +71,10 @@ export const TaskThread = memo(function TaskThread({
   workingSince?: number | null
   /** The question the task waits on (needs_input), as a card at the thread's foot until it's answered. */
   ask?: string | null
+  /** Where its lines are, for the selection's Create task (its project's Captain gets it). */
   selectionSource: SelectionTaskSource | null
-  onStartFromSelection: (prompt: string) => void
+  /** Where the selection's Ask goes: a thread of its project's Captain chat, shown in the task's panel. Null: no Ask. */
+  selectionAsk: SelectionAsk | null
   onFollowUp: (message: string) => void
 }) {
   const historyHandle = useRef<StickyScrollHandle>(null)
@@ -135,7 +137,7 @@ export const TaskThread = memo(function TaskThread({
   }, [shown, hidden, index, repo])
 
   return (
-    <SelectionToTask source={selectionSource} onPrompt={onStartFromSelection}>
+    <SelectionToTask source={selectionSource} askOn={selectionAsk}>
       <ChatHistory index={history.index} days={history.days ?? days} messages={shown} reveal={reveal} ensure={history.ensure} scrollHandle={historyHandle} taskId={id}>
         <StickyScroll
           handle={setHistoryHandle}

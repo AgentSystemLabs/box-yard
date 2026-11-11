@@ -29,50 +29,74 @@ export function taskContext(task: Task | null | undefined): SelectionTaskContext
   return task ? { id: task.id, title: task.title, branch: task.branch, prUrl: task.prUrl } : null
 }
 
-export function buildSelectionTaskPrompt(input: { source: SelectionTaskSource; selectedText: string; instructions: string; ownerName?: string }): string {
-  const selected = truncate(input.selectedText.trim(), MAX_SELECTED_CHARS)
-  const lines = [
-    "Start a new task from this selected Box Yard output. Route it through your normal Box Yard placement rules: create a new task in the relevant project unless an existing task is clearly the better place to continue.",
-    "",
-    "## Context",
-    ...contextLines(input.source),
-    "",
-    "## Selected output",
-    quote(selected),
-  ]
-  const instructions = input.instructions.trim()
-  if (instructions) lines.push("", withOwner("## Cody's additional instructions", input.ownerName), instructions)
-  return lines.join("\n")
+/** Where in the app the text was highlighted, beyond its `source`: ids the chat's agent can look up. */
+export interface SelectionPlace {
+  /** The chat message (or transcript line) the selection is in. */
+  messageId?: string | null
+  /** The side thread it was highlighted in, and the passage that thread is about. */
+  thread?: { id: string; quote: string } | null
 }
 
 /**
- * The same selection as a prompt for an agent, not a chat to route it: the instructions first, then where the text
- * came from and the full quote. The New task dialog ("Start it myself…") starts the task with it directly.
+ * "Create task" on highlighted text: the message for whoever creates it (selectionTargetProject: the project's
+ * Captain, or the Coordinator). It asks for a new task from Cody's request and the passage, and says where the passage
+ * was highlighted. The browser never creates the task itself.
  */
-export function buildSelectionTaskBrief(input: { source: SelectionTaskSource; selectedText: string; instructions: string }): string {
-  const instructions = input.instructions.trim() || "Follow up on this Box Yard output."
-  return [instructions, "", "## Context", ...contextLines(input.source), "", "## Selected output", quote(truncate(input.selectedText.trim(), MAX_SELECTED_CHARS))].join("\n")
+export function buildSelectionTaskPrompt(input: { source: SelectionTaskSource; selectedText: string; instructions: string; place?: SelectionPlace; ownerName?: string }): string {
+  const selected = truncate(input.selectedText.trim(), MAX_SELECTED_CHARS)
+  const instructions = input.instructions.trim()
+  const here = selectionTargetProject(input.source)
+  const lines = [
+    withOwner(
+      `Create a new task from Cody's request and the text Cody highlighted, both below. Write the task's prompt from the request, and give it the highlighted text and where it was highlighted as context. ${
+        here ? "It belongs in this project unless the request says otherwise." : "Put it in the project it belongs to."
+      } Create a new task: don't add this to an existing one unless the request asks for that.`,
+      input.ownerName,
+    ),
+    "",
+    withOwner("## Cody's request", input.ownerName),
+    instructions || withOwner("(Cody didn't write one: work out the task from the highlighted text.)", input.ownerName),
+    "",
+    "## Where it was highlighted",
+    ...contextLines(input.source, input.place),
+    "",
+    "## Highlighted text",
+    quote(selected),
+  ]
+  return lines.join("\n")
 }
 
-/** Where the selection's prompt goes, for the popover's "Send to …" button and the toast after sending it. */
+/** The project whose Captain gets a selection's "Create task" (a task's, or the Captain chat's own), or null: the Coordinator. */
+export function selectionTargetProject(source: SelectionTaskSource): string | null {
+  return source.kind === "orchestrator" ? null : source.project.id
+}
+
+/** Who that is, for the popover's "Send to …" button and the toast after sending it. */
 export function selectionTarget(source: SelectionTaskSource): string {
-  return source.kind === "captain" ? `${source.project.name}'s Captain` : "the Coordinator"
+  return source.kind === "orchestrator" ? "the Coordinator" : `${source.project.name}'s Captain`
 }
 
-function contextLines(source: SelectionTaskSource): string[] {
+function contextLines(source: SelectionTaskSource, place?: SelectionPlace): string[] {
   const lines: string[] = []
   if (source.project) lines.push(`- Project: ${source.project.name} (${source.project.id})`)
-  else lines.push("- Project: unknown; decide from the selected output and existing projects.")
+  else lines.push("- Project: unknown; decide from the request, the highlighted text and the existing projects.")
   if (source.kind === "task") {
-    lines.push(`- Source task: ${source.task.title} (${source.task.id})`)
-    if (source.task.branch) lines.push(`- Source branch: ${source.task.branch}`)
-    if (source.task.prUrl) lines.push(`- Source pull request: ${source.task.prUrl}`)
+    lines.push(`- In the transcript of the task: ${source.task.title} (${source.task.id})`)
+    if (source.task.branch) lines.push(`- That task's branch: ${source.task.branch}`)
+    if (source.task.prUrl) lines.push(`- That task's pull request: ${source.task.prUrl}`)
   } else if (source.kind === "captain") {
-    lines.push("- Source: the project Captain's chat output")
+    lines.push("- In this chat (the project Captain's)")
   } else {
-    lines.push("- Source: orchestrator chat output")
+    lines.push("- In this chat (the Coordinator's)")
   }
+  if (place?.thread) lines.push(`- In a side thread (${place.thread.id}) about: “${oneLine(place.thread.quote, 200)}”`)
+  if (place?.messageId) lines.push(`- Message: ${place.messageId}`)
   return lines
+}
+
+const oneLine = (text: string, max: number) => {
+  const flat = text.replace(/\s+/g, " ").trim()
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat
 }
 
 function quote(text: string): string {
