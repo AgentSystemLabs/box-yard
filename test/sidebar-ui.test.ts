@@ -19,6 +19,10 @@ import { chatRef, resetColumns, setPinned } from "../web/src/lib/columns.js"
 import type { Project, Task, TaskStatus } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
 import { sidebarGroup } from "./sidebarTree.js"
+import { CUE_DOT } from "../web/src/components/TaskIcon.js"
+
+/** Drawn in the asks amber (the asks cue dot's colour). */
+const ASKS_AMBER = CUE_DOT.asks.split(" ").map((c) => `.${CSS.escape(c)}`).join("")
 
 // Settings, project settings and schedules are lazy chunks: load them up front, as the app does once it settles, so
 // they open in the same render.
@@ -134,17 +138,17 @@ describe("the sidebar", () => {
     expect(waiting.textContent).toContain("Refresh the portfolio")
     expect(waiting.textContent).not.toContain("Three-pane layout")
     // Asking and PR ready: the count goes amber for the question.
-    expect(waiting.querySelector(".bg-amber-400")!.textContent).toBe("2")
+    expect(waiting.querySelector(ASKS_AMBER)!.textContent).toBe("2")
     const yard = section("box-yard")!
     expect([...yard.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") ?? spoken(b))).toEqual([
       // The fold, the row that is the Captain, settings, the pin, then its tasks: asking first. No Captain row of its
-      // own among the tasks. Screen readers hear each status (the task's icon names it, after its title; a meta that is
-      // the same word stays quiet), and that the Captain is working.
+      // own among the tasks. Screen readers hear each status (the task's icon names it, after its title; no state word
+      // follows it), and that the Captain is working.
       "Hide box-yard tasks",
       "Working… box-yard, Captain",
       "box-yard project settings",
       "Pin box-yard",
-      "Check SSH into the bench Needs you asks",
+      "Check SSH into the bench Needs you",
       "Three-pane layout Working",
     ])
     // Each task leads with its own icon and a still corner dot; only the working glyph pulses.
@@ -185,7 +189,7 @@ describe("the sidebar", () => {
     expect(section("box-yard")!.textContent).not.toContain("Three-pane layout")
     // Folded, the row says how many tasks it holds, with an amber dot because one asks.
     expect(projectRow("box-yard").textContent).toBe("box-yard, Captain2 tasks, 1 asking you")
-    expect(projectRow("box-yard").querySelector(".bg-amber-400")).not.toBeNull()
+    expect(projectRow("box-yard").querySelector(ASKS_AMBER)).not.toBeNull()
     expect(JSON.parse(localStorage.getItem("box-yard:sidebar-folds")!)).toEqual({ [YARD.id]: true })
     click(fold)
     expect(section("box-yard")!.textContent).toContain("Three-pane layout")
@@ -214,7 +218,8 @@ describe("the sidebar", () => {
     render()
     click(button(section("Waiting on you")!, "Check SSH into the bench"))
     expect(new URLSearchParams(location.search).get("session")).toBe(ASK.id)
-    expect(selected()).toEqual([["page", "Check SSH into the bench Needs you asks"]])
+    // The copy in Waiting on you ends its name with its project.
+    expect(selected()).toEqual([["page", "Check SSH into the bench Needs you , box-yard"]])
     expect(section("Waiting on you")!.querySelector("[aria-current=page]")).not.toBeNull()
     // Fold the section: the task's row under box-yard is the one on screen, so it takes the mark.
     click(button(section("Waiting on you")!, /^Waiting on you/))
@@ -759,7 +764,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
 
   it("a single click opens the Captain and leaves the rail folded; the tooltip says what a double click does", () => {
     folded()
-    expect(railIcon("box-yard").title).toBe("box-yard Captain, Working… (double-click to expand)")
+    expect(railIcon("box-yard").title).toBe("box-yard Captain, Working…, 1 asking you (double-click to expand)")
     clickAt(railIcon("box-yard"), 1000)
     expect(title()).toBe("box-yard Captain")
     expect(inline()!.dataset.rail).toBe("true")
@@ -910,7 +915,8 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     render(APP_HOME, [RUN, failed])
     const row = section("box-yard")!.querySelector(`[data-open-task="${failed.id}"]`)!.closest<HTMLElement>('[role="treeitem"]')!
     expect(row.querySelector('[data-delete-task], [data-sidebar-delete], [data-row-actions]')).toBeNull()
-    expect(row.getAttribute("aria-keyshortcuts")).toBeNull()
+    // Its one action is Mark done, which Shift+Enter clicks; nothing deletes it.
+    expect(row.getAttribute("aria-keyshortcuts")).toBe("Shift+Enter")
     expect(checks(row)).toHaveLength(1)
     const open = row.querySelector<HTMLButtonElement>('[data-open-task]')!
     const capture = vi.fn()
