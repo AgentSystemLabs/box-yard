@@ -448,7 +448,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   }, [current, overlay, picked, rail, waiting.shown, groups.shown, folds, treeFolds, chatHidden])
   const selection = useKept(computed, keepSelection)
   const { focusCurrent, ...tree } = useTreeView(currentTreeKey(selection))
-  const reorder = useSidebarReorder(tree, groups)
+  const reorder = useSidebarReorder(tree, groups, { drawer })
   const navigation = useRef<HTMLElement>(null)
   useEffect(() => {
     const take = (e: Event) => {
