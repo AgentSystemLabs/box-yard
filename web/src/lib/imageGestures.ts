@@ -33,8 +33,29 @@ export function maxScale(natural: Size, fit: Size): number {
   return Math.max(4, 2 * pixelRatio(natural, fit))
 }
 
-/** Where a double tap, a click, Z or the zoom button goes: the image's own pixels, but at least 2× and at most 4×. */
-export function zoomStep(natural: Size, fit: Size): number {
+/**
+ * How big the image is drawn, as a percentage of its own pixels: what the zoom pill says, so 100% is always sharp.
+ * An image with no size of its own (some SVGs) counts from its fitted size.
+ */
+export function shownPercent(scale: number, natural: Size, fit: Size): number {
+  return Math.round(scale * (fit.width > 0 && natural.width > 0 ? fit.width / natural.width : 1) * 100)
+}
+
+/**
+ * A tall image (a whole-page capture) shrunk to the stage's height, which leaves it a strip: under 60% of the stage's
+ * width. Zooming one fills the width, as 2–4× its fitted size would often still be a strip.
+ */
+export function isStrip(natural: Size, fit: Size, stage: Size): boolean {
+  return fit.width > 0 && natural.width > fit.width && fit.width < stage.width * 0.6
+}
+
+/**
+ * Where a double tap, a click, Z or the zoom button goes: the image's own pixels, but at least 2× and at most 4×.
+ * With the `stage`, a strip goes to the stage's width instead, but no further than its own pixels (or 2×): a wide
+ * desktop stage would blur it.
+ */
+export function zoomStep(natural: Size, fit: Size, stage?: Size): number {
+  if (stage && isStrip(natural, fit, stage)) return Math.min(stage.width / fit.width, Math.max(pixelRatio(natural, fit), 2))
   return clamp(pixelRatio(natural, fit), 2, 4)
 }
 
@@ -93,7 +114,7 @@ export interface Tap extends Point {
   t: number
 }
 
-/** A second tap close enough in time and place to the first to be a double tap. */
-export function isDoubleTap(prev: Tap | null, now: Tap): boolean {
-  return !!prev && now.t - prev.t < 300 && Math.hypot(now.x - prev.x, now.y - prev.y) < 30
+/** A second tap close enough in time (within `ms`) and place to the first to be a double tap. */
+export function isDoubleTap(prev: Tap | null, now: Tap, ms = 300): boolean {
+  return !!prev && now.t - prev.t < ms && Math.hypot(now.x - prev.x, now.y - prev.y) < 30
 }
