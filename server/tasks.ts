@@ -1814,7 +1814,8 @@ export class TaskManager {
       void stopping?.catch((err) => console.warn(`[box-yard] stopping ${taskId} as it closed: ${errorMessage(err)}`))
       this.dropQueuedMessages(row.id)
       // What it was, for Reopen.
-      const doneFrom = { status: row.status, question: row.question, questions: this.store.taskQuestions(row), parent: by?.parent.id ?? null }
+      const questions = this.store.taskQuestions(row)
+      const doneFrom = { status: row.status, question: row.question, ...(questions && { questions }), parent: by?.parent.id ?? null }
       this.store.updateTask(row.id, { status: "done", question: null, doneFrom }, { quiet: true })
       this.addEvent(row.id, isLocalRunnerBox(row.box_id) ? "Closed. Its folder stays on this computer until the task is deleted or this computer's cleanup archives it (Settings › Boxes & limits › This computer and SSH machines)." : "Closed. Its workspace was archived and its box slot freed.")
       if (by) this.addEvent(row.id, by.root ? `Closed with ${by.root.title}, a task above it (its parent task, ${by.parent.title}, was done already).` : `Closed with its parent task, ${by.parent.title}.`, { kind: "subtasks" })
