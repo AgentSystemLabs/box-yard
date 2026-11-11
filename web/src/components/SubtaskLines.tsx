@@ -32,7 +32,7 @@ export function SubtasksLine({ m }: { m: TaskMessage }) {
       <div className="min-w-0 flex-1">
         <div className="wrap-anywhere">
           {m.content}
-          <span className="ml-2 text-[11px] text-zinc-500">
+          <span className="ml-2 text-[11px] text-zinc-400">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>
@@ -58,7 +58,7 @@ function SubtaskRows({ items }: { items: Listed[] }) {
           <li key={s.id} className="flex min-w-0 items-center gap-1">
             <AppLink
               href={`/tasks/${s.id}`}
-              className={cx("grid min-h-8 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm hover:bg-zinc-900 hover:text-yard-200 pointer-coarse:min-h-11", status === "done" ? "text-yard-300/60" : "text-yard-300")}
+              className={cx("grid min-h-8 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm hover:bg-zinc-900 hover:text-yard-200 pointer-coarse:min-h-11", status === "done" ? "text-yard-300/80" : "text-yard-300")}
             >
               {/* The word after the title names the state, so the icon stays out of the accessible name. A task that
                   is gone (deleted) keeps a neutral tile. */}
@@ -103,7 +103,7 @@ export function SubtaskReportLine({ m }: { m: TaskMessage }) {
           </AppLink>
           {word && <span className={cx("shrink-0 font-normal", status === "failed" ? "text-red-300" : status === "needs_input" ? "text-amber-300" : "text-violet-300/80")}>{word}</span>}
           {pr && <PrChip task={pr} variant="number" className={cx(TAP_AREA, "shrink-0 font-normal tabular-nums")} />}
-          <span className="shrink-0 font-normal text-zinc-500">
+          <span className="shrink-0 font-normal text-zinc-400">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>

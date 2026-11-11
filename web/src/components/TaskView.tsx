@@ -23,6 +23,8 @@ import type { SelectionTaskSource } from "../lib/selectionTask"
 import type { TaskMessage, TaskStatus } from "../../../shared/types"
 import { submissionId } from "../lib/taskSubmissions"
 import { userMessageLabel } from "../../../shared/sender"
+import { DEFAULT_OWNER_NAME } from "../../../shared/owner"
+import { toolBrief } from "../../../shared/activity"
 import { TurnTimingChip, timingOf } from "./TurnTimingChip"
 import { Loading } from "./Loading"
 import { SubtaskReportLine, SubtasksLine } from "./SubtaskLines"
@@ -35,11 +37,11 @@ const TOOL_SCAN = 200
 /** "Turn 3 finished · $0.42." (server/tasks.ts): the event that closes a turn. */
 const TURN_END = /^Turn (\d+ )?(finished|stopped|failed)\b/
 
-/** The running turn's newest tool call ("Edit web/src/…"), on one line: the transcript folds tool calls away. */
+/** The running turn's newest tool call, as it was stored: the live line shows it on one line (toolBrief), since the transcript folds tool calls away. */
 function latestTool(items: readonly TaskMessage[]): string | null {
   for (let i = items.length - 1, end = Math.max(0, items.length - TOOL_SCAN); i >= end; i--) {
     const m = items[i]!
-    if (m.role === "tool" && !m.meta?.error) return m.content.trim().split("\n", 1)[0]!.slice(0, 160) || null
+    if (m.role === "tool" && !m.meta?.error) return m.content.trim() || null
     // The message that started the turn, or the end of the turn before it: nothing older is this turn's.
     if (m.role === "user" ? !m.meta?.pending : m.role === "event" && (timingOf(m.meta) !== null || TURN_END.test(m.content))) return null
   }
@@ -172,18 +174,18 @@ export const TaskThread = memo(function TaskThread({
             // At the foot, where the working line was, so it's the last thing above the box however long the thread.
             <div role="group" aria-label="The agent asks" data-testid="pending-ask" className="flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-sm">
               {/* Its first row is as tall as Answer (h-7), and so is the icon's box. A narrow card (a small phone) drops
-                  the time, so the label is never cut. */}
+                  the time and Answer's icon, so the label is never cut. */}
               <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" box="h-7!" />
               <div className="@container/ask min-w-0 flex-1">
                 <div className="flex h-7 min-w-0 items-center gap-2 text-[11px] font-semibold text-amber-400">
-                  <span className="min-w-0 truncate">The agent asks</span>
+                  <span className="shrink-0">The agent asks</span>
                   {asked && (
-                    <span className="shrink-0 text-[11px] font-normal text-zinc-500 @max-[15rem]/ask:hidden">
+                    <span className="shrink-0 text-[11px] font-normal text-zinc-400 @max-[15rem]/ask:hidden">
                       <TimeAgo ts={asked.createdAt} />
                     </span>
                   )}
                   <button type="button" data-testid="pending-ask-answer" onClick={() => focusComposer(id)} className={cx(TAP_AREA, ANSWER_BUTTON)}>
-                    <MessageSquareReply className="h-3.5 w-3.5" aria-hidden />
+                    <MessageSquareReply className="h-3.5 w-3.5 @max-[15rem]/ask:hidden" aria-hidden />
                     Answer
                   </button>
                 </div>
@@ -222,7 +224,7 @@ const PublishedRun = memo(
         {messages.map((m) => (
           <PublishedFile key={m.id} artifactId={typeof m.meta?.artifactId === "string" ? m.meta.artifactId : undefined} url={String(m.meta!.url)} text={m.content} />
         ))}
-        <span className="text-[11px] text-zinc-500">
+        <span className="text-[11px] text-zinc-400">
           <TimeAgo ts={messages.at(-1)!.createdAt} />
         </span>
       </div>
@@ -246,7 +248,7 @@ const HousekeepingRun = memo(
         aria-expanded={open}
         aria-label={open ? `Hide ${earlier} earlier ${earlier === 1 ? "event" : "events"}` : `Show ${earlier} earlier ${earlier === 1 ? "event" : "events"}`}
         onClick={() => setOpen((o) => !o)}
-        className={cx(TAP_AREA, "ml-2 rounded text-[11px] text-zinc-500 underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300 hover:decoration-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none")}
+        className={cx(TAP_AREA, "ml-2 rounded text-[11px] text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300 hover:decoration-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none")}
       >
         {open ? "Show less" : `${earlier} earlier`}
       </button>
@@ -264,36 +266,50 @@ const HousekeepingRun = memo(
 /**
  * The live line while a turn runs, in the events' column (pl-6), with no dot or colour of its own: the task's icon in
  * the header says it works. "Turn running · 2m · › 4 steps · Bash npm run typecheck": the steps since the newest line
- * unfold under it, where the newest one then is, so the line stops repeating it. A narrow line (a 320px phone) drops
- * the tool rather than cut it to two letters.
+ * unfold under it, where the newest one then is, so the line stops repeating it. A narrow line (a phone, under 24rem)
+ * is two: "Turn running · 2m", then the steps and the tool, which so keeps the room to be read.
  */
 function WorkingLine({ label, since, tool, steps }: { label: string; since: number | null; tool: string | null; steps: TaskMessage[] | null }) {
   const [open, setOpen] = useState(false)
   const listed = open && steps !== null
   const Chevron = listed ? ChevronDown : ChevronRight
+  const summary = steps && stepsSummary(steps)
+  const showTool = tool !== null && !listed
   return (
     <>
-      <div data-testid="working-line" className="@container/live flex min-w-0 items-center gap-1.5 pt-1 pl-6 text-xs text-zinc-400">
-        <span className="shrink-0">{label}</span>
-        {since !== null && (
-          <span data-testid="working-for" className="shrink-0">
-            · <Elapsed since={since} title="Started" className="tabular-nums" />
-          </span>
-        )}
-        {steps && (
+      <div data-testid="working-line" className="@container/live pt-1 pl-6 text-xs text-zinc-400">
+        <div className="flex min-w-0 items-center gap-x-1.5 @max-[24rem]/live:flex-col @max-[24rem]/live:items-start @max-[24rem]/live:gap-y-0.5">
           <span className="flex shrink-0 items-center gap-1.5">
-            <span aria-hidden>·</span>
-            <button type="button" data-testid="working-steps" aria-expanded={listed} onClick={() => setOpen((o) => !o)} className={cx(TAP_AREA, STEPS_TOGGLE, "inline-flex items-center gap-0.5")}>
-              <Chevron className="h-3.5 w-3.5 text-zinc-500" aria-hidden />
-              {stepsSummary(steps).count}
-            </button>
+            <span>{label}</span>
+            {since !== null && (
+              <span data-testid="working-for">
+                · <Elapsed since={since} title="Started" className="tabular-nums" />
+              </span>
+            )}
           </span>
-        )}
-        {tool && !listed && (
-          <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px] @max-[17rem]/live:hidden">
-            · {tool}
-          </span>
-        )}
+          {(summary || showTool) && (
+            // On its own line a finger gets a taller row, so the toggle's 44px stays clear of the lines around it.
+            <span className="flex min-w-0 items-center gap-1.5 @max-[24rem]/live:max-w-full pointer-coarse:@max-[24rem]/live:min-h-8">
+              {summary && (
+                <>
+                  <span aria-hidden className="@max-[24rem]/live:hidden">·</span>
+                  <button type="button" data-testid="working-steps" aria-expanded={listed} onClick={() => setOpen((o) => !o)} className={cx(TAP_AREA, STEPS_TOGGLE, "inline-flex shrink-0 items-center gap-0.5")}>
+                    <Chevron className="h-3.5 w-3.5 text-zinc-500" aria-hidden />
+                    {summary.count}
+                    {summary.failed > 0 && <span className="ml-1 text-red-300">· {summary.failed} failed</span>}
+                  </button>
+                </>
+              )}
+              {showTool && (
+                <span data-testid="working-tool" title={tool.slice(0, 600)} className="min-w-0 truncate font-mono text-[11px]">
+                  {/* Leading its own line (no steps to follow), it needs no dot. */}
+                  <span aria-hidden className={cx(!summary && "@max-[24rem]/live:hidden")}>· </span>
+                  {toolBrief(tool).split("\n", 1)[0]!.slice(0, 160)}
+                </span>
+              )}
+            </span>
+          )}
+        </div>
       </div>
       {listed && (
         <div data-testid="working-steps-list" className="space-y-1">
@@ -360,8 +376,8 @@ const StepsRun = memo(
 )
 
 /**
- * One tool call (the tool and what it was given, on up to three lines), or a tool's error: all of it, in a box that
- * scrolls past ten lines or so, since the error is what a failed turn is opened for.
+ * One tool call (the tool and what it ran or touched, on up to three lines; all it was given in its tooltip), or a
+ * tool's error: all of it, in a box that scrolls past ten lines or so, since the error is what a failed turn is opened for.
  */
 function ToolText({ m }: { m: TaskMessage }) {
   if (m.meta?.error)
@@ -370,17 +386,17 @@ function ToolText({ m }: { m: TaskMessage }) {
         ✗ {m.content}
       </div>
     )
-  return <div className={cx(TOOL_TEXT, "line-clamp-3 text-zinc-400")}>› {m.content}</div>
+  return <div title={m.content} className={cx(TOOL_TEXT, "line-clamp-3 text-zinc-400")}>› {toolBrief(m.content)}</div>
 }
 
 const TOOL_TEXT = "pl-6 font-mono text-[11px] whitespace-pre-wrap wrap-anywhere"
 
-/** A plain event: dim small text, its time, and a finished turn's timing. */
+/** A plain event: small quiet text, then its time and a finished turn's timing, which wrap together or not at all. */
 function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
   const url = typeof m.meta?.url === "string" ? m.meta.url : null
   const timing = timingOf(m.meta)
   return (
-    <div data-chat-id={m.id} className="pl-6 text-xs wrap-anywhere text-zinc-500">
+    <div data-chat-id={m.id} className="pl-6 text-xs wrap-anywhere text-zinc-400">
       {url ? (
         <AppLink href={url} className="hover:text-zinc-300 hover:underline">
           {m.content}
@@ -388,19 +404,22 @@ function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
       ) : (
         m.content
       )}
-      <span className="ml-2 text-[11px] text-zinc-500">
+      <span className="ml-2 text-[11px] whitespace-nowrap text-zinc-400">
         <TimeAgo ts={m.createdAt} />
+        {timing && <TurnTimingChip id={timing.id} ms={timing.ms} className="ml-2 align-middle" />}
       </span>
-      {timing && <TurnTimingChip id={timing.id} ms={timing.ms} className="ml-2 align-middle" />}
       {children}
     </div>
   )
 }
 
+/** A sender's label starts with a capital, whatever the owner's name in Settings does. */
+const capitalised = (label: string) => label.charAt(0).toUpperCase() + label.slice(1)
+
 export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: TaskMessage; onFollowUp: (message: string) => void; next?: boolean }) {
   const ownerName = useOwnerName()
   const time = (
-    <span className="ml-2 text-[11px] text-zinc-500">
+    <span className="ml-2 text-[11px] text-zinc-400">
       <TimeAgo ts={m.createdAt} />
     </span>
   )
@@ -412,7 +431,8 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
         <div className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 px-3 py-2", hook ? "border-teal-500 bg-teal-500/5" : "border-yard-500 bg-yard-500/5")} data-testid={hook ? "hook-message" : undefined} aria-busy={m.meta?.pending === true || undefined}>
           <div className={cx("mb-0.5 flex items-center gap-1 text-[11px] font-semibold", hook ? "text-teal-300" : "text-yard-400")}>
             {hook && <Webhook className="h-3 w-3" />}
-            {userMessageLabel(m.meta, ownerName)}
+            {/* With no name in Settings the owner's own bubbles say "You", not "the owner". */}
+            {capitalised(userMessageLabel(m.meta, ownerName === DEFAULT_OWNER_NAME ? "You" : ownerName))}
             {/* Transport acceptance does not establish when the model processed a follow-up. */}
             {m.meta?.steered === true && (
               <span className="inline-flex items-center gap-0.5 rounded bg-yard-500/10 px-1 text-[10px] font-semibold text-yard-300" title={m.meta?.steerAccepted ? "Codex accepted this input; model processing is not confirmed" : "Written to the agent's input stream; model processing is not confirmed"}>
@@ -424,8 +444,8 @@ export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: Task
           </div>
           {m.content && <div className="text-sm whitespace-pre-wrap wrap-anywhere text-zinc-200">{m.content}</div>}
           <AttachmentList files={m.meta?.attachments} />
-          {m.meta?.undelivered === true && <div className="mt-1 text-[11px] text-zinc-500">Not delivered: the task was stopped or marked done first.</div>}
-          {m.meta?.deliveryUncertain === true && <div className="mt-1 text-[11px] text-zinc-500">Delivery uncertain: this may already have reached Codex. Removing it from the queue does not undo delivery.</div>}
+          {m.meta?.undelivered === true && <div className="mt-1 text-[11px] text-zinc-400">Not delivered: the task was stopped or marked done first.</div>}
+          {m.meta?.deliveryUncertain === true && <div className="mt-1 text-[11px] text-zinc-400">Delivery uncertain: this may already have reached Codex. Removing it from the queue does not undo delivery.</div>}
           {!m.meta?.pending && <MessageActions text={m.content} />}
         </div>
       )

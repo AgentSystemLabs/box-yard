@@ -16,7 +16,7 @@ function shortPath(p: string) {
 }
 
 /** The most telling string in a tool's (possibly clipped) JSON input. */
-function toolDetail(input: string): string {
+function toolDetail(input: string, keys: readonly string[] = TOOL_KEYS): string {
   let obj: Record<string, unknown> | null = null
   try {
     const v = JSON.parse(input) as unknown
@@ -33,7 +33,7 @@ function toolDetail(input: string): string {
     }
   }
   if (!obj) return oneLine(input)
-  for (const key of TOOL_KEYS) {
+  for (const key of keys) {
     const v = obj[key]
     if (typeof v === "string" && v.trim()) return key === "file_path" || key === "path" ? shortPath(v.trim()) : oneLine(v)
   }
@@ -72,4 +72,19 @@ export function activityLine(role: string, content: string, meta?: Record<string
     return clip(detail ? `${name}: ${detail}` : name)
   }
   return null
+}
+
+/** Input keys the transcript shows for a tool call: what it ran or touched, not the agent's own words for it. */
+const BRIEF_KEYS = ["command", "file_path", "path", "pattern", "url"]
+
+/**
+ * A tool message (`${name} ${jsonInput}`) on one line for the transcript: "Bash npm run typecheck",
+ * "Edit web/src/App.tsx". The text as it is when its input isn't JSON or has none of these keys.
+ */
+export function toolBrief(content: string): string {
+  const text = content.trim()
+  const space = text.search(/\s/)
+  if (space < 0) return text
+  const detail = toolDetail(text.slice(space + 1), BRIEF_KEYS)
+  return detail ? `${text.slice(0, space)} ${detail}` : text
 }

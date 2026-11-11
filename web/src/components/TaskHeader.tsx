@@ -378,7 +378,8 @@ function Breadcrumb({ task, project }: { task: Task; project: Project | undefine
 /**
  * A preview the agent registered (report_preview) or Cody opened: the header's most prominent action, in a new tab.
  * With several, each shows its port in place of the word, to tell them apart and leave the title its room; the tooltip
- * always has the label and port. A narrow header folds it to the globe.
+ * always has the label and port. A narrow header (a phone) keeps its sky border and fill, and says the port too
+ * (":3000") where the others fold to their icons: a bare globe didn't say what it opens.
  */
 function PreviewChip({ preview, port }: { preview: PreviewLink; port: boolean }) {
   return (
@@ -388,10 +389,10 @@ function PreviewChip({ preview, port }: { preview: PreviewLink; port: boolean })
       mark="end"
       markClassName={HEADER_FOLD.label}
       data-testid="preview-chip"
-      className={cx(HEADER_CHIP, "border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-50 hover:bg-sky-500/30", HEADER_FOLD.chip)}
+      className={cx(HEADER_CHIP, "border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-50 hover:bg-sky-500/30 @max-[36rem]/head:mx-0.5")}
     >
-      <Globe className={cx("h-3.5 w-3.5 text-sky-300", HEADER_FOLD.icon)} aria-hidden /> <span className={port ? "sr-only" : HEADER_FOLD.label}>Preview</span>
-      {port && <span className="tabular-nums">:{preview.port}</span>}
+      <Globe className="h-3.5 w-3.5 text-sky-300" aria-hidden /> <span className={port ? "sr-only" : HEADER_FOLD.label}>Preview</span>
+      <span className={cx("tabular-nums", !port && "@min-[36rem]/head:hidden")}>:{preview.port}</span>
     </NewTabLink>
   )
 }

@@ -37,7 +37,7 @@ export const TurnTimingChip = memo(function TurnTimingChip({ id, ms, className }
           setOpen(!open)
         }}
         className={cx(
-          "inline-flex shrink-0 items-center gap-1 rounded-sm text-[11px] text-zinc-500 tabular-nums hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none aria-expanded:text-zinc-300 [@media(pointer:coarse)]:min-h-8",
+          "inline-flex shrink-0 items-center gap-1 rounded-sm text-[11px] text-zinc-400 tabular-nums hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none aria-expanded:text-zinc-300 [@media(pointer:coarse)]:min-h-8",
           className,
         )}
       >

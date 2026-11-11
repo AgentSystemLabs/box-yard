@@ -32,6 +32,9 @@ const ICON_BUTTONS = "-my-0.5 flex shrink-0 pointer-coarse:-my-2.5"
 const STEER_BUTTON =
   "flex h-6 shrink-0 items-center gap-1 rounded-md border border-yard-300/40 px-2 text-[11px] font-semibold text-yard-300 transition hover:border-yard-300/70 hover:bg-zinc-800 hover:text-yard-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none disabled:opacity-50 pointer-coarse:h-11 pointer-coarse:px-2.5"
 
+/** A sender's label starts with a capital ("The owner" with no name in Settings). */
+const capitalised = (label: string) => label.charAt(0).toUpperCase() + label.slice(1)
+
 /** A turn is taking the row, or has: it can't be edited, cancelled or steered any more. */
 const isLocked = (m: QueuedMessage) => m.status === "delivering" || m.status === "steering" || m.status === "accepted" || m.status === "uncertain"
 
@@ -143,7 +146,7 @@ export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string })
         )}
       </div>
       {waiting.length > 0 && (
-        <div data-testid="queue-delivery" className="flex min-h-6 items-center gap-2 pt-1 pr-1 pl-3 text-[11px] text-zinc-500 pointer-coarse:min-h-11">
+        <div data-testid="queue-delivery" className="flex min-h-6 items-center gap-2 pt-1 pr-1 pl-3 text-[11px] text-zinc-400 pointer-coarse:min-h-11">
           <span className="min-w-0 flex-1">{WAITS[turn](noSteer ?? "this agent")}</span>
           {canSteer && (
             <button type="button" className={STEER_BUTTON} title={STEER_TITLE} aria-label="Steer the queued messages into the running turn" disabled={steer.isPending} onClick={onSteer}>
@@ -191,22 +194,23 @@ const QueuedRow = memo(function QueuedRow({
       data-testid="queued-message"
       className="@container rounded-lg border border-dashed border-zinc-800 bg-zinc-900/30 px-3 py-2"
     >
-      <div className="flex min-h-6 items-center gap-1.5 text-[11px] text-zinc-500">
+      <div className="flex min-h-6 items-center gap-1.5 text-[11px] text-zinc-400">
         {steered ? (
           <LineIcon icon={Navigation2} className="h-3 w-3 rotate-90 text-yard-300" />
         ) : (
           <LineIcon icon={m.status === "accepted" || m.status === "uncertain" ? Clock : locked ? Loader2 : Clock} className={cx("h-3 w-3", m.status === "delivering" && "animate-spin")} />
         )}
-        <span className={cx("font-semibold", steered ? "text-yard-300" : "text-zinc-400")}>{m.status === "uncertain" ? "Delivery uncertain" : m.status === "accepted" ? "Accepted by Codex" : steered ? "Steering" : locked ? "Delivering" : "Queued"}</span>
-        {/* The owner's own messages need no name: only another sender's (a hook, an agent, a Captain) says who. */}
+        <span className={cx("font-semibold", steered ? "text-yard-300" : "text-zinc-300")}>{m.status === "uncertain" ? "Delivery uncertain" : m.status === "accepted" ? "Accepted by Codex" : steered ? "Steering" : locked ? "Delivering" : "Queued"}</span>
+        {/* The owner's own messages need no name: only another sender's (a hook, an agent, a Captain) says who. A
+            Captain's is "Captain" (the task has one), its whole name in the tooltip. */}
         {m.source !== "cody" && (
           <>
             <span aria-hidden>·</span>
-            <span className="min-w-0 truncate">{m.sender || ownerName}</span>
+            <span className="min-w-0 truncate" title={m.sender || undefined}>{m.kind === "captain" ? "Captain" : capitalised(m.sender || ownerName)}</span>
           </>
         )}
         {/* Too narrow for the time next to two 44px buttons (a 320px phone at 125% zoom): it goes, so nothing overflows. */}
-        <span className="hidden shrink-0 text-[11px] text-zinc-500 @min-[15rem]:inline">
+        <span className="hidden shrink-0 text-[11px] text-zinc-400 @min-[15rem]:inline">
           <TimeAgo ts={m.createdAt} />
         </span>
         {m.status === "uncertain" && <button type="button" className={ICON_BUTTON + " ml-auto"} title="Remove hold after reviewing the transcript; this does not undo delivery" aria-label="Remove delivery hold" onClick={() => onDelete(m)}><X className="h-3.5 w-3.5" /></button>}
@@ -227,9 +231,9 @@ const QueuedRow = memo(function QueuedRow({
         m.text && <div className="mt-0.5 line-clamp-6 text-sm whitespace-pre-wrap wrap-anywhere text-zinc-300">{m.text}</div>
       )}
       <AttachmentList files={m.attachments.length ? m.attachments : undefined} />
-      {m.status === "accepted" && <div className="mt-1 text-[11px] text-zinc-500">Codex accepted this input. This does not confirm that the model processed it.</div>}
-      {m.status === "uncertain" && <div className="mt-1 text-[11px] text-zinc-500">It may already have reached Codex. Automatic retry is paused. Review the transcript, then remove this hold before resuming.</div>}
-      {steered && <div className="mt-1 text-[11px] text-zinc-500">Delivery requested; waiting for the runner to acknowledge it.</div>}
+      {m.status === "accepted" && <div className="mt-1 text-[11px] text-zinc-400">Codex accepted this input. This does not confirm that the model processed it.</div>}
+      {m.status === "uncertain" && <div className="mt-1 text-[11px] text-zinc-400">It may already have reached Codex. Automatic retry is paused. Review the transcript, then remove this hold before resuming.</div>}
+      {steered && <div className="mt-1 text-[11px] text-zinc-400">Delivery requested; waiting for the runner to acknowledge it.</div>}
     </div>
   )
 })
@@ -321,7 +325,7 @@ function DeletedRow({ m, onUndo, onExpire }: { m: QueuedMessage; onUndo: (m: Que
     return () => clearTimeout(t)
   }, [m.id, onExpire])
   return (
-    <div role="listitem" data-testid="queued-deleted" className="flex min-h-6 items-center gap-1.5 rounded-lg px-3 text-[11px] text-zinc-500">
+    <div role="listitem" data-testid="queued-deleted" className="flex min-h-6 items-center gap-1.5 rounded-lg px-3 text-[11px] text-zinc-400">
       <LineIcon icon={X} className="h-3 w-3" />
       <span className="min-w-0 truncate">Cancelled · back in the message box</span>
       <button type="button" onClick={() => onUndo(m)} className="ml-auto min-h-6 shrink-0 rounded-md px-2 font-semibold text-yard-400 hover:bg-zinc-800 pointer-coarse:-my-2.5 pointer-coarse:min-h-11">
