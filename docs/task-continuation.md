@@ -1,6 +1,6 @@
 # Continue the same task on another harness
 
-A usage or token limit is a failed turn, not a reason to recreate the task. **Retry** and ordinary messages keep its saved harness. **Continue with…**, available on the failure banner and in a resting task's details, explicitly chooses Claude Code, Codex, Cursor, OpenCode, or the current project/Settings default.
+A usage or token limit is a failed turn, not a reason to recreate the task. **Retry** and ordinary messages keep its saved harness. **Continue with another agent…**, available on the failure banner and in a resting task's details, explicitly chooses Claude Code, Codex, Cursor, OpenCode, or the current project/Settings default.
 
 The task id, runner, branch/PR, workspace, uncommitted work, archive, attachments, transcript and queued messages stay with the task. A different harness gets a new CLI session id and a bounded recap (original instructions, summary, branch/PR and recent conversation). It never resumes the other CLI's session. Earlier sessions remain in the workspace/archive for recovery. Switching back also starts a fresh session.
 

@@ -8,7 +8,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
-  GitMerge,
+  DoorOpen,
   Globe,
   Info,
   Plug,
@@ -22,7 +22,7 @@ import { ContinueTask } from "./ContinueTask"
 import { api } from "../lib/api"
 import { primaryAction, readyForReview } from "../lib/taskActions"
 import { toast } from "../lib/toast"
-import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, StatusDot, TimeAgo, cx, timeAgo } from "./ui"
+import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, TimeAgo, cx, timeAgo } from "./ui"
 import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
 import { TaskStatusIcon } from "./TaskIcon"
 import { FilesChip } from "./TaskFiles"
@@ -49,13 +49,13 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
 
 /**
  * The task's header, in the task panel (`onBack`: an h2 with a back button before it) and the task page (an h1
- * under the breadcrumb). One row, like a phone's navigation bar: back, the task's icon and its title (one line; a tap
+ * under the breadcrumb). One row, like a phone's navigation bar: back, the task's icon and its title (two lines at most; a tap
  * opens the details), then what to act on (its PR, previews and files, and Mark done once it's ready for review, or
  * Reopen once it's done, or Delete if it failed) and ⓘ (its details) last. The icon is the header's status (TaskStatusIcon): it pulses while
  * the task works and has a still dot when it asks or failed, and its name says the state to screen readers; the details
  * say it in words. A narrow header (a slim panel) folds the chips to their icons. The agent and where it runs are
- * only in the details. Too narrow even for that, the icons wrap under the
- * title. It sticks to the top while the transcript scrolls.
+ * only in the details. Too narrow even for that, the chips and Mark done wrap under the
+ * title, and ⓘ stays on its row. A failed task's title is red. It sticks to the top while the transcript scrolls.
  *
  * In a panel its crumbs' row is the Captain's header's (CaptainTab.tsx CentreCaptainHeader): as tall, the Captain's
  * icon and its project's name where that header has them (TreeNav.tsx), then the task's own crumb; filling the room
@@ -63,7 +63,7 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
  *
  * On a phone (under SIDEBAR_INLINE, where the panel covers the chat) it's two rows. The first is the way around: the
  * sidebar's ☰, the levels above as crumbs in Back's place (TreeNav.tsx), Mark done or Reopen, and ⓘ. Under it, the
- * task: its icon and its whole title, wrapping (a tap opens the details), with its chips.
+ * task: its icon and its whole title, wrapping (a tap opens the details), and its chips on a row of their own under it.
  */
 export function TaskHeader({
   task,
@@ -101,12 +101,14 @@ export function TaskHeader({
   const [details, setDetails] = useState(false)
   const phone = !useMinWidth(SIDEBAR_INLINE)
   const ready = readyForReview(task.status)
+  // Its PR, files or a preview: chips that share the header with the title.
+  const crowded = Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0
   const chips = (
     <div data-testid="task-chips" className="flex items-center gap-0.5 @min-[36rem]/head:gap-1.5">
       <TaskStateMore task={task} />
       {task.prUrl && <PrStatusChip task={task} />}
-      {task.previews.map((p) => <PreviewChip key={p.port} preview={p} port={task.previews.length > 1} />)}
       {files.length > 0 && <FilesChip taskId={task.id} projectId={task.projectId} files={files} quiet fold />}
+      {task.previews.map((p) => <PreviewChip key={p.port} preview={p} port={task.previews.length > 1} />)}
     </div>
   )
   const menu = <TaskMenu task={task} project={project} schedule={schedule} open={details} setOpen={setDetails} />
@@ -123,40 +125,53 @@ export function TaskHeader({
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {spend}
               {ready ? <MarkDoneButton task={task} crowded={false} /> : task.status === "done" && <ReopenButton task={task} crowded={false} />}
-              {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
+              {/* Delete keeps 8px off ⓘ: a slip beside it shouldn't land on it. */}
+              {task.status === "failed" && <DeleteFailedTaskButton task={task} className="mr-1.5" />}
               {tools}
               {menu}
               {controls}
             </div>
           </div>
         </div>
-        <div data-testid="task-meta" className={cx(CHAT_COLUMN, "flex min-w-0 flex-wrap items-start gap-x-0.5 pb-0.5 text-xs text-zinc-500")}>
-          <Heading className={cx("flex min-w-[min(100%,9rem)] flex-1 basis-0", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
+        {/* The title has the row to itself, and the chips their own under it, starting where the title's text does
+            (past its icon): a narrow header never squeezes the title beside them. */}
+        <div data-testid="task-meta" className={cx(CHAT_COLUMN, "min-w-0 pb-0.5 text-xs text-zinc-500")}>
+          <Heading className={cx("flex min-w-0", titleTone(task.status))}>
             <TitleButton task={task} open={details} onOpen={() => setDetails(true)} wrap />
           </Heading>
-          <div className="ml-auto flex h-11 shrink-0 items-center">{chips}</div>
+          {crowded && <div className="-mt-2 flex h-11 min-w-0 items-center pl-6">{chips}</div>}
         </div>
       </header>
     )
   const crumbs = Boolean(onBack && tree)
   const meta = (
-    <div data-testid="task-meta" className="flex min-w-0 flex-wrap items-center gap-x-0.5 text-xs text-zinc-500 @min-[36rem]/head:gap-x-1.5">
-      {/* Back and the title keep 9rem (about 12 characters of title) beside the icons; any less and the icons wrap to a second row. */}
-      <div className="flex min-w-[min(100%,9rem)] flex-1 basis-0 items-center">
-        {onBack && <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-2 pointer-coarse:-ml-3", backClassName)} />}
-        {/* The Captain's crumb reaches into the gap before it, where Back shows (a sheet over the chat) its own. */}
-        {crumbs && <TaskCrumbs task={task} project={project} className={backClassName ? "@max-[35.5rem]/coord:ml-2" : "ml-2"} />}
-        <Heading className={cx("flex min-w-0 flex-1", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
+    // Row 1 is 44px whatever wraps under it, so Back, the crumbs and ⓘ sit at the title's height on one row or two.
+    <div data-testid="task-meta" className="flex min-w-0 items-start gap-x-0.5 text-xs text-zinc-500 @min-[36rem]/head:gap-x-1.5">
+      {(onBack || crumbs) && (
+        <div className="flex h-11 min-w-0 items-center">
+          {onBack && <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-2 pointer-coarse:-ml-3", backClassName)} />}
+          {/* The Captain's crumb reaches into the gap before it, where Back shows (a sheet over the chat) its own. */}
+          {crumbs && <TaskCrumbs task={task} project={project} className={backClassName ? "@max-[35.5rem]/coord:ml-2" : "ml-2"} />}
+        </div>
+      )}
+      {/* The title keeps 12rem (about 16 characters) after Back and the crumbs; any less and the chips (the PR, files,
+          previews) wrap to a row of their own, which starts under the title's icon. So this group's least width is its
+          content's (no min-w-0), where the title counts as its 12rem alone (contain-inline-size), and the crumbs give
+          way first once the header itself is narrower than that. */}
+      <div className="flex flex-1 basis-0 flex-wrap items-center gap-x-0.5 @min-[36rem]/head:gap-x-1.5">
+        <Heading className={cx("flex min-h-11 min-w-48 flex-1 items-center contain-inline-size", titleTone(task.status))}>
           <TitleButton task={task} open={details} onOpen={() => setDetails(true)} />
         </Heading>
+        {/* On a row of their own they keep 4px off the title's row and the header's edge. */}
+        <div className="my-1 ml-1 flex shrink-0 items-center pointer-coarse:my-0">{chips}</div>
       </div>
-      {/* Chips and ⓘ wrap together, so ⓘ stays last. */}
-      <div className="ml-auto flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5">
-        {chips}
+      {/* Its cost, then the task's own action (Mark done, Reopen, Delete), then ⓘ, Pin and Close, stay on the title's
+          row: they never wrap with the chips. */}
+      <div className="flex h-11 shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5">
         {spend}
-        {ready && <MarkDoneButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
-        {task.status === "done" && <ReopenButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
-        {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
+        {ready && <MarkDoneButton task={task} crowded={crowded} />}
+        {task.status === "done" && <ReopenButton task={task} crowded={crowded} />}
+        {task.status === "failed" && <DeleteFailedTaskButton task={task} className="@max-[36rem]/head:mr-1.5" />}
         {tools}
         {menu}
         {controls}
@@ -177,6 +192,9 @@ export function TaskHeader({
     </header>
   )
 }
+
+/** The title's colour: red once the task failed (as its rows are everywhere), dim while it idles. */
+const titleTone = (status: Task["status"]) => (status === "failed" ? "task-title-failed" : status === "idle" ? "text-zinc-400" : "text-zinc-50")
 
 /**
  * The Captain's header's column (CaptainTab.tsx CentreCaptainHeader): `chat-column`, its scrollbar gutters too (they
@@ -256,10 +274,10 @@ const ICON_BUTTON =
   "grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:w-11"
 
 /**
- * The task's icon and the title, on one line. A tap opens the details (the full title, the state in words, where it
+ * The task's icon and the title, on up to two lines. A tap opens the details (the full title, the state in words, where it
  * runs). The icon says the state (TaskStatusIcon): to the eye while it works, asks or failed, and always by name to
  * screen readers and in the tooltip. Task state is separate from its PR state, including after the PR merges. `wrap`
- * (a phone's second row): the whole title, up to three lines, the icon on its first.
+ * (a phone's second row, the title's alone): the whole title, up to three lines, the icon on its first.
  */
 function TitleButton({ task, open, onOpen, wrap = false }: { task: Task; open: boolean; onOpen: () => void; wrap?: boolean }) {
   return (
@@ -280,7 +298,7 @@ function TitleButton({ task, open, onOpen, wrap = false }: { task: Task; open: b
         <TaskStatusIcon task={task} size="lg" label={STATUS[task.status].label} muted={task.status === "idle"} />
         <PriorityPill task={task} compact />
       </span>
-      <span className={cx("min-w-0 flex-1 font-semibold tracking-tight", wrap ? "line-clamp-3 wrap-anywhere" : "truncate text-[15px] leading-snug @min-[32rem]/head:text-base")}>{task.title}</span>
+      <span className={cx("min-w-0 flex-1 font-semibold tracking-tight", wrap ? "line-clamp-3 wrap-anywhere" : "line-clamp-2 text-[15px] leading-snug wrap-anywhere @min-[32rem]/head:text-base")}>{task.title}</span>
     </button>
   )
 }
@@ -297,15 +315,23 @@ function TaskStateMore({ task }: { task: Task }) {
   )
 }
 
-/** The state in words, for the details: the dot and its label, then what's queued and compacting. */
+/**
+ * The state in words, for the details: the task's icon, which draws the state here as everywhere, and its label, then
+ * what's queued and compacting.
+ */
 function TaskState({ task, onReveal }: { task: Task; onReveal: () => void }) {
   return (
-    <StatusDot status={task.status} title={`Active ${timeAgo(task.updatedAt)}`} className={cx("min-w-0 flex-wrap", task.status !== "idle" && "text-zinc-200")}>
+    <span title={`Active ${timeAgo(task.updatedAt)}`} data-status={task.status} className={cx("inline-flex min-w-0 flex-wrap items-center gap-1.5 text-xs font-medium whitespace-nowrap", task.status === "idle" ? "text-zinc-400" : "text-zinc-200")}>
+      {/* The label beside it says the state. */}
+      <span aria-hidden className="inline-flex">
+        <TaskStatusIcon task={task} size="sm" muted={task.status === "idle"} />
+      </span>
+      {STATUS[task.status].label}
       {/* The queue opens in the transcript, so the sheet steps aside first. */}
       {task.pendingCount > 0 && <span className="font-normal text-zinc-500" onClickCapture={onReveal}>· <QueuedLink taskId={task.id} count={task.pendingCount} /></span>}
       {(task.compacting || task.compactPending) && <span className="font-normal text-zinc-500">· {task.compacting ? "Compacting…" : "Compact queued"}</span>}
       <PriorityPill task={task} />
-    </StatusDot>
+    </span>
   )
 }
 
@@ -357,8 +383,9 @@ function Breadcrumb({ task, project }: { task: Task; project: Project | undefine
 
 /**
  * A preview the agent registered (report_preview) or Cody opened: the header's most prominent action, in a new tab.
- * The port only shows when there are several to tell apart; the tooltip always has the label and port. A narrow
- * header folds it to the globe.
+ * With several, each shows its port in place of the word, to tell them apart and leave the title its room; the tooltip
+ * always has the label and port. A narrow header (a phone) keeps its sky border and fill, and says the port too
+ * (":3000") where the others fold to their icons: a bare globe didn't say what it opens.
  */
 function PreviewChip({ preview, port }: { preview: PreviewLink; port: boolean }) {
   return (
@@ -368,10 +395,10 @@ function PreviewChip({ preview, port }: { preview: PreviewLink; port: boolean })
       mark="end"
       markClassName={HEADER_FOLD.label}
       data-testid="preview-chip"
-      className={cx(HEADER_CHIP, "border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-50 hover:bg-sky-500/30", HEADER_FOLD.chip)}
+      className={cx(HEADER_CHIP, "border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-50 hover:bg-sky-500/30 @max-[36rem]/head:mx-0.5")}
     >
-      <Globe className={cx("h-3.5 w-3.5 text-sky-300", HEADER_FOLD.icon)} aria-hidden /> <span className={HEADER_FOLD.label}>Preview</span>
-      {port && <span className="font-normal text-sky-200/80">:{preview.port}</span>}
+      <Globe className="h-3.5 w-3.5 text-sky-300" aria-hidden /> <span className={port ? "sr-only" : HEADER_FOLD.label}>Preview</span>
+      <span className={cx("tabular-nums", !port && "@min-[36rem]/head:hidden")}>:{preview.port}</span>
     </NewTabLink>
   )
 }
@@ -423,8 +450,9 @@ const dangerItem = cx(menuItemBase, "text-red-300 hover:bg-red-500/10 hover:text
 
 /**
  * ⓘ and the details sheet it opens (the title opens it too, so the header holds `open`). An info icon, not ⋯: the sheet
- * is the task's details first (its state, branch, where it runs), with its less common actions under them, as a
- * phone's ⓘ beside a conversation's name opens its details with Delete at the bottom; ⋯ promises a short menu.
+ * is about the task (its state, branch, where it runs), as a phone's ⓘ beside a conversation's name opens its details;
+ * ⋯ promises a short menu. Its less common actions come first, Stop and Delete last among them, so none sits a screen
+ * of details away.
  */
 function TaskMenu({
   task,
@@ -480,91 +508,8 @@ function TaskMenu({
           )}
         >
           <p className="mb-4 leading-snug font-medium wrap-anywhere text-zinc-100">{task.title}</p>
-          <div className="grid items-start gap-x-6 gap-y-5 text-xs text-zinc-400 @min-[34rem]/details:grid-cols-2">
-            <DetailGroup title="Task">
-              <Detail label="Status">
-                <TaskState task={task} onReveal={() => setOpen(false)} />
-              </Detail>
-              <Detail label="ID">
-                <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300">{task.id}</span>
-                <CopyButton text={task.id} label="Copy task id" />
-              </Detail>
-              <Detail label="Link">
-                <span className="min-w-0 flex-1 truncate text-zinc-300">Open this task</span>
-                <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link" />
-              </Detail>
-              {task.branch && (
-                <Detail label="Branch">
-                  <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300" title={task.branch}>
-                    {task.branch}
-                  </span>
-                  <CopyButton text={task.branch} label="Copy branch name" />
-                </Detail>
-              )}
-              {task.pushState && <PushDetail push={task.pushState} />}
-              <Detail label="Active">
-                <span className="text-zinc-300">
-                  <TimeAgo ts={task.updatedAt} />
-                </span>
-                <span>
-                  · {task.turnCount} turn{task.turnCount === 1 ? "" : "s"}
-                </span>
-              </Detail>
-              <Detail label="Created">
-                <span className="text-zinc-300">
-                  <TimeAgo ts={task.createdAt} />
-                </span>
-              </Detail>
-              {task.scheduleId && (
-                <Detail label="Schedule">
-                  <span className="min-w-0 wrap-anywhere text-zinc-300">
-                    {schedule ? schedule.name : "a deleted schedule"}
-                  </span>
-                </Detail>
-              )}
-            </DetailGroup>
-            <div className="min-w-0 space-y-5">
-              <DetailGroup title="Agent">
-                <Detail label="Agent">
-                  <span className="min-w-0 wrap-anywhere text-zinc-300" data-testid="task-agent-cli">
-                    {AGENT_CLI_LABEL[task.agentCli ?? "claude"]}
-                  </span>
-                </Detail>
-                {(task.model || task.effort) && (
-                  <Detail label="Model">
-                    <span className="min-w-0 wrap-anywhere text-zinc-300">{[task.model, task.effort ? `${task.effort} effort` : ""].filter(Boolean).join(" · ")}</span>
-                  </Detail>
-                )}
-                {project && <IdentityDetail identityId={project.identityId} onOpen={() => setOpen(false)} />}
-                {(task.routingRule || task.routingReason) && (
-                  <Detail label="Route" top>
-                    <span className="min-w-0 py-0.5 leading-snug wrap-anywhere">
-                      {task.routingRule && <span className="text-zinc-300">{task.routingRule}</span>}
-                      {task.routingRule && task.routingReason && " · "}
-                      {task.routingReason}
-                    </span>
-                  </Detail>
-                )}
-              </DetailGroup>
-              {/* Where it runs: the header leaves it out, so this is the only place it shows. */}
-              <section aria-label="Where this task runs" data-testid="task-details-placement" className="border-t border-zinc-800/80 pt-3">
-                <h3 className="mb-2 text-sm font-medium text-zinc-100">Runner</h3>
-                {task.runsOn && (
-                  <dl className="mb-3 grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-2">
-                    <Detail label="Runs on">
-                      <span className={cx("min-w-0 wrap-anywhere", task.runsOn === "local" ? "text-amber-200" : "text-zinc-300")} data-testid="task-runs-on">
-                        {task.runsOn === "gpu" && task.gpu ? gpuPickLabel(task.gpu.provider, task.gpu.type) : RUNNER_LABEL[task.runsOn]}
-                        {task.runsOn === "box" && task.boxSize ? ` · ${task.boxSize} or larger` : task.runsOn === "gpu" && task.gpu?.size ? ` · ${daytonaSize(task.gpu.size)?.label ?? task.gpu.size}` : task.runsOn === "ssh" && task.machineLabel ? ` · ${task.machineLabel}` : ""} · this task only
-                      </span>
-                    </Detail>
-                  </dl>
-                )}
-                <PlacementDetails task={task} project={project} />
-              </section>
-            </div>
-          </div>
-
-          <section aria-label="Task actions" className="mt-5 border-t border-zinc-800/80 pt-3">
+          {/* Before the details, which run long: on a phone every action is in reach as the sheet opens. */}
+          <section aria-label="Task actions" className="mb-5 border-t border-zinc-800/80 pt-3">
             <h3 className="mb-2 text-sm font-medium text-zinc-100">Actions</h3>
             <button
               type="button"
@@ -575,7 +520,7 @@ function TaskMenu({
               title="On: this task is never moved to done or archived when its PR merges, for a long-running task like a dev server or runner."
               data-testid="task-stay-open-on-merge"
             >
-              <GitMerge className="h-3.5 w-3.5 text-zinc-500" />
+              <DoorOpen className="h-3.5 w-3.5 text-zinc-500" />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span>Stay open when its PR merges</span>
                 {!task.stayOpenOnMerge && (
@@ -596,7 +541,7 @@ function TaskMenu({
               {primary === "retry" && <button type="button" className={menuItem} onClick={() => { retry.mutate(task.id); setOpen(false) }}>
                 <RefreshCcw className="h-3.5 w-3.5 text-zinc-500" /> Retry task
               </button>}
-              <ContinueTask task={task} className="justify-start" />
+              <ContinueTask task={task} menu />
               {task.status !== "done" && (
                 <button
                   type="button"
@@ -646,7 +591,7 @@ function TaskMenu({
                 className={dangerItem}
                 onClick={async () => {
                   setOpen(false)
-                  if (!(await confirmDialog({ title: "Delete task?", body: "Delete this task, its workspace and its archive?", confirmLabel: "Delete task", danger: true }))) return
+                  if (!(await confirmDialog({ title: "Delete task?", body: `Delete "${task.title}", its workspace and its archive?`, confirmLabel: "Delete task", danger: true }))) return
                   del.mutate(task.id)
                   navigate(project ? `/projects/${project.id}` : "/")
                 }}
@@ -655,6 +600,88 @@ function TaskMenu({
               </button>
             </div>
           </section>
+          <div className="grid items-start gap-x-6 gap-y-5 text-xs text-zinc-400 @min-[34rem]/details:grid-cols-2">
+            <DetailGroup title="Task">
+              <Detail label="Status">
+                <TaskState task={task} onReveal={() => setOpen(false)} />
+              </Detail>
+              <Detail label="ID">
+                <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300">{task.id}</span>
+                <CopyButton text={task.id} label="Copy task id" />
+              </Detail>
+              <Detail label="Link">
+                <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link">Copy link</CopyButton>
+              </Detail>
+              {task.branch && (
+                <Detail label="Branch">
+                  <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300" title={task.branch}>
+                    {task.branch}
+                  </span>
+                  <CopyButton text={task.branch} label="Copy branch name" />
+                </Detail>
+              )}
+              {task.pushState && <PushDetail push={task.pushState} />}
+              <Detail label="Active">
+                <span className="text-zinc-300">
+                  <TimeAgo ts={task.updatedAt} />
+                </span>
+                <span>
+                  · {task.turnCount} turn{task.turnCount === 1 ? "" : "s"}
+                </span>
+              </Detail>
+              <Detail label="Created">
+                <span className="text-zinc-300">
+                  <TimeAgo ts={task.createdAt} />
+                </span>
+              </Detail>
+              {task.scheduleId && (
+                <Detail label="Schedule">
+                  <span className="min-w-0 wrap-anywhere text-zinc-300">
+                    {schedule ? schedule.name : "a deleted schedule"}
+                  </span>
+                </Detail>
+              )}
+            </DetailGroup>
+            <div className="min-w-0 space-y-5">
+              <DetailGroup title="Agent">
+                <Detail label="Harness">
+                  <span className="min-w-0 wrap-anywhere text-zinc-300" data-testid="task-agent-cli">
+                    {AGENT_CLI_LABEL[task.agentCli ?? "claude"]}
+                  </span>
+                </Detail>
+                {(task.model || task.effort) && (
+                  <Detail label="Model">
+                    <span className="min-w-0 wrap-anywhere text-zinc-300">{[task.model, task.effort ? `${task.effort} effort` : ""].filter(Boolean).join(" · ")}</span>
+                  </Detail>
+                )}
+                {project && <IdentityDetail identityId={project.identityId} onOpen={() => setOpen(false)} />}
+                {(task.routingRule || task.routingReason) && (
+                  <Detail label="Route" top>
+                    <span className="min-w-0 py-0.5 leading-snug wrap-anywhere">
+                      {task.routingRule && <span className="text-zinc-300">{task.routingRule}</span>}
+                      {task.routingRule && task.routingReason && " · "}
+                      {task.routingReason}
+                    </span>
+                  </Detail>
+                )}
+              </DetailGroup>
+              {/* Where it runs: the header leaves it out, so this is the only place it shows. */}
+              <section aria-label="Where this task runs" data-testid="task-details-placement" className="border-t border-zinc-800/80 pt-3">
+                <h3 className="mb-2 text-sm font-medium text-zinc-100">Runner</h3>
+                {task.runsOn && (
+                  <dl className="mb-3 grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-2">
+                    <Detail label="Runs on">
+                      <span className={cx("min-w-0 wrap-anywhere", task.runsOn === "local" ? "text-amber-200" : "text-zinc-300")} data-testid="task-runs-on">
+                        {task.runsOn === "gpu" && task.gpu ? gpuPickLabel(task.gpu.provider, task.gpu.type) : RUNNER_LABEL[task.runsOn]}
+                        {task.runsOn === "box" && task.boxSize ? ` · ${task.boxSize} or larger` : task.runsOn === "gpu" && task.gpu?.size ? ` · ${daytonaSize(task.gpu.size)?.label ?? task.gpu.size}` : task.runsOn === "ssh" && task.machineLabel ? ` · ${task.machineLabel}` : ""} · this task only
+                      </span>
+                    </Detail>
+                  </dl>
+                )}
+                <PlacementDetails task={task} project={project} />
+              </section>
+            </div>
+          </div>
         </Modal>
       )}
     </div>
@@ -716,14 +743,19 @@ function Detail({ label, top, children }: { label: string; top?: boolean; childr
   )
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+/** Copies `text`. An icon button after the value it copies; with `children` (its words), the whole row, and the tooltip says what it copies. */
+function CopyButton({ text, label, children }: { text: string; label: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false)
+  const icon = copied ? <Check className="h-3.5 w-3.5 text-emerald-400" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />
   return (
     <button
       type="button"
-      aria-label={label}
-      title={label}
-      className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
+      aria-label={children ? undefined : label}
+      title={children ? text : label}
+      className={cx(
+        "shrink-0 rounded-lg text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none",
+        children ? "-ml-2 flex h-11 min-w-0 flex-1 items-center pl-2 text-left" : "grid h-11 w-11 place-items-center",
+      )}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text)
@@ -734,7 +766,14 @@ function CopyButton({ text, label }: { text: string; label: string }) {
         }
       }}
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+      {children ? (
+        <>
+          <span className="min-w-0 flex-1 text-zinc-300">{children}</span>
+          <span className="grid h-11 w-11 shrink-0 place-items-center">{icon}</span>
+        </>
+      ) : (
+        icon
+      )}
     </button>
   )
 }

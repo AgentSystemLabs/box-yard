@@ -1,6 +1,6 @@
 // The task header's PR chip and the PR sheet it opens. The chip carries the one thing to know before opening it
 // (lib/prDetails.ts prSignal: conflicts, failing checks, checks running, all passing...) as a glyph beside "PR #76",
-// or on the PR glyph's corner when the header folds to icons. A tap opens the sheet: checks (failing ones link to
+// or on the PR glyph's corner when the header folds to its glyph and number ("#76"). A tap opens the sheet: checks (failing ones link to
 // their logs), whether it merges cleanly, the review and files changed, the tasks that worked on it, with Open on
 // GitHub and Merge PR.
 import { useState, type ReactNode } from "react"
@@ -35,7 +35,11 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
   const signal = live ? prSignal(query.data?.details) : null
   const SignalIcon = signal ? signalIcon(signal) : null
   const activity = merge.state === "hidden" || merge.state === "ready" ? null : merge.state
-  const title = [activity && PENDING_TITLE[activity], signal && `${prLabel(task)}: ${signal.label}`, prTooltip(task), "Checks, review, files and Merge PR"].filter(Boolean).join("\n")
+  const label = prLabel(task) ?? ""
+  const number = prNumber(task.prUrl)
+  // "PR #76" is its word and its number: a folded chip keeps the number.
+  const word = number && label.endsWith(`#${number}`) ? label.slice(0, -`#${number}`.length) : null
+  const title = [activity && PENDING_TITLE[activity], signal && `${label}: ${signal.label}`, prTooltip(task), "Checks, review, files and Merge PR"].filter(Boolean).join("\n")
   return (
     <>
       <button
@@ -48,20 +52,19 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
         onClick={() => setOpen(true)}
         className={cx(HEADER_CHIP, "border", style.chip, HEADER_FOLD.chip)}
       >
-        <span className="relative inline-flex shrink-0">
-          {activity ? <StateIcon state={activity} className="h-3 w-3" /> : <Icon className={cx("h-3 w-3", HEADER_FOLD.icon)} aria-hidden />}
-          {/* Folded to its glyph, the signal sits on the glyph's corner. */}
-          {SignalIcon && !activity && (
-            <span aria-hidden data-testid="pr-signal-badge" className="absolute -right-1.5 -bottom-1 hidden rounded-full bg-zinc-950 @max-[36rem]/head:block">
-              <SignalIcon className={cx("h-2.5 w-2.5", TONE_TEXT[signal!.tone])} strokeWidth={3} />
-            </span>
-          )}
-        </span>
-        <span className={HEADER_FOLD.label}>{prLabel(task)}</span>
+        {activity ? <StateIcon state={activity} className="h-3 w-3 shrink-0" /> : <Icon className={cx("h-3 w-3 shrink-0", HEADER_FOLD.icon)} aria-hidden />}
+        {word === null ? (
+          <span className={HEADER_FOLD.label}>{label}</span>
+        ) : (
+          // Folded, "#76" stays beside the glyph, and its signal after it ("#76 ✓"): which PR, not just that there is one.
+          <span className="tabular-nums @max-[36rem]/head:ml-0.5">
+            <span className={HEADER_FOLD.label}>{word}</span>#{number}
+          </span>
+        )}
         {activity ? (
           <span className={cx("font-normal", HEADER_FOLD.label)}>· {MERGE_CHIP_LABEL[activity]}</span>
         ) : (
-          SignalIcon && <SignalIcon aria-hidden data-testid="pr-signal" className={cx("h-3.5 w-3.5 shrink-0 @max-[36rem]/head:hidden", TONE_TEXT[signal!.tone])} />
+          SignalIcon && <SignalIcon aria-hidden data-testid="pr-signal" className={cx("h-3.5 w-3.5 shrink-0", TONE_TEXT[signal!.tone])} />
         )}
         {signal && !activity && <span className="sr-only">, {signal.label}</span>}
       </button>
@@ -135,7 +138,7 @@ function PrSheet({ task, query, onClose }: { task: PrStatusTask; query: ReturnTy
           From GitHub <TimeAgo ts={answer.checkedAt} />. It refreshes every minute while this page is open.
         </p>
       )}
-      <PrAgents prUrl={task.prUrl!} onOpenTask={openTask} className="border-t border-zinc-800 pt-4" />
+      <PrAgents prUrl={task.prUrl!} onOpenTask={openTask} currentTaskId={task.id} className="border-t border-zinc-800 pt-4" />
     </Modal>
   )
 }

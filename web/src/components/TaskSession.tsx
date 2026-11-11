@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { useArtifacts, useProjects, useSchedules, useSendChat, useSendTaskMessage, useTask, newClientId } from "../lib/queries"
 import { projectContext, taskContext } from "../lib/selectionTask"
 import { Button, InRepo, cx } from "./ui"
-import { TaskThread } from "./TaskView"
+import { TaskThread, workingLabel } from "./TaskView"
 import { CHAT_COLUMN, TaskHeader } from "./TaskHeader"
 import { TaskComposer, type TaskAskTarget } from "./CaptainForward"
 import { TaskAsk } from "./TaskAsk"
@@ -103,12 +103,20 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
             <TaskStatusAnnouncer task={task} />
             {/* pb-0.5: the column clips from sm, and the button's focus ring stays inside it. */}
             {task.status === "queued" && task.waitReason && <div role="status" className={cx(CHAT_COLUMN, "flex shrink-0 flex-wrap items-center gap-2 pt-2 pb-0.5 text-sm text-amber-200")}><WaitReason task={task} /><WaitFixButton task={task} /></div>}
-            <div className={cx(CHAT_COLUMN, "mt-2 shrink-0 empty:hidden")}><TaskFailure task={task} project={project} /></div>
+            {/* At most half the panel, and it scrolls: with Details open on a small phone the box and Send stay on screen.
+                Beside the chat it is the transcript's column, which starts past its day rail (ChatHistory, w-11); a
+                phone's sheet gives it the whole width. */}
+            {task.status === "failed" && task.error && (
+              <div className="mt-2 flex max-h-[50%] min-h-0 shrink-0 flex-col @min-[35.5rem]/coord:pl-11">
+                <div className="chat-column min-h-0 overflow-y-auto"><TaskFailure task={task} project={project} /></div>
+              </div>
+            )}
             <div className="flex min-h-0 flex-1 flex-col">
               {asking ? <TaskAsk taskId={id} handle={askHandle} onAsk={askStarter} /> : (
                 <TaskThread handle={handle} id={id} bare scrollKey={scrollKey}
-                  working={onTurn(task) ? "Task is working…" : null}
+                  working={onTurn(task) ? workingLabel(task.status) : null}
                   workingSince={onTurn(task) ? runningSince(task) : null}
+                  ask={task.status === "needs_input" ? task.question : null}
                   selectionSource={project ? { kind: "task", project: projectContext(project)!, task: taskContext(task)! } : null}
                   onStartFromSelection={selection} onFollowUp={followUp}
                 />

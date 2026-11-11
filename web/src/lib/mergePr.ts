@@ -38,10 +38,9 @@ export const MERGE_CHIP_LABEL: Record<Exclude<MergeButtonState, "hidden" | "read
   requested: "merging…",
 }
 
-export const mergeTitle = (task: Pick<Task, "title">) => `Send merge request to "${task.title}"?`
-
-export const mergeBody = (task: Pick<Task, "prUrl">) =>
-  `The agent merges the latest base branch into its branch, runs the checks and merges PR #${prNumber(task.prUrl) ?? "?"} with --match-head-commit, or comments the error on the PR and reports it. If it is mid-turn, the request waits for that turn to end. The project Captain and the Coordinator are told.`
+/** The confirm's body: whose agent it asks, what that agent does, and who hears of it. */
+export const mergeBody = (task: Pick<Task, "title">) =>
+  `The agent of "${task.title}" updates its branch from the base, runs the checks and merges the PR. If that fails, it comments on the PR and reports here. A running turn finishes first. The Captain and the Coordinator are told.`
 
 // ------------------------------------------------------------- client duplicate guard
 

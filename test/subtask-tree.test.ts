@@ -585,7 +585,7 @@ describe("sub-task panels", () => {
     const listed = [...parent.querySelectorAll("[data-testid=subtasks-line] a")].map((a) => [a.querySelector(".truncate")!.textContent, a.querySelector("[data-subtask-status]")?.textContent])
     expect(listed).toEqual([CLASSIC, RATIOS, PANS, CHEFS].map((t) => [t.title, expect.any(String)]))
     expect(new Set(listed.map(([, status]) => status)).size).toBe(4)
-    expect(parent.querySelector("[data-testid=subtask-report]")!.textContent).toContain("Report from")
+    expect(parent.querySelector("[data-testid=subtask-report]")!.textContent).toMatch(new RegExp(`^Report${RATIOS.title}`))
     expect(parent.querySelector("[data-testid=subtask-report] strong")!.textContent).toBe("3 eggs")
 
     // Unpinned, the parent is the rightmost unpinned panel: the sub-task takes its place. Back brings it back.

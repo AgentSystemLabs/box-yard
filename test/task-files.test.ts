@@ -78,9 +78,9 @@ describe("helpers", () => {
     expect(galleryOf([zip, png, md]).map((g) => g.name)).toEqual(["shot.png", "notes.md"])
   })
 
-  it("counts files newer than the last opened mark", () => {
+  it("counts files newer than the last opened mark, and none before the first look", () => {
     const files = [file("a", "a.md", 10), file("b", "b.md", 20), file("c", "c.md", 30)]
-    expect(unseenCount(files, null)).toBe(3)
+    expect(unseenCount(files, null)).toBe(0)
     expect(unseenCount(files, 20)).toBe(1)
     expect(unseenCount(files, latestAt(files))).toBe(0)
     expect(latestAt([])).toBe(0)

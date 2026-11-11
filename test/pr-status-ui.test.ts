@@ -88,7 +88,16 @@ const listed: Task = {
   model: null, effort: null, claudeCostUsd: 0, claudeTokens: 0, routingRule: null, routingReason: null, runsOn: null, machineLabel: null,
   mergeRequest: null, createdAt: 1, updatedAt: 1,
 }
-const agents: PrTasksAnswer = { url: prUrl, branch: "webhook-retry", tasks: [{ taskId: listed.id, roles: ["opened"], model: "claude-opus-5-5", since: 1 }] }
+// Another task that pushed to the same PR.
+const helper: Task = { ...listed, id: "task_prhelp0001", title: "Fix the retry backoff", prUrl: null, prState: null }
+const agents: PrTasksAnswer = {
+  url: prUrl,
+  branch: "webhook-retry",
+  tasks: [
+    { taskId: listed.id, roles: ["opened"], model: "claude-opus-5-5", since: 1 },
+    { taskId: helper.id, roles: ["pushed"], model: "claude-opus-5-5", since: 2 },
+  ],
+}
 
 describe("PrStatusChip", () => {
   let root: Root
@@ -102,7 +111,7 @@ describe("PrStatusChip", () => {
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       calls.push(`${init?.method ?? "GET"} ${url}`)
       if (url.endsWith("/pr")) return new Response(JSON.stringify(answer))
-      if (url === "/api/tasks") return new Response(JSON.stringify([listed]))
+      if (url === "/api/tasks") return new Response(JSON.stringify([listed, helper]))
       if (url === "/api/projects") return new Response(JSON.stringify([]))
       if (url.startsWith("/api/prs/")) return new Response(JSON.stringify(agents))
       return new Response(JSON.stringify({ task: {}, delivery: "now" }))
@@ -159,7 +168,7 @@ describe("PrStatusChip", () => {
     await until(() => facts() || document.querySelector('[data-testid="pr-error"]'))
   }
 
-  it("carries the PR's most urgent signal: a glyph beside its number, on the glyph's corner when folded, and in words", async () => {
+  it("carries the PR's most urgent signal: a glyph beside its number, folded too, and in words", async () => {
     await render(task())
     await until(() => chip().getAttribute("data-pr-signal"))
     expect(calls).toEqual(["GET /api/tasks/task_prchip0001/pr"])
@@ -167,8 +176,13 @@ describe("PrStatusChip", () => {
     expect(chip().textContent).toContain("PR #76")
     expect(chip().textContent).toContain(", Conflicts with main")
     expect(chip().title).toContain("PR #76: Conflicts with main")
-    expect(chip().querySelector('[data-testid="pr-signal"]')!.getAttribute("class")).toContain("@max-[36rem]/head:hidden")
-    expect(chip().querySelector('[data-testid="pr-signal-badge"]')!.className).toContain("@max-[36rem]/head:block")
+    // Folded, "PR" goes but "#76" and the glyph after it stay: which PR, and its signal.
+    const word = [...chip().querySelectorAll("span")].find((s) => s.textContent === "PR ")!
+    expect(word.className).toContain("@max-[36rem]/head:sr-only")
+    expect(word.parentElement!.className).not.toContain("sr-only")
+    expect(word.parentElement!.textContent).toBe("PR #76")
+    expect(chip().querySelector('[data-testid="pr-signal"]')!.getAttribute("class")).not.toMatch(/hidden|sr-only/)
+    expect(chip().querySelector('[data-testid="pr-signal-badge"]')).toBeNull()
     // Green stays the open PR's, and purple is only ever Merged's.
     expect(chip().outerHTML).not.toContain("merged")
   })
@@ -211,12 +225,17 @@ describe("PrStatusChip", () => {
     expect(calls).toContain("GET /api/prs/acme/site/76/tasks")
     const section = sheet()!.querySelector<HTMLElement>('[data-testid="pr-agents"]')!
     expect(section.querySelector("h2")!.textContent).toContain("Worked on by")
-    const row = section.querySelector<HTMLAnchorElement>('[data-testid="pr-agent"]')!
-    expect(row.textContent).toContain("Retry webhooks")
-    expect(row.textContent).toContain("Opened it")
-    await act(async () => void row.click())
+    await until(() => section.querySelectorAll('[data-testid="pr-agent"]').length === 2)
+    const [here, row] = [...section.querySelectorAll<HTMLElement>('[data-testid="pr-agent"]')]
+    // The task the sheet is in reads "This task" and links nowhere.
+    expect(here!.textContent).toContain("This task")
+    expect(here!.textContent).toContain("Opened it")
+    expect(here!.tagName).not.toBe("A")
+    expect(row!.tagName).toBe("A")
+    expect(row!.textContent).toContain("Fix the retry backoff")
+    await act(async () => void row!.click())
     expect(sheet()).toBeNull()
-    expect(new URLSearchParams(location.search).get("session")).toBe("task_prchip0001")
+    expect(new URLSearchParams(location.search).get("session")).toBe("task_prhelp0001")
   })
 
   it("acts from the sheet: Open on GitHub, and Merge PR through the shared confirm", async () => {

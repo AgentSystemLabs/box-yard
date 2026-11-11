@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
-// The "Merge PR" button: when it shows, its confirm step, the queued / requested states and the client duplicate guard.
+// The "Merge PR" button (the PR sheet, the details' item and cards): when it shows, its confirm step, the queued / requested states and the client duplicate guard.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { MergePrButton, MergePrCardButton, MergePrMenuItem } from "../web/src/components/MergePr.js"
+import { MergePrCardButton, MergePrMenuItem } from "../web/src/components/MergePr.js"
+import { PrStatusChip } from "../web/src/components/PrStatus.js"
 import { PrChip } from "../web/src/components/ui.js"
 import { ConfirmHost } from "../web/src/components/ConfirmDialog.js"
 import { canRequestMerge, mergeButtonState, sendMergeOnce } from "../web/src/lib/mergePr.js"
@@ -112,7 +113,8 @@ describe("Merge PR button", () => {
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
     qc.setQueryData(keys.tasks, [task()])
-    fetchMock = vi.fn()
+    // Anything not answered below (the PR sheet's GitHub details) stays in flight.
+    fetchMock = vi.fn(() => new Promise(() => {}))
     vi.stubGlobal("fetch", fetchMock)
     host = document.createElement("div")
     document.body.append(host)
@@ -133,23 +135,29 @@ describe("Merge PR button", () => {
   const button = (state?: string) => document.querySelector<HTMLButtonElement>(state ? `[data-merge-state="${state}"]` : "[data-merge-state]")
   const byText = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes(text))
   const answer = (body: unknown, status = 200) => fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status }))
+  /** The header's PR chip opens the PR sheet, whose footer has Merge PR. */
+  const openSheet = () => click(document.querySelector("[data-pr-state]")!)
+  /** The task details' (ⓘ) item. */
+  const menuItem = (t: Task) => createElement(MergePrMenuItem, { task: t, onPicked: () => {} })
 
-  it("keeps merge actions neutral across placements and reserves merged colour for the PR chip", () => {
+  it("keeps merge actions neutral across placements and reserves merged colour for the PR chip", async () => {
     const t = task()
     render(createElement("div", null,
-      createElement(MergePrButton, { task: t }),
-      createElement(MergePrButton, { task: t, placement: "actions" }),
+      createElement(PrStatusChip, { task: t }),
       createElement(MergePrCardButton, { task: t }),
-      createElement(MergePrMenuItem, { task: t, onPicked: () => {} }),
+      menuItem(t),
       createElement(PrChip, { task: task({ prState: "merged" }) }),
     ))
-    const actions = [...host.querySelectorAll<HTMLElement>("[data-merge-state]")]
-    expect(actions).toHaveLength(4)
+    await openSheet()
+    const actions = [...document.querySelectorAll<HTMLElement>("[data-merge-state]")]
+    expect(actions).toHaveLength(3)
     for (const action of actions) {
       expect(action.className).not.toMatch(/merged|purple|violet/)
       expect(action.classList.contains("min-h-11")).toBe(true)
     }
-    for (const action of actions.slice(0, 3)) {
+    // The buttons (the card's, the sheet's) are filled neutral; the details' item is a menu row.
+    const sheet = document.querySelector('[role="dialog"] [data-merge-state]')!
+    for (const action of [host.querySelector('[aria-label^="Merge the PR of"]')!, sheet]) {
       expect(action.classList.contains("bg-zinc-800")).toBe(true)
       expect(action.classList.contains("text-zinc-200")).toBe(true)
     }
@@ -158,40 +166,50 @@ describe("Merge PR button", () => {
     expect(merged.className).toContain("text-merged-fg")
   })
 
-  it("confirms in a popover, sends one POST, then shows the queued state from the server", async () => {
+  it("confirms with the confirm dialog, sends one POST, then shows the queued state from the server", async () => {
     answer({ task: task({ status: "working", mergeRequest: pending(null) }), delivery: "queued" })
-    render(createElement(MergePrButton, { task: qc.getQueryData<Task[]>(keys.tasks)![0]! }))
+    render(menuItem(qc.getQueryData<Task[]>(keys.tasks)![0]!))
     expect(button("ready")?.textContent).toContain("Merge PR")
 
     await click(button("ready")!)
-    const popover = document.querySelector('[role="dialog"]')!
-    expect(popover.textContent).toContain('Send merge request to "Ship the inbox"?')
+    const dialog = document.querySelector('[role="alertdialog"], [role="dialog"]')!
+    expect(dialog.textContent).toContain("Merge PR #12?")
+    expect(dialog.textContent).toContain('The agent of "Ship the inbox"')
     expect(fetchMock).not.toHaveBeenCalled()
 
     await click(byText("Send merge request")!)
+    await act(async () => {})
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]![0]).toBe("/api/tasks/task_merge00001/merge")
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: "POST" })
 
     // The cache now holds the server's task: re-render with it, as the task page does.
-    render(createElement(MergePrButton, { task: qc.getQueryData<Task[]>(keys.tasks)![0]! }))
+    render(menuItem(qc.getQueryData<Task[]>(keys.tasks)![0]!))
     const queued = button("queued")!
     expect(queued.textContent).toContain("Merge queued")
     expect(queued.disabled).toBe(true)
     expect(currentToasts().map((t) => t.title)).toContain("Merge request queued")
   })
 
-  it("is disabled and reads Merge requested… while the agent is on it", () => {
-    render(createElement(MergePrButton, { task: task({ mergeRequest: pending(5) }) }))
+  it("is disabled and reads Merge requested… while the agent is on it", async () => {
+    render(menuItem(task({ mergeRequest: pending(5) })))
+    expect(button("requested")?.textContent).toContain("Merge requested…")
+    expect(button("requested")?.disabled).toBe(true)
+    // The PR sheet's button too.
+    render(createElement(PrStatusChip, { task: task({ mergeRequest: pending(5) }) }))
+    await openSheet()
     expect(button("requested")?.textContent).toContain("Merge requested…")
     expect(button("requested")?.disabled).toBe(true)
   })
 
-  it("renders nothing for merged, closed and draft PRs, in the header, the menu and on cards", () => {
+  it("renders nothing for merged, closed and draft PRs, in the PR sheet, the menu and on cards", async () => {
     for (const prState of ["merged", "closed", "draft"] as const) {
       const t = task({ prState })
-      render(createElement("div", null, createElement(MergePrButton, { task: t }), createElement(MergePrMenuItem, { task: t, onPicked: () => {} }), createElement(MergePrCardButton, { task: t })))
+      render(createElement("div", null, createElement(PrStatusChip, { task: t }), menuItem(t), createElement(MergePrCardButton, { task: t })))
+      await openSheet()
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull()
       expect(button()).toBeNull()
+      render(null)
     }
     render(createElement(MergePrCardButton, { task: task() }))
     expect(button("ready")?.textContent).toContain("Merge")
@@ -206,7 +224,7 @@ describe("Merge PR button", () => {
     await act(async () => void button("ready")!.dispatchEvent(ev))
     expect(opened).not.toHaveBeenCalled()
     expect(ev.defaultPrevented).toBe(true)
-    expect(document.body.textContent).toContain('Send merge request to "Ship the inbox"?')
+    expect(document.body.textContent).toContain('The agent of "Ship the inbox"')
     await click(byText("Send merge request")!)
     await act(async () => {})
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -215,7 +233,7 @@ describe("Merge PR button", () => {
 
   it("shows the server's refusal of a duplicate", async () => {
     answer({ error: "A merge of PR #12 was already requested and the agent is on it. Wait for that turn to end." }, 409)
-    render(createElement(MergePrButton, { task: task() }))
+    render(menuItem(task()))
     await click(button("ready")!)
     await click(byText("Send merge request")!)
     await act(async () => {})

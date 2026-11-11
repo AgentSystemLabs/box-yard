@@ -9,7 +9,7 @@ import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
 import { useOpenSettings } from "./SettingsHost"
 import { ContinueTask } from "./ContinueTask"
-import { Button, COPIED_MS, LineIcon, LinkedText, cx, useMinuteClock } from "./ui"
+import { Button, COPIED_MS, LineIcon, LinkedText, TAP_AREA, cx, useMinuteClock } from "./ui"
 
 const ICON: Record<FailureKind, LucideIcon> = {
   usage_limit: Hourglass,
@@ -57,11 +57,20 @@ function FailureBanner({ task, error, identityId, className }: { task: FailedTas
       <div className="flex items-start gap-2.5">
         <LineIcon icon={ICON[f.kind]} className="h-4 w-4 text-red-300" />
         <div className="min-w-0 flex-1">
-          <p className="font-medium wrap-anywhere text-red-50" data-testid="failure-title">
-            {f.title}
-          </p>
+          {/* Details sits on the title's row, a line tall (44px to a finger), so the actions under it wrap less. */}
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 font-medium wrap-anywhere text-red-50" data-testid="failure-title">
+              {f.title}
+            </p>
+            {more && (
+              <button type="button" aria-expanded={open} aria-controls={rawId} onClick={() => setOpen((o) => !o)} className={cx(TAP_AREA, "ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded text-xs font-medium text-red-200/70 hover:text-red-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none")} data-testid="failure-details">
+                Details <ChevronDown className={cx("h-3.5 w-3.5", open && "rotate-180")} aria-hidden />
+              </button>
+            )}
+          </div>
           <p className="mt-0.5 wrap-anywhere text-red-200/80" data-testid="failure-detail">
-            {f.detail}
+            {/* Under "The last turn failed", an error's own "Turn failed: " says it twice. */}
+            {f.kind === "unknown" ? f.detail.replace(/^Turn failed:\s*/i, "") || f.detail : f.detail}
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             {f.fixFirst && settings}
@@ -70,17 +79,12 @@ function FailureBanner({ task, error, identityId, className }: { task: FailedTas
             </Button>
             <ContinueTask task={task} />
             {!f.fixFirst && settings}
-            {more && (
-              <Button size="sm" variant="ghost" aria-expanded={open} aria-controls={rawId} onClick={() => setOpen((o) => !o)} className="text-red-200/70 hover:text-red-100" data-testid="failure-details">
-                Details <ChevronDown className={cx("h-3.5 w-3.5", open && "rotate-180")} aria-hidden />
-              </Button>
-            )}
           </div>
         </div>
       </div>
       {more && open && (
         <div id={rawId} className="mt-2.5">
-          <pre className="max-h-48 overflow-y-auto rounded-lg bg-zinc-950/60 p-2.5 font-mono text-xs whitespace-pre-wrap wrap-anywhere text-red-200/90" data-testid="failure-raw">
+          <pre className="max-h-[min(12rem,30dvh)] overflow-y-auto rounded-lg bg-zinc-950/60 p-2.5 font-mono text-xs whitespace-pre-wrap wrap-anywhere text-red-200/90" data-testid="failure-raw">
             <LinkedText text={error} />
           </pre>
           <CopyError text={error} />

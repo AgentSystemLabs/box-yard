@@ -84,8 +84,8 @@ describe("TaskFailure", () => {
     expect($("failure-title")!.textContent).toBe("Claude didn't accept its login")
     expect($("failure-detail")!.textContent).toContain("Sign in again or paste a new key, then retry.")
     const buttons = [...host.querySelectorAll("button")].map((b) => b.textContent!.trim())
-    expect(buttons).toEqual(["Claude login", "Retry", "Continue with…", "Details"])
-    // The raw error isn't in the way until asked for.
+    expect(buttons).toEqual(["Details", "Claude login", "Retry", "Continue with another agent…"])
+    // Details sits on the title's row; the raw error isn't in the way until asked for.
     expect($("failure-raw")).toBeNull()
   })
 
@@ -106,7 +106,7 @@ describe("TaskFailure", () => {
     render(task({ error: SSH }))
     expect($("failure-title")!.textContent).toBe("Couldn't reach gpu-tower")
     const buttons = [...host.querySelectorAll("button")].map((b) => b.textContent!.trim())
-    expect(buttons).toEqual(["Retry", "Continue with…", "SSH machines", "Details"])
+    expect(buttons).toEqual(["Details", "Retry", "Continue with another agent…", "SSH machines"])
     await act(async () => {
       $("failure-retry")!.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       await new Promise((r) => setTimeout(r, 10))

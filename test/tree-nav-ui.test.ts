@@ -252,7 +252,10 @@ describe("a task's header on a phone", () => {
       expect(nav.querySelector("[data-testid=task-mark-done]")).not.toBeNull()
       expect(nav.querySelector("[data-testid=task-reopen]")).toBeNull()
       expect(nav.textContent).not.toContain("Idle")
-      expect(header(PANS).querySelector("[data-testid=task-meta] [data-testid=task-chips]")).not.toBeNull()
+      // Its state is the title's icon; with no PR, files or preview there is no chip row under the title.
+      const meta = header(PANS).querySelector("[data-testid=task-meta]")!
+      expect(meta.querySelector("[data-testid=task-title] [data-testid=task-status-icon]")!.getAttribute("aria-label")).toBe("Idle")
+      expect(meta.querySelector("[data-testid=task-chips]")).toBeNull()
     } finally {
       TASKS.splice(TASKS.indexOf(ready), 1, PANS)
     }
