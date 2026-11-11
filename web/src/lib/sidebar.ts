@@ -33,6 +33,8 @@ export interface SidebarGroup {
   rows: SidebarRow[]
   /** Tasks asking Cody. */
   needs: number
+  /** Tasks that failed. */
+  failed: number
   /** Turns running or being set up. */
   running: number
 }
@@ -135,7 +137,7 @@ export function sidebarGroups(
   opts: { now?: number; current?: string | null; closing?: ReadonlySet<string> },
 ): { shown: SidebarGroup[]; others: SidebarGroup[] } {
   const groups = new Map<string, SidebarGroup>()
-  for (const p of projects) groups.set(p.id, { project: p, pin: pins[p.id] ?? null, rows: [], needs: 0, running: 0 })
+  for (const p of projects) groups.set(p.id, { project: p, pin: pins[p.id] ?? null, rows: [], needs: 0, failed: 0, running: 0 })
   const byProject = new Map<string, Task[]>()
   const byId = new Map(tasks.map((t) => [t.id, t]))
   /** Being marked done here, or under a task that is: Mark done on a parent closes its tree, so it all leaves at once. */
@@ -147,6 +149,7 @@ export function sidebarGroups(
   for (const t of listed) {
     const g = groups.get(t.projectId)!
     if (t.status === "needs_input") g.needs++
+    if (t.status === "failed") g.failed++
     if (t.status === "working" || t.status === "starting") g.running++
     if (!trees.top(t)) continue
     const list = byProject.get(t.projectId) ?? []
@@ -204,7 +207,7 @@ export function keepGroups(prev: readonly SidebarGroup[] | undefined, next: Side
   const out = next.map((g, i) => {
     const o = old.get(g.project.id)
     const rows = keepRows(o?.rows, g.rows)
-    const kept = o && o.project === g.project && o.pin === g.pin && o.needs === g.needs && o.running === g.running && o.rows === rows ? o : rows === g.rows ? g : { ...g, rows }
+    const kept = o && o.project === g.project && o.pin === g.pin && o.needs === g.needs && o.failed === g.failed && o.running === g.running && o.rows === rows ? o : rows === g.rows ? g : { ...g, rows }
     if (kept !== prev[i]) same = false
     return kept
   })
