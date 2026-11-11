@@ -669,11 +669,9 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
   const dialog = (heading: string) => dialogs().find((d) => d.querySelector("h2")?.textContent === heading)
   const esc = () => act(() => void document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })))
   const settingsParam = () => new URLSearchParams(location.search).get("projectSettings")
-  // Closing awaits the unsaved-changes check (mayLeave), so the URL updates a microtask later.
-  const settle = () => act(async () => {})
   const openDrawer = () => click(document.querySelector("button[aria-label^='Projects and tasks']")!)
 
-  it.each([400, 1440])("a project row's settings button opens them over the chat at %ipx", async (width) => {
+  it.each([400, 1440])("a project row's settings button opens them over the chat at %ipx", (width) => {
     viewport(width)
     render()
     if (width < 1000) openDrawer()
@@ -684,7 +682,6 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
     expect(settings.querySelector("[data-testid=project-identity-section]")!.textContent).toContain("Identity / Claude login")
     expect(settingsParam()).toBe(YARD.id)
     click(button(settings, "Close"))
-    await settle()
     expect(settingsParam()).toBeNull()
     expect(dialog("box-yard settings")).toBeUndefined()
     // The chat underneath never changed; on a phone the drawer is still there, with focus back on the button.
@@ -700,7 +697,7 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
     expect(settingsParam()).toBe(QUIET.id)
   })
 
-  it.each([400, 1440])("the centre Captain's ⋯ opens (not clipped by its header) and reaches Project settings at %ipx", async (width) => {
+  it.each([400, 1440])("the centre Captain's ⋯ opens (not clipped by its header) and reaches Project settings at %ipx", (width) => {
     viewport(width)
     render(`${APP_HOME}?project=${YARD.id}`)
     const chat = document.querySelector<HTMLElement>("[data-testid=captain-chat][data-centre]")!
@@ -716,13 +713,12 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
     expect(dialog("box-yard settings")).toBeDefined()
     expect(settingsParam()).toBe(YARD.id)
     esc()
-    await settle()
     expect(settingsParam()).toBeNull()
     expect(document.querySelector("[data-testid=captain-chat][data-centre]")).toBe(chat)
     expect(document.activeElement).toBe(trigger)
   })
 
-  it.each([400, 1440])("the Captain panel's ⋯ reaches Project settings, and Esc leaves settings first at %ipx", async (width) => {
+  it.each([400, 1440])("the Captain panel's ⋯ reaches Project settings, and Esc leaves settings first at %ipx", (width) => {
     viewport(width)
     render(`${APP_HOME}?captain=${YARD.id}`)
     const captain = document.querySelector<HTMLElement>("[data-testid=captain-chat]:not([data-centre])")!
@@ -734,7 +730,6 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
     const params = new URLSearchParams(location.search)
     expect([params.get("captain"), params.get("projectSettings")]).toEqual([YARD.id, YARD.id])
     esc()
-    await settle()
     expect(settingsParam()).toBeNull()
     expect(new URLSearchParams(location.search).get("captain")).toBe(YARD.id)
     expect(document.querySelector("[data-testid=captain-chat]:not([data-centre])")).toBe(captain)
