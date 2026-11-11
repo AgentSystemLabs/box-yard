@@ -12,7 +12,6 @@ import { flushSync } from "react-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
-  ChevronRight,
   CircleCheck,
   Loader2,
   Maximize2,
@@ -32,7 +31,7 @@ import { RouteLine, routerName } from "./ThreadRoute"
 import { StickyScroll, type StickyScrollHandle } from "./StickyScroll"
 import { DismissButton } from "./Modal"
 import { MessageMenu, type MenuItem } from "./MessageActions"
-import { LineIcon, Markdown, cx } from "./ui"
+import { LineIcon, Markdown, TAP_AREA, cx } from "./ui"
 import { quotePreview } from "./NewTask"
 import { confirmDialog } from "../lib/confirm"
 import { revealChatMessage } from "../lib/reveal"
@@ -160,26 +159,40 @@ const PaneBody = memo(function PaneBody({ id, chat, open, headerClassName }: { i
 
 const NO_MESSAGES: SideThreadMessage[] = []
 
-/** A message's first line as a title: no Markdown marks, at most a line. */
+/**
+ * A message's first line as a title, at most a line: a link is its text and bold loses its marks. Nothing else is
+ * taken out, so a name keeps its underscores ("task_demo01", "test_related").
+ */
 export function threadTitle(text: string) {
   const line = text.split(/\r?\n/).find((l) => l.trim()) ?? ""
-  return quotePreview(line.replace(/^\s*(?:#+|>|[-*+]|\d+\.)\s+/, "").replace(/[*_`~]+/g, ""), 140)
+  return quotePreview(
+    line
+      .replace(/^\s*(?:#+|>|[-*+]|\d+\.)\s+/, "")
+      .replace(/!?\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/(^|[^\w])__(.+?)__(?!\w)/g, "$1$2"),
+    140,
+  )
 }
 
 export const repliesLabel = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`
+
+/** Under a thread that started after its chat was compacted: what it was given to read. */
+const SUMMARY_NOTE = "Earlier messages were summarized, so this thread starts from that summary and the messages up to the one you picked."
 
 /** The panel header's icon buttons: 44px for a finger, 32px for a mouse. */
 const PANEL_ICON =
   "grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 aria-expanded:bg-zinc-800 aria-pressed:text-yard-300 [@media(pointer:fine)]:h-8 [@media(pointer:fine)]:w-8"
 /** A header button only for the column beside the chat: a sheet has ‹ instead. */
 const PANEL_WIDE = "hidden @min-[35.5rem]/coord:grid"
+/** Resolve says its name where the panel's header has the room (its container); narrower, it's the ✓ alone. */
+const RESOLVE_ROOM = "@min-[24rem]/thread:flex @min-[24rem]/thread:w-auto! @min-[24rem]/thread:items-center @min-[24rem]/thread:gap-1.5 @min-[24rem]/thread:px-2.5"
 
-/** The panel's header: ‹ on a sheet, "Threads › title", its own buttons (`children`), and × in a column. */
+/** The panel's header: ‹ on a sheet, its heading (`title`), its own buttons (`children`), and × in a column. */
 function PanelHeader({
   chat,
   open,
   className,
-  crumb,
   title,
   closeLabel,
   closeTitle,
@@ -188,7 +201,6 @@ function PanelHeader({
   chat: ThreadChat
   open: OpenThread
   className: string
-  crumb: string
   title: ReactNode
   closeLabel: string
   closeTitle: string
@@ -196,14 +208,10 @@ function PanelHeader({
 }) {
   const close = () => closeThread(chat)
   return (
-    <header className={cx(className, "flex shrink-0 items-center gap-1 border-b border-zinc-900 pt-[env(safe-area-inset-top)] pr-[max(0.5rem,env(safe-area-inset-right))] pl-2")}>
+    <header className={cx(className, "@container/thread flex shrink-0 items-center gap-1 border-b border-zinc-900 pt-[env(safe-area-inset-top)] pr-[max(0.5rem,env(safe-area-inset-right))] pl-2")}>
       {/* A sheet goes back to the chat; a column closes with the × on the right. */}
       <DismissButton kind="back" onClick={close} label="Back to the chat" className={open.expanded ? "hidden" : "@min-[35.5rem]/coord:hidden"} />
-      <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-sm @min-[35.5rem]/coord:pl-2">
-        <span className="shrink-0 font-semibold text-zinc-100">{crumb}</span>
-        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
-        {title}
-      </nav>
+      {title}
       <div className="flex shrink-0 items-center gap-0.5">
         {children}
         <DismissButton kind="close" onClick={close} label={closeLabel} title={closeTitle} className={open.expanded ? undefined : PANEL_WIDE} />
@@ -300,13 +308,24 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
         chat={chat}
         open={open}
         className={headerClassName}
-        crumb="Threads"
         closeLabel="Close thread"
         closeTitle="Close (Esc). It stays under the message."
         title={
-          <span data-testid="side-thread-title" title={quotePreview(original, 400)} className="min-w-0 truncate text-zinc-400">
-            {reply ? threadTitle(original) : `“${quotePreview(original, 140)}”`}
-          </span>
+          // A heading, not a trail: there's no list of threads to go back to. A highlight's passage is the card under
+          // it; a reply's message scrolls with the thread, so its first line stays here.
+          <h2 title={quotePreview(original, 400)} className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-100 @min-[35.5rem]/coord:pl-2">
+            Thread
+            {reply && (
+              <>
+                <span aria-hidden className="ml-2 font-normal text-zinc-600">
+                  ·
+                </span>
+                <span data-testid="side-thread-title" className="ml-2 font-normal text-zinc-400">
+                  {threadTitle(original)}
+                </span>
+              </>
+            )}
+          </h2>
         }
       >
         {thread && (
@@ -317,9 +336,10 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
             aria-pressed={resolved}
             aria-label={resolved ? "Reopen thread" : "Resolve thread"}
             title={resolved ? "Resolved. Reopen it" : "Resolve: fold it away under the message"}
-            className={PANEL_ICON}
+            className={cx(PANEL_ICON, RESOLVE_ROOM)}
           >
-            {resolved ? <Undo2 className="h-4 w-4" /> : <CircleCheck className="h-4 w-4" />}
+            {resolved ? <Undo2 className="h-4 w-4 shrink-0" /> : <CircleCheck className="h-4 w-4 shrink-0" />}
+            <span className="hidden text-xs font-medium @min-[24rem]/thread:inline">{resolved ? "Reopen" : "Resolve"}</span>
           </button>
         )}
         <button ref={more} type="button" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu} aria-label="More thread actions" title="More" className={PANEL_ICON}>
@@ -350,7 +370,7 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
             <span className="line-clamp-4">{thread.quote}</span>
           </button>
           {thread.context === "summary" && (
-            <p className="mt-1.5 text-[11px] leading-4 text-zinc-500">The chat was compacted since, so this thread started from the compaction summary and the messages up to the highlight.</p>
+            <p className="mt-1.5 text-[11px] leading-4 text-zinc-400">{SUMMARY_NOTE}</p>
           )}
         </div>
       )}
@@ -360,16 +380,16 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
             <div className="text-sm text-zinc-200">
               <Markdown>{original}</Markdown>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+            <div className="flex items-center gap-2 text-[11px] text-zinc-400">
               <span className="shrink-0">{thread?.replies ? repliesLabel(thread.replies) : "No replies yet"}</span>
               <span className="h-px flex-1 bg-zinc-800" />
             </div>
             {!thread?.replies && (
-              <p data-testid="side-thread-routing-hint" className="text-[11px] leading-4 text-zinc-500">
+              <p data-testid="side-thread-routing-hint" className="text-[11px] leading-4 text-zinc-400">
                 The {router} answers questions here and sends instructions on, to the task&apos;s agent or its own chat. Each message says where it went.
               </p>
             )}
-            {thread?.context === "summary" && <p className="text-[11px] leading-4 text-zinc-500">The chat was compacted since, so this thread started from the compaction summary and the messages up to this one.</p>}
+            {thread?.context === "summary" && <p className="text-[11px] leading-4 text-zinc-400">{SUMMARY_NOTE}</p>}
           </div>
         )}
         {messages.map((m) =>
@@ -442,16 +462,7 @@ export function ThreadStreaming({ id, busy }: { id: string; busy: boolean }) {
       </div>
     )
   if (!busy) return null
-  return (
-    <div data-testid="side-thread-working" role="status" className="flex items-center gap-2 px-1 py-2 text-xs text-zinc-500">
-      <span className="flex gap-1" aria-hidden>
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-yard-400/80" style={{ animationDelay: `${i * 120}ms` }} />
-        ))}
-      </span>
-      Claude is working
-    </div>
-  )
+  return <p data-testid="side-thread-working" role="status" className="py-2 text-xs text-zinc-400">Working on this thread…</p>
 }
 
 // ---------------------------------------------------------------- markers on the chat
@@ -512,7 +523,8 @@ function Markers({ chat, m }: { chat: ThreadChat; m: ChatMessage }) {
   const isOpen = (t: SideThread) => open?.id === t.id
   const toggle = (t: SideThread) => (isOpen(t) ? closeThread(chat) : openThread(chat, t.id))
   return (
-    <div ref={row} data-thread-markers className={cx("mt-1.5 flex flex-wrap items-center gap-1.5", right && "justify-end")}>
+    // On touch the row is as tall as its buttons' tap areas (TAP_AREA), and wrapped rows keep them apart.
+    <div ref={row} data-thread-markers className={cx("mt-1.5 flex flex-wrap items-center gap-1.5 pointer-coarse:min-h-11 pointer-coarse:gap-y-5", right && "justify-end")}>
       {replies && <RepliesButton t={replies} active={isOpen(replies)} onOpen={() => toggle(replies)} />}
       {asks.map((t) => (
         <ThreadChip key={t.id} t={t} active={isOpen(t)} onOpen={() => toggle(t)} />
@@ -524,7 +536,7 @@ function Markers({ chat, m }: { chat: ThreadChat; m: ChatMessage }) {
 /** "↰ 2 replies" under a message: opens its reply thread. It says when an answer is coming, unread or resolved. */
 function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; onOpen: () => void }) {
   const resolved = t.resolvedAt != null
-  const state = t.busy ? "answering" : t.unread ? "new reply" : resolved ? "resolved" : null
+  const state = t.busy ? "answering" : t.unread ? "unread" : resolved ? "resolved" : null
   return (
     <button
       type="button"
@@ -535,10 +547,11 @@ function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; 
       onClick={onOpen}
       aria-pressed={active}
       aria-label={`${repliesLabel(t.replies)}${state ? `, ${state}` : ""}`}
-      title={active ? "Close the replies" : "Open the replies"}
+      title={`${active ? "Close the replies" : "Open the replies"}${state ? ` (${state})` : ""}`}
       className={cx(
-        "-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-xs [@media(pointer:coarse)]:h-9",
-        active ? "bg-yard-500/15 text-yard-100" : resolved && !t.unread && !t.busy ? "text-zinc-600 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100",
+        TAP_AREA,
+        "-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-xs",
+        active ? "bg-yard-500/15 text-yard-100" : resolved && !t.unread && !t.busy ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100",
       )}
     >
       <Reply className="h-3.5 w-3.5 shrink-0" />
@@ -554,22 +567,37 @@ function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; 
   )
 }
 
+/** A question about a highlight, under its message: the passage, how many replies it has, and the same marks as "N replies". */
 function ThreadChip({ t, active, onOpen }: { t: SideThread; active: boolean; onOpen: () => void }) {
+  const resolved = t.resolvedAt != null
+  const state = t.busy ? "answering" : t.unread ? "unread" : resolved ? "resolved" : null
+  const quote = quotePreview(t.quote, 48)
   return (
     <button
       type="button"
       data-testid="thread-marker"
+      data-unread={(t.unread && !t.busy) || undefined}
+      data-resolved={resolved || undefined}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onOpen}
       aria-pressed={active}
-      title={active ? "Close this side thread" : "Open this side thread"}
+      aria-label={`Side thread on “${quote}”${t.replies ? `, ${repliesLabel(t.replies)}` : ""}${state ? `, ${state}` : ""}`}
+      // The dot and the tick are drawn only; the name and the tooltip say them.
+      title={`${active ? "Close this side thread" : "Open this side thread"}${t.replies ? `: ${repliesLabel(t.replies)}` : ""}${state ? `${t.replies ? "," : ":"} ${state}` : ""}`}
       className={cx(
-        "inline-flex h-11 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs sm:h-6",
+        TAP_AREA,
+        "inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs",
         active ? "border-yard-400/60 bg-yard-500/15 text-yard-100" : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200",
       )}
     >
       {t.busy ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> : <MessageCircle className="h-3 w-3 shrink-0" />}
-      <span className="min-w-0 truncate">“{quotePreview(t.quote, 48)}”</span>
+      <span className="min-w-0 truncate">“{quote}”</span>
+      {t.replies > 0 && <span className="shrink-0 whitespace-nowrap">· {repliesLabel(t.replies)}</span>}
+      {t.busy ? null : t.unread ? (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-yard-400" aria-hidden />
+      ) : resolved ? (
+        <CircleCheck className="h-3 w-3 shrink-0" aria-hidden />
+      ) : null}
     </button>
   )
 }
