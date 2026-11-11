@@ -138,6 +138,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/task-continuation.test.ts": "Full Box Yard server/task-manager/MCP fixture",
   "test/task-continuation.e2e.test.ts": "Real CLI/workspace/archive continuation integration",
   "test/task-compaction-runner.test.ts": "Real stdio runner/server history integration",
+  "test/ask-questions-runner.test.ts": "Real stdio runner/server/HTTP ask_user integration",
   "test/task-order.e2e.test.ts": "End-to-end runner/server integration",
   "test/task-shutdown.test.ts": "Full Box Yard server/task-manager fixture",
   "test/teardown.e2e.test.ts": "End-to-end runner/server integration",
