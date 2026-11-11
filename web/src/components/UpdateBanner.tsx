@@ -10,11 +10,12 @@ import { NOTHING_SEEN, trackUpdate, updateBanner, updateSummary, waitingText, ty
 import { updateAvailable } from "../../../shared/selfUpdate"
 import { Button, NewTabLink, cx } from "./ui"
 
+// Shades the light theme remaps (styles.css), as the app's other tinted notices use them.
 const TONE = {
-  info: "border-sky-900/40 bg-sky-950/30 text-sky-100",
+  info: "border-sky-500/25 bg-sky-500/10 text-sky-200",
   progress: "border-zinc-800 bg-zinc-900/60 text-zinc-300",
-  done: "border-emerald-900/40 bg-emerald-950/30 text-emerald-100",
-  error: "border-red-900/40 bg-red-950/30 text-red-100",
+  done: "border-emerald-500/20 bg-emerald-500/10 text-emerald-200",
+  error: "border-red-900/40 bg-red-950/30 text-red-200",
 } as const
 
 const LABEL: Record<UpdateAction, string> = {
@@ -88,7 +89,7 @@ export function UpdateBanner() {
         ))}
       </div>
       {details && banner.detail && (
-        <pre className="mt-2 max-h-48 overflow-auto rounded bg-black/30 p-2 font-mono text-[11px] whitespace-pre-wrap text-zinc-300">{banner.detail}</pre>
+        <pre className="mt-2 max-h-48 overflow-auto rounded border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] whitespace-pre-wrap text-zinc-300">{banner.detail}</pre>
       )}
     </div>
   )
