@@ -113,6 +113,8 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
         { id: "tree-open", label: "Open", keys: [["Enter"]] },
         { id: "tree-ends", label: "First or last row", keys: [["Home"], ["End"]] },
         { id: "tree-find", label: "Jump to a row: type the start of its name", keys: [["A–Z"]] },
+        { id: "tree-reorder", label: "Move a project, task or sub-task up or down its list", keys: [[caps.alt, "↑"], [caps.alt, "↓"]] },
+        { id: "tree-reorder-ends", label: "Move it to the top or bottom of its list", keys: [[caps.alt, caps.shift, "↑"], [caps.alt, caps.shift, "↓"]] },
       ],
     },
     {

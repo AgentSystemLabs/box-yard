@@ -300,7 +300,7 @@ export interface MenuItem {
 }
 
 /** The ··· menu: in a portal (a transcript's scroller would clip it), under the button or above it when there's no room. */
-export function MessageMenu({ trigger, items, onClose, label = "Message actions", className }: { trigger: RefObject<HTMLButtonElement | null>; items: MenuItem[]; onClose: () => void; label?: string; className?: string }) {
+export function MessageMenu({ trigger, items, onClose, label = "Message actions", className }: { trigger: RefObject<HTMLElement | null>; items: MenuItem[]; onClose: () => void; label?: string; className?: string }) {
   const panel = useRef<HTMLDivElement>(null)
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" })
   const closeRef = useRef(onClose)
