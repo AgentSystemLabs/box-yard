@@ -58,6 +58,7 @@ const field = (k: string) => document.querySelector<HTMLInputElement>(`[data-tes
 const button = (k: string) => document.querySelector<HTMLButtonElement>(`[data-testid=use-size-default-${k}]`)
 const envNote = (k: string) => document.querySelector(`[data-testid=env-note-${k}]`)
 // Upstash boxes also reads the key's status (GET /api/setup): only writes count here.
+const MODELS_ONLY = [{ method: "GET", url: "/api/models", body: undefined }]
 const writes = () => requests.filter((r) => r.method !== "GET")
 const saveButton = () => [...document.querySelectorAll("button")].find((b) => b.textContent === "Save")!
 
@@ -145,7 +146,8 @@ describe("box limit fields", () => {
   it("say where local tasks work, from the server (BOXYARD_LOCAL_DIR)", () => {
     render(info(), "limits")
     expect(document.body.textContent).toContain("Each task works in its own folder in /Volumes/fast/agents (BOXYARD_LOCAL_DIR).")
-    expect(requests).toEqual([])
+    // The only request is the model list the dialog reads to name models in its hints ("Uses Opus 5.5."): nothing is written.
+    expect(requests).toEqual(MODELS_ONLY)
   })
 })
 
@@ -169,7 +171,8 @@ describe("this computer's cleanup fields", () => {
     type(input("local-disk-min-free"), "50")
     act(() => input("local-build-cleanup").click())
     await settle()
-    expect(requests).toEqual([])
+    // The only request is the model list the dialog reads to name models in its hints ("Uses Opus 5.5."): nothing is written.
+    expect(requests).toEqual(MODELS_ONLY)
     replies["PUT /api/agent-settings"] = info({ localFoldersKept: 4, localDiskMinFreeGb: 50, localBuildCleanup: false }, { localFoldersKept: "ui", localDiskMinFreeGb: "ui", localBuildCleanup: "ui" })
     act(() => saveButton().click())
     await settle()

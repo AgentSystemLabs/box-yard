@@ -115,7 +115,7 @@ describe("TaskComposer: send to the Captain", () => {
     render(task())
     act(() => q("captain-target")!.click())
     expect(q("captain-target")!.getAttribute("aria-pressed")).toBe("true")
-    expect(textarea().placeholder).toContain("demo Captain")
+    expect(textarea().placeholder).toBe("Message the demo Captain…")
     expect(q("captain-forward-note")!.textContent).toContain("with this task's 2 queued messages")
     type("what's left in the queue")
     await act(async () => submitForm())

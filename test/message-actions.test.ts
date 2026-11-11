@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-// A chat message's one action (MessageActions.tsx): Reply, in a small toolbar on a short message and in a pill at the
-// tap's height on one taller than about the chat, which quotes text selected beside it. It opens the message's reply
-// thread, where the chat's agent routes each message (side-threads-web.test.ts, thread-routing.test.ts). No Ask,
-// Respond or ··· menu, and nothing that stops the text being selected.
+// A chat message's actions (MessageActions.tsx): Reply and Copy, in a small toolbar on a short message and in pills at
+// the click's height on one taller than about the chat, which quote text selected beside them. On touch they come out
+// in a row under the tapped message, in room it makes for them, or in a band across a long message's end. Reply opens
+// the message's reply thread, where the chat's agent routes each message (side-threads-web.test.ts,
+// thread-routing.test.ts). No Ask, Respond or ··· menu, and nothing that stops the text being selected.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -116,7 +117,7 @@ const line = (m: ChatMessage) => createElement(ChatLine, { key: m.id, m, onFollo
 const replyEl = () => host.querySelector<HTMLElement>("[data-testid=chat-reply]")!
 
 describe("the message toolbar", () => {
-  it("is one Reply on every Coordinator message type but not on tool rows", () => {
+  it("is Reply and Copy on every Coordinator message type but not on tool rows", () => {
     inChat(
       COORDINATOR_CHAT,
       ORCH,
@@ -132,8 +133,8 @@ describe("the message toolbar", () => {
     for (const bar of bars) {
       expect(bar.getAttribute("role")).toBe("toolbar")
       const buttons = [...bar.querySelectorAll("button")]
-      expect(buttons.map((b) => b.dataset.testid)).toEqual(["message-reply"])
-      expect(buttons[0]!.getAttribute("aria-label")).toBe("Reply in a thread")
+      expect(buttons.map((b) => b.dataset.testid)).toEqual(["message-reply", "message-copy"])
+      expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Reply in a thread", "Copy message"])
       expect(buttons[0]!.title).toBeTruthy()
     }
     // The old Ask, Respond and ··· are gone, and so is the menu they opened.
@@ -184,10 +185,22 @@ describe("the message toolbar", () => {
     click(replyEl().querySelector("p")!)
     expect(bar!.hasAttribute("data-open")).toBe(true)
     expect(other!.hasAttribute("data-open")).toBe(false)
-    // It goes on the tap's click, not its press, so nothing moves under the finger before the tap lands.
+    // Not over the text: a row under the message, in room the message makes for it, and the message is tinted.
+    expect(bar!.hasAttribute("data-under")).toBe(true)
+    expect(bar!.className).toContain("top-full")
+    expect(bar!.parentElement!.className).toContain("has-[>[data-under]]:mb-14")
+    expect(bar!.parentElement!.querySelector(":scope > [data-message-tint]")).not.toBeNull()
+    // A finger puts it away as its tap ends, not as it lands (the rows under it move up as it goes).
     down(other!.parentElement!)
     expect(bar!.hasAttribute("data-open")).toBe(true)
-    click(other!.parentElement!)
+    click(document.body)
+    expect(bar!.hasAttribute("data-open")).toBe(false)
+    expect(bar!.hasAttribute("data-under")).toBe(false)
+    expect(bar!.parentElement!.querySelector(":scope > [data-message-tint]")).toBeNull()
+    // A tap on the message again puts it away too.
+    click(replyEl().querySelector("p")!)
+    expect(bar!.hasAttribute("data-open")).toBe(true)
+    click(replyEl().querySelector("p")!)
     expect(bar!.hasAttribute("data-open")).toBe(false)
   })
 
@@ -247,6 +260,10 @@ describe("a long message's Reply pill", () => {
   }
   const column = (block: HTMLElement) => block.querySelector<HTMLElement>(":scope > [data-reply-pill]")!
   const pill = (block: HTMLElement) => column(block).querySelector<HTMLButtonElement>("[data-testid=message-reply]")!
+  /** Reply and Copy, stacked: 52px each and 4px apart, placed together. */
+  const stack = (block: HTMLElement) => pill(block).parentElement!
+  /** Half the stack: a click centres it. */
+  const HALF = (52 * 2 + 4) / 2
   const esc = () => {
     const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
     act(() => void document.body.dispatchEvent(e))
@@ -267,26 +284,30 @@ describe("a long message's Reply pill", () => {
     const block = long()
     expect(block.querySelector("[data-message-actions]")).toBeNull()
     expect(column(block)).not.toBeNull()
-    expect(block.className).toContain("has-[>[data-reply-pill]]:pr-12")
+    expect(column(block).hasAttribute("data-gutter")).toBe(true)
+    expect(block.className).toContain("has-[>[data-gutter]]:pr-12")
+    expect([...stack(block).querySelectorAll("button")].map((b) => b.dataset.testid)).toEqual(["message-reply", "message-copy"])
     // The short message keeps its toolbar.
     expect(toolbars()).toHaveLength(1)
     // Hidden until a tap, and a 44px-wide target in a column down the gutter that doesn't catch presses on the text.
     expect(column(block).hasAttribute("data-open")).toBe(false)
     expect(column(block).className).toMatch(/\binset-y-0\b.*\bpointer-events-none\b|\bpointer-events-none\b.*\binset-y-0\b/)
     expect(pill(block).className).toContain("w-11")
-    expect(pill(block).style.height).toBe("52px")
-    for (const el of [column(block), pill(block)]) expect(el.className).not.toMatch(/transition|duration-|animate-/)
+    expect(pill(block).className).toContain("h-[52px]")
+    for (const el of [column(block), stack(block), pill(block)]) expect(el.className).not.toMatch(/transition|duration-|animate-/)
     // Shorter again: back to the toolbar.
     resize(block, 300)
     expect(block.querySelector("[data-reply-pill]")).toBeNull()
     expect(block.querySelector("[data-message-actions]")).not.toBeNull()
   })
 
-  it("shows on keyboard focus without a tap or a hover, stuck to the top of the message's visible part", () => {
+  it("shows on keyboard focus or a mouse over the message without a click, stuck to the top of the message's visible part", () => {
     const block = long()
-    const cls = pill(block).className.split(/\s+/)
-    expect(cls).toEqual(expect.arrayContaining(["sticky", "top-2", "opacity-0", "focus-visible:opacity-100", "focus-visible:pointer-events-auto"]))
-    expect(cls.some((c) => c.startsWith("hover:opacity") || c.startsWith("group-hover"))).toBe(false)
+    const cls = stack(block).className.split(/\s+/)
+    expect(cls).toEqual(expect.arrayContaining(["sticky", "top-2", "opacity-0", "focus-within:opacity-100", "focus-within:pointer-events-auto"]))
+    // The hover is on the message's own group, not on the pill itself or a :has() on the list.
+    expect(cls).toEqual(expect.arrayContaining(["group-hover/msg:opacity-100", "group-hover/msg:pointer-events-auto"]))
+    expect(cls.some((c) => c.startsWith("hover:opacity") || c.startsWith("has-"))).toBe(false)
     // It's in the tab order, and Enter on it replies.
     expect(pill(block).tabIndex).toBe(0)
     click(pill(block))
@@ -300,18 +321,16 @@ describe("a long message's Reply pill", () => {
     // At 300px in the viewport, 800px into the message (its top is 500px above): centred on the tap.
     click(block.querySelector("p")!, { clientY: 300 })
     expect(column(block).hasAttribute("data-open")).toBe(true)
-    expect(pill(block).style.top).toBe(`${800 - 26}px`)
-    expect(pill(block).className).not.toContain("sticky")
+    expect(stack(block).style.top).toBe(`${800 - HALF}px`)
+    expect(stack(block).className).not.toContain("sticky")
     // Another tap on it moves it there; a press inside the message keeps it.
     down(block.querySelector("p")!)
     click(block.querySelector("p")!, { clientY: 100 })
-    expect(pill(block).style.top).toBe(`${600 - 26}px`)
-    // A tap elsewhere hides it, on its click rather than its press.
+    expect(stack(block).style.top).toBe(`${600 - HALF}px`)
+    // A press elsewhere hides it.
     down(document.body)
-    expect(column(block).hasAttribute("data-open")).toBe(true)
-    click(document.body)
     expect(column(block).hasAttribute("data-open")).toBe(false)
-    expect(pill(block).style.top).toBe("")
+    expect(stack(block).style.top).toBe("")
     // Esc hides it, and is used up, so the open thread around it doesn't close too.
     click(block.querySelector("p")!, { clientY: 300 })
     expect(esc().defaultPrevented).toBe(true)
@@ -320,8 +339,8 @@ describe("a long message's Reply pill", () => {
     expect(esc().defaultPrevented).toBe(false)
     // Shown again, then scrolled out of view: gone.
     click(block.querySelector("p")!, { clientY: 300 })
-    const view = views.find((v) => v.el === pill(block))!
-    act(() => view.cb([{ isIntersecting: false, target: pill(block) } as unknown as IntersectionObserverEntry], {} as IntersectionObserver))
+    const view = views.find((v) => v.el === stack(block))!
+    act(() => view.cb([{ isIntersecting: false, target: stack(block) } as unknown as IntersectionObserverEntry], {} as IntersectionObserver))
     expect(column(block).hasAttribute("data-open")).toBe(false)
   })
 
@@ -337,9 +356,9 @@ describe("a long message's Reply pill", () => {
     const block = long()
     // Visible from 500px into the message (the window's top) to 1268px (its bottom, 768px).
     click(block.querySelector("p")!, { clientY: 2 })
-    expect(pill(block).style.top).toBe(`${500 + 4}px`)
+    expect(stack(block).style.top).toBe(`${500 + 4}px`)
     click(block.querySelector("p")!, { clientY: 766 })
-    expect(pill(block).style.top).toBe(`${1268 - 52 - 4}px`)
+    expect(stack(block).style.top).toBe(`${1268 - 2 * HALF - 4}px`)
     // "Jump to latest" floating over the chat's bottom edge, over the gutter: the pill stays above it.
     const float = document.createElement("div")
     float.setAttribute("data-chat-float", "")
@@ -347,15 +366,15 @@ describe("a long message's Reply pill", () => {
     document.body.append(float)
     vi.spyOn(jump, "getBoundingClientRect").mockReturnValue(new DOMRect(500, 700, 120, 44))
     click(block.querySelector("p")!, { clientY: 766 })
-    expect(pill(block).style.top).toBe(`${1200 - 52 - 4}px`)
+    expect(stack(block).style.top).toBe(`${1200 - 2 * HALF - 4}px`)
     // One that floats away from the gutter is left alone.
     vi.spyOn(jump, "getBoundingClientRect").mockReturnValue(new DOMRect(200, 700, 120, 44))
     click(block.querySelector("p")!, { clientY: 766 })
-    expect(pill(block).style.top).toBe(`${1268 - 52 - 4}px`)
+    expect(stack(block).style.top).toBe(`${1268 - 2 * HALF - 4}px`)
     // A message starting 100px down the window: its own top is the limit.
     vi.spyOn(block, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 100, 600, LONG_HEIGHT))
     click(block.querySelector("p")!, { clientY: 102 })
-    expect(pill(block).style.top).toBe("4px")
+    expect(stack(block).style.top).toBe("4px")
   })
 
   it("in a chat's scroller, the scroller's visible part is the limit, and its height is what long means", () => {
@@ -366,9 +385,9 @@ describe("a long message's Reply pill", () => {
     const block = long()
     // The scroller shows 100px–500px of the window: 600px–1000px into the message.
     click(block.querySelector("p")!, { clientY: 110 })
-    expect(pill(block).style.top).toBe(`${600 + 4}px`)
+    expect(stack(block).style.top).toBe(`${600 + 4}px`)
     click(block.querySelector("p")!, { clientY: 495 })
-    expect(pill(block).style.top).toBe(`${1000 - 52 - 4}px`)
+    expect(stack(block).style.top).toBe(`${1000 - 2 * HALF - 4}px`)
     // 500px is long in a 400px scroller, though not in the 768px window.
     resize(block, 500)
     expect(column(block)).not.toBeNull()
@@ -395,7 +414,7 @@ describe("a long message's Reply pill", () => {
     expect(pill(block).getAttribute("aria-label")).toBe("Reply quoting selection")
     expect(pill(block).className).toContain("after:content-['Quote']")
     // Beside the selection's last line (200px–218px in the window: 709px into the message).
-    expect(pill(block).style.top).toBe(`${709 - 26}px`)
+    expect(stack(block).style.top).toBe(`${709 - HALF}px`)
     expect(document.querySelector("[data-testid=selection-reply]")).toBeNull()
     // Pressing it keeps the selection; a phone may drop it before the click lands, so the quote is kept from the press.
     const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
@@ -427,6 +446,33 @@ describe("a long message's Reply pill", () => {
     expect(pill(block).getAttribute("aria-label")).toBe("Reply in a thread")
     click(pill(block))
     expect(document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!.value).toBe("")
+  })
+})
+
+describe("a long message on touch", () => {
+  it("gets a band across its end instead of pills: in room the message makes, never over the text, and a tap again puts it away", () => {
+    touch()
+    inChat(COORDINATOR_CHAT, ORCH, line(chat("chat_reply0001", "assistant", "The retry loop never backs off.\n\nSo a dead remote spins the CPU.")))
+    const block = replyEl()
+    resize(block, LONG_HEIGHT)
+    const column = block.querySelector<HTMLElement>(":scope > [data-reply-pill]")!
+    expect(column.hasAttribute("data-gutter")).toBe(false)
+    expect(block.querySelector("[data-message-actions]")).toBeNull()
+    const band = column.querySelector<HTMLElement>("[role=toolbar]")!
+    // Out of sight until a tap.
+    expect(band.className).toContain("sr-only")
+    click(block.querySelector("p")!)
+    expect(column.hasAttribute("data-open")).toBe(true)
+    // It rests in room under the message (the message's own margin), sticking to the chat's bottom while the end is lower.
+    expect(column.hasAttribute("data-dock")).toBe(true)
+    expect(block.className).toContain("has-[>[data-dock]]:mb-16")
+    expect(band.className.split(/\s+/)).toEqual(expect.arrayContaining(["sticky", "bottom-0", "bg-zinc-950"]))
+    // One capsule: Reply and Copy as its halves.
+    expect([...band.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Reply in a thread", "Copy message"])
+    expect(band.querySelector(".rounded-full")).not.toBeNull()
+    click(block.querySelector("p")!)
+    expect(column.hasAttribute("data-open")).toBe(false)
+    expect(band.className).toContain("sr-only")
   })
 })
 

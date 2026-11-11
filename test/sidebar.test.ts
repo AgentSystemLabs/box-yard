@@ -103,12 +103,13 @@ describe("sidebarGroups", () => {
 
 describe("rowMeta", () => {
   it("says what Cody would ask about first", () => {
-    expect(rowMeta(task("a", YARD.id, "needs_input"))).toBe("asks")
+    // State words are gone: the row's icon says the state, so only a PR shows here.
+    expect(rowMeta(task("a", YARD.id, "needs_input"))).toBe("")
     expect(rowMeta(task("a", YARD.id, "failed"))).toBe("")
-    expect(rowMeta(task("a", YARD.id, "queued"))).toBe("queued")
+    expect(rowMeta(task("a", YARD.id, "queued"))).toBe("")
     expect(rowMeta(task("a", YARD.id, "pr_ready", { prUrl: "https://github.com/o/r/pull/19" }))).toBe("#19")
     expect(rowMeta(task("a", YARD.id, "done", { prUrl: "https://github.com/o/r/pull/19", prMergedAt: NOW }))).toBe("merged #19")
-    expect(rowMeta(task("a", YARD.id, "done"))).toBe("done")
+    expect(rowMeta(task("a", YARD.id, "done"))).toBe("")
     expect(rowMeta(task("a", YARD.id, "working", { lastActiveAt: NOW - 12 * 60_000 }))).toBe("")
     expect(rowMeta(task("a", YARD.id, "idle", { lastActiveAt: NOW - 12 * 60_000 }))).toBe("")
     expect(rowMeta(task("a", YARD.id, "idle", { prUrl: "https://github.com/o/r/pull/7" }))).toBe("#7")
