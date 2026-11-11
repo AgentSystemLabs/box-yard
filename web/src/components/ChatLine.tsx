@@ -4,13 +4,13 @@ import { navigateApp, taskSessionHref } from "../lib/navigation"
 import { memo, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { useLocation } from "wouter"
 import { AlarmClock, AlertTriangle, ChevronDown, ChevronRight, Loader2, Square, Webhook, Wrench } from "lucide-react"
-import { AppLink, InRepo, LineIcon, Markdown, cx } from "./ui"
+import { AppLink, InRepo, LineIcon, Markdown, TAP_AREA, cx } from "./ui"
 import { useEntityIndex } from "../lib/entities"
 import { useTaskTile } from "../lib/taskTiles"
 import { routes, toolMentions } from "../lib/linkify"
 import { CAPTAIN_TOOLS, captainToolView, isLongMessage, splitNotice, type NoticeKind } from "../lib/captainTranscript"
 import { NOTICE_ICON } from "./noticeIcons"
-import { NoticeNowRow, useNoticeNow } from "./NoticeNow"
+import { NoticeNowRow, noticeRowPr, useNoticeNow } from "./NoticeNow"
 import { AttachmentList } from "./Attachments"
 import { PickChips } from "./RunTargetMenu"
 import { QueuedChatMessage } from "./QueuedMessages"
@@ -38,7 +38,8 @@ export function CollapsibleMarkdown({ children, className }: { children: string;
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+          // 44px to a finger; its margins leave that room, so the area never covers the text above it.
+          className={cx(TAP_AREA, "mt-1 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 pointer-coarse:my-3.5")}
         >
           <ChevronDown className={cx("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
           {open ? "Show less" : "Show more"}
@@ -355,6 +356,12 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
   // A question, PR or failure says what its task needs now, or where it is once it has moved on.
   const live = useNoticeNow(n.kind, taskId, m.id)
   const past = live?.now.live === false
+  // The card's line links the PR (its number, GitHub's state), so the sentence above it doesn't name it again.
+  const chipPr = live ? noticeRowPr(live.now, live.task) : null
+  const event = useMemo(() => {
+    const opened = chipPr ? n.event.match(/^opened \[PR #\d+\]\((\S+)\)$/) : null
+    return opened && opened[1] === chipPr ? "opened a PR" : n.event
+  }, [n.event, chipPr])
   const body = (
     <NoticeLayout
       kind={n.kind}
@@ -364,7 +371,7 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
       project={taskId && <NoticeProject taskId={taskId} projectId={projectId} />}
       meta={
         <>
-          <NoticeEvent>{n.event}</NoticeEvent>
+          <NoticeEvent>{event}</NoticeEvent>
           {n.truncated && taskId && <FullReplyLink taskId={taskId} />}
         </>
       }
@@ -417,7 +424,7 @@ export const ChatLine = memo(function ChatLine({
 
 export const USER_BUBBLE = "max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-yard-500/15 px-3 py-2 text-sm whitespace-pre-wrap wrap-anywhere text-zinc-100"
 /** Over Cody's bubble: where it went. */
-const SENT_LABEL = "flex max-w-[85%] min-w-0 items-center gap-1 text-[11px] text-zinc-500"
+const SENT_LABEL = "flex max-w-[85%] min-w-0 items-center gap-1 text-[11px] text-zinc-400"
 
 /** Over a message Cody sent to a task from its card in the chat: the task, and the way to its conversation. */
 function SentFrom({ taskId }: { taskId: string }) {

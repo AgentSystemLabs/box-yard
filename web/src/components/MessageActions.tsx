@@ -1,28 +1,31 @@
-// A chat message's one action: Reply, which opens the message's reply thread (SideThread.tsx). The Coordinator or
-// the Captain reads each message sent there and answers it in the thread, sends it on to the task's agent, or posts it
-// in the main chat (server/sideThreads.ts), so there's nothing to pick first. It only shows in a chat with threads.
-// A message up to about a screen tall has it in a small toolbar on its top-right edge (as on claude.ai): with a mouse
-// it shows on hover and keyboard focus; on touch a tap on the message shows it, a tap anywhere else hides it, and
-// revealing it makes room above the message so a sticky card header can't cover it. A message taller than about the
-// chat's height has a gutter on its right instead: a tap or click on its text shows a Reply pill there at the tap's
-// height, inside the part of the message on screen, so it's never a scroll away. Selecting text in it while the pill
-// is out turns the pill into "Reply quoting selection", beside the selection. A tap elsewhere, Esc, or scrolling it
-// away puts it back; keyboard focus shows it at the top of the message's visible part, where it sticks. Both are placed
-// inside the message (no overlay, no portal) and show and hide at once, with no fade. Text stays selectable: nothing
-// here sets user-select or handles a long press.
+// A chat message's actions: Reply, which opens the message's reply thread (SideThread.tsx), and Copy, which copies
+// the message as it was written (its Markdown). The Coordinator or the Captain reads each message sent to a thread and
+// answers it there, sends it on to the task's agent, or posts it in the main chat (server/sideThreads.ts), so there's
+// nothing to pick first. They only show in a chat with threads.
+// A message up to about a screen tall has them in a small toolbar on its top-right edge (as on claude.ai): with a
+// mouse it shows on hover and keyboard focus; on touch a tap on the message shows it, a tap anywhere else hides it. On
+// touch it lies over the space above the message, or over the message's top corner when there's no room above, so
+// showing it never moves the transcript. A message taller than about the chat's height has a gutter on its right
+// instead, with Reply and Copy pills: a mouse over the message shows them at the top of the part on screen, and a tap
+// or click on its text puts them at the tap's height, so they're never a scroll away. Selecting text in it while the
+// pills are out turns them into "Reply quoting selection" and "Copy selection", beside the selection. A tap elsewhere,
+// Esc, or scrolling them away puts them back; keyboard focus shows them at the top of the message's visible part, where
+// they stick. Both are placed inside the message (no portal) and show and hide at once, with no fade. Text stays
+// selectable: nothing here sets user-select or handles a long press.
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject, type SyntheticEvent } from "react"
 import { createPortal } from "react-dom"
-import { Quote, Reply, type LucideIcon } from "lucide-react"
+import { Copy, Quote, Reply, type LucideIcon } from "lucide-react"
 import { useReplyTo } from "./SideThread"
+import { copyText } from "../lib/clipboard"
 import { onSuspend } from "../lib/resume"
+import { toast } from "../lib/toast"
 import { cx } from "./ui"
 
 /**
  * The classes for the element a MessageActions sits in (a bubble, a reply, a notice card): the hover group and the
- * toolbar's positioning box. A long message's Reply pill gets a gutter on the right, so it never covers the text.
+ * toolbar's positioning box. A long message's pills get a gutter on the right, so they never cover the text.
  */
-export const MESSAGE_BLOCK =
-  "group/msg relative pointer-coarse:has-[>[data-message-actions][data-open]]:mt-14 pointer-coarse:has-[>[data-message-actions]:focus-within]:mt-14 has-[>[data-reply-pill]]:pr-12"
+export const MESSAGE_BLOCK = "group/msg relative has-[>[data-reply-pill]]:pr-12"
 
 /** What a tap on a message means by itself; tapping one of these inside it doesn't show the toolbar. */
 const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [role=link], [role=menuitem]"
@@ -32,8 +35,14 @@ const BUTTON =
 
 const TITLE = "Reply in a thread: a question is answered there, and an instruction goes on to whoever acts on it"
 
-/** The long message's pill: 44px wide in its 48px gutter, at least 44px to a finger. */
+/** A long message's pill: 44px wide in its 48px gutter, at least 44px to a finger. */
 const PILL_HEIGHT = 52
+/** Its two pills (Reply, Copy) and the gap between them. */
+const PILLS_HEIGHT = PILL_HEIGHT * 2 + 4
+const PILL =
+  "flex w-11 flex-col items-center justify-center gap-0.5 rounded-full border bg-zinc-900 text-[10px] font-medium shadow-lg shadow-black/40 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none"
+/** The touch toolbar's height with a little air: the room it needs above its message. */
+const TOOLBAR_ROOM = 52
 
 /** Keeps the toolbar's clicks and keys from the row under it (a notice card opens its task, a notice row folds). */
 const stop = (e: SyntheticEvent) => e.stopPropagation()
@@ -43,11 +52,13 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
   const replyTo = useReplyTo()
   const reply = anchorId && text.trim() ? replyTo : null
   const bar = useRef<HTMLDivElement>(null)
-  const button = useRef<HTMLButtonElement>(null)
+  const pills = useRef<HTMLDivElement>(null)
   /** Taller than about the chat's height: the gutter pill instead of the toolbar. */
   const long = useLongBlock(bar, Boolean(reply))
   /** Touch, a short message: the toolbar, shown by a tap on the message until a tap anywhere else. */
   const [tapped, setTapped] = useState(false)
+  /** Touch: no room above the message when it was tapped, so the toolbar lies over its top corner. */
+  const [inside, setInside] = useState(false)
   /** A long message: the pill's top in the message, where it was tapped (null: hidden). */
   const [pill, setPill] = useState<number | null>(null)
   /** Text selected in the message while the pill is out: the pill quotes it. */
@@ -61,7 +72,10 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
     const tap = (e: MouseEvent) => {
       const hit = (e.target as Element | null)?.closest?.(INTERACTIVE)
       if ((hit && hit !== block && block.contains(hit)) || !window.getSelection()?.isCollapsed) return
-      if (!long) return setTapped(true)
+      if (!long) {
+        setInside(!roomAbove(block))
+        return setTapped(true)
+      }
       setPill(pillTop(block, e.clientY))
     }
     block.addEventListener("click", tap)
@@ -98,10 +112,10 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
     }
   }, [shown])
 
-  // The pill scrolled out of view: it's gone, rather than waiting where Cody left it.
+  // The pills scrolled out of view: they're gone, rather than waiting where Cody left them.
   const out = pill !== null
   useEffect(() => {
-    const el = button.current
+    const el = pills.current
     if (!out || !el || typeof IntersectionObserver === "undefined") return
     const io = new IntersectionObserver(
       ([e]) => {
@@ -143,11 +157,22 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
     window.getSelection()?.removeAllRanges()
   }
 
+  /** The selection while the pills quote it, else the whole message as written. */
+  const copy = async () => {
+    const picked = pressed.current ?? quote
+    pressed.current = null
+    setTapped(false)
+    setPill(null)
+    if (await copyText(picked ?? text)) toast.info("Copied")
+    else toast.error("Couldn't copy", "The browser blocked clipboard access.")
+  }
+
   if (long) {
     const quoting = pill !== null && quote !== null
     return (
-      // The gutter: a column down the message's right edge. Tapped, the pill sits in it at the tap's height; otherwise
-      // it's hidden at the top of the message's visible part (sticky), so keyboard focus shows it there without a scroll.
+      // The gutter: a column down the message's right edge. Tapped, the pills sit in it at the tap's height; otherwise
+      // they're hidden at the top of the message's visible part (sticky), where a mouse over the message or keyboard
+      // focus shows them without a scroll.
       <div
         ref={bar}
         data-reply-pill
@@ -158,26 +183,46 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
         onKeyDown={stop}
         className={cx("pointer-events-none absolute inset-y-0 right-0.5 z-10 w-11", className)}
       >
-        <button
-          ref={button}
-          type="button"
-          data-testid="message-reply"
-          aria-label={quoting ? "Reply quoting selection" : "Reply in a thread"}
-          title={quoting ? "Reply in a thread, quoting the selected text" : TITLE}
-          // Pressing it keeps the selection it quotes, and the focus where it is.
-          onPointerDown={() => (pressed.current = quote)}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={open}
-          style={pill === null ? { height: PILL_HEIGHT } : { height: PILL_HEIGHT, top: pill }}
+        <div
+          ref={pills}
+          style={pill === null ? undefined : { top: pill }}
           className={cx(
-            // The label is CSS content, so it's never part of the message's text (a copy, a search, a row's textContent).
-            "flex w-11 flex-col items-center justify-center gap-0.5 rounded-full border bg-zinc-900 text-[10px] font-medium shadow-lg shadow-black/40 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none",
-            quoting ? "border-yard-400/60 text-yard-200 after:content-['Quote']" : "border-zinc-700 text-zinc-300 after:content-['Reply']",
-            pill === null ? "sticky top-2 opacity-0 focus-visible:pointer-events-auto focus-visible:opacity-100" : "pointer-events-auto absolute",
+            "flex w-11 flex-col gap-1",
+            // The hover is on the message's own group, not a :has() on the list.
+            pill === null
+              ? "sticky top-2 opacity-0 focus-within:pointer-events-auto focus-within:opacity-100 pointer-fine:group-hover/msg:pointer-events-auto pointer-fine:group-hover/msg:opacity-100"
+              : "pointer-events-auto absolute",
           )}
         >
-          {quoting ? <Quote className="h-4 w-4" aria-hidden /> : <Reply className="h-4 w-4" aria-hidden />}
-        </button>
+          <button
+            type="button"
+            data-testid="message-reply"
+            aria-label={quoting ? "Reply quoting selection" : "Reply in a thread"}
+            title={quoting ? "Reply in a thread, quoting the selected text" : TITLE}
+            // Pressing it keeps the selection it quotes, and the focus where it is.
+            onPointerDown={() => (pressed.current = quote)}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={open}
+            style={{ height: PILL_HEIGHT }}
+            // The label is CSS content, so it's never part of the message's text (a copy, a search, a row's textContent).
+            className={cx(PILL, quoting ? "border-yard-400/60 text-yard-200 after:content-['Quote']" : "border-zinc-700 text-zinc-300 after:content-['Reply']")}
+          >
+            {quoting ? <Quote className="h-4 w-4" aria-hidden /> : <Reply className="h-4 w-4" aria-hidden />}
+          </button>
+          <button
+            type="button"
+            data-testid="message-copy"
+            aria-label={quoting ? "Copy selection" : "Copy message"}
+            title={quoting ? "Copy the selected text" : "Copy message"}
+            onPointerDown={() => (pressed.current = quote)}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={copy}
+            style={{ height: PILL_HEIGHT }}
+            className={cx(PILL, "after:content-['Copy']", quoting ? "border-yard-400/60 text-yard-200" : "border-zinc-700 text-zinc-300")}
+          >
+            <Copy className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
       </div>
     )
   }
@@ -189,21 +234,27 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
       aria-label="Message actions"
       data-message-actions
       data-open={tapped || undefined}
+      data-inside={(tapped && inside) || undefined}
       onClick={stop}
       onAuxClick={stop}
       onKeyDown={stop}
       className={cx(
-        // Keep the larger touch toolbar above its source text rather than covering the first two lines.
-        "absolute -top-3.5 right-2 z-10 flex items-center gap-px rounded-lg border border-zinc-800 bg-zinc-900 p-0.5 shadow-lg shadow-black/40 pointer-coarse:top-0 pointer-coarse:-translate-y-full",
+        // The larger touch toolbar lies over the space above its message rather than its first two lines, and nothing
+        // moves to make room for it. Without room there (the top of the chat, under a header) it takes the top corner.
+        "absolute -top-3.5 right-2 z-10 flex items-center gap-px rounded-lg border border-zinc-800 bg-zinc-900 p-0.5 shadow-lg shadow-black/40 pointer-coarse:top-0 pointer-coarse:-translate-y-full pointer-coarse:data-inside:top-1 pointer-coarse:data-inside:translate-y-0",
         // Hidden (and not catching clicks) until the message is hovered, focused or tapped.
         "pointer-events-none opacity-0",
         "group-focus-within/msg:pointer-events-auto group-focus-within/msg:opacity-100 group-hover/msg:pointer-events-auto group-hover/msg:opacity-100 data-open:pointer-events-auto data-open:opacity-100",
         className,
       )}
     >
-      {/* On touch it's the only thing in the bar, so it says what it does: in CSS content, like the pill's. */}
+      {/* On touch each says what it does: in CSS content, like the pills'. */}
       <button type="button" data-testid="message-reply" aria-label="Reply in a thread" title={TITLE} onClick={open} className={cx(BUTTON, "pointer-coarse:text-xs pointer-coarse:font-medium pointer-coarse:after:content-['Reply']")}>
         <Reply className="h-3.5 w-3.5 pointer-coarse:h-4 pointer-coarse:w-4" aria-hidden />
+      </button>
+      {/* A mouse press leaves the focus where it is, so the bar goes when the mouse does. */}
+      <button type="button" data-testid="message-copy" aria-label="Copy message" title="Copy message" onMouseDown={(e) => e.preventDefault()} onClick={copy} className={cx(BUTTON, "pointer-coarse:text-xs pointer-coarse:font-medium pointer-coarse:after:content-['Copy']")}>
+        <Copy className="h-3.5 w-3.5 pointer-coarse:h-4 pointer-coarse:w-4" aria-hidden />
       </button>
     </div>
   )
@@ -214,7 +265,19 @@ const SCROLLER = "[data-scroller]"
 /** What floats over a chat's bottom edge ("Jump to latest", the new-cards pill): the pill stays above it. */
 const FLOATING = "[data-chat-float] button"
 
-/** The pill's top in `block` for a press at `y` (viewport): centred on it, inside the message and inside the part of it on screen. */
+/**
+ * Whether the touch toolbar fits above `block`: the spot it would take is on screen, in the chat's scroller, and not
+ * under a sticky header.
+ */
+function roomAbove(block: HTMLElement) {
+  if (typeof document.elementFromPoint !== "function") return true
+  const r = block.getBoundingClientRect()
+  const at = document.elementFromPoint(r.right - 24, r.top - TOOLBAR_ROOM + 4)
+  const view = block.closest(SCROLLER)
+  return Boolean(at && (!view || view.contains(at)) && !at.closest("header"))
+}
+
+/** The pills' top in `block` for a press at `y` (viewport): centred on it, inside the message and inside the part of it on screen. */
 function pillTop(block: HTMLElement, y: number) {
   const r = block.getBoundingClientRect()
   const view = block.closest(SCROLLER)?.getBoundingClientRect()
@@ -226,8 +289,8 @@ function pillTop(block: HTMLElement, y: number) {
     if (f.height && f.right > r.right - 48 && f.left < r.right && f.top < visBottom && f.top > (visTop + visBottom) / 2) visBottom = f.top
   }
   const top = visTop - r.top + 4
-  const bottom = visBottom - r.top - PILL_HEIGHT - 4
-  return Math.round(Math.max(top, Math.min(bottom, y - r.top - PILL_HEIGHT / 2)))
+  const bottom = visBottom - r.top - PILLS_HEIGHT - 4
+  return Math.round(Math.max(top, Math.min(bottom, y - r.top - PILLS_HEIGHT / 2)))
 }
 
 /** Whether the selection runs from its end back to its start (its focus is before its anchor). */
