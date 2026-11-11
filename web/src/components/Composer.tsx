@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type ReactNode, type RefObject, type Ref } from "react"
 import { createPortal, flushSync } from "react-dom"
-import { Clock, Maximize2, Minimize2, ArrowUpRight, Paperclip, Send, Square } from "lucide-react"
+import { Clock, Maximize2, Minimize2, ArrowUpRight, Paperclip, Send, Square, type LucideIcon } from "lucide-react"
 import { composerMaxHeight, isTouchDevice } from "../lib/composer"
 import { useSettings } from "../lib/queries"
 import { Button, cx } from "./ui"
@@ -15,7 +15,7 @@ import { attachFiles, draftAttachments, EMPTY_DRAFT, prependDraft, readDraft, re
 import { registerTakeBack, type TakeBackBox } from "../lib/takeBack"
 import { PickButtons, PickConflict, PickMenuItems, PickScope, RunTargetList, RunTargetPanel, useChatPicks, type ChatPicks } from "./RunTargetMenu"
 import { ComposerMenuItem, MoreButton, MoreMenu, ToolFolds, useMoreMenu, type MoreDot } from "./ComposerMenu"
-import { foldPlan, inMenu, onRow } from "../lib/composerRow"
+import { foldPlan, inMenu, onRow, toolSlots as bareSlots, type ToolWidth } from "../lib/composerRow"
 import type { Attachment } from "../../../shared/types"
 import { connectionState, useConnectionLive } from "../lib/connection"
 import { SendToMenu, SendToNote, sendToHint, useSendTo } from "./SendToMenu"
@@ -107,6 +107,7 @@ export function Composer({
   githubProject = runTargetsProject,
   stop = null,
   sendLabel: sendName = "Send",
+  sendIcon = Send,
   onDestinationPick,
 }: {
   onDestinationPick?: () => void
@@ -139,9 +140,10 @@ export function Composer({
   /**
    * How many 44px buttons wide the tools are on a narrow box (default 1 when there are tools). A list, one width per
    * tool in the row's order, folds them one at a time, the last first: each tool's button and menu line then hide
-   * themselves at their own width (ComposerMenu.tsx's `useToolFold`).
+   * themselves at their own width (ComposerMenu.tsx's `useToolFold`). A tool with a text label gives its width with
+   * the label too, and hides the label first (`useToolLabel`).
    */
-  toolSlots?: number | readonly number[]
+  toolSlots?: number | readonly ToolWidth[]
   /** The first tool's dot (a side question's new answer), on the More button while that tool is folded into it. */
   toolsDot?: MoreDot | null
   /** Accessible target icon/control, inset beside the text; callers supply its label. */
@@ -163,6 +165,8 @@ export function Composer({
   stop?: { label: string; onStop: () => void } | null
   /** What Send does here when it isn't a plain send ("Queue message" while a task's agent works): its name and tooltip. */
   sendLabel?: string
+  /** That send's glyph, in place of the paper plane. */
+  sendIcon?: LucideIcon
 }) {
   // The same slim box with a target or an icon: the text only moves over for it.
   const textMetrics = cx(TEXT, target || icon ? "pl-11" : null)
@@ -204,7 +208,7 @@ export function Composer({
   const showExpand = overflowing || expanded
   const toolWidths = tools ? (toolSlots ?? 1) : 0
   const fold = foldPlan({
-    fixed: 2 + (stop ? 1 : 0) + (toolsMenu ? 0 : typeof toolWidths === "number" ? toolWidths : toolWidths.reduce((n, w) => n + w, 0)),
+    fixed: 2 + (stop ? 1 : 0) + (toolsMenu ? 0 : typeof toolWidths === "number" ? toolWidths : toolWidths.reduce((n: number, w) => n + bareSlots(w), 0)),
     picks: runTargets ? picks.kinds.length : 0,
     expand: showExpand ? 1 : 0,
     tools: toolsMenu ? toolWidths : 0,
@@ -212,9 +216,9 @@ export function Composer({
     attach: allowFiles ? 1 : 0,
   }, { stop: Boolean(stop) })
   // The same list until a width changes: the tools that read it don't render again on every key.
-  const toolFolds = useMemo(() => fold.tool, [fold.tool.join()])
+  const toolFolds = useMemo(() => ({ tool: fold.tool, label: fold.label }), [fold.tool.join(), fold.label.join()])
   // The tool beside the mic is the last one to fold.
-  const firstTool = toolFolds[0] ?? null
+  const firstTool = toolFolds.tool[0] ?? null
 
   // Uploads run in the draft store, so they finish (or fail, with Retry) while the box is away.
   const add = (picked: File[]) => attachFiles(key, picked, maxMb)
@@ -328,6 +332,7 @@ export function Composer({
   const [held, setHeld] = useState(false)
   // What Send says of itself, also while it can't be pressed.
   const sendLabel = held ? "Waiting to send" : uploading ? "Uploading files…" : sendTo.chosen ? "Send" : sendName
+  const SendIcon = held ? Clock : sendTo.chosen ? Send : sendIcon
   const live = useConnectionLive()
   const submit = (now = false) => {
     // Still listening: stop, let the last words land, then send (dictation calls submit again).
@@ -690,9 +695,9 @@ export function Composer({
                 <Square className="h-3.5 w-3.5 fill-current text-red-300" aria-hidden />
               </Button>
             )}
-            {/* With nothing to send it's a plain gray button, not a dimmed gold one; it turns gold once there is. Beside Stop it has no tile, so Stop is the row's one filled button. */}
-            <Button type="submit" variant="primary" size="sm" className={cx(TOOL, "disabled:text-zinc-500! disabled:opacity-100!", stop ? "disabled:bg-transparent!" : "disabled:bg-zinc-800!")} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
-              {held ? <Clock className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+            {/* With nothing to send it's a plain gray button, not a dimmed gold one; it turns gold once there is. Beside Stop it has no tile, so Stop is the row's one filled button. The fill comes at once: faded in from no tile, the first letter of a draft showed a pale one. */}
+            <Button type="submit" variant="primary" size="sm" className={cx(TOOL, "transition-none! disabled:text-zinc-500! disabled:opacity-100!", stop ? "disabled:bg-transparent!" : "disabled:bg-zinc-800!")} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
+              <SendIcon className="h-4 w-4" aria-hidden />
             </Button>
           </div>
         </div>
