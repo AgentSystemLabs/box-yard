@@ -5,7 +5,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
 import { createPortal } from "react-dom"
 import { useLocation } from "wouter"
-import { AlertTriangle, ChevronDown, ChevronUp, FileText, Laptop, Loader2, Paperclip, Plus, ShieldAlert, SlidersHorizontal, X } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronUp, FileText, KeyRound, Laptop, Loader2, Paperclip, Plus, ShieldAlert, SlidersHorizontal, X } from "lucide-react"
 import { newClientId, useAgentSettings, useCreateTask, useModels, useProjects, useSettings } from "../lib/queries"
 import { clearNewTaskDraft, draftScope, loadDraft, newTaskDraftKey, saveDraft } from "../lib/newTask"
 import { attachFiles, draftAttachments, filesHold, removeFile, retryFile, useDraft, useDraftKey } from "../lib/composerDraft"
@@ -18,7 +18,7 @@ import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
 import { titleFromPrompt } from "../../../shared/taskTitle"
 import { type Effort, type Project } from "../../../shared/types"
-import { LOCAL_UNSANDBOXED, RUNNER_LABEL, type Runner } from "../../../shared/runner"
+import { LOCAL_UNSANDBOXED, RUNNER_LABEL, RUNNER_PHRASE, type Runner } from "../../../shared/runner"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 import { Modal, focusables } from "./Modal"
 import { Kbd } from "./Kbd"
@@ -322,7 +322,8 @@ export function NewTaskPopover({
           {projectId && project && <span className="font-normal text-zinc-500"> in {project.name}</span>}
         </h2>
         <span className="ml-auto shrink-0 text-[11px] text-zinc-500" aria-hidden>
-          Enter to {onStart ? "send" : "start"} · Shift+Enter new line
+          <Kbd>↵</Kbd> {onStart ? "send" : "start"} · <Kbd>Shift</Kbd>
+          <Kbd>↵</Kbd> new line
         </span>
       </div>
       {form}
@@ -499,7 +500,8 @@ export function NewTaskDialog({
 }) {
   const create = useCreateTask()
   const [, navigate] = useLocation()
-  const projects = useProjects().data ?? []
+  const loaded = useProjects().data
+  const projects = loaded ?? []
   const [picked, setPicked] = useState("")
   const projectId = projectProp || [picked, defaultProjectId].find((id) => id && projects.some((p) => p.id === id)) || projects[0]?.id || ""
   const project: Project | undefined = projects.find((p) => p.id === projectId)
@@ -563,12 +565,16 @@ export function NewTaskDialog({
   // A selection is a task without a word more.
   const canStart = Boolean(prompt.trim() || quote) && !uploading && Boolean(projectId)
   // What Start task waits for, said beside it.
-  const why = !(prompt.trim() || quote) ? "Describe the task to start it." : uploading ? "Files are still uploading." : ""
+  const why = loaded && !projectId ? "Create a project first." : !(prompt.trim() || quote) ? "Describe the task to start it." : uploading ? "Files are still uploading." : ""
   const autoTitle = prompt.trim() ? titleFromPrompt(prompt) : "Made from the prompt when blank"
 
   return (
     <Modal
       size="lg"
+      // A phone gets it as tall as what's in it, from the bottom edge, as the popover's sheet is; up to the whole
+      // screen, so a short phone's keyboard still leaves the prompt in view.
+      placement="sheet"
+      className="max-sm:max-h-dvh!"
       title={quote ? "New task from selection" : "New task"}
       // The picker already names the project.
       description={projectProp ? project?.name : undefined}
@@ -648,7 +654,7 @@ export function NewTaskDialog({
         />
       </Field>
       <Field label="Title (optional)">
-        <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={autoTitle} />
+        <input className={cx(inputClass, "text-ellipsis")} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={autoTitle} />
       </Field>
       <div className="@container flex flex-col gap-4">
         <button
@@ -661,12 +667,17 @@ export function NewTaskDialog({
         >
           <SlidersHorizontal aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 wrap-anywhere text-zinc-200">
-            <span className="text-zinc-400">Runs with </span>
-            {runsWith} ·{" "}
-            {/* Where: this computer has no sandbox, and says so in the warning's colour. */}
-            <span data-testid="new-task-runs-on" className={cx("whitespace-nowrap", runsOn === "local" && "text-amber-200")}>
-              {runsOn === "local" && <ShieldAlert aria-hidden className="mr-1 inline h-3.5 w-3.5 align-[-0.15em] text-amber-300" />}
-              {RUNNER_LABEL[runsOn]}
+            {/* Open, the fields under it say the agent, model and effort: the line keeps only where it runs. */}
+            <span className="text-zinc-400">{showOptions ? "Runs on " : "Runs with "}</span>
+            {!showOptions && `${runsWith} `}
+            {/* One box, so the dot goes to the next line with what it leads (and a long name still wraps inside it). */}
+            <span className="inline-block max-w-full">
+              {!showOptions && "· "}
+              {/* This computer has no sandbox, and says so in the warning's colour. */}
+              <span data-testid="new-task-runs-on" className={cx(runsOn === "local" && "text-amber-200")}>
+                {runsOn === "local" && <ShieldAlert aria-hidden className="mr-1 inline h-3.5 w-3.5 align-[-0.15em] text-amber-300" />}
+                {showOptions ? RUNNER_PHRASE[runsOn] : RUNNER_LABEL[runsOn]}
+              </span>
             </span>
           </span>
           {showOptions ? <ChevronUp aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" /> : <ChevronDown aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />}
@@ -797,10 +808,10 @@ export function NewTaskDialog({
             type="button"
             aria-expanded={showEnv}
             aria-controls={showEnv ? envId : undefined}
-            className="inline-flex min-h-11 items-center text-xs whitespace-nowrap text-zinc-300 hover:text-zinc-100 pointer-fine:min-h-6"
+            className="inline-flex min-h-11 items-center gap-1.5 text-xs whitespace-nowrap text-zinc-300 hover:text-zinc-100 pointer-fine:min-h-6"
             onClick={() => setShowEnv(!showEnv)}
           >
-            {showEnv ? "Hide env vars" : envCount ? `Env vars (${envCount})` : "+ env vars"}
+            <KeyRound className="h-3.5 w-3.5" /> {showEnv ? "Hide env vars" : envCount ? `Env vars (${envCount})` : "Env vars"}
           </button>
         </div>
       </div>
@@ -819,14 +830,14 @@ export function NewTaskDialog({
 function RunHereToggle({ on, projectLocal, onChange }: { on: boolean; projectLocal: boolean; onChange: (on: boolean) => void }) {
   const hint = projectLocal
     ? on
-      ? "Its project runs on this computer. Turn it off to run this task in an Upstash box."
-      : "This task only runs in an Upstash box, though its project runs on this computer."
+      ? "This project runs on this computer. Turn this off to run this task in an Upstash box."
+      : "Only this task runs in an Upstash box; the project runs on this computer."
     : on
-      ? "This task only runs on this computer, though its project runs in Upstash boxes."
-      : "Its project runs in Upstash boxes. Turn it on to run this task here."
+      ? "Only this task runs on this computer; the project runs in Upstash boxes."
+      : "This project runs in Upstash boxes. Turn this on to run this task here."
   return (
     <label className="flex min-h-11 cursor-pointer items-start gap-2.5 text-sm text-zinc-300">
-      <input type="checkbox" className="mt-1 shrink-0" checked={on} onChange={(e) => onChange(e.target.checked)} data-testid="new-task-local" />
+      <input type="checkbox" className="h-5 w-5 shrink-0 accent-yard-500" checked={on} onChange={(e) => onChange(e.target.checked)} data-testid="new-task-local" />
       <span className="min-w-0">
         <span className="inline-flex items-center gap-1.5 text-zinc-200">
           <Laptop className="h-3.5 w-3.5 text-zinc-400" /> Run on this computer
