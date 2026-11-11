@@ -149,7 +149,8 @@ describe("FilePreviewHost", () => {
     const dialog = document.querySelector("[role=dialog]")!
     expect(dialog.getAttribute("aria-label")).toBe("data.json")
     expect(dialog.textContent).toContain('"ok": true')
-    expect(dialog.textContent).toContain("1\n2\n3")
+    // One row per line: the gutter numbers each of the pretty-printed lines.
+    expect([...dialog.querySelectorAll("pre > span[aria-hidden]")].map((n) => n.textContent).slice(0, 3)).toEqual(["1", "2", "3"])
     click(dialog.querySelector('[aria-label="Show raw"]')!)
     expect(dialog.textContent).toContain('{"ok":true,"n":[1,2]}')
     act(() => closePreview())
@@ -250,9 +251,10 @@ describe("image preview gestures", () => {
     layout()
   }
 
-  it("shows where it is in the gallery before the title, so a phone's truncation never hides it", () => {
+  it("shows where it is in the gallery in the footer pager, so a phone's truncation of the title never hides it", () => {
     open()
-    expect(document.querySelector("[role=dialog] header p")!.textContent).toBe("1 of 2 · Before at 400px")
+    expect(document.querySelector('[role=dialog] nav[aria-label="Files"]')!.textContent).toContain("1 of 2")
+    expect(document.querySelector("[role=dialog] header p")!.textContent).toBe("before.png · 1200×2400")
     act(() => closePreview())
   })
 

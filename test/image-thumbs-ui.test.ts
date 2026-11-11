@@ -90,8 +90,9 @@ describe("published file thumbnails", () => {
     const rows = groupPublished([notice(1), notice(2)])
     render(createElement(PublishedCard, { group: (rows[0] as { group: PublishedGroup }).group }))
     const imgs = [...host.querySelectorAll("img")]
-    expect(imgs.map((i) => i.getAttribute("src"))).toEqual(["/artifacts/art_000000000001/shot-1.png?w=320", "/artifacts/art_000000000002/shot-2.png?w=320"])
-    expect(imgs[0]!.closest("a")!.getAttribute("href")).toBe("/artifacts/art_000000000001/shot-1.png")
+    // Newest first, the Files list's order.
+    expect(imgs.map((i) => i.getAttribute("src"))).toEqual(["/artifacts/art_000000000002/shot-2.png?w=320", "/artifacts/art_000000000001/shot-1.png?w=320"])
+    expect(imgs[1]!.closest("a")!.getAttribute("href")).toBe("/artifacts/art_000000000001/shot-1.png")
   })
 
   it("the task thread's chip loads the same 320 px copy, so the browser fetches it once", () => {
