@@ -195,10 +195,11 @@ export function NoticeProject({ taskId, projectId, end = false, captain = true }
   const id = projectId ?? index.byId.get(taskId)?.projectId
   const project = id ? index.byId.get(id) : undefined
   if (!id || project?.kind !== "project") return null
-  // Under a finger each link reaches past its text: 6px up and down (more would take taps from the title over it and
-  // the row under it) and 12px to the right, over the "·" after it. Padding with the same margin back, so nothing moves.
+  // Under a finger each link is 44px tall: it reaches 6px up (more would take taps from the title over it), 20px down
+  // into the room its line keeps under it (NOTICE_META) and 12px to the right, over the "·" after it. Padding with the
+  // same margin back, so nothing moves.
   const link =
-    "rounded-sm text-zinc-500 hover:text-zinc-200 hover:underline focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:-my-1.5 pointer-coarse:-mr-3 pointer-coarse:py-1.5 pointer-coarse:pr-3"
+    "rounded-sm text-zinc-500 hover:text-zinc-200 hover:underline focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:-mt-1.5 pointer-coarse:-mr-3 pointer-coarse:-mb-5 pointer-coarse:pt-1.5 pointer-coarse:pr-3 pointer-coarse:pb-5"
   // The link under it takes its taps.
   const dot = (
     <span aria-hidden className="pointer-events-none text-zinc-700">
@@ -225,6 +226,12 @@ export function NoticeProject({ taskId, projectId, end = false, captain = true }
     </span>
   )
 }
+
+/**
+ * A line that starts with a NoticeProject: under a finger it's at least 44px tall, the room its links reach down into.
+ * Child-scoped `:has()`, so a line whose task has no known project stays its own height.
+ */
+export const NOTICE_META = "pointer-coarse:has-[>[data-testid=notice-project]]:min-h-11"
 
 /** No standing underline: the title has a row of its own, and its whole card opens the task. */
 export const NOTICE_TITLE_LINK = "font-semibold text-yard-400 decoration-yard-400/60 underline-offset-2 hover:underline"
@@ -275,7 +282,7 @@ export function NoticeLayout({
           </div>
         )}
         {(project || meta) && (
-          <div data-testid="notice-meta" className="wrap-anywhere text-zinc-400">
+          <div data-testid="notice-meta" className={cx("wrap-anywhere text-zinc-400", NOTICE_META)}>
             {project}
             {meta}
           </div>

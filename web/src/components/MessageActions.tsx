@@ -8,9 +8,9 @@
 // message shows them at the top of the part on screen, in a gutter of their own, and a click on its text puts them at
 // the click's height, so they're never a scroll away.
 // On touch nothing lies over the chat's text. A tap on a message tints it and puts Reply and Copy in a row under it,
-// in room the message makes for them (the rows after it move down); a tap on it again, a tap anywhere else or Esc
-// puts them away. A long message gets them as a bar across its end, which stays at the bottom of the chat while that
-// end is further down. The keyboard reaches both the same way. The chat's newest reply needs no tap: it ends with both
+// in room the message makes for them (the rows after it move down, the tapped message stays where it is); a tap on
+// it again, a tap anywhere else or Esc puts them away. A long message gets them as a bar across its end, which stays
+// at the bottom of the chat while that end is further down. The keyboard reaches both the same way. The chat's newest reply needs no tap: it ends with both
 // as quiet buttons (StandingActions).
 // Selecting text in a long message while its pills or bar are out turns them into "Reply quoting selection" and "Copy
 // selection". All are placed inside the message (no portal) and show and hide at once, with no fade. Text stays
@@ -19,6 +19,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyn
 import { createPortal } from "react-dom"
 import { Check, Copy, Quote, Reply, type LucideIcon } from "lucide-react"
 import { useReplyTo } from "./SideThread"
+import { rejoinListBottom, releaseListBottom } from "./StickyScroll"
 import { copyText } from "../lib/clipboard"
 import { onSuspend } from "../lib/resume"
 import { toast } from "../lib/toast"
@@ -48,6 +49,8 @@ const ROW_BUTTON = cx(
 )
 /** The row itself, under its message in the room MESSAGE_BLOCK makes (`data-under`). */
 const ROW = "absolute top-full z-10 flex h-11 items-center gap-1.5 select-none"
+/** How far under its message the row reaches: its 44px. */
+const ROW_ROOM = 44
 
 /**
  * A long message's bar (touch): a band in the chat's own colour across the message's end, so where it stays at the
@@ -145,6 +148,17 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
   /** Just copied: Copy says so in place, and the toolbar or pills stay up while it does. A row or bar stays anyway. */
   const { copied, copy: copyNow, forget } = useCopied(() => setPill(null))
 
+  /** The row or bar is out (touch), for the handlers that open it. */
+  const isOut = useRef(false)
+  isOut.current = tapped !== null
+  // Put away: a chat that was following its bottom when they came out (holdStill) follows it again.
+  const wasOut = useRef(false)
+  useLayoutEffect(() => {
+    const block = bar.current?.parentElement
+    if (wasOut.current && !tapped && block) rejoinListBottom(block)
+    wasOut.current = tapped !== null
+  }, [tapped])
+
   useEffect(() => {
     const block = bar.current?.parentElement
     if (!block || !reply) return
@@ -163,8 +177,9 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
     const tap = (e: MouseEvent) => {
       const hit = (e.target as Element | null)?.closest?.(INTERACTIVE)
       if ((hit && hit !== block && block.contains(hit)) || !window.getSelection()?.isCollapsed) return
-      if (touch) setTapped((was) => (was ? null : under(block)))
-      else setPill(pillTop(block, e.clientY))
+      if (!touch) return setPill(pillTop(block, e.clientY))
+      if (!isOut.current) holdStill(block, long)
+      setTapped((was) => (was ? null : under(block)))
     }
     block.addEventListener("click", tap)
     return () => block.removeEventListener("click", tap)
@@ -189,17 +204,20 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
       e.stopPropagation()
       hide()
     }
-    document.addEventListener("pointerdown", away, true)
+    // A finger puts them away when its tap ends, not when it lands: the rows under the message move up as its row
+    // goes, and a tap that started on one of them would end on whatever slid under it.
+    const press = touch ? "click" : "pointerdown"
+    document.addEventListener(press, away, true)
     document.addEventListener("keydown", key, true)
     // The app going to the background (a phone's home-screen app is frozen, not closed): put them away, so a thaw
     // doesn't bring back actions whose tap is long over.
     const off = onSuspend(hide)
     return () => {
-      document.removeEventListener("pointerdown", away, true)
+      document.removeEventListener(press, away, true)
       document.removeEventListener("keydown", key, true)
       off()
     }
-  }, [shown, forget])
+  }, [shown, forget, touch])
 
   // A long message's pills or bar scrolled out of view: they're gone, rather than waiting where Cody left them.
   const out = long && shown
@@ -297,7 +315,9 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
     // The keyboard (or a screen reader) reaching the buttons brings them out, as a tap on the message does.
     const reach = () => {
       const block = bar.current?.parentElement
-      if (block) setTapped((was) => was ?? under(block))
+      if (!block) return
+      if (!isOut.current) holdStill(block, long)
+      setTapped((was) => was ?? under(block))
     }
     // Still, and drawn from this state: the message the row or bar under it belongs to.
     const tint = tapped && (
@@ -549,6 +569,17 @@ export function StandingActions({ text, anchorId, children }: { text: string; an
 
 /** A chat's scroller (StickyScroll): what "on screen" means for a message in it. */
 const SCROLLER = "[data-scroller]"
+
+/**
+ * Before a message makes room under itself for its row or bar: a chat that follows its bottom lets go of it
+ * (StickyScroll), or it would scroll by that room and the message would jump up from under the finger that tapped it.
+ * A short message whose row wouldn't be on screen keeps following instead, which brings the row into view.
+ */
+function holdStill(block: HTMLElement, long: boolean) {
+  const view = block.closest(SCROLLER)
+  if (!long && view && block.getBoundingClientRect().bottom + ROW_ROOM > view.getBoundingClientRect().bottom) return
+  releaseListBottom(block)
+}
 /** What floats over a chat's bottom edge ("Jump to latest", the new-cards pill): the pills and the bar stay above it. */
 const FLOATING = "[data-chat-float] button"
 

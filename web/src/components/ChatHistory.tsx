@@ -227,16 +227,22 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
   )
 })
 
-/** The popup's three jumps: drawn as buttons, 44px tall at every width. */
-const JUMP = "min-h-11! transition-none"
+/** The popup's three jumps: drawn as buttons in one row, 44px tall at every width. A narrow popup breaks their words over two lines rather than the row. */
+const JUMP = "min-h-11! min-w-0 flex-1 basis-0 px-2! leading-tight whitespace-normal! transition-none @max-[15rem]/day:px-1!"
 /** The rail's rows start under its padding and its label. */
 const RAIL_HEAD = 28
-/** A milestone's row in the popup, as one target: 44px tall, its title wrapping in it. Too narrow for its title, it sends its PRs and then its own trailing word to a line below. */
-const SUMMARY_ROW = "flex min-h-11 min-w-0 flex-1 basis-64 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg px-2 py-1.5 text-left wrap-anywhere text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400"
+/** A milestone's row in the popup, as one target: 44px tall, its title wrapping in it. Too narrow for its title, it sends its PRs and then its own trailing word to a line below; a narrow popup always has the PRs on a line of their own. */
+const SUMMARY_ROW = "flex min-h-11 min-w-0 flex-1 basis-64 @max-[22rem]/day:basis-full flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg px-2 py-1.5 text-left wrap-anywhere text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400"
 /** A long group of milestones shows this many, then its "Show all N". One more than this is shown whole: the button would take the row it hid. */
 const GROUP_ROWS = 5
 /** A PR or issue at a row's end: drawn as a small link, 44px to a finger (its row is that tall). */
 const SUMMARY_REF = cx(TAP_AREA, "inline-block h-7 shrink-0 rounded px-1 leading-7 whitespace-nowrap text-sky-400 hover:underline focus-visible:outline-2 focus-visible:outline-sky-400")
+
+/** A rail day's name. "Today" and "Yesterday" say their date too: the button shows it, and its name has to hold what it shows. */
+function railName(at: number, now: number) {
+  const label = dayLabel(at, now)
+  return /\d/.test(label) ? label : `${label}, ${new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+}
 
 const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId, complete, current, onEnd }: {
   days: ChatDay[]
@@ -262,8 +268,9 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
   const nav = useRef<HTMLElement>(null)
   const popup = useRef<HTMLDivElement>(null)
   const anchor = useRef<HTMLButtonElement | null>(null)
-  /** A narrow panel's way to the rail: it names the day being read (the newest, until one is). */
+  /** A narrow panel's way to the rail: it names the open day, else the day being read (the newest, until one is). */
   const chip = useRef<HTMLButtonElement>(null)
+  const scrim = useRef<HTMLDivElement>(null)
   const popupId = useId()
   const day = days.find((d) => d.key === open)
   const bullets = day ? summaries.get(day.key) ?? [] : []
@@ -317,8 +324,8 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
     if (!open) return
     const outside = (e: PointerEvent) => {
       const at = e.target as Node
-      // The chip closes it itself.
-      if (!nav.current?.contains(at) && !popup.current?.contains(at) && !chip.current?.contains(at)) setOpen(null)
+      // The chip closes it itself, and so does the scrim.
+      if (!nav.current?.contains(at) && !popup.current?.contains(at) && !chip.current?.contains(at) && at !== scrim.current) setOpen(null)
     }
     const escape = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
@@ -348,7 +355,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
             ref={chip}
             type="button"
             data-day-chip
-            aria-label={`Chat days: ${dayLabel(reading.at, now)}`}
+            aria-label={`Chat days: ${dayLabel((day ?? reading).at, now)}`}
             aria-expanded={open !== null}
             aria-controls={open ? popupId : undefined}
             onClick={() => {
@@ -362,11 +369,15 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
             )}
           >
             <CalendarDays aria-hidden className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{dayLabel(reading.at, now)}</span>
+            <span className="truncate">{dayLabel((day ?? reading).at, now)}</span>
             <ChevronDown aria-hidden className="h-3 w-3 shrink-0" />
           </button>
         </div>
       )}
+      {/* A narrow panel: the rail and the popup lie over the chat, which is dimmed under them so its text doesn't
+          show between and around them. Before them, so under them at the same z-index. A tap on it closes them as its tap ends (not as it lands, or the tap would
+          end on the chat under it). */}
+      {day && <div ref={scrim} aria-hidden data-day-scrim onClick={close} className="absolute inset-x-0 top-10 bottom-0 z-20 hidden bg-zinc-950/85 @max-[28rem]/history:block" />}
       <nav
         ref={nav}
         onScroll={(e) => setRailTop(e.currentTarget.scrollTop)}
@@ -402,7 +413,7 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
                 setRailTop(top)
                 requestAnimationFrame(() => nav.current?.querySelector<HTMLElement>(`[data-day-index="${next}"]`)?.focus({ preventScroll: true }))
               }}
-              aria-label={`${dayLabel(d.at, now)}: preview day summary`}
+              aria-label={`${railName(d.at, now)}: preview day summary`}
               aria-current={d.key === current ? "date" : undefined}
               aria-expanded={d.key === open}
               aria-controls={d.key === open ? popupId : undefined}
@@ -429,19 +440,19 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
       {day && (
         // The title and the jumps stay put; the milestones scroll under them. A panel too short for both (the list
         // keeps a row or two: min-h) scrolls the popup instead.
-        <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} className="@container/day scroll-thin absolute top-2 left-12 z-20 flex max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm flex-col overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 text-xs shadow-xl @max-[28rem]/history:top-12 @max-[28rem]/history:max-h-[calc(100%-3.5rem)]">
-          <div role="group" aria-label="Transcript navigation" className="shrink-0 border-b border-zinc-800 px-3 pt-2 pb-3">
-            {/* The day, its own jump and Close share one row. A popup too narrow for the three puts the jump under them. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div ref={popup} id={popupId} role="region" aria-label={`${dayLabel(day.at, now)} work summary`} className="@container/day scroll-thin absolute top-2 left-12 z-20 flex max-h-[calc(100%-1rem)] w-[calc(100%-3.5rem)] max-w-sm flex-col overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 text-xs shadow-xl @max-[28rem]/history:top-12 @max-[28rem]/history:left-11 @max-[28rem]/history:max-h-[calc(100%-3.5rem)] @max-[28rem]/history:w-[calc(100%-3.25rem)] @max-[28rem]/history:max-w-none">
+          <div role="group" aria-label="Transcript navigation" className="shrink-0 border-b border-zinc-800 px-3 pt-1 pb-3">
+            <div className="flex items-center gap-2">
               <p className="min-w-0 flex-1 font-semibold text-zinc-100">{dayLabel(day.at, now)}</p>
-              {/* It takes the focus as the day opens: a held Enter on the day must not also jump. */}
-              <Button data-day-jump size="sm" className={cx(JUMP, "shrink-0 @max-[15rem]/day:order-last @max-[15rem]/day:basis-full")} onKeyDown={(e) => { if (e.repeat) e.preventDefault() }} onClick={() => jump(day)}>Jump to day</Button>
-              <DismissButton kind="close" className="h-11 w-11 transition-none!" onClick={close} label="Close day summary" />
+              <DismissButton kind="close" className="-mr-1.5 h-11 w-11 transition-none!" onClick={close} label="Close day summary" />
             </div>
-            {/* The chat's two ends, side by side in one row. */}
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button size="sm" className={cx(JUMP, "flex-1")} disabled={!complete} title={complete ? undefined : "Load all chat dates to jump to start"} onClick={() => jump(days[0]!)}>Jump to start</Button>
-              <Button size="sm" className={cx(JUMP, "flex-1")} onClick={() => { setOpen(null); onEnd() }}>Jump to end</Button>
+            {/* The three jumps in one row, in the chat's order: its start, this day (the one the popup is for, so the
+                tinted one), its end. */}
+            <div className="mt-1 flex gap-1.5 @max-[15rem]/day:gap-1">
+              <Button size="sm" className={JUMP} disabled={!complete} title={complete ? undefined : "Load all chat dates to jump to start"} onClick={() => jump(days[0]!)}>Jump to start</Button>
+              {/* It takes the focus as the day opens: a held Enter on the day must not also jump. */}
+              <Button data-day-jump size="sm" className={cx(JUMP, "bg-yard-500/15! text-yard-200! hover:bg-yard-500/25!")} onKeyDown={(e) => { if (e.repeat) e.preventDefault() }} onClick={() => jump(day)}>Jump to day</Button>
+              <Button size="sm" className={JUMP} onClick={() => { setOpen(null); onEnd() }}>Jump to end</Button>
             </div>
           </div>
           {/* scroll-pt: a row the keyboard reaches stops clear of its group's pinned heading. */}
@@ -560,10 +571,11 @@ function SummaryRow({ summary, openTask, onShow, onOpen }: { summary: DaySummary
           </AppLink>
         </span>
       ) : (
-        <span data-summary-plain className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 wrap-anywhere text-zinc-300">{title}</span>
+        <span data-summary-plain className="flex min-w-0 flex-1 items-center @max-[22rem]/day:basis-full gap-2 px-2 py-1.5 wrap-anywhere text-zinc-300">{title}</span>
       )}
       {summary.refs.length > 0 && (
-        <span className="ml-auto flex max-w-full shrink-0 flex-wrap items-center gap-x-2 pr-1 pointer-coarse:min-h-11 pointer-coarse:gap-y-4">
+        // At the row's end; in a narrow popup on a line of their own, close under the title and starting where it does.
+        <span className="ml-auto flex max-w-full shrink-0 flex-wrap items-center gap-x-2 pr-1 pointer-coarse:min-h-11 pointer-coarse:gap-y-4 @max-[22rem]/day:-mt-1.5 @max-[22rem]/day:mr-auto @max-[22rem]/day:mb-1.5 @max-[22rem]/day:ml-7 @max-[22rem]/day:min-h-0! @max-[22rem]/day:max-w-[calc(100%-1.75rem)]">
           {summary.refs.map((url) => (
             <AppLink key={url} href={url} className={SUMMARY_REF}>
               {githubRef(url)?.kind === "pull" ? shortGithubLabel(url)! : `#${githubRef(url)?.number}`}

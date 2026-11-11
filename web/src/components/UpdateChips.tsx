@@ -5,7 +5,7 @@
 import { Fragment, memo, useMemo, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 import { AppLink, InRepo, LinkedText, Markdown, cx } from "./ui"
-import { ChatLine, FullReplyLink, NoticeProject } from "./ChatLine"
+import { ChatLine, FullReplyLink, NOTICE_META, NoticeProject } from "./ChatLine"
 import { PublishedCard } from "./PublishedNotices"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import { ThreadMarkers } from "./SideThread"
@@ -152,7 +152,7 @@ function NoticeBody({ m }: { m: ChatMessage }) {
     )
   }
   return (
-    <div data-testid="update-chip-body" className={cx(CHIP_BODY, "text-xs leading-relaxed wrap-anywhere text-zinc-400")}>
+    <div data-testid="update-chip-body" className={cx(CHIP_BODY, "text-xs leading-relaxed wrap-anywhere text-zinc-400", NOTICE_META)}>
       {taskId && <NoticeProject taskId={taskId} projectId={projectId} />}
       <div className="inline [&>.prose-chat]:inline [&>.prose-chat>p:first-child]:inline">
         <InRepo taskId={taskId} projectId={projectId}>

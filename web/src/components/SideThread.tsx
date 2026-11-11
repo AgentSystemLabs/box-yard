@@ -159,10 +159,20 @@ const PaneBody = memo(function PaneBody({ id, chat, open, headerClassName }: { i
 
 const NO_MESSAGES: SideThreadMessage[] = []
 
-/** A message's first line as a title: no Markdown marks, at most a line. */
+/**
+ * A message's first line as a title, at most a line: a link is its text and bold loses its marks. Nothing else is
+ * taken out, so a name keeps its underscores ("task_demo01", "test_related").
+ */
 export function threadTitle(text: string) {
   const line = text.split(/\r?\n/).find((l) => l.trim()) ?? ""
-  return quotePreview(line.replace(/^\s*(?:#+|>|[-*+]|\d+\.)\s+/, "").replace(/[*_`~]+/g, ""), 140)
+  return quotePreview(
+    line
+      .replace(/^\s*(?:#+|>|[-*+]|\d+\.)\s+/, "")
+      .replace(/!?\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/(^|[^\w])__(.+?)__(?!\w)/g, "$1$2"),
+    140,
+  )
 }
 
 export const repliesLabel = (n: number) => `${n} ${n === 1 ? "reply" : "replies"}`
@@ -306,9 +316,14 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
           <h2 title={quotePreview(original, 400)} className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-100 @min-[35.5rem]/coord:pl-2">
             Thread
             {reply && (
-              <span data-testid="side-thread-title" className="ml-2 font-normal text-zinc-400">
-                {threadTitle(original)}
-              </span>
+              <>
+                <span aria-hidden className="ml-2 font-normal text-zinc-600">
+                  ·
+                </span>
+                <span data-testid="side-thread-title" className="ml-2 font-normal text-zinc-400">
+                  {threadTitle(original)}
+                </span>
+              </>
             )}
           </h2>
         }
