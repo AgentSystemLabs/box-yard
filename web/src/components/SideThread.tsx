@@ -365,6 +365,8 @@ export function ThreadView({
     document.querySelector(`[data-chat-id="${CSS.escape(anchorId)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" })
   }
   const back = () => leaveThread(qc, chat, slot)
+  // Over the whole chat, or a task: the messages and the box keep a readable column.
+  const column = (open.expanded || sheet) && "mx-auto w-full max-w-3xl"
   const items: MenuItem[] = [
     ...(inChat ? [{ icon: TextSearch, label: "Show in the chat", run: reveal }] : []),
     ...(thread && busy ? [{ icon: Square, label: "Stop answering", run: () => control.stop(id) }] : []),
@@ -441,15 +443,18 @@ export function ThreadView({
           data-testid="side-thread-parent"
           onClick={() => openThread(slot, parentId)}
           title="Back to the thread this was asked in"
-          className="flex min-h-11 w-full shrink-0 items-center gap-1.5 border-b border-zinc-900 px-3 text-left text-xs text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none focus-visible:ring-inset [@media(pointer:fine)]:min-h-9"
+          className="block w-full shrink-0 border-b border-zinc-900 text-left text-xs text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none focus-visible:ring-inset"
         >
-          <CornerLeftUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span className="shrink-0">Asked in</span>
-          <span className="min-w-0 truncate text-zinc-200">{parent ? `“${threadTitle(parent.quote)}”` : "another thread"}</span>
+          <span className={cx("flex min-h-11 items-center gap-1.5 px-3 [@media(pointer:fine)]:min-h-9", column)}>
+            <CornerLeftUp className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span className="shrink-0">Asked in</span>
+            <span className="min-w-0 truncate text-zinc-200">{parent ? `“${threadTitle(parent.quote)}”` : "another thread"}</span>
+          </span>
         </button>
       )}
       {!reply && (thread || draft) && (
-        <div className="shrink-0 border-b border-zinc-900 px-3 py-2.5">
+        <div className="shrink-0 border-b border-zinc-900 py-2.5">
+          <div className={cx("px-3", column)}>
           {inChat && !parentId ? (
             <button type="button" onClick={reveal} title="Show it in the chat" data-testid="side-thread-quote" className={cx(QUOTE_CARD, "block w-full text-left hover:border-zinc-700")}>
               <span className="line-clamp-4">{original}</span>
@@ -462,10 +467,11 @@ export function ThreadView({
           {thread?.context === "summary" && (
             <p className="mt-1.5 text-[11px] leading-4 text-zinc-400">{SUMMARY_NOTE}</p>
           )}
+          </div>
         </div>
       )}
       <SelectionToTask source={selectionSource} askOn={askOn} thread={inThread}>
-      <StickyScroll handle={list} count={messages.length} resetKey={id} className={cx("px-3 py-3", open.expanded && "mx-auto w-full max-w-3xl")} contentClassName="space-y-3">
+      <StickyScroll handle={list} count={messages.length} resetKey={id} className={cx("px-3 py-3", column)} contentClassName="space-y-3">
         {reply && (
           <div data-testid="side-thread-original" className="space-y-2.5">
             <div className="text-sm text-zinc-200">
@@ -503,7 +509,7 @@ export function ThreadView({
       </SelectionToTask>
       {nested.length > 0 && (
         // The questions asked from inside this thread: each opens in this panel, and leads back here.
-        <div data-testid="side-thread-children" role="group" aria-label="Threads asked from here" className={cx("flex max-h-28 shrink-0 flex-wrap items-center gap-1.5 overflow-y-auto border-t border-zinc-900 px-3 py-2 pointer-coarse:gap-y-5 pointer-coarse:py-3", open.expanded && "mx-auto w-full max-w-3xl")}>
+        <div data-testid="side-thread-children" role="group" aria-label="Threads asked from here" className={cx("flex max-h-28 shrink-0 flex-wrap items-center gap-1.5 overflow-y-auto border-t border-zinc-900 px-3 py-2 pointer-coarse:gap-y-5 pointer-coarse:py-3", column)}>
           <span className="shrink-0 text-[11px] text-zinc-400">Asked from here</span>
           {nested.map((t) => (
             <ThreadChip key={t.id} t={t} active={false} onOpen={() => openThread(slot, t.id)} />
@@ -521,7 +527,7 @@ export function ThreadView({
         placeholder={reply ? (busy ? "Queue another reply…" : "Reply…") : busy ? "Queue a follow-up…" : thread ? "Reply in this thread…" : "Ask about the highlighted text…"}
         label={thread || reply ? "Reply in this side thread" : "Ask about the highlighted text"}
         panelRef={pane}
-        className={cx(COMPOSER_FOOTER, "px-3", open.expanded && "mx-auto w-full max-w-3xl")}
+        className={cx(COMPOSER_FOOTER, "px-3", column)}
       />
     </div>
   )

@@ -166,7 +166,7 @@ export function SelectionToTask({
             data-selection-task-action
             role="group"
             aria-label="Selected text"
-            className="fixed z-40 hidden -translate-x-1/2 items-center gap-0.5 rounded-full border border-yard-400/50 bg-zinc-900/95 p-0.5 shadow-lg shadow-black/40 backdrop-blur [@media(pointer:fine)]:flex"
+            className="fixed z-40 hidden w-max -translate-x-1/2 items-center gap-0.5 rounded-full border border-yard-400/50 bg-zinc-900/95 p-0.5 shadow-lg shadow-black/40 backdrop-blur [@media(pointer:fine)]:flex"
             style={{ left: selection.x, top: selection.y }}
           >
             {actions.map((a) => (
@@ -219,7 +219,7 @@ export function SelectionToTask({
 }
 
 const PILL =
-  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-yard-200 hover:bg-zinc-800 hover:text-yard-100 focus:ring-2 focus:ring-yard-500 focus:outline-none"
+  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap text-yard-200 hover:bg-zinc-800 hover:text-yard-100 focus:ring-2 focus:ring-yard-500 focus:outline-none"
 /** The phone's bar: one rounded box, a 44px button per action. */
 const BAR =
   "fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-stretch divide-x divide-yard-400/30 overflow-hidden rounded-2xl border border-yard-400/50 bg-zinc-900/95 shadow-2xl shadow-black/50 backdrop-blur [@media(pointer:fine)]:hidden"
