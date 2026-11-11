@@ -8,6 +8,7 @@ import type { Hub } from "./hub.js"
 import type { Store } from "./store.js"
 import { ORCHESTRATOR_PROMPT } from "./prompts.js"
 import { COORDINATOR_NAMED_HEADING, namedState, TASK_THREAD_HEADING, tasksState, type PrLookup } from "./handoff.js"
+import { projectDefaultsLine, type ProjectDefaults } from "./projectDefaults.js"
 import { updatesBlock } from "./noticeBatch.js"
 import { DirectMessageDigests } from "./directMessageDigests.js"
 import { withOwner } from "../shared/owner.js"
@@ -17,6 +18,7 @@ import { BadRequestError, queuedChatError, type QueuedChatChange } from "./store
 import { compactThreshold, type SettingsStore } from "./settings.js"
 import { contextTokens, contextWindowOf, formatTokens, parseContextReport, resultUsageObject, sessionUsageOf } from "./usage.js"
 import {
+  RESET_LEAD,
   SUMMARY_PROMPT,
   afterCompactBlock,
   cleanSummary,
@@ -25,6 +27,7 @@ import {
   finishCompaction,
   lastCompaction,
   recapBlock,
+  resetPrompt,
   summaryBody,
   summaryLooksValid,
   summaryPrompt,
@@ -219,6 +222,8 @@ export class Orchestrator {
   statusOnly: StatusOnly = () => false
   /** GitHub's PR states for the named-state block in front of Cody's messages (app.ts: TaskManager.prs). */
   prs: PrLookup | null = null
+  /** A project's live defaults for new tasks, under a project Cody's message names (app.ts: TaskManager.projectDefaults). */
+  projectDefaults: ((projectId: string) => ProjectDefaults | null) | null = null
   /** The Claude and Codex logins its runs rotate over (docs/logins.md); app.ts wires them in. */
   logins: AgentLogins | null = null
   /** The external MCP connectors a session gets (docs/connectors.md › Sessions); app.ts wires them in. */
@@ -492,7 +497,7 @@ export class Orchestrator {
       return null
     }
     const live = liveTaskLines(this.store, mentionedTaskIds([summaryBody(markdown)]), { statusOnly: this.statusOnly })
-    return opts.compacted ? afterCompactBlock(file, markdown, live) : recapBlock(file, markdown, live, opts.lead)
+    return opts.compacted ? afterCompactBlock(file, markdown, live, this.owner()) : recapBlock(file, markdown, live, opts.lead, this.owner())
   }
 
   /**
@@ -770,9 +775,16 @@ export class Orchestrator {
     return namedState(text, { tasks: this.store.listTasks(), projects }, this.stateOptions(projects), COORDINATOR_NAMED_HEADING)
   }
 
-  /** How the Coordinator is shown tasks' state: each with its project's name, a status-only project's sealed. */
+  /**
+   * How the Coordinator is shown tasks' state: each with its project's name, a status-only project's sealed, and a
+   * project's live defaults for new tasks (Runs on and agent aren't content, so a status-only project keeps them).
+   */
   private stateOptions(projects = this.store.listProjects()) {
-    return { store: this.store, prs: this.prs, sealed: (t: Task) => this.statusOnly(t.projectId), projectNames: new Map(projects.map((p) => [p.id, p.name])) }
+    const defaults = (projectId: string) => {
+      const d = this.projectDefaults?.(projectId)
+      return d ? projectDefaultsLine(d) : null
+    }
+    return { store: this.store, prs: this.prs, sealed: (t: Task) => this.statusOnly(t.projectId), projectNames: new Map(projects.map((p) => [p.id, p.name])), projectDefaults: defaults }
   }
 
   /** The model and effort a run uses: Settings' relay pair for a relay-only turn when it's on, else the Coordinator's. */
@@ -825,8 +837,8 @@ export class Orchestrator {
         .map((m) => `[${m.role}] ${m.content.slice(0, 800)}`)
         .join("\n")
       const last = recapFile ? { file: recapFile } : this.latestSummary()
-      const saved = last ? this.recap(last.file, { lead: "Your session was reset. This is the last summary you wrote" }) : null
-      result = await this.run(`${saved ? `${saved}\n\n` : ""}Earlier conversation (your session was reset):\n${recap}\n\n---\n\n${now}`, fresh, false, "turn", ask)
+      const saved = last ? this.recap(last.file, { lead: RESET_LEAD }) : null
+      result = await this.run(resetPrompt(saved, "Earlier conversation", recap, now), fresh, false, "turn", ask)
     }
     this.turnKey = null
     this.stopping = false

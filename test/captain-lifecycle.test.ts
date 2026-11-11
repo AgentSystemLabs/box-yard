@@ -78,6 +78,7 @@ async function captain(r: Running, name = "demo") {
 describe("Captain claude runs (#50)", () => {
   it("runs claude with only its own MCP config, Box Yard tools, read-only file access and a persistent session", async () => {
     const lines = logFile()
+    process.env.FAKE_CLAUDE_LOG_FULL = "1"
     const r = await start()
     const { p, say } = await captain(r)
     await say("status")
@@ -105,10 +106,13 @@ describe("Captain claude runs (#50)", () => {
     expect(session).toBeTruthy()
     expect(argOf(second!, "--resume")).toBe(session)
     expect(turns[0]!.prompt).toMatch(/^\[Project now: demo\]/)
+    // [Project now] ends with the project's live defaults for new tasks, right before the turn's messages.
+    expect(turns[0]!.prompt).toMatch(/\nDefaults now \(live; they beat any saved summary\): runs_on \w+ \(project\) · agent claude \(Settings\) · model \S+ \([\w-]+\) · effort \w+ \([\w-]+\)\. Omit runs_on and agent to follow them; pass one only when this turn's message asks for it\.\n\n\[From [^\]]+\]\nstatus$/)
   })
 
   it("falls back to a fresh session with a recap when the old one is gone", async () => {
     const lines = logFile()
+    process.env.FAKE_CLAUDE_LOG_FULL = "1"
     const r = await start()
     const { p, say } = await captain(r)
     await say("status")
@@ -121,7 +125,31 @@ describe("Captain claude runs (#50)", () => {
     // (The failed --resume run exits before the fake claude logs it.)
     const runs = lines().filter((l) => l.args.includes("--mcp-config"))
     expect(argOf(runs.at(-1)!.args, "--session-id")).toBe(fresh)
-    expect(runs.at(-1)!.prompt).toMatch(/^Earlier Captain conversation \(your session was reset\):/)
+    const prompt = runs.at(-1)!.prompt
+    expect(prompt).toMatch(/^Earlier Captain conversation \(your session was reset; saved history\):/)
+    // The history first, then an end marker, the live [Project now] with its defaults, and the message last.
+    const order = ["Earlier Captain conversation", "[End of saved history. Everything below is live", "[Project now: demo]", "Defaults now (live", "status after a reset"].map((x, i, all) => (i === all.length - 1 ? prompt.lastIndexOf(x) : prompt.indexOf(x)))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  it("restores a reset session from its last summary, labelled as saved history below the live config", async () => {
+    const lines = logFile()
+    process.env.FAKE_CLAUDE_LOG_FULL = "1"
+    const r = await start()
+    const { p, idle, say } = await captain(r)
+    await say("status")
+    await call(r, "POST", `/api/projects/${p.id}/captain/compact`)
+    await waitFor(async () => (await idle())?.lastCompaction?.tokensAfter, "compaction")
+    await say("after the compaction")
+    r.yard.store.setKv(`captain_session:${p.id}`, randomUUID())
+    await say("status after a reset")
+
+    const prompt = lines().filter((l) => l.args.includes("--mcp-config")).at(-1)!.prompt
+    expect(prompt).toMatch(/^\[Box Yard: Your session was reset\. This is the last summary you wrote \(.+\)\. Saved history, possibly stale: live project config and .+ current message override it\./)
+    const order = ["## Decisions and preferences", "Earlier Captain conversation (your session was reset", "[End of saved history", "[Project now: demo]", "Defaults now (live", "status after a reset"].map((x, i, all) => (i === all.length - 1 ? prompt.lastIndexOf(x) : prompt.indexOf(x)))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 })
 

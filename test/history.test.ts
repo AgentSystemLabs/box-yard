@@ -83,11 +83,11 @@ describe("compaction summaries carry forward", () => {
     const files = writeCompaction(tmpDir(), meta(Date.parse("2026-10-20T10:00:00Z")), SUMMARY)
     const block = afterCompactBlock(files.markdownFile, files.markdown, ['- task_aaaaaaaaaaaa "Runner" [demo] done'])
     expect(block).toBe(
-      `[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (2026-10-20T10:00:00.000Z, ${files.markdownFile}). Task states under "Live now" are current and beat both. For anything older, use compaction_history or search_history.]\n\nLive now, tasks it names:\n- task_aaaaaaaaaaaa "Runner" [demo] done`,
+      `[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (2026-10-20T10:00:00.000Z, ${files.markdownFile}). Saved history, possibly stale: live project config and the owner's current message override it. Task states under "Live now" are current and beat both. For anything older, use compaction_history or search_history.]\n\nLive now, tasks it names:\n- task_aaaaaaaaaaaa "Runner" [demo] done`,
     )
     expect(block).not.toContain("## Decisions and preferences")
     expect(afterCompactBlock("f.md", "## Decisions and preferences\n- none", [])).toBe(
-      "[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (f.md). For anything older, use compaction_history or search_history.]",
+      "[Box Yard: Your context was just compacted. The summary above carries the one you saved right before it (f.md). Saved history, possibly stale: live project config and the owner's current message override it. For anything older, use compaction_history or search_history.]",
     )
   })
 
@@ -95,13 +95,13 @@ describe("compaction summaries carry forward", () => {
     const files = writeCompaction(tmpDir(), meta(Date.parse("2026-10-20T10:00:00Z")), SUMMARY)
     const block = recapBlock(files.markdownFile, files.markdown, ['- task_aaaaaaaaaaaa "Runner" [demo] done'])
     expect(block.split("\n")[0]).toBe(
-      `[Box Yard: Your context was just compacted. This is the summary you wrote right before it (2026-10-20T10:00:00.000Z, saved as ${files.markdownFile}). Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]`,
+      `[Box Yard: Your context was just compacted. This is the summary you wrote right before it (2026-10-20T10:00:00.000Z, saved as ${files.markdownFile}). Saved history, possibly stale: live project config and the owner's current message override it. Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]`,
     )
     expect(block).toContain("## Open threads and next steps\n- Ask Cody about the local runner brief.")
     expect(block).not.toContain("tokens_before")
     expect(block.endsWith('Live now, tasks it names:\n- task_aaaaaaaaaaaa "Runner" [demo] done')).toBe(true)
     expect(recapBlock("f.md", "## Decisions and preferences\n- none", [], "Your session was reset")).toBe(
-      '[Box Yard: Your session was reset (saved as f.md). Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]\n## Decisions and preferences\n- none',
+      '[Box Yard: Your session was reset (saved as f.md). Saved history, possibly stale: live project config and the owner\'s current message override it. Task states under "Live now" are current and beat the summary. For anything older, use compaction_history or search_history.]\n## Decisions and preferences\n- none',
     )
   })
 

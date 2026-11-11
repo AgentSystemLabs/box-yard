@@ -55,6 +55,7 @@ import { PrDetailsSource } from "./prDetails.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
 import { prMark, quietAgentWake, taskTrigger, turnTrigger } from "./turnTrigger.js"
 import { isCopiedDefaultRoute, loadRouting, resolveAgentRoute } from "./routing.js"
+import { layerSource, type DefaultSource, type ProjectDefaults } from "./projectDefaults.js"
 import { NEXT_STEPS_META_KEY, parseNextSteps } from "../shared/nextSteps.js"
 import { isQuietRun, noopBlockers, type RunEvidence } from "../shared/quiet.js"
 import { memoryPressure, type BoxMemory, type MemoryPolicy } from "../shared/memory.js"
@@ -6414,8 +6415,44 @@ export class TaskManager {
     return this.settings.get().ownerName
   }
 
+  /**
+   * What a new task in the project gets when the call passes no runs_on, agent, model or effort, and where each comes
+   * from (server/projectDefaults.ts), resolved the way its first turn would be. Null for an unknown project.
+   */
+  projectDefaults(projectId: string): ProjectDefaults | null {
+    const project = this.store.getProject(projectId)
+    if (!project) return null
+    const s = this.settings.get()
+    const agent = project.agentCli ?? s.agentCli
+    let model: string | null = null
+    let modelFrom: DefaultSource = "Settings"
+    let effort: Effort | null = null
+    let effortFrom: DefaultSource = "Settings"
+    try {
+      const turn = this.agentSettings({ agent_cli: agent, model: null, effort: null, routing_rule: null, routing_reason: null, context_window: null }, project)
+      model = turn.model
+      // A model the harness can't run gives way to its Settings model (agentSettings), so it no longer comes from the route.
+      modelFrom = turn.model === turn.route.model ? layerSource(turn.route.modelFrom) : "Settings"
+      effort = turn.effort
+      effortFrom = layerSource(turn.route.effortFrom)
+    } catch {
+      // A Settings model this harness refuses (OpenCode): the turn fails with it; the line shows the CLI's default.
+    }
+    return {
+      runner: project.runner,
+      machineLabel: project.runner === "ssh" ? project.machineLabel : null,
+      agent,
+      agentFrom: project.agentCli ? "project" : "Settings",
+      model,
+      modelFrom,
+      effort,
+      effortFrom,
+      effortYours: effort !== null && (agent === "codex" ? s.agentCodexEffort : s.agentEffort) === "orchestrator",
+    }
+  }
+
   /** Model, effort, route and auto-compact window for a turn, from the task, routing YAML and saved settings (read fresh each turn; precedence in resolveAgentRoute). */
-  private agentSettings(row: TaskRow, project: NonNullable<ReturnType<Store["getProject"]>>) {
+  private agentSettings(row: Pick<TaskRow, "agent_cli" | "model" | "effort" | "routing_rule" | "routing_reason" | "context_window">, project: NonNullable<ReturnType<Store["getProject"]>>) {
     const { settings: s, sources } = this.settings.info()
     const cli = taskAgentCli(row)
     const codex = cli === "codex"

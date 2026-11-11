@@ -5,7 +5,7 @@ import type { Server } from "node:http"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { createBoxYard, type BoxYard } from "../server/app.js"
-import { buildMcpServer, MAX_TASK_BATCH, type McpCaller } from "../server/mcp.js"
+import { buildMcpServer, MAX_TASK_BATCH, type McpCaller, type McpDeps } from "../server/mcp.js"
 import { Artifacts } from "../server/artifacts.js"
 import { LocalProvider } from "../server/providers/local.js"
 import { Uploads, uploadsDir } from "../server/uploads.js"
@@ -67,9 +67,9 @@ afterEach(async () => {
 
 type ToolRes = { content: { type: string; text: string }[]; isError?: boolean }
 
-async function mcpAs(r: Running, caller: McpCaller) {
+async function mcpAs(r: Running, caller: McpCaller, extra: Partial<McpDeps> = {}) {
   const y = r.yard
-  const deps = { store: y.store, tasks: y.tasks, hub: y.hub, artifacts: r.artifacts, publicUrl: () => "", scheduler: y.scheduler, captains: y.captains, settings: y.settings, notes: y.notes, uploads: r.uploads }
+  const deps = { store: y.store, tasks: y.tasks, hub: y.hub, artifacts: r.artifacts, publicUrl: () => "", scheduler: y.scheduler, captains: y.captains, settings: y.settings, notes: y.notes, uploads: r.uploads, ...extra }
   const mcp = buildMcpServer(deps, caller)
   const [a, b] = InMemoryTransport.createLinkedPair()
   await mcp.connect(a)
@@ -367,5 +367,103 @@ describe("create_tasks", () => {
     expect(await coordinator.error("send_to_task", { task: one.id, message: "continue locally", runs_on: "local" })).toContain("Can't run it on this computer")
     expect(store.getTask(one.id)!.runsOn).toBe("box")
     expect(store.getTask(one.id)!.pendingCount).toBe(0)
+  })
+})
+
+// A reset Captain once passed runs_on "box" from a stale summary over its project's Runs on (local): the task tools
+// now say when a call's runs_on or agent leaves the project's live defaults, and list_projects shows Runs on.
+describe("live project defaults", () => {
+  it("resolves what a new task gets, with each default's source", async () => {
+    const r = await start()
+    const { store, tasks, settings } = r.yard
+    const p = store.createProject({ name: "mac", runner: "local" })
+    settings.update({ agentCli: "claude", agentModel: "claude-sonnet-5-5", agentEffort: "medium" })
+    expect(tasks.projectDefaults(p.id)).toEqual({
+      runner: "local",
+      machineLabel: null,
+      agent: "claude",
+      agentFrom: "Settings",
+      model: "claude-sonnet-5-5",
+      modelFrom: "Settings",
+      effort: "medium",
+      effortFrom: "Settings",
+      effortYours: false,
+    })
+    // The project's own Agent, and a routing entry for the project, win over Settings.
+    store.updateProject(p.id, { agentCli: "codex" })
+    settings.update({ agentCodexModel: "gpt-6-luna", agentCodexEffort: "low", agentRoutingConfig: `projects:\n  ${p.id}:\n    effort: high` })
+    expect(tasks.projectDefaults(p.id)).toMatchObject({ agent: "codex", agentFrom: "project", model: "gpt-6-luna", modelFrom: "Settings", effort: "high", effortFrom: "routing" })
+    // Effort left to the caller.
+    store.updateProject(p.id, { agentCli: null })
+    settings.update({ agentEffort: "orchestrator", agentRoutingConfig: "" })
+    expect(tasks.projectDefaults(p.id)).toMatchObject({ agent: "claude", effortYours: true })
+    expect(tasks.projectDefaults("prj_missing")).toBeNull()
+  })
+
+  it("shows Runs on in list_projects' boxSettings, for the Coordinator and the project's Captain", async () => {
+    const r = await start()
+    const { store } = r.yard
+    const mac = store.createProject({ name: "mac", runner: "local" })
+    store.createProject({ name: "cloud" })
+    const [listed] = await (await mcpAs(r, { kind: "captain", projectId: mac.id })).json("list_projects")
+    expect(listed.boxSettings.runsOn).toBe("local (this project): new tasks run there unless runs_on says otherwise")
+    expect(Object.keys(listed.boxSettings)[0]).toBe("runsOn")
+    const all = await (await mcpAs(r, { kind: "coordinator" })).json("list_projects")
+    expect(all.find((x: { name: string }) => x.name === "cloud").boxSettings.runsOn).toMatch(/^box \(this project\)/)
+  })
+
+  it("flags create_task, create_tasks and send_to_task calls whose runs_on or agent leaves the defaults", async () => {
+    const r = await start()
+    const { store, settings } = r.yard
+    settings.update({ agentCli: "claude" })
+    const p = store.createProject({ name: "mac", runner: "local" })
+    const captain = await mcpAs(r, { kind: "captain", projectId: p.id })
+
+    const boxed = await captain.json("create_task", { project: "mac", title: "Boxed", prompt: "a", runs_on: "box" })
+    expect(boxed.overridesDefault).toBe("runs_on box overrides project default local")
+    const codex = await captain.json("create_task", { project: "mac", title: "Codex", prompt: "a", agent: "codex", runs_on: "box" })
+    expect(codex.overridesDefault).toBe("runs_on box overrides project default local; agent codex overrides project default agent claude (Settings)")
+    // Following the project, or naming its own runner and agent, isn't an override.
+    for (const args of [{}, { runs_on: "local" }, { runs_on: "this_computer", agent: "claude" }]) {
+      const res = await captain.json("create_task", { project: "mac", title: `Plain ${JSON.stringify(args)}`, prompt: "a", ...args })
+      expect(res.overridesDefault, JSON.stringify(args)).toBeUndefined()
+    }
+
+    const batch = await captain.json("create_tasks", {
+      project: "mac",
+      runs_on: "box",
+      tasks: [
+        { title: "Shared", prompt: "a" },
+        { title: "Own", prompt: "b", runs_on: "local" },
+        { title: "Model", prompt: "c", runs_on: "local", model: "gpt-6.1-sol" },
+      ],
+    })
+    expect(batch.tasks.map((t: { overridesDefault?: string }) => t.overridesDefault)).toEqual([
+      "runs_on box overrides project default local",
+      undefined,
+      "model gpt-6.1-sol (agent codex) overrides project default agent claude (Settings)",
+    ])
+
+    // send_to_task moving a task off the project's runner says so; moving it back doesn't.
+    const away = await captain.json("send_to_task", { task: boxed.id, message: "go on", runs_on: "box" })
+    expect(away.overridesDefault).toBe("runs_on box overrides project default local")
+    const home = await captain.json("send_to_task", { task: boxed.id, message: "come back", runs_on: "local" })
+    expect(home.overridesDefault).toBeUndefined()
+    expect((await captain.json("send_to_task", { task: boxed.id, message: "carry on" })).overridesDefault).toBeUndefined()
+  })
+
+  it("leaves Cody's @ and ! picks to their own notes", async () => {
+    const r = await start()
+    const { store, settings } = r.yard
+    settings.update({ agentCli: "claude" })
+    const p = store.createProject({ name: "mac", runner: "local" })
+    const picks = { runsOn: { value: "box", token: "box", label: "Upstash box" }, agent: { value: "codex", token: "codex", label: "Codex" } }
+    const captain = await mcpAs(r, { kind: "captain", projectId: p.id }, { turnPicks: () => picks })
+    const res = await captain.json("create_task", { project: "mac", title: "Picked", prompt: "a", runs_on: "box", agent: "codex" })
+    expect(res.runs_on_pick).toBeTruthy()
+    expect(res.agent_pick).toBeTruthy()
+    expect(res.overridesDefault).toBeUndefined()
+    const batch = await captain.json("create_tasks", { project: "mac", tasks: [{ title: "One", prompt: "a", runs_on: "box", agent: "codex" }] })
+    expect(batch.tasks[0].overridesDefault).toBeUndefined()
   })
 })
