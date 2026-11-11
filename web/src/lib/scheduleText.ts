@@ -25,6 +25,12 @@ export function clockTime(hour: number, minute: number, locale?: string): string
   return plainSpaces(format(locale, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(Date.UTC(2000, 0, 1, hour, minute)))
 }
 
+/** "Chicago time" for America/Chicago, plain "UTC" for UTC: the zone as it reads after "Cron 0 2 * * * in". */
+export function zoneTime(tz: string): string {
+  const label = zoneLabel(tz)
+  return label === "UTC" ? label : `${label} time`
+}
+
 /**
  * The cron in plain words with its zone: "Every day at 2:00 AM Chicago". The zone only shows when the words name a
  * time of day ("Every 15 minutes" is the same everywhere). A shape describeCron can't read stays a cron, with its zone.
@@ -55,12 +61,13 @@ function dayNumber(ts: number, tz: string): number {
   return Date.UTC(part("year"), part("month") - 1, part("day")) / 86_400_000
 }
 
-/** "Today 2:00 AM", "Tomorrow 9:00 AM", "Tue 9:00 AM" (this week), else "Nov 12, 9:00 AM": `ts` read in `tz`. */
+/** "Today 2:00 AM", "Tomorrow 9:00 AM", "Yesterday 9:00 AM", "Tue 9:00 AM" (this week), else "Nov 12, 9:00 AM": `ts` read in `tz`. */
 export function runDayTime(ts: number, tz: string, now: number, locale?: string): string {
   const time = plainSpaces(format(locale, { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(ts))
   const days = dayNumber(ts, tz) - dayNumber(now, tz)
   if (days === 0) return `Today ${time}`
   if (days === 1) return `Tomorrow ${time}`
+  if (days === -1) return `Yesterday ${time}`
   if (days > 1 && days < 7) return `${format(locale, { timeZone: tz, weekday: "short" }).format(ts)} ${time}`
   return `${format(locale, { timeZone: tz, month: "short", day: "numeric" }).format(ts)}, ${time}`
 }

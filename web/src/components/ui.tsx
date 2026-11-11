@@ -1034,6 +1034,42 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
   )
 }
 
+/**
+ * A labelled set of buttons or chips. Field is a `<label>`, so a tap on its caption clicks the first control inside:
+ * right for one input, wrong for a row of choices. This is a named group instead.
+ */
+export function FieldGroup({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  const id = useId()
+  return (
+    <div role="group" aria-labelledby={id} className="space-y-1.5">
+      <span id={id} className="block text-xs font-medium tracking-wide whitespace-nowrap text-zinc-400 uppercase">
+        {label}
+      </span>
+      {children}
+      {hint && <span className="block text-xs text-zinc-500">{hint}</span>}
+    </div>
+  )
+}
+
+/** One choice in a FieldGroup. 44px tall; compact only for a mouse in a wide `@container`. */
+export function Chip({ on, onClick, children, ...props }: { on: boolean; onClick: () => void; children: ReactNode } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "type">) {
+  return (
+    <button
+      {...props}
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={cx(
+        "inline-flex min-h-11 items-center gap-1.5 rounded-md px-2.5 text-xs whitespace-nowrap pointer-fine:@lg:min-h-0 pointer-fine:@lg:py-1",
+        on ? "bg-yard-500/20 text-yard-300" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200",
+        props.className,
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 /** Parse KEY=value lines into an env map. */
 export function parseEnv(text: string): Record<string, string> {
   const env: Record<string, string> = {}
