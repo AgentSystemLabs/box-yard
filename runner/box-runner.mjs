@@ -613,9 +613,17 @@ function contextTokensOf(u) {
   return n > 0 ? n : null
 }
 
-function contextWindowOf(modelUsage) {
+/**
+ * The largest window the CLI reports for the turn's models. `guessed` names the models this CLI said it doesn't
+ * recognize (bare names): the 200k it reports for one is its guess, not the model's window, so it doesn't count.
+ */
+function contextWindowOf(modelUsage, guessed) {
   let best = null
-  for (const v of Object.values(modelUsage ?? {})) if (typeof v?.contextWindow === "number" && v.contextWindow > (best ?? 0)) best = v.contextWindow
+  for (const [name, v] of Object.entries(modelUsage ?? {})) {
+    if (typeof v?.contextWindow !== "number" || v.contextWindow <= (best ?? 0)) continue
+    if (v.contextWindow === GUESSED_WINDOW && guessed?.has(bareModel(name))) continue
+    best = v.contextWindow
+  }
   return best
 }
 
@@ -717,6 +725,8 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     let unknownModel = null
     let unknownModelKill = null
     const watchModel = model && !OWN_WINDOW_ENV.some((k) => env[k]) ? model : null
+    // Every model this CLI said it doesn't recognize, on a turn that goes on too: its window for one is a guess.
+    const guessed = new Set()
     let pending = Promise.resolve()
     const queue = (fn) => (pending = pending.then(fn).catch((e) => process.stderr.write(`${e.stack}\n`)))
     const steers = steerable ? steerInbox(child, turn.turnId, queue) : null
@@ -750,6 +760,7 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     })
     child.stderr.on("data", (chunk) => {
       stderr = (stderr + chunk.toString("utf8")).slice(-8000)
+      for (const m of unrecognizedModelsIn(stderr)) guessed.add(bareModel(m))
       if (!watchModel || unknownModel || stopping) return
       unknownModel = unrecognizedModelIn(stderr, watchModel)
       if (!unknownModel) return
@@ -778,7 +789,8 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
         buf = ""
       }
       pending.then(() => {
-        const window = contextWindowOf(result?.modelUsage)
+        // A window set by hand is the model's own, whatever the CLI knows of the model.
+        const window = contextWindowOf(result?.modelUsage, env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ? null : guessed)
         if (usage && window) usage.window = window
         // Killed by a signal: 128 + its number, as a shell says it (137 for SIGKILL, what a box's out-of-memory killer sends).
         const killed = code === null && signal ? `claude was killed (${signal})` : ""
@@ -809,8 +821,8 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
 /** A model name without "[1m]" or a date suffix, as the CLI's line and --model may each have it. */
 const bareModel = (m) => String(m ?? "").trim().toLowerCase().replace(/\[[^\]]*\]$/, "").replace(/-\d{8}$/, "")
 
-/** The model the CLI's stderr says it doesn't recognize, when it is this turn's own (a subagent may run another). */
-function unrecognizedModelIn(stderr, model) {
+/** Every model the CLI's stderr says it doesn't recognize. */
+function unrecognizedModelsIn(stderr) {
   const named = [...stderr.matchAll(/\[claude-code:unrecognized_model\][ \t]*(\{[^\n]*\})/g)].map((m) => {
     try {
       return JSON.parse(m[1]).model
@@ -819,8 +831,20 @@ function unrecognizedModelIn(stderr, model) {
     }
   })
   for (const m of stderr.matchAll(/doesn't recognize the model "([^"\n]+)"/g)) named.push(m[1])
-  return named.find((n) => typeof n === "string" && bareModel(n) === bareModel(model)) ?? null
+  return named.filter((n) => typeof n === "string")
 }
+
+/** The model the CLI's stderr says it doesn't recognize, when it is this turn's own (a subagent may run another). */
+function unrecognizedModelIn(stderr, model) {
+  return unrecognizedModelsIn(stderr).find((n) => bareModel(n) === bareModel(model)) ?? null
+}
+
+/**
+ * The window a CLI reports (modelUsage.contextWindow) for a model it doesn't recognize. Where such a turn goes on
+ * (OWN_WINDOW_ENV), the runner doesn't pass it on as the task's window: Box Yard sizes --autocompact from that, and a
+ * percent of a guessed 200k is the 100k floor, where a turn of screenshots and diffs compacts at 67k again and again.
+ */
+const GUESSED_WINDOW = 200_000
 
 /**
  * Env that makes the window the owner's own business: a gateway or another cloud names its own models, or the window

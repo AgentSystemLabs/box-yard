@@ -69,6 +69,8 @@
 // Box Yard can't tell the version and checks nothing). FAKE_CLAUDE_UNKNOWN_MODELS=<id,id> names --model values this
 // CLI doesn't know: like the real one it says so on stderr at its first request, runs on in the small window it
 // assumes, and after FAKE_CLAUDE_THRASH_MS (default 3000) ends in "Autocompact is thrashing", unless it is stopped first.
+// FAKE_CLAUDE_THRASH_MS=never is the turn that fits: it says the same on stderr, then goes on as any turn does, and its
+// modelUsage names the model with the 200k window this CLI assumed for it (costBasis "unknown").
 // Usage, like the real CLI's result: `usage` counts the main loop's calls of that result only, while modelUsage and
 // total_cost_usd are the session's running totals (saved with it, so a resumed or forked session goes on from them)
 // and also count compaction calls. [autocompact] in a prompt compacts the context at the turn's start (a
@@ -186,6 +188,8 @@ if (newId && fs.existsSync(sessionFile)) {
 }
 
 const WINDOW = Number(process.env.FAKE_CLAUDE_WINDOW || 200_000)
+// The --model this CLI doesn't know (FAKE_CLAUDE_UNKNOWN_MODELS), or null.
+const UNKNOWN_MODEL = (process.env.FAKE_CLAUDE_UNKNOWN_MODELS ?? "").split(",").includes(flag("--model") ?? "") ? flag("--model") : null
 const PER_TURN = Number(process.env.FAKE_CLAUDE_TOKENS_PER_TURN || 3000)
 // The summary lists the live tasks Box Yard gave it, like a real one would.
 const liveTasks = (prompt) => /Live task state from Box Yard[^\n]*\n((?:- .*\n?)+)/.exec(prompt)?.[1]?.trim()
@@ -892,9 +896,9 @@ async function turn(prompt, started) {
     out({ type: "result", subtype: "success", is_error: true, result: loginError, session_id: session.id })
     process.exit(1)
   }
-  if ((process.env.FAKE_CLAUDE_UNKNOWN_MODELS ?? "").split(",").includes(flag("--model") ?? "")) {
-    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: flag("--model") })
-    console.error(`[claude-code:unrecognized_model] ${JSON.stringify({ model: flag("--model"), query_source: "sdk" })}`)
+  if (UNKNOWN_MODEL) console.error(`[claude-code:unrecognized_model] ${JSON.stringify({ model: UNKNOWN_MODEL, query_source: "sdk" })}`)
+  if (UNKNOWN_MODEL && process.env.FAKE_CLAUDE_THRASH_MS !== "never") {
+    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: UNKNOWN_MODEL })
     await sleep(Number(process.env.FAKE_CLAUDE_THRASH_MS) || 3000)
     out({ type: "result", subtype: "success", is_error: true, result: "Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window.", session_id: session.id })
     process.exit(1)
@@ -968,7 +972,9 @@ async function turn(prompt, started) {
     num_turns: 1,
     total_cost_usd: spentUsd(),
     usage,
-    modelUsage: { fake: { ...session.spent, webSearchRequests: 0, costUSD: spentUsd(), contextWindow: WINDOW, maxOutputTokens: 32_000 } },
+    modelUsage: UNKNOWN_MODEL
+      ? { [UNKNOWN_MODEL]: { ...session.spent, webSearchRequests: 0, costUSD: spentUsd(), contextWindow: 200_000, maxOutputTokens: 32_000, costBasis: "unknown" } }
+      : { fake: { ...session.spent, webSearchRequests: 0, costUSD: spentUsd(), contextWindow: WINDOW, maxOutputTokens: 32_000 } },
   })
 }
 

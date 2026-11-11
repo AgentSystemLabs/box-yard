@@ -18,6 +18,8 @@ interface Ev {
   error?: string | null
   exitCode?: number
   unrecognizedModel?: { model: string; cliVersion: string | null }
+  usage?: { tokens: number; window: number | null } | null
+  modelUsage?: Record<string, { contextWindow?: number }> | null
 }
 
 /** One turn of the runner in a task folder of its own; resolves with its turn_end and how long the turn took. */
@@ -68,6 +70,30 @@ describe("a turn whose Claude Code doesn't know the model", () => {
     const { end } = await runTurn({ model: "claude-opus-5-5", fakeEnv: OLD_CLI })
     expect(end).toMatchObject({ ok: true, error: null })
     expect(end.unrecognizedModel).toBeUndefined()
+    // The window the CLI reports for a model it knows is the task's window.
+    expect(end.usage?.window).toBe(200_000)
+  })
+})
+
+// What made the turn thrash: Box Yard sizes --autocompact from the task's window, and took the 200k an old CLI
+// assumes for the model as that window. A percent of it is the 100k floor, where the CLI compacts at 67k.
+describe("the window a CLI assumes for a model it doesn't know", () => {
+  const GATEWAY = { ANTHROPIC_BASE_URL: "https://gateway.example.com" }
+  const FITS = { ...OLD_CLI, FAKE_CLAUDE_THRASH_MS: "never" }
+
+  it("isn't reported as the task's window on a turn that goes on", async () => {
+    const { end } = await runTurn({ model: "claude-fable-5-2", fakeEnv: FITS, taskEnv: GATEWAY })
+    expect(end).toMatchObject({ ok: true, error: null })
+    // The CLI did report its guess, and the runner still passes the raw figures on.
+    expect(end.modelUsage?.["claude-fable-5-2"]?.contextWindow).toBe(200_000)
+    expect(end.usage?.tokens).toBeGreaterThan(0)
+    expect(end.usage?.window).toBeNull()
+  })
+
+  it("is the task's window when the owner set it by hand", async () => {
+    const { end } = await runTurn({ model: "claude-fable-5-2", fakeEnv: FITS, taskEnv: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: "200000" } })
+    expect(end).toMatchObject({ ok: true, error: null })
+    expect(end.usage?.window).toBe(200_000)
   })
 })
 
