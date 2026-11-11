@@ -465,8 +465,15 @@ export interface SideThread {
   id: string
   /** null: the Coordinator chat; else that project's Captain chat. */
   projectId: string | null
-  /** The chat message the highlight is in (an ask), the message replied to (a reply thread), or a task card's key (a task thread: the task's id, or `batch:<batch id>`). */
+  /**
+   * The chat message the highlight is in (an ask), the message replied to (a reply thread), or a task card's key (a
+   * task thread: the task's id, or `batch:<batch id>`). An ask in a Captain's chat may be about a passage of one of the
+   * project's task transcripts instead: then it's that task's id, and the thread shows in the task's panel. A nested
+   * thread has its parent's.
+   */
   anchorId: string
+  /** A thread asked from inside another one (a passage highlighted in the parent's panel): the parent. Always an "ask". */
+  parentId?: string | null
   /**
    * "ask": a question about a highlighted passage. "reply": replies to the whole message, one thread per message, shown
    * as "N replies" under it; each of Cody's messages there is routed (shared/threadRoutes.ts). "task": questions to the

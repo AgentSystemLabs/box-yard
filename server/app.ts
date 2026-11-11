@@ -299,6 +299,8 @@ const schemas = {
     anchorId: z.string().min(1).max(100),
     /** "ask" (the default): a question about `quote`. "reply": a reply to the whole message; no quote. "task": from a task card (anchorId: the task). */
     kind: z.enum(["ask", "reply", "task"]).optional(),
+    /** An ask from inside another thread of this chat (a passage of its messages): that thread. Its anchor is the parent's. */
+    parentId: z.string().min(1).max(100).nullish(),
     quote: z.string().trim().max(MAX_QUOTE_CHARS).optional(),
     question: z.string().trim().min(1).max(MAX_QUESTION_CHARS),
     messageId: idSchema,

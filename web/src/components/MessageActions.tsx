@@ -12,12 +12,12 @@
 // it again, a tap anywhere else or Esc puts them away. A long message gets them as a bar across its end, which stays
 // at the bottom of the chat while that end is further down. The keyboard reaches both the same way. The chat's newest reply needs no tap: it ends with both
 // as quiet buttons (StandingActions).
-// Selecting text in a long message while its pills or bar are out turns them into "Reply quoting selection" and "Copy
-// selection". All are placed inside the message (no portal) and show and hide at once, with no fade. Text stays
-// selectable: nothing here sets user-select on it or handles a long press. Copy says "Copied" in place.
+// Selecting text in a long message while its pills or bar are out puts them away: a passage has its own actions, Ask
+// and Create task (SelectionToTask.tsx). All are placed inside the message (no portal) and show and hide at once, with
+// no fade. Text stays selectable: nothing here sets user-select on it or handles a long press. Copy says "Copied" in place.
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject, type SyntheticEvent } from "react"
 import { createPortal } from "react-dom"
-import { Check, Copy, Quote, Reply, type LucideIcon } from "lucide-react"
+import { Check, Copy, Reply, type LucideIcon } from "lucide-react"
 import { useReplyTo } from "./SideThread"
 import { rejoinListBottom, releaseListBottom } from "./StickyScroll"
 import { copyText } from "../lib/clipboard"
@@ -125,7 +125,7 @@ const word = (content: string) => <span aria-hidden className={content} />
 
 /**
  * `anchorId`: the chat message's id, which its reply thread hangs off. Without one, or outside a chat with threads, it shows nothing.
- * `standing`: the message ends with its StandingActions, so on touch a tap on it shows no row (a long one keeps its bar, which quotes).
+ * `standing`: the message ends with its StandingActions, so on touch a tap on it shows no row (a long one keeps its bar).
  */
 export const MessageActions = memo(function MessageActions({ text, anchorId, className, standing = false }: { text: string; anchorId?: string; className?: string; standing?: boolean }) {
   const replyTo = useReplyTo()
@@ -141,10 +141,6 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
   const [place, setPlace] = useState<Place>("above")
   /** A mouse, a long message: the pills' top in the message, where it was clicked (null: hidden). */
   const [pill, setPill] = useState<number | null>(null)
-  /** Text selected in a long message while its pills or bar are out: they quote it. */
-  const [quote, setQuote] = useState<string | null>(null)
-  /** The quote when they were pressed: on a phone the selection may be gone by the click. */
-  const pressed = useRef<string | null>(null)
   /** Just copied: Copy says so in place, and the toolbar or pills stay up while it does. A row or bar stays anyway. */
   const { copied, copy: copyNow, forget } = useCopied(() => setPill(null))
 
@@ -265,50 +261,37 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
     }
   }, [docked])
 
-  // Text selected in the message while they're out: they offer to quote it (the pills, beside the selection's end).
+  // Text selected in the message while they're out: they step aside for the selection's own actions (Ask and
+  // Create task, SelectionToTask.tsx), which are the one place a passage is acted on.
   useEffect(() => {
     const block = bar.current?.parentElement
-    if (!out || !block) return setQuote(null)
+    if (!out || !block) return
     const read = () => {
       const sel = window.getSelection()
-      const within = sel && !sel.isCollapsed && sel.rangeCount > 0 && block.contains(sel.anchorNode) && block.contains(sel.focusNode)
-      const picked = within ? sel.toString().trim() : ""
-      setQuote(picked || null)
-      if (!picked || touch) return
-      const rects = sel!.getRangeAt(0).getClientRects()
-      const end = backwards(sel!) ? rects[0] : rects[rects.length - 1]
-      if (end) setPill(pillTop(block, end.top + end.height / 2))
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !sel.toString().trim() || !block.contains(sel.anchorNode) || !block.contains(sel.focusNode)) return
+      setTapped(null)
+      setPill(null)
     }
     document.addEventListener("selectionchange", read)
     return () => document.removeEventListener("selectionchange", read)
-  }, [out, touch])
+  }, [out])
 
   if (!reply) return null
 
   const open = () => {
-    const quoted = pressed.current ?? quote
-    pressed.current = null
     setTapped(null)
     setPill(null)
-    if (!quoted) return reply(anchorId!, text)
-    reply(anchorId!, text, `${quoteLines(quoted)}\n\n`)
-    window.getSelection()?.removeAllRanges()
+    reply(anchorId!, text)
   }
 
-  /** The selection while the pills or bar quote it, else the whole message as written. */
-  const copy = () => {
-    const picked = pressed.current ?? quote
-    pressed.current = null
-    void copyNow(picked ?? text)
-  }
+  /** The whole message as written. */
+  const copy = () => void copyNow(text)
   /** Read out once; the buttons show it. */
   const said = (
     <span role="status" className="sr-only">
       {copied ? "Copied" : ""}
     </span>
   )
-  const quoting = out && quote !== null
-
   if (touch) {
     // Its standing actions have them.
     if (standing && !long) return <div ref={bar} hidden />
@@ -334,39 +317,36 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
             data-reply-pill
             data-open={tapped ? "" : undefined}
             data-dock={tapped ? "" : undefined}
-            data-quote={quoting || undefined}
             onClick={stop}
             onAuxClick={stop}
             onKeyDown={stop}
             className={cx("peer/bar pointer-events-none absolute top-0 -bottom-14.5 z-10 flex flex-col justify-end", tapped?.bare ? "-inset-x-2" : "inset-x-0", className)}
           >
             <div ref={pills} role="toolbar" aria-label="Message actions" onFocus={reach} className={tapped ? cx(BAND, tapped.bare && "px-2") : "sr-only"}>
-              <div className={cx(BAR, quoting ? "border-yard-400/60" : "border-zinc-700")}>
+              <div className={cx(BAR, "border-zinc-700")}>
                 <button
                   type="button"
                   data-testid="message-reply"
-                  aria-label={quoting ? "Reply quoting selection" : "Reply in a thread"}
-                  title={quoting ? "Reply in a thread, quoting the selected text" : TITLE}
-                  // Pressing it keeps the selection it quotes, and the focus where it is.
-                  onPointerDown={() => (pressed.current = quote)}
+                  aria-label="Reply in a thread"
+                  title={TITLE}
+                  // Pressing it keeps the focus where it is.
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={open}
-                  className={cx(BAR_HALF, quoting ? "text-yard-200" : "text-zinc-300")}
+                  className={cx(BAR_HALF, "text-zinc-300")}
                 >
-                  {quoting ? <Quote className="h-4 w-4" aria-hidden /> : <Reply className="h-4 w-4" aria-hidden />}
-                  {word(quoting ? "after:content-['Quote']" : "after:content-['Reply']")}
+                  <Reply className="h-4 w-4" aria-hidden />
+                  {word("after:content-['Reply']")}
                 </button>
-                <span aria-hidden className={cx("my-2.5 w-px shrink-0", quoting ? "bg-yard-400/40" : "bg-zinc-700")} />
+                <span aria-hidden className="my-2.5 w-px shrink-0 bg-zinc-700" />
                 <button
                   type="button"
                   data-testid="message-copy"
-                  aria-label={quoting ? "Copy selection" : "Copy message"}
-                  title={quoting ? "Copy the selected text" : "Copy message"}
-                  onPointerDown={() => (pressed.current = quote)}
+                  aria-label="Copy message"
+                  title="Copy message"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={copy}
                   data-copied={copied || undefined}
-                  className={cx(BAR_HALF, copied ? "text-emerald-300" : quoting ? "text-yard-200" : "text-zinc-300")}
+                  className={cx(BAR_HALF, copied ? "text-emerald-300" : "text-zinc-300")}
                 >
                   {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
                   {word(copied ? "after:content-['Copied']" : "after:content-['Copy']")}
@@ -427,7 +407,6 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
         data-reply-pill
         data-gutter
         data-open={pill !== null || undefined}
-        data-quote={quoting || undefined}
         onClick={stop}
         onAuxClick={stop}
         onKeyDown={stop}
@@ -449,31 +428,25 @@ export const MessageActions = memo(function MessageActions({ text, anchorId, cla
           <button
             type="button"
             data-testid="message-reply"
-            aria-label={quoting ? "Reply quoting selection" : "Reply in a thread"}
-            title={quoting ? "Reply in a thread, quoting the selected text" : TITLE}
-            // Pressing it keeps the selection it quotes, and the focus where it is.
-            onPointerDown={() => (pressed.current = quote)}
+            aria-label="Reply in a thread"
+            title={TITLE}
+            // Pressing it keeps the focus where it is.
             onMouseDown={(e) => e.preventDefault()}
             onClick={open}
             // The label is CSS content, so it's never part of the message's text (a copy, a search, a row's textContent).
-            className={cx(PILL, quoting ? "border-yard-400/60 text-yard-200 after:content-['Quote']" : "border-zinc-700 text-zinc-300 after:content-['Reply']")}
+            className={cx(PILL, "border-zinc-700 text-zinc-300 after:content-['Reply']")}
           >
-            {quoting ? <Quote className="h-4 w-4" aria-hidden /> : <Reply className="h-4 w-4" aria-hidden />}
+            <Reply className="h-4 w-4" aria-hidden />
           </button>
           <button
             type="button"
             data-testid="message-copy"
-            aria-label={quoting ? "Copy selection" : "Copy message"}
-            title={quoting ? "Copy the selected text" : "Copy message"}
-            onPointerDown={() => (pressed.current = quote)}
+            aria-label="Copy message"
+            title="Copy message"
             onMouseDown={(e) => e.preventDefault()}
             onClick={copy}
             data-copied={copied || undefined}
-            className={cx(
-              PILL,
-              copied ? "border-emerald-500/50 text-emerald-300 after:content-['Copied']" : "after:content-['Copy']",
-              !copied && (quoting ? "border-yard-400/60 text-yard-200" : "border-zinc-700 text-zinc-300"),
-            )}
+            className={cx(PILL, copied ? "border-emerald-500/50 text-emerald-300 after:content-['Copied']" : "border-zinc-700 text-zinc-300 after:content-['Copy']")}
           >
             {copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
           </button>
@@ -677,13 +650,6 @@ function pillTop(block: HTMLElement, y: number) {
   return Math.round(Math.max(top, Math.min(bottom, y - r.top - PILLS_HEIGHT / 2)))
 }
 
-/** Whether the selection runs from its end back to its start (its focus is before its anchor). */
-function backwards(sel: Selection) {
-  if (!sel.anchorNode || !sel.focusNode) return false
-  if (sel.anchorNode === sel.focusNode) return sel.focusOffset < sel.anchorOffset
-  return Boolean(sel.anchorNode.compareDocumentPosition(sel.focusNode) & Node.DOCUMENT_POSITION_PRECEDING)
-}
-
 /** Taller than this share of the chat's height (its scroller's, or the window's): a long message. */
 const LONG_SHARE = 0.9
 
@@ -830,13 +796,4 @@ export function MessageMenu({ trigger, items, onClose, label = "Message actions"
     </div>,
     document.body,
   )
-}
-
-/** The message as a Markdown quote, to paste into another chat. */
-export function quoteLines(text: string) {
-  return text
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => (line ? `> ${line}` : ">"))
-    .join("\n")
 }

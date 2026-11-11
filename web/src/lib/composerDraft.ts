@@ -195,11 +195,6 @@ export function prependDraft(key: string, text: string, attachments: Attachment[
   }
 }
 
-/** Put `text` after `key`'s draft, a blank line between: "Reply quoting selection" (lib/threads.ts' openReply). */
-export function appendDraft(key: string, text: string) {
-  setDraftText(key, (before) => (before.trimEnd() ? `${before.trimEnd()}\n\n${text}` : text))
-}
-
 /** Drafts with something in them, for tests. */
 export const draftKeys = () => [...drafts.keys()]
 

@@ -54,7 +54,7 @@ function render(threads: SideThread[] = []) {
         createElement(
           ThreadChatProvider,
           { value: COORDINATOR_CHAT },
-          createElement(SelectionToTask, { source: { kind: "orchestrator" }, onPrompt: vi.fn() }, createElement(ChatLine, { m: REPLY, onFollowUp: vi.fn() })),
+          createElement(SelectionToTask, { source: { kind: "orchestrator" } }, createElement(ChatLine, { m: REPLY, onFollowUp: vi.fn() })),
           createElement(SideThreadPane, { chat: COORDINATOR_CHAT }),
         ),
       ),
@@ -74,7 +74,9 @@ function select(text: string) {
 const click = (el: Element) => act(() => (el as HTMLElement).click())
 /** Let the queries' batched notifications (a timeout) reach the components. */
 const flush = () => act(() => new Promise((r) => setTimeout(r, 10)))
-const replyQuoting = () => document.querySelector<HTMLButtonElement>("[data-testid=selection-reply]")
+const askButton = () => document.querySelector<HTMLButtonElement>("[data-testid=selection-ask]")
+/** The selection's actions as their buttons read: the mouse's pill, then the finger's bar. */
+const actionLabels = () => [...document.querySelectorAll("[data-selection-task-action] button")].map((b) => b.textContent!.trim())
 /** Extra cache seeding for the next render (the chat's messages). */
 let qcSeed: ((q: QueryClient) => void) | null = null
 
@@ -99,78 +101,88 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("Reply quoting selection", () => {
-  it("is the selection's one action in a chat with threads, and opens the reply thread with the passage quoted", async () => {
+describe("Ask on a selection", () => {
+  it("Ask and Create task are the selection's actions in a chat; Ask opens the side panel on the passage, with a box for the question", async () => {
     qcSeed = (q) => q.setQueryData(keys.chat, [REPLY])
     render()
     select("server/sync.ts never backs off")
-    const button = replyQuoting()!
-    expect(button).not.toBeNull()
-    expect(button.textContent).toContain("Reply quoting selection")
-    // Ask and Start new task are gone: what Cody writes in the thread gets routed, a new task too.
-    expect(document.querySelector("[data-testid=selection-ask]")).toBeNull()
-    expect(document.querySelector("[data-testid=selection-task]")).toBeNull()
-    expect([...document.querySelectorAll("[data-selection-task-action] button")].map((b) => b.textContent!.trim())).toEqual(["Reply quoting selection", "Reply quoting selection"])
+    // The mouse's pill and the finger's bar, both with the two.
+    expect(actionLabels()).toEqual(["Ask", "Create task", "Ask", "Create task"])
+    const button = askButton()!
     // Pressing it keeps the focus and the selection where they are.
     const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
     button.dispatchEvent(down)
     expect(down.defaultPrevented).toBe(true)
     click(button)
     const pane = document.querySelector("[data-testid=side-thread]")!
-    // The whole message on top (from the chat, not the selection), and the passage quoted in the box, the caret after it.
-    expect(pane.querySelector("[data-testid=side-thread-original]")!.textContent).toContain("so a dead remote spins the CPU.")
+    // The passage on top (not the whole message), an empty box with the caret in it, and nothing sent yet.
+    expect(pane.querySelector("[data-testid=side-thread-quote]")!.textContent).toBe("server/sync.ts never backs off")
+    expect(pane.querySelector("[data-testid=side-thread-original]")).toBeNull()
+    expect(pane.querySelector("[data-testid=side-thread-parent]")).toBeNull()
+    expect(pane.querySelector("[data-testid=side-thread-ask-hint]")!.textContent).toContain("Ask the Coordinator about the highlighted text.")
     const box = pane.querySelector<HTMLTextAreaElement>("textarea")!
-    expect(box.value).toBe("> server/sync.ts never backs off\n\n")
+    expect(box.value).toBe("")
+    expect(box.placeholder).toBe("Ask about the highlighted text…")
     expect(document.activeElement).toBe(box)
-    expect(box.selectionStart).toBe(box.value.length)
-    expect(replyQuoting()).toBeNull()
+    expect(askButton()).toBeNull()
     expect(fetchMock.mock.calls.filter(([u]) => String(u).startsWith("/api/threads"))).toEqual([])
 
-    typeAndSend(box, `${box.value}Why does it spin?`)
+    typeAndSend(box, "Why does it spin?")
     await flush()
     const body = JSON.parse((posts("/api/threads")[0]![1] as RequestInit).body as string)
-    expect(body).toMatchObject({ kind: "reply", anchorId: REPLY.id, question: "> server/sync.ts never backs off\n\nWhy does it spin?", projectId: null })
+    expect(body).toMatchObject({ kind: "ask", anchorId: REPLY.id, quote: "server/sync.ts never backs off", question: "Why does it spin?", projectId: null })
+    // A question about the chat itself: under no other thread.
+    expect(body.parentId ?? null).toBeNull()
+    // It stays open, and the message gets its chip.
+    expect(openThreadId(COORDINATOR_CHAT)).toBe(body.id)
+    expect(host.querySelector("[data-testid=thread-marker]")!.textContent).toContain("server/sync.ts never backs off")
+    // Nothing went into the Coordinator's own chat.
+    expect(fetchMock.mock.calls.some(([u]) => String(u).startsWith("/api/chat"))).toBe(false)
   })
 
-  it("adds the quote after a reply already being written", () => {
-    render([replyThread()])
-    act(() => openThread(COORDINATOR_CHAT, "thr_reply01"))
-    const box = document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!
+  it("Ask mounts the panel and puts the caret in its box inside the press", () => {
+    render()
+    select("never backs off")
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    env.IS_REACT_ACT_ENVIRONMENT = false
+    try {
+      askButton()!.click()
+    } finally {
+      env.IS_REACT_ACT_ENVIRONMENT = true
+    }
+    const box = document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")
+    expect(box).not.toBeNull()
+    expect(document.activeElement).toBe(box)
+  })
+
+  it("asking again about the same passage keeps what's typed; another passage starts a new question", () => {
+    render()
+    select("never backs off")
+    click(askButton()!)
+    const first = openThreadId(COORDINATOR_CHAT)
+    const box = () => document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!
     act(() => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "First thought")
-      box.dispatchEvent(new Event("input", { bubbles: true }))
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box(), "Half a question")
+      box().dispatchEvent(new Event("input", { bubbles: true }))
     })
     select("never backs off")
-    click(replyQuoting()!)
-    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_reply01")
-    expect(document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!.value).toBe("First thought\n\n> never backs off\n\n")
+    click(askButton()!)
+    expect(openThreadId(COORDINATOR_CHAT)).toBe(first)
+    expect(box().value).toBe("Half a question")
+    select("spins the CPU")
+    click(askButton()!)
+    expect(openThreadId(COORDINATOR_CHAT)).not.toBe(first)
+    expect(box().value).toBe("")
+    expect(document.querySelector("[data-testid=side-thread-quote]")!.textContent).toBe("spins the CPU")
   })
 
-  it("keeps the quoted reply, once, when the chat is left and opened again", () => {
-    render([replyThread()])
-    select("never backs off")
-    click(replyQuoting()!)
-    const typed = "> never backs off\n\nWhy"
-    let box = document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!
-    act(() => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, typed)
-      box.dispatchEvent(new Event("input", { bubbles: true }))
-    })
-    // Another chat in the nav, then back: the panel mounts again on the same thread.
-    act(() => root.render(createElement("div")))
-    render([replyThread()])
-    box = document.querySelector<HTMLTextAreaElement>("[data-testid=side-thread] textarea")!
-    expect(box.value).toBe(typed)
-    expect(document.activeElement).not.toBe(box)
-  })
-
-  it("isn't offered where the chat has no side threads: New task from selection is", () => {
+  it("isn't offered where the chat has no side threads: Create task is", () => {
     act(() =>
       root.render(
         createElement(
           QueryClientProvider,
           { client: new QueryClient() },
-          createElement(SelectionToTask, { source: { kind: "orchestrator" }, onPrompt: vi.fn() }, createElement("p", { "data-chat-id": "chat_x00001" }, "Some output text")),
+          createElement(SelectionToTask, { source: { kind: "orchestrator" } }, createElement("p", { "data-chat-id": "chat_x00001" }, "Some output text")),
         ),
       ),
     )
@@ -178,8 +190,121 @@ describe("Reply quoting selection", () => {
     range.selectNodeContents(host.querySelector("p")!)
     window.getSelection()!.addRange(range)
     act(() => void document.dispatchEvent(new Event("selectionchange")))
-    expect(document.querySelector("button[data-selection-task-action]")!.textContent).toContain("New task from selection")
-    expect(replyQuoting()).toBeNull()
+    expect(actionLabels()).toEqual(["Create task", "Create task"])
+    expect(askButton()).toBeNull()
+  })
+})
+
+describe("nested threads", () => {
+  const ANSWER = "Because the loop retries at once, with no delay between tries."
+  const answerIn = (threadId: string, content = ANSWER): SideThreadMessage[] => [
+    { id: `thm_q_${threadId}`, threadId, role: "user", content: "Why?", meta: null, createdAt: 3 },
+    { id: `thm_a_${threadId}`, threadId, role: "assistant", content, meta: null, createdAt: 4 },
+  ]
+  const pane = () => document.querySelector<HTMLElement>("[data-testid=side-thread]")!
+  /** Select `text` in the open thread's answer. */
+  const selectInThread = (text: string) => {
+    const range = findQuoteRange(pane().querySelector("[data-testid=side-thread-reply]")!, text)!
+    const sel = window.getSelection()!
+    sel.removeAllRanges()
+    sel.addRange(range)
+    act(() => void document.dispatchEvent(new Event("selectionchange")))
+  }
+  const esc = () => act(() => void pane().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })))
+  /** A thread open on its answer. */
+  const openOn = (threads: SideThread[], id: string) => {
+    qcSeed = (q) => {
+      for (const t of threads) q.setQueryData(threadKeys.messages(t.id), answerIn(t.id))
+    }
+    render(threads)
+    act(() => openThread(COORDINATOR_CHAT, id))
+  }
+  const child = (over: Partial<SideThread> = {}) => thread({ id: "thr_child01", parentId: "thr_abc123", quote: "retries at once", replies: 1, ...over })
+
+  it("text in a thread has the same Ask and Create task; Ask nests a question under the thread, which is sent with its parent", async () => {
+    openOn([thread()], "thr_abc123")
+    selectInThread("retries at once")
+    expect(actionLabels()).toEqual(["Ask", "Create task", "Ask", "Create task"])
+    click(askButton()!)
+    // A question not started yet, under the thread it was highlighted in, on the same message.
+    expect(openThreadState(COORDINATOR_CHAT)).toMatchObject({ draft: { kind: "ask", anchorId: REPLY.id, parentId: "thr_abc123", text: "retries at once" } })
+    expect(pane().querySelector("[data-testid=side-thread-quote]")!.textContent).toBe("retries at once")
+    expect(pane().querySelector("[data-testid=side-thread-parent]")!.textContent).toContain("Asked in“never backs off”")
+    const box = pane().querySelector<HTMLTextAreaElement>("textarea")!
+    expect(document.activeElement).toBe(box)
+
+    typeAndSend(box, "How often?")
+    await flush()
+    const body = JSON.parse((posts("/api/threads")[0]![1] as RequestInit).body as string)
+    expect(body).toMatchObject({ kind: "ask", anchorId: REPLY.id, parentId: "thr_abc123", quote: "retries at once", question: "How often?", projectId: null })
+    expect(openThreadId(COORDINATOR_CHAT)).toBe(body.id)
+    // It's the parent's, not another chip under the message.
+    expect(host.querySelectorAll("[data-testid=thread-marker]")).toHaveLength(1)
+  })
+
+  it("a nested thread leads back to its parent, and the parent lists it", () => {
+    openOn([thread(), child()], "thr_child01")
+    const up = pane().querySelector<HTMLButtonElement>("[data-testid=side-thread-parent]")!
+    expect(up.textContent).toContain("“never backs off”")
+    // A sheet's Back goes up a level too, and says so.
+    expect(pane().querySelector("[data-dismiss=back]")!.getAttribute("aria-label")).toBe("Back to the thread this was asked in")
+    // Pressed with the keyboard: the row goes with the thread it was in, and the focus stays in the panel (Esc works on).
+    act(() => up.focus())
+    click(up)
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_abc123")
+    expect(pane().contains(document.activeElement)).toBe(true)
+    expect(pane().querySelector("[data-testid=side-thread-parent]")).toBeNull()
+    expect(pane().querySelector("[data-dismiss=back]")!.getAttribute("aria-label")).toBe("Back to the chat")
+    // The parent lists what was asked from inside it; the chip opens it again.
+    const chips = pane().querySelectorAll("[data-testid=side-thread-children] [data-testid=thread-marker]")
+    expect([...chips].map((c) => c.textContent)).toEqual(["“retries at once”· 1 reply"])
+    click(chips[0]!)
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_child01")
+    click(pane().querySelector("[data-dismiss=back]")!)
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_abc123")
+  })
+
+  it("Esc leaves one level at a time", () => {
+    openOn([thread(), child()], "thr_child01")
+    esc()
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_abc123")
+    esc()
+    expect(openThreadId(COORDINATOR_CHAT)).toBeNull()
+  })
+
+  it("nests to any depth: a question from inside a nested thread goes under that one", () => {
+    openOn([thread(), child()], "thr_child01")
+    selectInThread("no delay between tries")
+    click(askButton()!)
+    expect(openThreadState(COORDINATOR_CHAT)).toMatchObject({ draft: { kind: "ask", anchorId: REPLY.id, parentId: "thr_child01", text: "no delay between tries" } })
+    expect(pane().querySelector("[data-testid=side-thread-parent]")!.textContent).toContain("“retries at once”")
+    // Backing out of the unsent question returns to the thread it was highlighted in.
+    esc()
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_child01")
+  })
+
+  it("Create task from inside a thread messages the chat's agent, naming the thread", async () => {
+    openOn([thread()], "thr_abc123")
+    selectInThread("retries at once")
+    click(document.querySelector("[data-testid=selection-task]")!)
+    const box = document.querySelector<HTMLTextAreaElement>("[role=dialog] textarea")!
+    typeAndSend(box, "Add a backoff")
+    await flush()
+    const content: string = JSON.parse((posts("/api/chat")[0]![1] as RequestInit).body as string).content
+    expect(content).toContain("## The request\nAdd a backoff")
+    expect(content).toContain("- In a side thread (thr_abc123) about: “never backs off”")
+    expect(content).toContain("## Highlighted text\n> retries at once")
+    // The thread stays open, and no question was asked.
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_abc123")
+    expect(posts("/api/threads")).toEqual([])
+  })
+
+  it("a deleted nested thread shows its parent again; a deleted parent takes its nested threads with it", () => {
+    openOn([thread(), child(), child({ id: "thr_grand01", parentId: "thr_child01", quote: "no delay" })], "thr_grand01")
+    act(() => void applyThreadEvent(qc, { type: "thread.deleted", threadId: "thr_grand01", projectId: null }))
+    expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_child01")
+    act(() => void applyThreadEvent(qc, { type: "thread.deleted", threadId: "thr_abc123", projectId: null }))
+    expect(qc.getQueryData(threadKeys.list(COORDINATOR_CHAT))).toEqual([])
   })
 })
 

@@ -241,7 +241,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
             {state.data?.compacting ? "The Captain is compacting its context" : busy ? "The Captain is working" : ""}
           </span>
 
-          <SelectionToTask source={selectionSource} onPrompt={submit}>
+          <SelectionToTask source={selectionSource}>
             <ChatHistory index={history.index} days={history.days ?? days} messages={settled} reveal={reveal} ensure={history.ensure} scrollHandle={thread} projectId={project.id}>
               <StickyScroll
                 handle={thread}
