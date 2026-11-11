@@ -1292,6 +1292,14 @@ export const MIGRATIONS: string[] = [
   -- Store.orderTasks: lower is higher up. NULL (every older row, and every new task) is the automatic order.
   ALTER TABLE tasks ADD COLUMN sort_order INTEGER;
   `,
+  `
+  -- A Claude Code too old to know a task's model reports the 200k window it assumes for any unknown model, and the
+  -- runner passed that on as the task's window. --autocompact is sized from the stored window (autocompactFlag), so a
+  -- percent setting shrank to the 100k floor and a turn of screenshots and diffs compacted again and again. The runner
+  -- no longer passes the guess on; forget the ones already stored, so the next turn isn't sized from one. A model whose
+  -- window really is 200k reports it again at its next turn, and until then the flag is capped by the CLI at that window.
+  UPDATE tasks SET context_window = NULL WHERE context_window = 200000 AND (agent_cli IS NULL OR agent_cli = 'claude');
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

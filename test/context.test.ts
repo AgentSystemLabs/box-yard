@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
+import Database from "better-sqlite3"
 import fs from "node:fs"
 import path from "node:path"
-import { openDb } from "../server/db.js"
+import { MIGRATIONS, migrate, openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
 import { SettingsStore, autocompactFlag, compactThreshold } from "../server/settings.js"
 import { contextTokens, contextWindowOf, formatTokens, parseContextReport } from "../server/usage.js"
@@ -101,6 +102,34 @@ describe("settings", () => {
     expect(compactThreshold({ enabled: true, unit: "tokens", value: 150_000 }, 1_000_000)).toBe(150_000)
     expect(autocompactFlag({ enabled: true, unit: "percent", value: 10 }, 200_000)).toBe("100000") // clamped up to the CLI's minimum
     expect(autocompactFlag({ enabled: false, unit: "percent", value: 50 }, null)).toBeNull()
+  })
+  it("sizes a percent from the task's window, so a wrong window is a wrong --autocompact", () => {
+    const quarter = { enabled: true, unit: "percent", value: 25 } as const
+    expect(autocompactFlag(quarter, null)).toBe("250000") // no window known yet: 1M
+    expect(autocompactFlag(quarter, 1_000_000)).toBe("250000")
+    expect(autocompactFlag(quarter, 200_000)).toBe("100000") // the floor, where the CLI compacts at about 67k
+  })
+  it("the migration forgets a stored 200k window on Claude Code tasks, the one an old CLI assumed for an unknown model", () => {
+    const dataDir = tmpDir()
+    const db = new Database(path.join(dataDir, "box-yard.sqlite"))
+    migrate(db, MIGRATIONS.findIndex((m) => m.includes("SET context_window = NULL WHERE context_window = 200000")))
+    db.prepare("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('prj_old', 'old', 1, 1)").run()
+    const add = db.prepare(
+      "INSERT INTO tasks (id, project_id, title, prompt, status, session_id, created_at, updated_at, last_active_at, context_window, agent_cli) VALUES (?, 'prj_old', 'old', 'x', 'idle', 's', 1, 1, 1, ?, ?)",
+    )
+    add.run("task_guessed", 200_000, "claude")
+    add.run("task_older", 200_000, null) // before tasks had an agent CLI: Claude Code
+    add.run("task_codex", 200_000, "codex")
+    add.run("task_wide", 1_000_000, "claude")
+    add.run("task_new", null, "claude")
+    db.close()
+
+    const store = new Store(openDb(dataDir))
+    const window = (id: string) => store.getTask(id)!.contextWindow
+    expect([window("task_guessed"), window("task_older")]).toEqual([null, null])
+    expect([window("task_codex"), window("task_wide"), window("task_new")]).toEqual([200_000, 1_000_000, null])
+    // Sized from the default window again, as it was before the guess was stored.
+    expect(autocompactFlag({ enabled: true, unit: "percent", value: 25 }, window("task_guessed"))).toBe("250000")
   })
 })
 
