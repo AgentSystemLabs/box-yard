@@ -93,7 +93,7 @@ describe("TaskComposer: send to the Captain", () => {
   it("on a resting task the chip sends to the Captain, then stays for the next message, back on the task", async () => {
     render(task({ status: "pr_ready", pendingCount: 0 }))
     act(() => q("captain-target")!.click())
-    expect(textarea().placeholder).toBe("Ask the demo Captain: split, reprioritise, new tasks…")
+    expect(textarea().placeholder).toBe("Message the demo Captain…")
     expect(q("captain-forward-note")!.textContent).toBe("To the demo Captain, not the agent. Its reply shows here.")
     type("start a task for the docs")
     await act(async () => submitForm())
@@ -115,7 +115,7 @@ describe("TaskComposer: send to the Captain", () => {
     render(task())
     act(() => q("captain-target")!.click())
     expect(q("captain-target")!.getAttribute("aria-pressed")).toBe("true")
-    expect(textarea().placeholder).toContain("demo Captain")
+    expect(textarea().placeholder).toBe("Message the demo Captain…")
     expect(q("captain-forward-note")!.textContent).toContain("with this task's 2 queued messages")
     type("what's left in the queue")
     await act(async () => submitForm())
@@ -175,8 +175,8 @@ describe("thread lines", () => {
     const m: TaskMessage = { id: "tm_1", taskId: "task_abc123", role: "event", content: "split it", meta: { kind: "to_captain", captainName: "demo", captainProjectId: "prj_demo01", queued: 2 }, createdAt: Date.now() }
     renderLine(createElement(ToCaptainLine, { m }))
     const line = q("to-captain")!
-    expect(line.textContent).toContain("→ demo Captain")
-    expect(line.textContent).toContain("sent to the Captain, with 2 queued messages")
+    expect(line.textContent).toContain("You → demo Captain")
+    expect(line.textContent).toContain("with 2 queued messages")
     expect(line.textContent).toContain("split it")
     expect(line.querySelector("a")!.getAttribute("href")).toBe("/?project=prj_demo01")
   })

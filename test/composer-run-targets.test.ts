@@ -382,23 +382,24 @@ describe('Composer "!" harness', () => {
 })
 
 describe("Composer Where, Harness and Project buttons", () => {
-  it("type their trigger at the caret and open a sheet whose choices take focus", async () => {
+  it("type their trigger at the caret and open a sheet whose search field takes focus", async () => {
     mount(true, 1, "prj_captain")
     await settle()
     expect(whereButton().getAttribute("aria-label")).toBe("Where tasks run: Default (This computer, Mobile's Runs on)")
-    // Preserve the caret on the press; opening the sheet then moves focus off the phone keyboard.
+    // Preserve the caret on the press; the sheet's search field then takes the focus, its first choice highlighted.
     const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
     whereButton().dispatchEvent(down)
     expect(down.defaultPrevented).toBe(true)
     await press(whereButton())
     expect(textarea().value).toBe("@")
-    expect(document.activeElement).toBe(option("local"))
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Search where tasks run")
+    expect(active()).toBe("local")
     expect(textarea().getAttribute("aria-expanded")).toBe("false")
     expect(textarea().selectionStart).toBe(1)
     expect(menu()?.dataset.kind).toBe("runsOn")
     expect(options()).toEqual(["local", "box", "docker", "studio-mac", "ssh", "label:laptops"])
-    // The list's header says what Default is, since the buttons are only icons.
-    expect(listTitle()).toContain("Default: This computer, Mobile's Runs on")
+    // The sheet says what Default is, since the buttons are only icons.
+    expect(menu()?.textContent).toContain("Default: This computer, Mobile's Runs on")
     await tap(option("box"))
     expect(options()).toEqual(["box", "box:small", "box:medium", "box:large"])
     await tap(option("box"))
@@ -689,7 +690,8 @@ describe("Composer picker cache", () => {
     await press(whereButton())
     expect(menu()?.querySelector("[data-loading]")).not.toBeNull()
     expect(options()).toEqual([])
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Close")
+    // The search field is there while the list loads.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Search where tasks run")
     key("Escape")
     // Opening another composer's list shares the same pending request.
     await press(document.querySelectorAll<HTMLElement>('[data-testid="pick-agent"]')[1]!)
@@ -730,14 +732,16 @@ describe("Composer picker cache", () => {
     const original = kind === "runsOn" ? TARGETS : HARNESSES
     expect(options()).toEqual(original.filter((t) => !t.under).map((t) => t.token))
     expect(menu()?.textContent).not.toContain("Checking availability")
-    expect(document.activeElement).toBe(option(kind === "runsOn" ? "local" : "claude"))
+    expect(document.activeElement?.getAttribute("role")).toBe("combobox")
+    expect(active()).toBe(kind === "runsOn" ? "local" : "claude")
     const gone = kind === "runsOn" ? "box" : "codex"
     const changed = original.map((t) => t.token === gone ? { ...t, disabled: "No longer available" } : t)
     await act(async () => refresh.reply(changed))
     await settle()
     expect(option(gone).getAttribute("aria-disabled")).toBe("true")
     expect(option(gone).title).toContain("No longer available")
-    expect(document.activeElement).toBe(option(kind === "runsOn" ? "local" : "claude"))
+    expect(document.activeElement?.getAttribute("role")).toBe("combobox")
+    expect(active()).toBe(kind === "runsOn" ? "local" : "claude")
     const path = kind === "runsOn" ? "/api/run-targets" : "/api/harness-targets"
     expect(requestsFor(path)).toHaveLength(2)
     // Close/reopen within freshness window must not probe again.
@@ -851,7 +855,7 @@ describe("Composer picker cache", () => {
 })
 
 describe("Composer says where new tasks go, without a line over the buttons", () => {
-  it("spells out a Captain's Defaults in the buttons' names and the list's header", async () => {
+  it("spells out a Captain's Defaults in the buttons' names and the sheet", async () => {
     mount(true, 1, "prj_captain")
     await settle()
     expect(whereButton().getAttribute("aria-label")).toBe("Where tasks run: Default (This computer, Mobile's Runs on)")
@@ -860,7 +864,7 @@ describe("Composer says where new tasks go, without a line over the buttons", ()
     // No line between the text and the buttons.
     expect(document.querySelector('[data-testid="pick-summary"]')).toBeNull()
     await press(harnessButton())
-    expect(listTitle()).toContain("Default: Codex, Mobile's agent")
+    expect(menu()?.textContent).toContain("Default: Codex, Mobile's agent")
   })
 
   it("follows the project's own agent over Settings, and live", async () => {

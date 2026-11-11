@@ -322,8 +322,8 @@ export interface PaletteGroup {
 }
 
 export const GROUP_LABEL: Record<GroupKey, string> = {
-  // Box Yard's own label: the palette passes it through withOwner.
-  waiting: "Waiting on Cody",
+  // As the sidebar's list of the same tasks.
+  waiting: "Waiting on you",
   working: "Working",
   recent: "Recently viewed",
   command: "Commands",
@@ -455,11 +455,12 @@ function browseOrder(pool: PaletteItem[], scope: PaletteScope, opts: RankOptions
   return [...pool].sort((a, b) => open(a) - open(b) || tieBreak(a, b))
 }
 
-/** Most-used first; unused ones keep their built-in order. */
+/** "New task…" first, then the most-used; unused ones keep their built-in order. */
 function commandsByUse(items: PaletteItem[], usage: Record<string, number> = {}): PaletteItem[] {
   const commands = items.filter(isCommand)
   const order = new Map(commands.map((i, n) => [i.key, n]))
-  return commands.sort((a, b) => (usage[b.key] ?? 0) - (usage[a.key] ?? 0) || order.get(a.key)! - order.get(b.key)!)
+  const lead = (i: PaletteItem) => (i.command === "new-task" ? 0 : 1)
+  return commands.sort((a, b) => lead(a) - lead(b) || (usage[b.key] ?? 0) - (usage[a.key] ?? 0) || order.get(a.key)! - order.get(b.key)!)
 }
 
 const WAITING: TaskStatus[] = ["needs_input", "pr_ready"]
@@ -507,8 +508,8 @@ export function bumpUsage(usage: Record<string, number>, key: string): Record<st
   return { ...usage, [key]: (usage[key] ?? 0) + 1 }
 }
 
-/** Command keys since renamed, by their former key: the Coordinator's page was named for the app's former home. */
-const FORMER_KEYS: Readonly<Record<string, string>> = { "page:zen": "page:coordinator" }
+/** Command keys since renamed, by their former key: the Coordinator's page was named for the app's former home, and "Open settings" was a second row for the Settings page. */
+const FORMER_KEYS: Readonly<Record<string, string>> = { "page:zen": "page:coordinator", "action:settings": "page:settings" }
 
 /** Saved usage with a count under a former command key moved to the command's key now, so it still ranks. */
 export function currentUsage(usage: Record<string, number>): Record<string, number> {

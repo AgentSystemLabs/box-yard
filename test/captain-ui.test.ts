@@ -100,7 +100,7 @@ describe("Captain tab inbound messages", () => {
     const rows = [...host.querySelectorAll<HTMLElement>('[data-testid="captain-inbound"]')]
     expect(rows.map((r) => r.dataset.source)).toEqual(["coordinator", "cody", "coordinator", "schedule"])
     expect(rows[0]!.textContent).toContain("From Coordinator")
-    expect(rows[0]!.textContent).toContain("ask_captain")
+    expect(rows[0]!.textContent).toContain("wants a reply")
     expect(rows[1]!.textContent).toContain("You")
     expect(rows[1]!.querySelector("strong")?.textContent).toBe("retry")
     expect(rows[3]!.textContent).toContain("Scheduled")
@@ -132,10 +132,10 @@ describe("Captain tab: an agent's message_captain", () => {
     expect(rows.map((r) => r.dataset.source)).toEqual(["agent", "agent", "agent"])
     expect(rows[0]!.textContent).toContain("From task")
     expect(rows[0]!.textContent).toContain("Fix login")
-    expect(rows[0]!.textContent).toContain("waits 30s")
+    expect(rows[0]!.textContent).toContain("waited up to 30s for a reply")
     expect(rows[0]!.querySelector("a")?.getAttribute("href")).toBe("/?session=task_abc123def")
     expect(rows[1]!.textContent).not.toContain("waits")
-    expect(rows[2]!.textContent).toContain("held by loop guard")
+    expect(rows[2]!.textContent).toContain("held by the loop guard")
   })
 })
 

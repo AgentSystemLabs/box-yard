@@ -1,3 +1,4 @@
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { Mic, X } from "lucide-react"
 import { keyLabel, type DictationError, type DictationMachine } from "../lib/dictation"
 import { dictationSupported, isMac, useDictationSettings, useDictationState } from "../lib/useDictation"
@@ -12,19 +13,20 @@ const ERROR_TEXT: Record<DictationError, string> = {
 }
 
 /** The composer's mic: press and hold to talk, release to stop; a click (or Enter/Space on it) toggles. */
-export function MicButton({ machine }: { machine: DictationMachine }) {
+export function MicButton({ machine, touch }: { machine: DictationMachine; touch: boolean }) {
   const settings = useDictationSettings()
   const state = useDictationState(machine)
   if (!settings.enabled || !dictationSupported()) return null
   const on = state.phase !== "idle"
-  const chord = settings.key === "off" ? "" : ` (hold ${keyLabel(settings.key, isMac())})`
-  const label = on ? "Stop dictation" : `Dictate: hold to talk, click to toggle${chord}`
+  // A phone (`touch`) has no key to hold, and it's tapped, not clicked.
+  const chord = touch || settings.key === "off" ? "" : ` (hold ${keyLabel(settings.key, isMac())})`
+  const label = on ? "Stop dictation" : `Dictate: hold to talk, ${touch ? "tap" : "click"} to toggle${chord}`
   return (
     <Button
       type="button"
       variant="ghost"
       size="sm"
-      className={cx("h-11 w-11 shrink-0 touch-none !p-0 select-none pointer-fine:@min-[32rem]/composer:h-8 pointer-fine:@min-[32rem]/composer:w-8", on && "bg-red-500/15 !text-red-400 hover:bg-red-500/25")}
+      className={cx("h-11 w-11 shrink-0 touch-none !p-0 select-none pointer-fine:@min-[32rem]/composer:h-8 pointer-fine:@min-[32rem]/composer:min-h-0 pointer-fine:@min-[32rem]/composer:w-8 pointer-fine:@min-[32rem]/composer:min-w-0", on && "bg-red-500/15 !text-red-400 hover:bg-red-500/25")}
       title={label}
       aria-label={label}
       aria-pressed={on}
@@ -45,7 +47,7 @@ export function MicButton({ machine }: { machine: DictationMachine }) {
         if (e.detail === 0) machine.toggle()
       }}
     >
-      <Mic className={cx("h-4 w-4", on && "animate-pulse")} />
+      <Mic className="h-4 w-4" aria-hidden />
     </Button>
   )
 }
@@ -58,21 +60,74 @@ export function DictationStatus({ machine }: { machine: DictationMachine }) {
       <div role="alert" className="flex items-start gap-2 px-2 pb-2 text-xs text-amber-300">
         <Mic className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span className="min-w-0 flex-1">{ERROR_TEXT[state.error]}</span>
-        <button type="button" className="-my-3 grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-500 hover:text-zinc-200 sm:-my-1 sm:h-6 sm:w-6" aria-label="Dismiss" onClick={() => machine.clearError()}>
+        <button type="button" className="-my-3 grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-500 hover:text-zinc-200 pointer-fine:-my-1 pointer-fine:h-6 pointer-fine:w-6" aria-label="Dismiss" onClick={() => machine.clearError()}>
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
     )
   if (state.phase === "idle") return null
   return (
-    <div className="flex items-baseline gap-2 px-2 pb-1.5 text-xs" role="status" aria-live="polite">
-      <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-red-400">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+    <div className="flex items-baseline gap-2 px-2 pb-1.5 text-xs">
+      {/* Only the phase is announced: the words change several times a second, and land in the text anyway. */}
+      <span role="status" aria-live="polite" className="inline-flex shrink-0 items-center gap-1.5 font-medium text-red-400">
+        <span aria-hidden className="h-2 w-2 rounded-full bg-red-500" />
         {state.phase === "stopping" ? "Finishing…" : "Listening…"}
       </span>
-      <span className="min-w-0 truncate text-zinc-500 italic" data-testid="interim">
-        {state.interim}
-      </span>
+      <Interim text={state.interim} />
     </div>
+  )
+}
+
+/**
+ * The words heard so far. Longer than the line, they lose their oldest words, whole ones, and start with "…": the
+ * newest stay in view.
+ */
+function Interim({ text }: { text: string }) {
+  const line = useRef<HTMLSpanElement>(null)
+  const dots = useRef<HTMLSpanElement>(null)
+  const all = useRef<HTMLSpanElement>(null)
+  // Where the shown words start in `text`: 0 while they all fit.
+  const [from, setFrom] = useState(0)
+  const measure = useCallback(() => {
+    const words = all.current?.firstChild
+    const room = line.current?.getBoundingClientRect().width ?? 0
+    const width = all.current?.getBoundingClientRect().width ?? 0
+    if (!(words instanceof Text) || width <= room + 0.5) return setFrom(0)
+    // The first word that fits with every word after it, behind the "…".
+    const need = width + (dots.current?.getBoundingClientRect().width ?? 0) - room
+    const range = document.createRange()
+    range.setStart(words, 0)
+    const starts = Array.from(words.data.matchAll(/\s+(?=\S)/g), (m) => m.index + m[0].length)
+    let lo = 0
+    let hi = starts.length - 1
+    // One word wider than the line: it's shown from its start, cut at its end.
+    let fits = starts.at(-1) ?? 0
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      range.setEnd(words, starts[mid]!)
+      if (range.getBoundingClientRect().width >= need - 0.5) {
+        fits = starts[mid]!
+        hi = mid - 1
+      } else lo = mid + 1
+    }
+    setFrom(fits)
+  }, [])
+  // Measured on new words, and whenever the line changes width (a resized panel) or the words do (a font that just loaded).
+  useLayoutEffect(measure, [measure, text])
+  useLayoutEffect(() => {
+    const ro = new ResizeObserver(measure)
+    if (line.current) ro.observe(line.current)
+    if (all.current) ro.observe(all.current)
+    return () => ro.disconnect()
+  }, [measure])
+  return (
+    <span ref={line} aria-hidden className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap text-zinc-500 italic">
+      {/* Never seen: the "…" and every word at their full width, to measure against the line. */}
+      <span className="invisible absolute top-0 left-0">
+        <span ref={dots}>…</span>
+        <span ref={all}>{text}</span>
+      </span>
+      <span data-testid="interim">{from > 0 && from < text.length ? `…${text.slice(from)}` : text}</span>
+    </span>
   )
 }

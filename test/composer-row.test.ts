@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Composer } from "../web/src/components/Composer.js"
 import { ComposerMenuItem, useCloseMore } from "../web/src/components/ComposerMenu.js"
-import { FOLD_ORDER, foldPlan, rowWidth, type FoldGroup, type RowParts } from "../web/src/lib/composerRow.js"
+import { FOLD_ORDER, foldPlan, type FoldGroup, type RowParts } from "../web/src/lib/composerRow.js"
 import { buildHarnessTargets, buildRunTargets } from "../shared/runTargets.js"
 import { resetDrafts } from "../web/src/lib/composerDraft.js"
 import { GitPullRequest } from "lucide-react"
@@ -14,33 +14,44 @@ import type { Project } from "../shared/types.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+type Parts = RowParts & { tools: number }
+/** Stop is on the row while `fixed` counts it (Mic + Stop + Send). */
+const running = (parts: Parts) => parts.fixed >= 3
+/** Send's group's gaps: 0.25rem between its buttons, 0.5rem while Stop is there; one before Send for Stop, one for Expand. */
+const gapsOf = (parts: Parts, expand: boolean) => (running(parts) ? 0.5 : 0.25) * ((running(parts) ? 1 : 0) + (expand ? 1 : 0))
 /** What sits on the row in a box `rem` wide under `plan`: the buttons that never fold, the groups from their width, More. */
-function onTheRow(parts: RowParts, rem: number) {
-  const plan = foldPlan(parts)
+function onTheRow(parts: Parts, rem: number) {
+  const plan = foldPlan(parts, { stop: running(parts) })
   const groups = FOLD_ORDER.filter((g) => parts[g] > 0 && (plan[g] === null || rem >= plan[g]!))
   const more = plan.more !== null && rem < plan.more
   return { groups, more, slots: parts.fixed + groups.reduce((n, g) => n + parts[g], 0) + (more ? 1 : 0) }
 }
-const fits = (slots: number, rem: number) => 3 * slots + 0.5 <= rem
+/** 2.75rem a button edge to edge, inside the row's 0.25rem padding and 0.25rem between tools and Send's group. */
+const need = (slots: number, gaps: number) => 2.75 * slots + 0.75 + gaps
+const fits = (slots: number, gaps: number, rem: number) => need(slots, gaps) <= rem
+/** The narrowest box for `slots` buttons, rounded up to a quarter rem. */
+const rowWidth = (slots: number, gaps: number) => Math.ceil(need(slots, gaps) * 4) / 4
 
 describe("foldPlan", () => {
   // Mic + Send, and Stop while a turn runs; the Coordinator's 3 picks or a Captain's 2; Expand when the text overflows;
   // Pull requests (1.25 with its count) or none; Attach or a text-only box.
-  const combos: RowParts[] = []
+  // Send to (a chat that can send elsewhere) or none.
+  const combos: Parts[] = []
   for (const fixed of [2, 3, 3.75])
     for (const picks of [0, 2, 3])
-      for (const expand of [0, 1])
-        for (const tools of [0, 1, 1.25])
-          for (const attach of [0, 1]) combos.push({ fixed, picks, expand, tools, attach })
+      for (const sendTo of [0, 1])
+        for (const expand of [0, 1])
+          for (const tools of [0, 1, 1.25])
+            for (const attach of [0, 1]) combos.push({ fixed, picks, sendTo, expand, tools, attach })
 
   it("keeps the row to what fits at every width, whenever folding can make it fit", () => {
     for (const parts of combos) {
-      const plan = foldPlan(parts)
+      const plan = foldPlan(parts, { stop: running(parts) })
       const everything = parts.fixed + FOLD_ORDER.reduce((n, g) => n + parts[g], 0)
-      const fewest = plan.more === null ? everything : parts.fixed + 1
+      const fewest = plan.more === null ? rowWidth(everything, gapsOf(parts, parts.expand > 0)) : rowWidth(parts.fixed + 1, gapsOf(parts, false))
       for (let rem = 8; rem <= 40; rem += 0.125) {
         const row = onTheRow(parts, rem)
-        if (rem >= rowWidth(fewest)) expect(fits(row.slots, rem), `${JSON.stringify(parts)} at ${rem}rem: ${row.slots} buttons`).toBe(true)
+        if (rem >= fewest) expect(fits(row.slots, gapsOf(parts, row.groups.includes("expand")), rem), `${JSON.stringify(parts)} at ${rem}rem: ${row.slots} buttons`).toBe(true)
       }
     }
   })
@@ -51,21 +62,23 @@ describe("foldPlan", () => {
       for (let rem = 8; rem <= 40; rem += 0.125) {
         const row = onTheRow(parts, rem)
         const folded = there.filter((g) => !row.groups.includes(g))
-        // The folded ones are always the first in the order: picks, then Expand, then tools, then Attach.
+        // The folded ones are always the first in the order: picks, then Send to, then Expand, then tools, then Attach.
         expect(there.slice(0, folded.length)).toEqual(folded)
         expect(row.more).toBe(folded.length > 0)
-        // Wide enough for one more group (and More, if others stay folded), rounded up to a half rem: it's on the row.
+        // Wide enough for one more group (and More, if others stay folded), rounded up to a quarter rem: it's on the row.
         if (folded.length) {
           const next = folded.at(-1)! as FoldGroup
           const withIt = row.slots + parts[next] - (folded.length === 1 ? 1 : 0)
-          expect(rem < rowWidth(withIt), `${JSON.stringify(parts)} at ${rem}rem could show ${next}`).toBe(true)
+          // A lone first fold (never folded alone) comes back with the next one, so its gap counts too.
+          const back = folded.length === 2 && parts[folded[0]] <= 1 ? folded : [next]
+          expect(rem < rowWidth(withIt, gapsOf(parts, back.includes("expand") || row.groups.includes("expand"))), `${JSON.stringify(parts)} at ${rem}rem could show ${next}`).toBe(true)
         }
       }
     }
   })
 
   it("puts Cody's usual buttons on a 320px panel's row (a 17.875rem box), and the rest in More", () => {
-    const coordinator = { fixed: 2, picks: 3, expand: 0, tools: 1.25, attach: 1 }
+    const coordinator = { fixed: 2, picks: 3, sendTo: 0, expand: 0, tools: 1.25, attach: 1 }
     // Attach, More, Mic, Pull requests, Send.
     expect(onTheRow(coordinator, 17.875)).toEqual({ groups: ["tools", "attach"], more: true, slots: 5.25 })
     // While a turn runs, Stop takes Pull requests' place: Attach, More, Mic, Stop, Send.
@@ -77,8 +90,8 @@ describe("foldPlan", () => {
   })
 
   it("never folds a lone button: More would only take its place", () => {
-    expect(foldPlan({ fixed: 4, picks: 0, expand: 0, tools: 0, attach: 1 })).toEqual({ picks: null, expand: null, tools: null, attach: null, more: null })
-    expect(foldPlan({ fixed: 2, picks: 0, expand: 1, tools: 0, attach: 1 }).more).not.toBeNull()
+    expect(foldPlan({ fixed: 4, picks: 0, sendTo: 0, expand: 0, tools: 0, attach: 1 })).toEqual({ picks: null, sendTo: null, expand: null, tools: null, attach: null, more: null, tool: [null], label: [null] })
+    expect(foldPlan({ fixed: 2, picks: 0, sendTo: 0, expand: 1, tools: 0, attach: 1 }).more).not.toBeNull()
   })
 })
 
@@ -163,11 +176,11 @@ describe("Composer row", () => {
     // The part that may scroll if a tool is wider than counted never holds Stop or Send.
     expect(send().closest(".overflow-x-auto")).toBeNull()
     expect(send().className).not.toMatch(/composer:hidden/)
-    // The Coordinator with Pull requests: the picks fold below 22.5rem, Pull requests below 16.5, Attach below 12.5.
-    expect(byTestId("pick-runsOn")!.parentElement!.className).toContain("@max-[22.5rem]/composer:hidden")
-    expect(byTestId("tool")!.parentElement!.className).toContain("@max-[16.5rem]/composer:hidden")
-    expect(attach().className).toContain("@max-[12.5rem]/composer:hidden")
-    expect(byTestId("composer-more")!.className).toContain("@min-[22.5rem]/composer:hidden")
+    // The Coordinator with Pull requests: the picks fold below 20.75rem, Pull requests below 15.25, Attach below 11.75.
+    expect(byTestId("pick-runsOn")!.parentElement!.className).toContain("@max-[20.75rem]/composer:hidden")
+    expect(byTestId("tool")!.parentElement!.className).toContain("@max-[15.25rem]/composer:hidden")
+    expect(attach().className).toContain("@max-[11.75rem]/composer:hidden")
+    expect(byTestId("composer-more")!.className).toContain("@min-[20.75rem]/composer:hidden")
     // The mic (hold to talk) never folds.
     expect(byTestId("mic")?.className ?? "").not.toMatch(/composer:hidden/)
   })
@@ -175,9 +188,9 @@ describe("Composer row", () => {
   it("folds sooner while a turn runs, since Stop takes a place", () => {
     const render = mount()
     render({ stop: { label: "Stop the Coordinator", onStop: () => {} } })
-    expect(byTestId("composer-more")!.className).toContain("@min-[25.5rem]/composer:hidden")
-    expect(byTestId("tool")!.parentElement!.className).toContain("@max-[19.5rem]/composer:hidden")
-    expect(attach().className).toContain("@max-[15.5rem]/composer:hidden")
+    expect(byTestId("composer-more")!.className).toContain("@min-[24rem]/composer:hidden")
+    expect(byTestId("tool")!.parentElement!.className).toContain("@max-[18.5rem]/composer:hidden")
+    expect(attach().className).toContain("@max-[15rem]/composer:hidden")
   })
 
   it("has no More when nothing can fold: tools without a menu form stay on the row", () => {
@@ -199,9 +212,9 @@ describe("Composer row", () => {
     const menu = byTestId("composer-more-menu")!
     expect(more.getAttribute("aria-expanded")).toBe("true")
     expect(more.getAttribute("aria-controls")).toBe(menu.id)
-    expect(byTestId("more-attach")!.className).toContain("@min-[12.5rem]/composer:hidden")
-    for (const kind of ["project", "runsOn", "agent"]) expect(byTestId(`more-pick-${kind}`)!.className).toContain("@min-[22.5rem]/composer:hidden")
-    expect(byTestId("tool-line")!.parentElement!.className).toContain("@min-[16.5rem]/composer:hidden")
+    expect(byTestId("more-attach")!.className).toContain("@min-[11.75rem]/composer:hidden")
+    for (const kind of ["project", "runsOn", "agent"]) expect(byTestId(`more-pick-${kind}`)!.className).toContain("@min-[20.75rem]/composer:hidden")
+    expect(byTestId("tool-line")!.parentElement!.className).toContain("@min-[15.25rem]/composer:hidden")
     // A line names what it types, so the menu teaches the shortcut.
     expect(byTestId("more-pick-project")!.textContent).toContain("%")
     // It sits in a box-wide `composer` container, so its queries read the box's width.

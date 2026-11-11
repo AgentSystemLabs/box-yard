@@ -25,6 +25,12 @@ export function clockTime(hour: number, minute: number, locale?: string): string
   return plainSpaces(format(locale, { hour: "numeric", minute: "2-digit", timeZone: "UTC" }).format(Date.UTC(2000, 0, 1, hour, minute)))
 }
 
+/** "Chicago time" for America/Chicago, plain "UTC" for UTC: the zone as it reads after "Cron 0 2 * * * in". */
+export function zoneTime(tz: string): string {
+  const label = zoneLabel(tz)
+  return label === "UTC" ? label : `${label} time`
+}
+
 /**
  * The cron in plain words with its zone: "Every day at 2:00 AM Chicago". The zone only shows when the words name a
  * time of day ("Every 15 minutes" is the same everywhere). A shape describeCron can't read stays a cron, with its zone.
@@ -45,7 +51,13 @@ export function scheduleWhen(cron: string, tz: string, locale?: string): string 
   })
   if (clock) return `${words} ${zoneLabel(tz)}`
   if (words === source) return `${source} (${zoneLabel(tz)} time)`
-  return words
+  // "Every 6 hours at :00" is just "Every 6 hours".
+  return words.replace(/^(Every \d+ hours) at :00$/, "$1")
+}
+
+/** Whether scheduleWhen's words name the zone, so a line right below them needn't say it again. */
+export function whenNamesZone(cron: string, tz: string, locale?: string): boolean {
+  return scheduleWhen(cron, tz, locale).includes(zoneLabel(tz))
 }
 
 /** Days since the epoch of `ts`'s calendar date in `tz`, so two times can be compared by day. */
@@ -55,12 +67,13 @@ function dayNumber(ts: number, tz: string): number {
   return Date.UTC(part("year"), part("month") - 1, part("day")) / 86_400_000
 }
 
-/** "Today 2:00 AM", "Tomorrow 9:00 AM", "Tue 9:00 AM" (this week), else "Nov 12, 9:00 AM": `ts` read in `tz`. */
+/** "Today 2:00 AM", "Tomorrow 9:00 AM", "Yesterday 9:00 AM", "Tue 9:00 AM" (this week), else "Nov 12, 9:00 AM": `ts` read in `tz`. */
 export function runDayTime(ts: number, tz: string, now: number, locale?: string): string {
   const time = plainSpaces(format(locale, { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(ts))
   const days = dayNumber(ts, tz) - dayNumber(now, tz)
   if (days === 0) return `Today ${time}`
   if (days === 1) return `Tomorrow ${time}`
+  if (days === -1) return `Yesterday ${time}`
   if (days > 1 && days < 7) return `${format(locale, { timeZone: tz, weekday: "short" }).format(ts)} ${time}`
   return `${format(locale, { timeZone: tz, month: "short", day: "numeric" }).format(ts)}, ${time}`
 }
@@ -96,8 +109,11 @@ export function plannedRun(s: Pick<Schedule, "enabled" | "nextRunAt" | "cron" | 
   }
 }
 
-/** "Tomorrow 2:00 AM · in 7h", with the zone when the reader's clock differs ("Tomorrow 2:00 AM Chicago · in 7h"). */
-export function nextRunText(ts: number, tz: string, now: number, opts: { locale?: string; readerTz?: string } = {}): string {
+/**
+ * "Tomorrow 2:00 AM · in 7h", with the zone when the reader's clock differs ("Tomorrow 2:00 AM Chicago · in 7h").
+ * `zone: false` leaves it out, for a line that sits under words that already name it.
+ */
+export function nextRunText(ts: number, tz: string, now: number, opts: { locale?: string; readerTz?: string; zone?: boolean } = {}): string {
   const at = runDayTime(ts, tz, now, opts.locale)
-  return `${sameClock(ts, tz, opts.readerTz) ? at : `${at} ${zoneLabel(tz)}`} · ${untilText(ts, now)}`
+  return `${opts.zone === false || sameClock(ts, tz, opts.readerTz) ? at : `${at} ${zoneLabel(tz)}`} · ${untilText(ts, now)}`
 }

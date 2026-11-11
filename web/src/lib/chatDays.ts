@@ -22,9 +22,25 @@ export function chatDays(messages: readonly Pick<NoticeLike, "id" | "createdAt">
 
 type MilestoneTask = Pick<Task, "id" | "title" | "createdAt" | "prState" | "prMergedAt" | "projectId" | "prUrl">
 type SummaryProject = Pick<Project, "id" | "repo">
+export type DaySummaryKind = "pr_merged" | "pr_opened" | "finished" | "worked" | "started"
+/** A day's milestones are listed in these groups, the most telling first. */
+export const DAY_SUMMARY_GROUPS: readonly { kind: DaySummaryKind; label: string }[] = [
+  { kind: "pr_merged", label: "PR merged" },
+  { kind: "pr_opened", label: "PR opened" },
+  { kind: "finished", label: "Finished" },
+  { kind: "worked", label: "Worked on" },
+  { kind: "started", label: "Started" },
+]
 export interface DaySummary {
-  text: string
+  /** What happened to the task that day: its group in the list. */
+  kind: DaySummaryKind
+  /** The task's title, as plain text. */
+  title: string
   repo: string | null
+  /** The task, when the app knows which one it is. */
+  taskId?: string
+  /** The PRs and issues its title and its notice name, as GitHub URLs: one each. */
+  refs: string[]
   /** A message in this chat, never a message from another task's transcript. */
   sourceMessageId?: string
 }
@@ -38,19 +54,18 @@ export function daySummaryRepo(projectId: string | undefined, task: Pick<Milesto
   return pr?.kind === "pull" ? `${pr.owner}/${pr.repo}` : null
 }
 
-/** Keep the milestone short, but retain PR/issue references from its notice and avoid repeating title links. */
-function summary(text: string, repo: string | null, detail = ""): DaySummary {
-  const identity = (url: string) => {
-    const ref = githubRef(url)!
-    return `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase()
+/** Keep the milestone short: the task's title, with the PR/issue references of its title and its notice set apart. */
+function summary(kind: DaySummaryKind, title: string, repo: string | null, taskId: string | undefined, detail = ""): DaySummary {
+  const plain = plainText(title)
+  const refs = new Map<string, string>()
+  for (const s of [...splitGithubRefs(plain, repo), ...splitGithubRefs(detail, repo)]) {
+    if (!s.url || s.kind === "commit") continue
+    const ref = githubRef(s.url)!
+    const identity = `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase()
+    // A pull request's own URL over an "#12" that GitHub would have to redirect.
+    if (!refs.has(identity) || s.kind === "pull") refs.set(identity, s.url)
   }
-  const seen = new Set(splitGithubRefs(text, repo).flatMap((s) => s.url && s.kind !== "commit" ? [identity(s.url)] : []))
-  for (const s of splitGithubRefs(detail, repo)) {
-    if (!s.url || s.kind === "commit" || seen.has(identity(s.url))) continue
-    seen.add(identity(s.url))
-    text += ` · ${s.url}`
-  }
-  return { text: plainText(text), repo }
+  return { kind, title: plain, repo, ...(taskId ? { taskId } : {}), refs: [...refs.values()] }
 }
 
 /** Recorded milestones only: never infer a finish date from a task's mutable updatedAt or a merge request. */
@@ -75,15 +90,15 @@ export function daySummaries(messages: readonly (NoticeLike & { taskId?: string;
   }
   for (const t of tasks) {
     const repo = daySummaryRepo(undefined, t, undefined, projects)
-    add(t.createdAt, t.id, summary(`Started: ${t.title}`, repo), 1)
-    if (t.prState === "merged" && t.prMergedAt != null) add(t.prMergedAt, t.id, summary(`PR merged: ${t.title}`, repo, t.prUrl ?? ""), 5)
+    add(t.createdAt, t.id, summary("started", t.title, repo, t.id), 1)
+    if (t.prState === "merged" && t.prMergedAt != null) add(t.prMergedAt, t.id, summary("pr_merged", t.title, repo, t.id, t.prUrl ?? ""), 5)
   }
   for (const m of messages) {
     if (m.role === "event") {
       const task = byId.get(m.taskId ?? "")
       const repo = daySummaryRepo(m.projectId ?? projectId, task, undefined, projects)
-      if (task && /^Turn \d+ finished(?:\.| ·)/.test(m.content)) add(m.createdAt, task.id, summary(`Worked on: ${task.title}`, repo), 2, m.id)
-      if (task && m.meta?.kind === "auto_done") add(m.createdAt, task.id, summary(`Finished: ${task.title}`, repo), 4, m.id)
+      if (task && /^Turn \d+ finished(?:\.| ·)/.test(m.content)) add(m.createdAt, task.id, summary("worked", task.title, repo, task.id), 2, m.id)
+      if (task && m.meta?.kind === "auto_done") add(m.createdAt, task.id, summary("finished", task.title, repo, task.id), 4, m.id)
       continue
     }
     if (m.role !== "notice") continue
@@ -101,11 +116,11 @@ export function daySummaries(messages: readonly (NoticeLike & { taskId?: string;
     const prUrl = prs.size === 1 ? prs.values().next().value : undefined
     const repo = daySummaryRepo(sourceProject, task, prUrl, projects)
     if (n.kind === "done") {
-      add(m.createdAt, id, summary(`Finished: ${n.title}`, repo, n.event), 4, m.id)
+      add(m.createdAt, id, summary("finished", n.title, repo, task?.id, n.event), 4, m.id)
     } else if (n.kind === "message" && /^finished its turn:/.test(n.event)) {
-      add(m.createdAt, id, summary(`Worked on: ${n.title}`, repo, n.event), 2, m.id)
+      add(m.createdAt, id, summary("worked", n.title, repo, task?.id, n.event), 2, m.id)
     } else if (n.kind === "pr") {
-      add(m.createdAt, id, summary(`PR opened: ${n.title}`, repo, n.event), 3, m.id)
+      add(m.createdAt, id, summary("pr_opened", n.title, repo, task?.id, n.event), 3, m.id)
     }
   }
   return new Map([...days].map(([key, entries]) => [key, [...entries.values()].map((e) => e.bullet)]))

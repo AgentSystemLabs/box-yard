@@ -1697,6 +1697,7 @@ class Captain {
             costUsd: resultCostUsd,
             resumed: resume,
             loginId: login?.id ?? null,
+            harness: launch.cli,
           })
         }
         const ok = !err && code === 0 && !resultError && (sawResult || launch.cli === "claude")

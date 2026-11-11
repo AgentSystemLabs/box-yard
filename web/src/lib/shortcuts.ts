@@ -77,6 +77,16 @@ export function isShortcutsKey(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlK
   return !el?.closest(FIELD)
 }
 
+/** "N" from anywhere but a text field: the New task dialog (components/CommandPalette.tsx), as the palette's "New task…". */
+export function isNewTaskKey(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "defaultPrevented" | "repeat" | "isComposing" | "target">) {
+  if (e.key.toLowerCase() !== "n" || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented || e.repeat || e.isComposing) return false
+  const el = e.target instanceof Element ? e.target : null
+  return !el?.closest(FIELD)
+}
+
+/** The New task dialog's Start task: ⌘↵ / Ctrl+Enter from any of its fields. */
+export const startTaskChord = (mac: boolean): Chord => [capsFor(mac).mod, "Enter"]
+
 /** "commands, PRs, files or projects". */
 const orList = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words.at(-1)}` : (words[0] ?? ""))
 
@@ -92,6 +102,7 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
       title: "Anywhere",
       rows: [
         { id: "palette", label: "Search tasks, projects, files and commands", keys: [paletteChord(mac), ["/"]] },
+        { id: "new-task", label: "Start a new task", keys: [["N"]] },
         { id: "switch", label: "Switch chat: the Coordinator or a project's Captain", keys: [["P"]] },
         { id: "composer", label: "Jump to the composer; again to hop between the chat and the panel", keys: [composerChord(mac)] },
         { id: "voice", label: "Turn voice on or off", keys: [voiceChord(mac)] },
@@ -109,8 +120,8 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
         { id: "tree-unfold", label: "Unfold, then step into it", keys: [["→"]] },
         { id: "tree-fold", label: "Fold, or step out to the row it's under", keys: [["←"]] },
         { id: "tree-toggle", label: "Fold or unfold; on a row that doesn't fold, open it", keys: [["Space"]] },
-        { id: "tree-delete", label: "Reveal actions for a project or task (Escape to close)", keys: [["Shift", "F10"]] },
         { id: "tree-open", label: "Open", keys: [["Enter"]] },
+        { id: "tree-done", label: "Mark the row's task done", keys: [[caps.shift, "Enter"]] },
         { id: "tree-ends", label: "First or last row", keys: [["Home"], ["End"]] },
         { id: "tree-find", label: "Jump to a row: type the start of its name", keys: [["A–Z"]] },
       ],
@@ -118,15 +129,15 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
     {
       title: "Composer",
       rows: [
-        { id: "send", label: "Send", keys: [["Enter"]] },
+        { id: "send", label: "Send; on a touch screen, Enter adds a line", keys: [["Enter"], [caps.mod, "Enter"]] },
         { id: "send-to", label: "Choose a task, Captain or Coordinator to send this draft to", keys: [[">"], sendToChord(mac)] },
         { id: "newline", label: "New line", keys: [[caps.shift, "Enter"]] },
         { id: "sidebar", label: "Return focus to the current sidebar row, keeping the draft", keys: [["Esc"]] },
         { id: "history", label: "Earlier prompts, in an empty composer", keys: [["↑"], ["↓"]] },
-        { id: "where", label: "Choose where its tasks run", keys: [["@"]] },
+        { id: "where", label: "Choose where this message's tasks run", keys: [["@"]] },
         { id: "github", label: "Reference a GitHub issue or pull request by number or title", keys: [["#"]] },
         { id: "project", label: "Choose a project in the Coordinator chat", keys: [["%"]] },
-        { id: "harness", label: "Choose the agent that runs them", keys: [["!"]] },
+        { id: "harness", label: "Choose the agent for this message's tasks", keys: [["!"]] },
       ],
     },
     {
@@ -136,8 +147,12 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
         { id: "open", label: "Open", keys: [["Enter"]] },
         { id: "new-tab", label: "Open in a new tab", keys: [[caps.mod, "Enter"]] },
         { id: "narrow", label: `Narrow to ${orList(PREFIXES.map((p) => (/^[A-Z]{2}/.test(p.label) ? p.label : p.label.toLowerCase())))}`, keys: PREFIXES.map((p) => [p.prefix]) },
-        { id: "unscope", label: "Remove the filter", keys: [["⌫"]] },
+        { id: "unscope", label: "Remove the filter", keys: [["Backspace"]] },
       ],
+    },
+    {
+      title: "New task dialog",
+      rows: [{ id: "start-task", label: "Start the task", keys: [startTaskChord(mac)] }],
     },
     {
       title: "File preview",

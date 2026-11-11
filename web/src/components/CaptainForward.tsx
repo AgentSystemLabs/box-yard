@@ -2,31 +2,38 @@
 // (lib/captainForward.ts), and the two thread lines that follow: "→ Captain" and the Captain's reply.
 import { memo, useCallback, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
 import { flushSync } from "react-dom"
-import { MessageCircleQuestion, X } from "lucide-react"
+import { ListPlus, MessageCircleQuestion, X } from "lucide-react"
 import { COMPOSER_FOOTER, Composer, type ComposerHandle } from "./Composer"
-import { ComposerMenuItem, useCloseMore } from "./ComposerMenu"
+import { ComposerMenuItem, useCloseMore, useToolFold, useToolLabel } from "./ComposerMenu"
 import { ComposerIcon, TaskComposerIcon } from "./ChatIcons"
 import { CaptainIcon, captainIconFor } from "./CaptainIcon"
-import { projectColorStyle } from "./TaskIcon"
+import { WORKING_PULSE, projectColorStyle } from "./TaskIcon"
 import { useProjectColor } from "../lib/taskTiles"
 import { captainHref } from "./ChatSwitcher"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import { AttachmentList } from "./Attachments"
-import { AppLink, LineIcon, Markdown, TimeAgo, cx } from "./ui"
-import { useForwardToCaptain, useOwnerName, useStopTask } from "../lib/queries"
+import { AppLink, LineIcon, Markdown, TAP_AREA, TimeAgo, cx } from "./ui"
+import { useForwardToCaptain, useStopTask } from "../lib/queries"
 import { looksLikeTaskManagement, suggestsCaptain } from "../lib/captainForward"
 import { useComposerFocus } from "../lib/chatSwitch"
-import { labelFrom, rowWidth } from "../lib/composerRow"
+import { inMenu, labelFrom, onRow } from "../lib/composerRow"
 import type { Attachment, Project, Task, TaskMessage } from "../../../shared/types"
 
 /**
- * How many of the row's 44px buttons (and the gap after one) a chip takes with its label, at text-xs to a finger:
- * "Side question" 119px, "Captain" 85px, "To Captain" 104px. Without its label a chip counts as one 44px touch slot.
+ * How many of the row's 44px buttons a chip takes with its label, at text-xs to a finger: "Side question" 115.2px,
+ * "Captain" 81.6px, "To Captain" 99px, each rounded up. Without its label a chip is one 44px slot. A 390px phone's
+ * box (356px) then fits a working task's Attach, More, Mic, "Side question", Stop and Send exactly.
  */
-const LABELLED = { ask: 2.6, captain: 1.9, toCaptain: 2.25 }
+const LABELLED = { ask: 116 / 44, captain: 82 / 44, toCaptain: 100 / 44 }
 
 const CHIP =
-  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3"
+  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5"
+
+/**
+ * The line under the text that says where the next message goes instead of the agent (the Captain, a side question),
+ * with its way back at the end (NoteClose). A finger's line is 44px tall, the close button's tap area.
+ */
+const NOTE = "flex min-w-0 items-center gap-1 pb-1 pl-1.5 text-xs text-yard-300/80 pointer-coarse:min-h-11 pointer-coarse:pb-0"
 
 const queuedLabel = (n: number) => (n === 1 ? "1 queued message" : `${n} queued messages`)
 
@@ -84,24 +91,28 @@ export const TaskComposer = memo(function TaskComposer({
   const { mutate: stopTask } = useStopTask()
   const stop = useMemo(() => (running && !asking ? { label: "Stop the agent's turn", onStop: () => stopTask(task.id) } : null), [running, asking, stopTask, task.id])
   const showCaptain = !asking
-  // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts). Their labels show
-  // only where the whole row fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
-  const chips = (ask ? 1 : 0) + (showCaptain ? 1 : 0)
-  const labels = labelFrom(
-    rowWidth(4 + (stop ? 1 : 0) + (asking ? 0 : 1) + (ask ? LABELLED.ask : 0) + (showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0)),
-  )
+  const queues = running && !asking && !toCaptain
+  // The chips give way when the row is too narrow for them (lib/composerRow.ts), one at a time and in the row's order
+  // from its end: Captain loses its label, then folds into the box's More menu; then Side question does the same. So a
+  // phone keeps "Side question" spelled out for as long as it fits, rather than two bare icons.
+  const chips = [...(ask ? [{ slots: 1, labelled: LABELLED.ask }] : []), ...(showCaptain ? [{ slots: 1, labelled: toCaptain ? LABELLED.toCaptain : LABELLED.captain }] : [])]
+  const captainAt = ask ? 1 : 0
   const askToggle = ask?.toggle
   const toggleAsk = useCallback(() => {
     handle.current?.clearSendTo()
     setToCaptain(false)
     askToggle?.()
   }, [askToggle])
-  // Turned on, the text takes the caret at once, inside the press: on a phone that's what brings up the keyboard.
-  const pressAsk = useCallback(() => {
-    if (!asking) box.current?.focus()
-    toggleAsk()
-  }, [asking, toggleAsk])
   const toggleCaptain = useCallback(() => { handle.current?.clearSendTo(); setToCaptain((on) => !on) }, [])
+  // A chip on the row: the text takes the caret inside the press, which on a phone brings the keyboard up or keeps it.
+  const pressAsk = useCallback(() => {
+    box.current?.focus()
+    toggleAsk()
+  }, [toggleAsk])
+  const pressCaptain = useCallback(() => {
+    box.current?.focus()
+    toggleCaptain()
+  }, [toggleCaptain])
   const answer = !asking && ask && (ask.busy || ask.unread) ? (ask.busy ? "An answer is on its way" : "A new answer") : null
 
   const submit = useCallback(
@@ -127,18 +138,25 @@ export const TaskComposer = memo(function TaskComposer({
     (draft: string) => {
       if (asking)
         return (
-          <div data-testid="task-ask-note" className="flex min-w-0 items-center gap-1.5 px-1.5 pb-1 text-[11px] text-yard-300/80">
-            <MessageCircleQuestion className="h-3 w-3 shrink-0" aria-hidden />
-            <span className="min-w-0 truncate">To the Coordinator, aside. The agent doesn't see it.</span>
+          <div data-testid="task-ask-note" className={NOTE}>
+            <span className="flex min-w-0 flex-1 items-start gap-1.5">
+              <LineIcon icon={MessageCircleQuestion} className="h-3 w-3" />
+              <span className="min-w-0 wrap-anywhere">To the Coordinator, aside. The agent doesn't see it.</span>
+            </span>
+            <NoteClose onClose={toggleAsk} box={box} />
           </div>
         )
       if (toCaptain)
         return (
-          <div data-testid="captain-forward-note" className="flex min-w-0 items-center gap-1.5 px-1.5 pb-1 text-[11px] text-yard-300/80">
-            <CaptainIcon projectId={task.projectId} className="h-3 w-3" />
-            <span className="min-w-0 truncate">
-              To the {captain}, not the agent{task.pendingCount ? `, with this task's ${queuedLabel(task.pendingCount)}` : ""}. Its reply shows here.
+          <div data-testid="captain-forward-note" className={NOTE}>
+            <span className="flex min-w-0 flex-1 items-start gap-1.5" style={projectColorStyle(color)}>
+              {/* The hat in the project's colour, as the box's own beside the text. */}
+              <LineIcon icon={captainIconFor(task.projectId)} className={cx("h-3 w-3", color ? "text-(--pc)" : "text-yard-400")} />
+              <span className="min-w-0 wrap-anywhere">
+                To the {captain}, not the agent{task.pendingCount ? `, with this task's ${queuedLabel(task.pendingCount)}` : ""}. Its reply shows here.
+              </span>
             </span>
+            <NoteClose onClose={toggleCaptain} box={box} />
           </div>
         )
       if (!suggest || dismissed || !looksLikeTaskManagement(draft)) return null
@@ -159,7 +177,7 @@ export const TaskComposer = memo(function TaskComposer({
         </div>
       )
     },
-    [asking, toCaptain, suggest, dismissed, captain, task.projectId, task.pendingCount, running, sendToCaptain],
+    [asking, toCaptain, suggest, dismissed, captain, color, task.projectId, task.pendingCount, running, sendToCaptain, toggleAsk, toggleCaptain],
   )
 
   return (
@@ -177,12 +195,15 @@ export const TaskComposer = memo(function TaskComposer({
       files={!asking}
       hint={hint}
       stop={stop}
+      // While the agent works, a message to it waits for the turn's end.
+      sendLabel={queues ? "Queue message" : undefined}
+      sendIcon={queues ? ListPlus : undefined}
       icon={asking ? <ComposerIcon kind="side-question" label="Side question to the Coordinator about this task" /> : <TaskComposerIcon task={task} captain={toCaptain ? captain : null} />}
       tools={
         <>
           {ask && (
-            <button
-              type="button"
+            <RowChip
+              tool={0}
               data-testid="task-ask-toggle"
               aria-pressed={asking}
               onClick={pressAsk}
@@ -190,23 +211,23 @@ export const TaskComposer = memo(function TaskComposer({
               className={cx(CHIP, "relative", asking ? "bg-yard-500/15 text-yard-200 ring-1 ring-yard-500/40" : "text-zinc-500 hover:text-zinc-200")}
             >
               <MessageCircleQuestion className="h-3.5 w-3.5 text-yard-400" aria-hidden />
-              <span className={labels}>Side question</span>
+              <ChipLabel tool={0}>Side question</ChipLabel>
               {!asking && (ask.busy || ask.unread) && (
                 <span
                   data-testid="task-ask-dot"
                   role="img"
                   aria-label={ask.busy ? "An answer is on its way" : "A new answer"}
-                  className={cx("absolute top-1 right-1 h-1.5 w-1.5 rounded-full pointer-coarse:top-2.5 pointer-coarse:right-1.5", ask.busy ? "animate-pulse bg-sky-400" : "bg-yard-400")}
+                  className={cx("absolute top-1 right-1 h-1.5 w-1.5 rounded-full pointer-coarse:top-2.5 pointer-coarse:right-1.5", ask.busy ? cx(WORKING_PULSE, "bg-sky-400") : "bg-yard-400")}
                 />
               )}
-            </button>
+            </RowChip>
           )}
           {showCaptain && (
-            <button
-              type="button"
+            <RowChip
+              tool={captainAt}
               data-testid="captain-target"
               aria-pressed={toCaptain}
-              onClick={toggleCaptain}
+              onClick={pressCaptain}
               title={
                 toCaptain
                   ? "Sending to the Captain: tap to send to the task's agent instead"
@@ -215,16 +236,17 @@ export const TaskComposer = memo(function TaskComposer({
               className={cx(CHIP, toCaptain ? "bg-yard-500/15 text-yard-200 ring-1 ring-yard-500/40" : "text-zinc-500 hover:text-zinc-200")}
             >
               <CaptainIcon projectId={task.projectId} style={projectColorStyle(color)} className={cx("h-3.5 w-3.5", color ? "text-(--pc)" : "text-zinc-300")} />
-              <span className={labels}>{toCaptain ? "To Captain" : "Captain"}</span>
-            </button>
+              <ChipLabel tool={captainAt}>{toCaptain ? "To Captain" : "Captain"}</ChipLabel>
+            </RowChip>
           )}
         </>
       }
       toolsMenu={
-        chips ? (
+        chips.length ? (
           <>
             {ask && (
               <ChipLine
+                tool={0}
                 data-testid="more-task-ask"
                 icon={MessageCircleQuestion}
                 label="Side question"
@@ -236,6 +258,7 @@ export const TaskComposer = memo(function TaskComposer({
             )}
             {showCaptain && (
               <ChipLine
+                tool={captainAt}
                 data-testid="more-captain-target"
                 icon={captainIconFor(task.projectId)}
                 label={toCaptain ? "To Captain" : "Captain"}
@@ -254,23 +277,59 @@ export const TaskComposer = memo(function TaskComposer({
         asking
           ? "Ask about this task…"
           : toCaptain
-          ? `Ask the ${captain}: split, reprioritise, ${task.pendingCount ? "the queue" : "new tasks"}…`
+          ? `Message the ${captain}…`
           : task.status === "needs_input"
             ? "Answer the agent…"
             : running
-              ? "Delivered when the current turn ends…"
+              ? "Queue a message…"
               : "Send feedback or a follow-up…"
       }
+      label={asking ? "Side question about this task" : toCaptain ? "Message the Captain" : "Message this task"}
     />
   )
 })
 
+/**
+ * The way out of a NOTE's mode, back to messaging the agent: at 320px the chip that turned it on is in the More menu.
+ * A press keeps the caret (and a phone's keyboard) where it was; from the keyboard, focus goes to the text.
+ */
+function NoteClose({ onClose, box }: { onClose: () => void; box: RefObject<HTMLTextAreaElement | null> }) {
+  return (
+    <button
+      type="button"
+      data-testid="note-close"
+      aria-label="Back to the agent"
+      title="Back to the agent"
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={(e) => {
+        if (document.activeElement === e.currentTarget) box.current?.focus()
+        onClose()
+      }}
+      className={cx(TAP_AREA, "grid h-6 w-6 shrink-0 place-items-center rounded-md text-yard-300/70 hover:bg-zinc-800 hover:text-yard-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:w-11")}
+    >
+      <X className="h-3.5 w-3.5" aria-hidden />
+    </button>
+  )
+}
+
+/** A chip on the box's row (`tool`: which one, in the row's order), gone below the width where its ChipLine takes over. */
+function RowChip({ tool, className, ...button }: ComponentProps<"button"> & { tool: number }) {
+  return <button type="button" {...button} className={cx(className, onRow(useToolFold(tool)))} />
+}
+
+/** A RowChip's text, gone (but for a screen reader) below the width where the row has no room for it. */
+function ChipLabel({ tool, children }: { tool: number; children: string }) {
+  return <span className={labelFrom(useToolLabel(tool))}>{children}</span>
+}
+
 /** A chip's line in the box's More menu, where it goes when the row is too narrow: it toggles, then closes the menu. */
-function ChipLine({ onToggle, box, ...line }: Omit<ComponentProps<typeof ComposerMenuItem>, "onClick"> & { onToggle: () => void; box: RefObject<HTMLTextAreaElement | null> }) {
+function ChipLine({ tool, onToggle, box, ...line }: Omit<ComponentProps<typeof ComposerMenuItem>, "onClick"> & { tool: number; onToggle: () => void; box: RefObject<HTMLTextAreaElement | null> }) {
   const close = useCloseMore()
+  const fold = useToolFold(tool)
   return (
     <ComposerMenuItem
       {...line}
+      className={inMenu(fold)}
       onClick={() => {
         onToggle()
         close()
@@ -281,22 +340,23 @@ function ChipLine({ onToggle, box, ...line }: Omit<ComponentProps<typeof Compose
   )
 }
 
-/** "Cody → box-yard Captain": Cody's message sent from this chat to the Captain (TaskManager.forwardToCaptain). */
+/**
+ * "You → box-yard Captain": Cody's message sent from this chat to the Captain (TaskManager.forwardToCaptain), "You" as
+ * in the Captain's own chat. The task's queued messages are named only when some went with it.
+ */
 export const ToCaptainLine = memo(function ToCaptainLine({ m }: { m: TaskMessage }) {
-  const ownerName = useOwnerName()
   const name = typeof m.meta?.captainName === "string" ? `${m.meta.captainName} Captain` : "Captain"
   const queued = typeof m.meta?.queued === "number" ? m.meta.queued : 0
   const pid = typeof m.meta?.captainProjectId === "string" ? m.meta.captainProjectId : null
   return (
     <div data-testid="to-captain" className={cx(MESSAGE_BLOCK, "rounded-lg border-l-2 border-dashed border-yard-500/70 bg-yard-500/5 px-3 py-2")}>
-      <div className="mb-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] font-semibold text-yard-400">
-        <span className="min-w-0 truncate">
-          {ownerName} → {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
+      {/* The time keeps the first line's end, whatever wraps before it. */}
+      <div className="mb-0.5 flex min-w-0 items-baseline gap-x-1 text-[11px] font-semibold text-yard-400">
+        <span className="min-w-0 wrap-anywhere">
+          You → {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
+          {queued > 0 && <span className="font-normal text-zinc-500"> · with {queuedLabel(queued)}</span>}
         </span>
-        <span className="font-normal text-zinc-500">
-          · sent to the Captain{queued ? `, with ${queuedLabel(queued)}` : ""}
-        </span>
-        <span className="ml-1 text-[10px] font-normal text-zinc-600">
+        <span className="ml-auto shrink-0 pl-2 text-[10px] font-normal whitespace-nowrap text-zinc-600">
           <TimeAgo ts={m.createdAt} />
         </span>
       </div>
@@ -311,14 +371,19 @@ export const ToCaptainLine = memo(function ToCaptainLine({ m }: { m: TaskMessage
 export const CaptainAnswerLine = memo(function CaptainAnswerLine({ m }: { m: TaskMessage }) {
   const name = typeof m.meta?.captainName === "string" ? `${m.meta.captainName} Captain` : "Captain"
   const pid = typeof m.meta?.captainProjectId === "string" ? m.meta.captainProjectId : null
+  // The Captain's icon in its project's colour, as everywhere a Captain shows.
+  const color = useProjectColor(pid)
   return (
-    <div data-testid="captain-answer" className={cx(MESSAGE_BLOCK, "flex min-w-0 items-start gap-2 rounded-lg bg-yard-500/5 px-3 py-2 text-sm leading-relaxed")}>
-      <LineIcon icon={captainIconFor(pid)} className="h-4 w-4 text-yard-400" />
-      <div className="min-w-0 text-zinc-200 [&>.prose-chat>:first-child]:mt-0!">
-        <div className="mb-0.5 text-[11px] leading-5 font-semibold text-yard-400">
-          {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
-          <span className="font-normal text-zinc-500"> · replied</span>
-          <span className="ml-2 text-[10px] font-normal text-zinc-600">
+    <div data-testid="captain-answer" style={projectColorStyle(color)} className={cx(MESSAGE_BLOCK, "flex min-w-0 items-start gap-2 rounded-lg bg-yard-500/5 px-3 py-2 text-sm leading-relaxed")}>
+      <LineIcon icon={captainIconFor(pid)} className={cx("h-4 w-4", color ? "text-(--pc)" : "text-zinc-300")} />
+      <div className="min-w-0 flex-1 text-zinc-200 [&>.prose-chat>:first-child]:mt-0!">
+        {/* The time ends the first line, as in ToCaptainLine. */}
+        <div className="mb-0.5 flex min-w-0 items-baseline gap-x-1 text-[11px] leading-5 font-semibold text-yard-400">
+          <span className="min-w-0 wrap-anywhere">
+            {pid ? <AppLink href={captainHref(pid)} className="hover:underline">{name}</AppLink> : name}
+            <span className="font-normal text-zinc-500"> · replied</span>
+          </span>
+          <span className="ml-auto shrink-0 pl-2 text-[10px] font-normal whitespace-nowrap text-zinc-600">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>

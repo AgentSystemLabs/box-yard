@@ -49,7 +49,7 @@ import { formatTokens, sessionUsageOf } from "./usage.js"
 import { errorMessage, failedStep, isRateLimited } from "./util/retry.js"
 import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
-import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, reportText, spawnProblem, type SubtaskLimits, type SubtaskReport, type SubtasksFile } from "./subtasks.js"
+import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
 import { AUTO_DONE_FROM, PrTracker, prNumber, restingStatus, type PrChange } from "./prs.js"
 import { PrDetailsSource } from "./prDetails.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
@@ -85,7 +85,7 @@ import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sess
 import type { SessionRef } from "./connectors/connectors.js"
 import { claudeLoginRef, codexLoginRef, limitsOf, recordLimits, type LoginRef } from "./loginLimits.js"
 import { authorEnv, chooseAuthor, fallbackWarning, GithubAuthors, hostGitScript, parseHostGit, readHostGit, recordAuthorSource, type HostGit, type TurnAuthor } from "./gitAuthor.js"
-import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, type AgentCli } from "../shared/agentCli.js"
+import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, pinProblem, type AgentCli } from "../shared/agentCli.js"
 import { CursorModels } from "./cursor.js"
 import type { Identities, TurnSigning } from "./identity/identities.js"
 import type { AgentLogins, PickedLogin } from "./agentLogins.js"
@@ -2001,13 +2001,8 @@ export class TaskManager {
     available(before)
     const project = this.store.getProject(before.project_id)!
     const agent = options.agent === "default" ? project.agentCli ?? this.settings.get().agentCli : options.agent ?? taskAgentCli(before)
-    const modelCli = cliForModel(options.model)
-    if (options.model && modelCli && agent !== "cursor" && modelCli !== agent) throw new BadRequestError(`Model ${options.model} cannot run on ${AGENT_CLI_LABEL[agent]}. Choose a compatible model or use its defaults.`)
-    if (options.model && agent === "cursor" && !cursorModel(options.model, "", (id) => this.cursorModels.has(id))) throw new BadRequestError(`Model ${options.model} is not a Cursor model in its catalog. Choose a Cursor model or use its defaults.`)
-    if (options.effort === "ultra" && agent !== "codex") throw new BadRequestError("Ultra effort is only available on Codex.")
-    if (agent === "opencode" && options.model && !isOpenCodeModel(options.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant.")
-    if (agent === "opencode" && options.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
-    if (agent === "cursor" && options.effort) throw new BadRequestError("Cursor's effort is part of its model id; omit effort.")
+    const pins = pinProblem(agent, options.model, options.effort, (id) => this.cursorModels.has(id))
+    if (pins) throw new BadRequestError(pins)
     const runner = this.store.taskRunner(before)
     await this.requireRunner(runner, before.project_id, this.store.taskEnv(taskId), { agentCli: agent, machineLabel: before.machine_label, gpu: taskGpuPick(before) })
     // Credential/capability checks can yield while another request sends a message or starts a turn.
@@ -7991,8 +7986,9 @@ export class TaskManager {
 
   /**
    * spawn_subtasks: start the agent's sub-tasks as tasks of their own, under it and in its project, and hand its
-   * runner their ids and links (subtasks-reply-<id>.json). All or none: a cap, or a runner that can't run, refuses
-   * the whole call. runs_on "same" runs one where its parent runs and shares its parent's slot (place).
+   * runner their ids and links (subtasks-reply-<id>.json). All or none: a cap, a bad agent, model or effort pin, or a
+   * runner that can't run refuses the whole call. runs_on "same" runs one where its parent runs and shares its
+   * parent's slot (place). Each keeps the agent, model and effort it asked for, else its parent's (subtaskPins).
    */
   private async spawnSubtasks(parent: TaskRow, ev: WorkerEvent) {
     const reqId = String(ev.id ?? "")
@@ -8007,14 +8003,26 @@ export class TaskManager {
     const { asks } = parsed
     const problem = spawnProblem({ depth: parent.subtask_depth ?? 0, started: this.store.subtaskRows(parent.id).length, asked: asks.length, limits: this.subtaskLimits() })
     if (problem) return refuse(problem)
-    const env = this.store.taskEnv(parent.id)
     const agentCli = taskAgentCli(parent)
+    const env = this.store.taskEnv(parent.id)
     let type: ReturnType<TaskEnvironment["forChild"]>
+    let pins: SubtaskPins[]
     try {
       type = this.environment.forChild(this.requireRow(parent.id))
       for (const ask of asks) if (ask.runsOn !== "same") this.environment.runner(type, ask.runsOn, environmentGpu(type) ?? this.gpuCloudFor(parent))
-      for (const runner of new Set(asks.map((a) => a.runsOn).filter((r): r is Runner => r !== "same"))) {
-        await this.requireRunner(runner, parent.project_id, env, { agentCli, model: parent.model, ...(runner === "gpu" ? { gpu: { provider: environmentGpu(type)!, type: null } } : {}) })
+      // After the environment: where no sub-task may start (RunPod, Vast.ai), that's the answer, not a pin to fix.
+      const resolved = subtaskPins(asks, { agent: agentCli, model: parent.model, effort: parent.effort }, (id) => this.cursorModels.has(id))
+      if ("problem" in resolved) return refuse(resolved.problem)
+      pins = resolved.pins
+      // Each runner asked for, once per harness. "same" is its parent's runner, which already runs its parent's harness.
+      const checks = new Map<string, { runsOn: SubtaskRunsOn; agentCli: AgentCli }>()
+      asks.forEach((a, i) => {
+        if (a.runsOn !== "same" || pins[i]!.agent !== agentCli) checks.set(`${a.runsOn} ${pins[i]!.agent}`, { runsOn: a.runsOn, agentCli: pins[i]!.agent })
+      })
+      for (const c of checks.values()) {
+        const runner = c.runsOn === "same" ? this.store.taskRunner(parent) : c.runsOn
+        const where = c.runsOn === "same" ? { machineLabel: parent.machine_label, gpu: taskGpuPick(parent) } : runner === "gpu" ? { gpu: { provider: environmentGpu(type)!, type: null } } : {}
+        await this.requireRunner(runner, parent.project_id, env, { agentCli: c.agentCli, ...where })
       }
     } catch (err) {
       return refuse(errorMessage(err))
@@ -8023,16 +8031,16 @@ export class TaskManager {
     let created: Task[]
     try {
       created = this.createTasks(
-        asks.map((a) => ({
+        asks.map((a, i) => ({
           id: a.id && !this.store.getTaskRow(a.id) ? a.id : undefined,
           projectId: parent.project_id,
           title: a.title,
           prompt: a.prompt,
           env,
           source: `agent:${parent.id}` as const,
-          agentCli,
-          model: parent.model,
-          effort: parent.effort,
+          agentCli: pins[i]!.agent,
+          model: pins[i]!.model,
+          effort: pins[i]!.effort,
           runsOn: a.runsOn === "same" ? null : a.runsOn,
           machineLabel: a.runsOn === "same" ? parent.machine_label : null,
           gpu: a.runsOn === "same" && taskGpuPick(parent)?.provider === environmentGpu(type) ? taskGpuPick(parent) : null,
@@ -8046,7 +8054,9 @@ export class TaskManager {
     const n = created.length
     this.addEvent(parent.id, `Started ${n} sub-task${n === 1 ? "" : "s"}.`, { kind: "subtasks", subtasks: created.map((t) => ({ id: t.id, title: t.title })) })
     this.emitTask(parent.id)
-    await reply({ status: "ok", tasks: created.map((t, i) => ({ id: t.id, title: t.title, url: this.absoluteUrl(`/tasks/${t.id}`), runsOn: asks[i]!.runsOn })) })
+    // One that asked for its own agent, model or effort says what it got, so the agent can check it.
+    const asked = (a: SubtaskAsk) => Boolean(a.agent || a.model || a.effort)
+    await reply({ status: "ok", tasks: created.map((t, i) => ({ id: t.id, title: t.title, url: this.absoluteUrl(`/tasks/${t.id}`), runsOn: asks[i]!.runsOn, ...(asked(asks[i]!) ? { runsWith: pinsLabel(pins[i]!) } : {}) })) })
     this.syncSubtasks(parent.id)
   }
 
@@ -8805,6 +8815,7 @@ export class TaskManager {
       resumed: ev.resumed === true,
       costScope: taskAgentCli(row) === "opencode" ? "run" : "session",
       loginId: (turnId ? this.store.getTaskTurn(turnId)?.login_id : null) ?? null,
+      harness: taskAgentCli(row),
     })
     return hasCost ? cost : null
   }

@@ -97,7 +97,7 @@ export function VoicePanel({ fid }: { fid: (k: string) => string }) {
           checked={s.enabled}
           onChange={(enabled) => set({ enabled })}
         >
-          {s.enabled ? "On" : "Off"}
+          {s.enabled ? "On: updates are spoken" : "Off: nothing is spoken"}
         </Check>
       </Row>
       <Row
@@ -168,7 +168,7 @@ export function VoicePanel({ fid }: { fid: (k: string) => string }) {
       <Row id={fid("vq")} label="Quiet hours" help="No announcements between these times (this computer's clock). The window may run past midnight.">
         <div className="space-y-2">
           <Check id={fid("vq")} disabled={off} checked={s.quietHours.enabled} onChange={(enabled) => set({ quietHours: { ...s.quietHours, enabled } })}>
-            Enabled
+            {s.quietHours.enabled ? "On: quiet between these times" : "Off: announcements at any time"}
           </Check>
           <div className="flex flex-col gap-2 @xs:flex-row @xs:items-center">
             <input
@@ -270,7 +270,7 @@ function DictationSection({ fid }: { fid: (k: string) => string }) {
         <>
           <Row id={fid("de")} label="Dictation" help="Show the mic in message boxes. Press and hold it to talk, or click it to start and stop.">
             <Check id={fid("de")} checked={d.enabled} onChange={(enabled) => setDictation({ enabled })}>
-              {d.enabled ? "On" : "Off"}
+              {d.enabled ? "On: mic in message boxes" : "Off: no mic"}
             </Check>
           </Row>
           <Row id={fid("dl")} label="Language" help="What you'll speak. Defaults to the browser's language.">

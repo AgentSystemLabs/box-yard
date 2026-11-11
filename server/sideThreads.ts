@@ -1067,6 +1067,7 @@ export class SideThreads {
             costUsd: resultCostUsd,
             resumed,
             loginId: login?.id ?? null,
+            harness: launch.cli,
           })
         }
         // A thread doesn't hold its chat's login; it tells the rotation how the login did.

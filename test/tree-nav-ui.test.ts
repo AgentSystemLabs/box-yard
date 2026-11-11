@@ -217,15 +217,15 @@ describe("a task's header on a phone", () => {
     expect(search().get("session")).toBe(OMELETTE.id)
   })
 
-  it("row 1 is ☰, the crumbs and ⓘ; row 2 is the task's icon (its state) and whole title, which opens the details; no 🔍, no menu", async () => {
+  it("row 1 is ☰, the crumbs, its cost and ⓘ; row 2 is the task's icon (its state) and whole title, which opens the details; no 🔍, no menu", async () => {
     render(`/?session=${OMELETTE.id}&stack=${CLASSIC.id}`)
     await settle()
     const nav = header(CLASSIC).querySelector<HTMLElement>("[data-testid=task-nav]")!
     // Nothing here waits on Cody, so ☰ has no count. Pin and Close, after ⓘ, show only beside a chat (CSS).
-    expect(labels(nav).slice(0, 5)).toEqual(["Projects and tasks", "Coordinator", "box-yard Captain", `Up to ${OMELETTE.title}`, "Task details and more actions"])
+    expect(labels(nav).slice(0, 6)).toEqual(["Projects and tasks", "Coordinator", "box-yard Captain", `Up to ${OMELETTE.title}`, "Cost breakdown", "Task details and more actions"])
     // No state word: the task's icon, before its title, names it.
     expect(nav.textContent).not.toContain("Waiting on agent")
-    expect(header(CLASSIC).querySelector("button[aria-label='Search tasks']")).toBeNull()
+    expect(header(CLASSIC).querySelector("button[aria-label='Search and commands']")).toBeNull()
     const title = header(CLASSIC).querySelector<HTMLElement>("[data-testid=task-meta]")!.querySelector<HTMLButtonElement>("[data-testid=task-title]")!
     expect(title.textContent).toContain(CLASSIC.title)
     expect(title.querySelector("[data-testid=task-status-icon]")!.getAttribute("aria-label")).toBe("Waiting on agent")
@@ -282,7 +282,7 @@ describe("a chat's header on a phone", () => {
     expect(head.querySelector("[data-testid=chat-switcher]")).toBeNull()
     // "Box Yard " is for a wider screen (CSS).
     expect(head.querySelector("h1")!.textContent).toMatch(/Coordinator$/)
-    const search = head.querySelector<HTMLButtonElement>("button[aria-label='Search tasks']")!
+    const search = head.querySelector<HTMLButtonElement>("button[aria-label='Search and commands']")!
     click(search)
     expect(document.activeElement).toBe(document.querySelector('input[aria-label="Search Box Yard"]'))
     click(document.querySelector('[role="dialog"] button[aria-label="Close"]')!)
@@ -297,7 +297,7 @@ describe("a chat's header on a phone", () => {
     expect(labels(head).slice(0, 2)).toEqual(["Projects and tasks", "Coordinator"])
     expect(head.querySelector("[data-testid=chat-switcher]")).toBeNull()
     expect(head.querySelector("h1")!.textContent).toBe("box-yard Captain")
-    expect(head.querySelector("button[aria-label='Search tasks']")).not.toBeNull()
+    expect(head.querySelector("button[aria-label='Search and commands']")).not.toBeNull()
     const bot = head.querySelector("[data-testid=agent-icon][data-captain-icon]")!
     expect(bot.getAttribute("class")).toContain("text-(--pc)")
     expect((bot.parentElement as HTMLElement).style.getPropertyValue("--pc")).not.toBe("")
@@ -309,7 +309,7 @@ describe("a chat's header on a phone", () => {
     click(chatHeader().querySelector("button[aria-label^='Projects and tasks']")!)
     const drawer = document.querySelector<HTMLElement>("[role=dialog][aria-label='Projects and tasks']")!
     expect(drawer.querySelector("[data-dismiss=close]")).not.toBeNull()
-    expect(drawer.querySelector("button[aria-label='Search tasks']")).toBeNull()
+    expect(drawer.querySelector("button[aria-label='Search and commands']")).toBeNull()
     expect(drawer.querySelector("input")).toBeNull()
   })
 })

@@ -21,26 +21,27 @@ const NO_TASKS: never[] = []
 const TOUCH = "min-h-11! min-w-11!"
 
 /** The chat's pull requests: an icon in its box's row of buttons (DockComposer), with how many are still open beside it
- * so it says something before it's opened. Sized like the box's other buttons: 44px, 32px with a mouse in a wide box. */
-export function PullRequestsButton() {
+ * so it says something before it's opened. Sized like the box's other buttons: 44px, 32px with a mouse in a wide box.
+ * `projectId` names the project for a chat that isn't the centre's (a Captain's side panel). */
+export function PullRequestsButton({ projectId }: { projectId?: string }) {
   const [open, setOpen] = useState(false)
-  const count = useOpenPullRequests()
-  const label = count ? `Pull requests, ${count} open` : "Pull requests"
+  const count = useOpenPullRequests(projectId)
+  const label = count ? `Pull requests: ${count} open` : "Pull requests"
   return (
     <>
       <Button size="sm" variant="ghost" className="h-11 min-w-11! shrink-0 gap-1.5 px-2.5! text-zinc-400 hover:text-zinc-100 pointer-fine:@min-[32rem]/composer:h-8 pointer-fine:@min-[32rem]/composer:min-w-8! pointer-fine:@min-[32rem]/composer:px-2!" aria-label={label} title={label} data-testid="pull-requests-button" onClick={(e) => { e.currentTarget.focus(); setOpen(true) }}>
         <GitPullRequest className="h-4 w-4" aria-hidden />
         {count > 0 && <span aria-hidden className="text-xs font-medium tabular-nums">{count}</span>}
       </Button>
-      {open && <PullRequestsDialog onClose={() => setOpen(false)} />}
+      {open && <PullRequestsDialog projectId={projectId} onClose={() => setOpen(false)} />}
     </>
   )
 }
 
 /** The same as a line of the composer's More menu, for a box too narrow to show it on the row. */
-export function PullRequestsMenuItem({ className }: { className?: string }) {
+export function PullRequestsMenuItem({ className, projectId }: { className?: string; projectId?: string }) {
   const [open, setOpen] = useState(false)
-  const count = useOpenPullRequests()
+  const count = useOpenPullRequests(projectId)
   return (
     <>
       <ComposerMenuItem
@@ -54,21 +55,23 @@ export function PullRequestsMenuItem({ className }: { className?: string }) {
           setOpen(true)
         }}
       />
-      {open && <PullRequestsDialog onClose={() => setOpen(false)} />}
+      {open && <PullRequestsDialog projectId={projectId} onClose={() => setOpen(false)} />}
     </>
   )
 }
 
 /** The chat's open PRs: the picked Captain's project, or every project for the Coordinator. */
-function useOpenPullRequests(): number {
-  const projectId = useChatProjectFilter()
+function useOpenPullRequests(project?: string): number {
+  const picked = useChatProjectFilter()
+  const projectId = project ?? picked
   // Only the count: a task update that opens or closes no PR doesn't re-render the button.
   const select = useCallback((list: Task[]) => taskPullRequests(list, projectId).filter((pr) => !isPrHistory(pr)).length, [projectId])
   return useQuery({ queryKey: keys.tasks, queryFn: fetchTasks, select }).data ?? 0
 }
 
-export function PullRequestsDialog({ onClose }: { onClose: () => void }) {
-  const projectId = useChatProjectFilter()
+export function PullRequestsDialog({ onClose, projectId: project }: { onClose: () => void; projectId?: string }) {
+  const picked = useChatProjectFilter()
+  const projectId = project ?? picked
   const tasks = useTasks()
   const projects = useProjects()
   const prs = useMemo(() => taskPullRequests(tasks.data ?? NO_TASKS, projectId), [tasks.data, projectId])

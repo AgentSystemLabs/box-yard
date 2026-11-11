@@ -10,8 +10,12 @@ import {
   keepSelection,
   revealScroll,
   rowMeta,
+  rowPath,
+  setTreeFolds,
   sidebarGroups,
   sidebarSelection,
+  toggleSidebarFold,
+  unfoldRowPath,
   withFold,
   type SelectionInput,
 } from "../web/src/lib/sidebar.js"
@@ -99,12 +103,13 @@ describe("sidebarGroups", () => {
 
 describe("rowMeta", () => {
   it("says what Cody would ask about first", () => {
-    expect(rowMeta(task("a", YARD.id, "needs_input"))).toBe("asks")
+    // State words are gone: the row's icon says the state, so only a PR shows here.
+    expect(rowMeta(task("a", YARD.id, "needs_input"))).toBe("")
     expect(rowMeta(task("a", YARD.id, "failed"))).toBe("")
-    expect(rowMeta(task("a", YARD.id, "queued"))).toBe("queued")
+    expect(rowMeta(task("a", YARD.id, "queued"))).toBe("")
     expect(rowMeta(task("a", YARD.id, "pr_ready", { prUrl: "https://github.com/o/r/pull/19" }))).toBe("#19")
     expect(rowMeta(task("a", YARD.id, "done", { prUrl: "https://github.com/o/r/pull/19", prMergedAt: NOW }))).toBe("merged #19")
-    expect(rowMeta(task("a", YARD.id, "done"))).toBe("done")
+    expect(rowMeta(task("a", YARD.id, "done"))).toBe("")
     expect(rowMeta(task("a", YARD.id, "working", { lastActiveAt: NOW - 12 * 60_000 }))).toBe("")
     expect(rowMeta(task("a", YARD.id, "idle", { lastActiveAt: NOW - 12 * 60_000 }))).toBe("")
     expect(rowMeta(task("a", YARD.id, "idle", { prUrl: "https://github.com/o/r/pull/7" }))).toBe("#7")
@@ -209,6 +214,32 @@ describe("revealScroll", () => {
   it("a group taller than the list starts at its head", () => {
     expect(revealScroll(list, { top: 300, bottom: 900 })).toBe(200)
     expect(revealScroll(list, { top: -300, bottom: 600 })).toBe(-400)
+  })
+})
+
+describe("rowPath and unfoldRowPath: what hides the row of a task a link opened", () => {
+  const top = task("top", YARD.id, "waiting")
+  const mid = task("mid", YARD.id, "waiting", { parentTaskId: "top" })
+  const leaf = task("leaf", YARD.id, "working", { parentTaskId: "mid" })
+  const solo = task("solo", SITE.id, "waiting")
+  const { shown } = sidebarGroups([YARD, SITE], [top, mid, leaf, solo, task("kid", SITE.id, "working", { parentTaskId: "solo" })], {}, opts)
+
+  it("finds a row's project and the tasks it nests under, outermost first; none for a task no project lists", () => {
+    expect(rowPath(shown, "leaf")).toEqual({ project: YARD.id, parents: ["top", "mid"] })
+    expect(rowPath(shown, "top")).toEqual({ project: YARD.id, parents: [] })
+    expect(rowPath(shown, "kid")).toEqual({ project: SITE.id, parents: ["solo"] })
+    expect(rowPath(shown, "gone")).toBeNull()
+  })
+
+  it("unfolds the project and the trees above the row, nothing else, and says whether anything was folded", () => {
+    setTreeFolds({ top: true, mid: true, solo: true })
+    toggleSidebarFold(YARD.id)
+    expect(unfoldRowPath({ project: YARD.id, parents: ["top", "mid"] })).toBe(true)
+    expect(unfoldRowPath({ project: YARD.id, parents: ["top", "mid"] })).toBe(false)
+    // The other project's tree is as it was.
+    expect(unfoldRowPath({ project: SITE.id, parents: ["solo"] })).toBe(true)
+    expect(unfoldRowPath({ project: SITE.id, parents: ["solo"] })).toBe(false)
+    setTreeFolds({})
   })
 })
 
