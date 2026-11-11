@@ -349,6 +349,8 @@ async function runTurn() {
     modelUsage: attempt.result?.modelUsage ?? null,
     // Cursor names the model it ran (its label); Claude's and Codex's come from task_turns.
     ...(cursor && attempt.result?.model ? { model: attempt.result.model } : {}),
+    // The CLI doesn't know the turn's model, so the turn was stopped (runClaude): the server says what to do.
+    ...(attempt.unrecognizedModel && !ok ? { unrecognizedModel: attempt.unrecognizedModel } : {}),
     error: ok ? null : clip(attempt.errorText || attempt.result?.result || `${codex ? "codex" : cursor ? "cursor-agent" : opencode ? "opencode" : "claude"} exited with code ${attempt.exitCode}`, 2000),
     sleptMs: Math.max(0, Math.round(Date.now() - clocks.wall - (performance.now() - clocks.mono))),
     // Where the turn's time went (shared/turnTimings.ts), on the box's clock: the server adds its side.
@@ -699,9 +701,10 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     const isolate = task.isolateConfig !== false
     if (isolate) fs.mkdirSync(claudeConfigDir, { recursive: true })
 
+    const env = claudeEnv()
     const child = spawn(task.claudeBin || "claude", [...(task.claudeArgs ?? []), ...args], {
       cwd: workDir,
-      env: claudeEnv(),
+      env,
       stdio: ["pipe", "pipe", "pipe"],
     })
 
@@ -710,6 +713,10 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     let usage = null
     let stderr = ""
     let buf = ""
+    // The model this CLI said it doesn't recognize, once the turn is being stopped for it (unrecognizedModelIn).
+    let unknownModel = null
+    let unknownModelKill = null
+    const watchModel = model && !OWN_WINDOW_ENV.some((k) => env[k]) ? model : null
     let pending = Promise.resolve()
     const queue = (fn) => (pending = pending.then(fn).catch((e) => process.stderr.write(`${e.stack}\n`)))
     const steers = steerable ? steerInbox(child, turn.turnId, queue) : null
@@ -743,11 +750,23 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     })
     child.stderr.on("data", (chunk) => {
       stderr = (stderr + chunk.toString("utf8")).slice(-8000)
+      if (!watchModel || unknownModel || stopping) return
+      unknownModel = unrecognizedModelIn(stderr, watchModel)
+      if (!unknownModel) return
+      try {
+        child.kill("SIGTERM")
+      } catch {}
+      unknownModelKill = setTimeout(() => {
+        try {
+          child.kill("SIGKILL")
+        } catch {}
+      }, 5000)
     })
     child.on("error", (err) => {
       stderr += `\n${err.message}`
     })
     child.on("close", (code, signal) => {
+      clearTimeout(unknownModelKill)
       steers?.close()
       if (buf.trim()) {
         try {
@@ -764,6 +783,12 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
         // Killed by a signal: 128 + its number, as a shell says it (137 for SIGKILL, what a box's out-of-memory killer sends).
         const killed = code === null && signal ? `claude was killed (${signal})` : ""
         const exitCode = code ?? (signal ? 128 + (os.constants.signals[signal] ?? 0) : 1)
+        if (unknownModel && !stopping) {
+          const cliVersion = claudeCliVersion(env)
+          const errorText = `Claude Code${cliVersion ? ` ${cliVersion}` : ""} doesn't recognize the model ${unknownModel}: it would run it in a 200k-token window and thrash on auto-compact, so Box Yard stopped the turn. Update Claude Code on this runner, or pick a model it knows.`
+          resolve({ exitCode: exitCode || 1, startedAt, result: null, usage, timing: turnTimingOf(clock, false), errorText, unrecognizedModel: { model: unknownModel, cliVersion } })
+          return
+        }
         const timing = turnTimingOf(clock, exitCode === 0 && !result?.is_error)
         resolve({ exitCode, startedAt, result, usage, timing, errorText: [stderr.trim(), result?.is_error ? result.result : "", killed].filter(Boolean).join("\n") })
       })
@@ -773,6 +798,45 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     if (steerable) child.stdin.write(userLine(prompt))
     else child.stdin.end(prompt)
   })
+}
+
+// Unknown-model watch. A CLI that doesn't know its --model still runs it, in the 200k-token window it assumes for any
+// unknown model, and says so on stderr: "[claude-code:unrecognized_model] {"model":…}" at its first request, and from
+// newer CLIs "Claude Code doesn't recognize the model "…"" at start. A model with a larger window (Fable 5.2: 1M) then
+// auto-compacts far too early and the turn ends in "Autocompact is thrashing", so the turn stops at that line instead,
+// and the server says what to do (shared/claudeCli.ts).
+
+/** A model name without "[1m]" or a date suffix, as the CLI's line and --model may each have it. */
+const bareModel = (m) => String(m ?? "").trim().toLowerCase().replace(/\[[^\]]*\]$/, "").replace(/-\d{8}$/, "")
+
+/** The model the CLI's stderr says it doesn't recognize, when it is this turn's own (a subagent may run another). */
+function unrecognizedModelIn(stderr, model) {
+  const named = [...stderr.matchAll(/\[claude-code:unrecognized_model\][ \t]*(\{[^\n]*\})/g)].map((m) => {
+    try {
+      return JSON.parse(m[1]).model
+    } catch {
+      return null
+    }
+  })
+  for (const m of stderr.matchAll(/doesn't recognize the model "([^"\n]+)"/g)) named.push(m[1])
+  return named.find((n) => typeof n === "string" && bareModel(n) === bareModel(model)) ?? null
+}
+
+/**
+ * Env that makes the window the owner's own business: a gateway or another cloud names its own models, or the window
+ * is set by hand. The CLI's line is then expected, and the turn goes on.
+ */
+const OWN_WINDOW_ENV = ["ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"]
+// end unknown-model watch
+
+/** "2.1.293" from this task's `claude --version`, or null (a wrapper, a CLI that doesn't answer). */
+function claudeCliVersion(env) {
+  try {
+    const res = spawnSync(task.claudeBin || "claude", [...(task.claudeArgs ?? []), "--version"], { env, encoding: "utf8", timeout: 10_000 })
+    return /(?:^|\n)\s*(\d+\.\d+\.\d+)\s*\(Claude Code\)/.exec(res.stdout ?? "")?.[1] ?? null
+  } catch {
+    return null
+  }
 }
 
 /** A stream-json user message for the CLI's stdin. */
