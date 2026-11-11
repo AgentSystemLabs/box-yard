@@ -166,6 +166,26 @@ export function lineCount(text: string): number {
 }
 
 /** The text's lines, as many as lineCount says. */
+/** Tab stops in the monospace view, in columns: the stylesheet's `tab-size` (Tailwind's preflight sets 4). */
+const TAB_COLUMNS = 4
+
+/**
+ * A line's leading whitespace in columns, up to `max`: how far its later rows hang when it wraps, so nested code keeps
+ * its shape. A line with a tab in it hangs at a tab stop: the browser counts stops from where the rows hang, so
+ * anywhere else would move the line's columns.
+ */
+export function hangingIndent(line: string, max = 8): number {
+  let n = 0
+  for (let i = 0; i < line.length; i++) {
+    const c = line.charCodeAt(i)
+    if (c === 32) n++
+    else if (c === 9) n += TAB_COLUMNS - (n % TAB_COLUMNS)
+    else break
+  }
+  n = Math.min(n, max)
+  return line.includes("\t") ? n - (n % TAB_COLUMNS) : n
+}
+
 export function splitLines(text: string): string[] {
   const lines = text.split("\n")
   if (lines.length > 1 && lines.at(-1) === "") lines.pop()

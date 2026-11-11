@@ -1,15 +1,16 @@
 // The file preview modal: images in a lightbox, markdown rendered, HTML and PDF in iframes, text and code with line
 // numbers (JSON pretty-printed, CSV as a table), video and audio in native players. Mounted once as <FilePreviewHost>;
 // links open it through <FileLink> and lib/preview.ts.
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
 import { useSearchParams } from "wouter"
-import { Check, ChevronLeft, ChevronRight, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, RotateCw, WrapText, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDownToLine, ArrowUpToLine, Check, ChevronLeft, ChevronRight, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, RotateCw, WrapText, ZoomIn, ZoomOut } from "lucide-react"
 import { useArtifacts } from "../lib/queries"
 import {
   CSV_ROW_LIMIT,
   LINE_ROWS_MAX,
   TEXT_PREVIEW_MAX,
   fileNameOf,
+  hangingIndent,
   isTextKind,
   lineCount,
   lineNumbers,
@@ -96,10 +97,19 @@ const TALL: PreviewKind[] = ["image", "html", "pdf"]
 type Wrap = boolean | null
 
 /**
- * A text file's contents once they load, for Copy contents. `long`: with more lines than get a row each
- * (LINE_ROWS_MAX), so it doesn't wrap unless asked to. "failed": there is no text, so nothing to wrap or copy.
+ * A text file's contents once they load, for Copy contents, and how many `lines` its monospace view has. "failed":
+ * there is no text, so nothing to wrap or copy.
  */
-type TextFile = { text: string; long: boolean } | "loading" | "failed"
+type TextFile = { text: string; lines: number } | "loading" | "failed"
+
+/** Text with more lines than this (a log) gets Jump to end. */
+const JUMP_MIN_LINES = 200
+
+/** The text's scroller, so the header can jump in it, and whether it is scrolled past its first screen. */
+type Scroll = { box: RefObject<HTMLDivElement | null>; onPast: (past: boolean) => void }
+
+/** In the header only where it is wide (42rem); narrower, the same action is in the header's ⋯. */
+const WIDE_ONLY = "@max-2xl/preview:hidden"
 
 /** What Copy link or Copy contents came to, shown for a moment. */
 type Flash = { what: "link" | "contents"; ok: boolean }
@@ -127,7 +137,14 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const [wrap, setWrap] = useState<Wrap>(null)
   const [file, setFile] = useState<TextFile>("loading")
   const text = typeof file === "object" ? file.text : null
+  const lines = typeof file === "object" ? file.lines : 0
   const failed = file === "failed"
+  // The file that turned out to be deleted (its URL): nothing can be done with it but copying its link.
+  const [goneUrl, setGoneUrl] = useState<string | null>(null)
+  const gone = goneUrl === item.url
+  const box = useRef<HTMLDivElement>(null)
+  const [past, setPast] = useState(false)
+  const scroll = useMemo<Scroll>(() => ({ box, onPast: setPast }), [])
   // An image's own size once it loads, with its URL: the last image's must never show under the next one's name.
   const [pixels, setPixels] = useState<(Size & { url: string }) | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
@@ -172,10 +189,13 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const hasRaw = !failed && (kind === "markdown" || kind === "json" || kind === "csv")
   /** Lines of monospace text are showing (CodeView), so Wrap lines applies. */
   const code = !failed && (kind === "text" || kind === "json" || (raw && hasRaw))
-  // With no choice made yet, lines wrap where the frame is narrow (unless the file is long): each layout's own
-  // control says so.
+  // With no choice made yet, lines wrap where the frame is narrow (unless the file has more lines than get a row
+  // each): each layout's own control says so.
   const wrapWide = wrap ?? false
-  const wrapNarrow = wrap ?? !(typeof file === "object" && file.long)
+  const wrapNarrow = wrap ?? lines <= LINE_ROWS_MAX
+  /** A long file (a log): its end is what matters, and then the way back. */
+  const jump = code && lines > JUMP_MIN_LINES
+  const jumpTo = (end: boolean) => box.current?.scrollTo({ top: end ? box.current.scrollHeight : 0, behavior: "instant" })
 
   /** Switches the view, so it names the one it goes to. `bar`: the narrow bar's, which keeps the word only while it fits. */
   const rawToggle = (bar: boolean) =>
@@ -185,21 +205,29 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
         <span className={cx(bar && "@max-[22rem]/preview:hidden")}>{raw ? (kind === "csv" ? "Table" : kind === "json" ? "Formatted" : "Rendered") : "Raw"}</span>
       </ToolButton>
     )
-  const zoom = image && (
+  const zoom = image && !gone && (
     <ToolButton label={zoomed ? "Fit to screen (Z)" : "Zoom in (Z)"} active={zoomed} onClick={() => toggleZoom.current?.()}>
       {zoomed ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
     </ToolButton>
   )
-  const download = (
-    <a href={item.url} download={name} className={TOOL} title="Download" aria-label="Download">
-      <Download className="h-4 w-4" />
-    </a>
-  )
+  /** `bar`: the narrow bar's, an icon like its neighbours; the header's says the word where it is wide. */
+  const download = (bar: boolean) =>
+    !gone && (
+      <a href={item.url} download={name} className={TOOL} title="Download" aria-label="Download">
+        <Download className="h-4 w-4" />
+        {!bar && <span className={WIDE_ONLY}>Download</span>}
+      </a>
+    )
+  const jumps: MenuItem[] = jump
+    ? [{ icon: ArrowDownToLine, label: "Jump to end", run: () => jumpTo(true) }, ...(past ? [{ icon: ArrowUpToLine, label: "Jump to start", run: () => jumpTo(false) }] : [])]
+    : []
+  const copyLink: MenuItem = { icon: LinkIcon, label: "Copy link", run: () => void copy("link") }
   const more: MenuItem[] = [
+    ...jumps,
     ...(code ? [{ icon: WrapText, label: wrapNarrow ? "Don't wrap lines" : "Wrap lines", run: () => setWrap(!wrapNarrow) }] : []),
     ...(text !== null ? [{ icon: Copy, label: "Copy contents", run: () => void copy("contents") }] : []),
-    { icon: ExternalLink, label: "Open in new tab", run: () => void window.open(item.url, "_blank", "noopener") },
-    { icon: LinkIcon, label: "Copy link", run: () => void copy("link") },
+    ...(gone ? [] : [{ icon: ExternalLink, label: "Open in new tab", run: () => void window.open(item.url, "_blank", "noopener") }]),
+    copyLink,
   ]
 
   return (
@@ -223,28 +251,42 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2 @max-[30rem]/preview:hidden">
+          {/* First in the row, so the one that comes and goes moves nothing but the title's edge. */}
+          {jump && past && (
+            <ToolButton label="Jump to start" className={WIDE_ONLY} onClick={() => jumpTo(false)}>
+              <ArrowUpToLine className="h-4 w-4" />
+            </ToolButton>
+          )}
+          {jump && (
+            <ToolButton label="Jump to end" className={WIDE_ONLY} onClick={() => jumpTo(true)}>
+              <ArrowDownToLine className="h-4 w-4" />
+            </ToolButton>
+          )}
           {rawToggle(false)}
-          {/* Worded where there's room: beside Copy link, two bare copy icons would be a guess. */}
+          {/* Worded from 32rem: a bare Copy would be a guess at what it copies. */}
           {code && (
             <ToolButton label="Wrap lines" title={wrapWide ? "Don't wrap lines" : "Wrap lines"} active={wrapWide} onClick={() => setWrap(!wrapWide)}>
               <WrapText className="h-4 w-4" />
-              <span className="@max-2xl/preview:hidden">Wrap</span>
+              <span className="@max-lg/preview:hidden">Wrap</span>
             </ToolButton>
           )}
           {zoom}
           {isTextKind(kind) && !failed && (
             <ToolButton label={copied("contents") ? "Copied" : "Copy contents"} disabled={text === null} onClick={() => void copy("contents")}>
               {copied("contents") ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
-              <span className="@max-2xl/preview:hidden">Copy</span>
+              <span className="@max-lg/preview:hidden">Copy</span>
             </ToolButton>
           )}
-          <NewTabLink href={item.url} mark={false} className={TOOL} title="Open in new tab" aria-label="Open in new tab">
-            <ExternalLink className="h-4 w-4" />
-          </NewTabLink>
-          {download}
-          <ToolButton label={copied("link") ? "Copied" : "Copy link"} onClick={() => void copy("link")}>
+          {!gone && (
+            <NewTabLink href={item.url} mark={false} className={TOOL} title="Open in new tab" aria-label="Open in new tab">
+              <ExternalLink className="h-4 w-4" />
+            </NewTabLink>
+          )}
+          {download(false)}
+          <ToolButton label={copied("link") ? "Copied" : "Copy link"} className={WIDE_ONLY} onClick={() => void copy("link")}>
             {copied("link") ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className="h-4 w-4" />}
           </ToolButton>
+          <MoreActions items={[...jumps, copyLink]} className="@2xl/preview:hidden" />
         </div>
         <DismissButton kind="close" onClick={closePreview} />
       </header>
@@ -260,6 +302,8 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
         onZoom={setZoomed}
         onPixels={setPixels}
         onText={setFile}
+        onGone={setGoneUrl}
+        scroll={scroll}
         onStep={position ? stepPreview : undefined}
       />
       {/* Seen and announced either way, just over the bar: a toast would sit under this dialog. */}
@@ -289,7 +333,7 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
         <div className="ml-auto flex items-center gap-1 @[30rem]/preview:hidden">
           {rawToggle(true)}
           {zoom}
-          {download}
+          {download(true)}
           <MoreActions items={more} />
         </div>
       </footer>
@@ -302,7 +346,7 @@ const TOOL =
   "relative inline-flex min-h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-md p-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 
 /** `active` makes it a toggle (aria-pressed); `title` is its tooltip when that differs from its name. */
-function ToolButton({ label, title = label, active, disabled, onClick, children }: { label: string; title?: string; active?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {
+function ToolButton({ label, title = label, active, disabled, className, onClick, children }: { label: string; title?: string; active?: boolean; disabled?: boolean; className?: string; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -311,15 +355,15 @@ function ToolButton({ label, title = label, active, disabled, onClick, children 
       title={title}
       aria-label={label}
       aria-pressed={active}
-      className={cx(TOOL, active && "bg-zinc-800 text-zinc-100", "disabled:text-zinc-700 disabled:hover:bg-transparent")}
+      className={cx(TOOL, active && "bg-zinc-800 text-zinc-100", "disabled:text-zinc-700 disabled:hover:bg-transparent", className)}
     >
       {children}
     </button>
   )
 }
 
-/** The narrow bar's ⋯: the actions that don't fit it, as a menu over the dialog. */
-function MoreActions({ items }: { items: MenuItem[] }) {
+/** A bar's ⋯: the actions that don't fit it, as a menu over the dialog. */
+function MoreActions({ items, className }: { items: MenuItem[]; className?: string }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
   return (
@@ -332,7 +376,7 @@ function MoreActions({ items }: { items: MenuItem[] }) {
         aria-expanded={open}
         aria-label="More actions"
         title="More actions"
-        className={cx(TOOL, open && "bg-zinc-800 text-zinc-100")}
+        className={cx(TOOL, open && "bg-zinc-800 text-zinc-100", className)}
       >
         <MoreHorizontal className="h-4 w-4" />
       </button>
@@ -375,13 +419,14 @@ const PROBLEM_ACTION =
 
 /**
  * A file that can't be shown, said to a screen reader as it appears, with what can still be done.
- * `onRetry`: loading it failed, so loading it again may work. `url`: the browser may still open it.
+ * `onRetry`: loading it failed, so loading it again may work. `url`: the browser may still open it. A deleted file
+ * gets neither. `dark`: on the image stage, which is dark in both themes, so the text is light in both.
  */
-function Problem({ message, url, onRetry }: { message: string; url?: string; onRetry?: () => void }) {
+function Problem({ message, url, onRetry, dark }: { message: string; url?: string; onRetry?: () => void; dark?: boolean }) {
   return (
-    <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center text-sm text-zinc-400">
-      <FileWarning className="h-8 w-8 text-zinc-600" />
-      <p>{message}</p>
+    <div className={cx("flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center text-sm", dark ? "text-[#d4d4d8]" : "text-zinc-400")}>
+      <FileWarning className={cx("h-8 w-8", dark ? "text-[#a1a1aa]" : "text-zinc-600")} />
+      <p role="status">{message}</p>
       {(onRetry || url) && (
         <div className="flex flex-wrap items-center justify-center gap-2">
           {onRetry && (
@@ -419,6 +464,8 @@ function PreviewBody({
   onZoom,
   onPixels,
   onText,
+  onGone,
+  scroll,
   onStep,
 }: {
   item: PreviewItem
@@ -435,12 +482,15 @@ function PreviewBody({
   onPixels: (size: Size & { url: string }) => void
   /** Told how a text file's loading went, and its contents. */
   onText: (file: TextFile) => void
+  /** Told the URL of a file that turned out to be deleted. */
+  onGone: (url: string) => void
+  scroll: Scroll
   /** Steps through the gallery, when there is one. */
   onStep?: (delta: number) => void
 }) {
   switch (kind) {
     case "image":
-      return <ImageView url={item.url} name={name} toggleRef={toggleZoom} onZoom={onZoom} onPixels={onPixels} onStep={onStep} onClose={closePreview} />
+      return <ImageView url={item.url} name={name} toggleRef={toggleZoom} onZoom={onZoom} onPixels={onPixels} onGone={onGone} onStep={onStep} onClose={closePreview} />
     case "html":
       // No allow-same-origin: the page runs its scripts but can't reach Box Yard's cookies or API.
       return <FrameView url={item.url} name={name} sandbox="allow-scripts" />
@@ -455,7 +505,7 @@ function PreviewBody({
     case "json":
     case "csv":
     case "text":
-      return <TextPreview item={item} kind={kind} raw={raw} wrap={wrap} onText={onText} />
+      return <TextPreview item={item} kind={kind} raw={raw} wrap={wrap} onText={onText} onGone={onGone} scroll={scroll} />
     default:
       return <Problem message="This file type can't be previewed." url={item.url} />
   }
@@ -490,6 +540,7 @@ function ImageView({
   toggleRef,
   onZoom,
   onPixels,
+  onGone,
   onStep,
   onClose,
 }: {
@@ -499,10 +550,31 @@ function ImageView({
   /** Told when the image crosses fit size, for the header button's pressed state. */
   onZoom: (z: boolean) => void
   onPixels: (size: Size & { url: string }) => void
+  onGone: (url: string) => void
   onStep?: (delta: number) => void
   onClose: () => void
 }) {
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading")
+  // "gone": the file was deleted, so trying again can't help.
+  const [status, setStatus] = useState<"loading" | "ready" | "error" | "gone">("loading")
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  /** An <img> doesn't say why it failed: ask the server, as the text preview's fetch does. */
+  const onError = () =>
+    void fetch(url, { method: "HEAD" })
+      .then(
+        (res) => res.status === 404,
+        () => false,
+      )
+      .then((gone) => {
+        if (!mounted.current) return
+        setStatus(gone ? "gone" : "error")
+        if (gone) onGone(url)
+      })
   /** Counts Try again: a new <img> loads the URL again. */
   const [attempt, setAttempt] = useState(0)
   const [view, setView] = useState<View>(FIT)
@@ -689,8 +761,11 @@ function ImageView({
       {status === "loading" && (
         <FileLoading stage />
       )}
-      {status === "error" ? (
+      {status === "gone" ? (
+        <Problem dark message="This file doesn't exist anymore." />
+      ) : status === "error" ? (
         <Problem
+          dark
           message="Couldn't load this image."
           url={url}
           onRetry={() => {
@@ -710,7 +785,7 @@ function ImageView({
             const { naturalWidth: width, naturalHeight: height } = e.currentTarget
             if (width && height) onPixels({ url, width, height })
           }}
-          onError={() => setStatus("error")}
+          onError={onError}
           style={view === FIT ? undefined : { transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
           className={cx("max-h-full max-w-full object-contain select-none", !isZoomed && "cursor-zoom-in", status !== "ready" && "invisible")}
         />
@@ -794,21 +869,41 @@ function useFileText(url: string, size?: number): [TextState, () => void] {
   return [state, () => setAttempt((a) => a + 1)]
 }
 
-function TextPreview({ item, kind, raw, wrap, onText }: { item: PreviewItem; kind: "markdown" | "json" | "csv" | "text"; raw: boolean; wrap: Wrap; onText: (file: TextFile) => void }) {
+function TextPreview({
+  item,
+  kind,
+  raw,
+  wrap,
+  onText,
+  onGone,
+  scroll,
+}: {
+  item: PreviewItem
+  kind: "markdown" | "json" | "csv" | "text"
+  raw: boolean
+  wrap: Wrap
+  onText: (file: TextFile) => void
+  onGone: (url: string) => void
+  scroll: Scroll
+}) {
   const [file, retry] = useFileText(item.url, item.size)
   const text = file.status === "ready" ? file.text : null
   const pretty = useMemo(() => (text !== null && kind === "json" && !raw ? prettyJson(text) : null), [text, kind, raw])
   /** What CodeView shows, when it is what shows. */
-  const lines = pretty ?? text
-  const long = useMemo(() => lines !== null && lineCount(lines) > LINE_ROWS_MAX, [lines])
+  const shown = pretty ?? text
+  const lines = useMemo(() => (shown === null ? 0 : lineCount(shown)), [shown])
   const status = file.status
+  const gone = file.status === "error" && !!file.gone
   useEffect(() => {
-    onText(text !== null ? { text, long } : status === "loading" ? "loading" : "failed")
+    onText(text !== null ? { text, lines } : status === "loading" ? "loading" : "failed")
     return () => onText("loading")
-  }, [text, long, status, onText])
+  }, [text, lines, status, onText])
+  useEffect(() => {
+    if (gone) onGone(item.url)
+  }, [gone, item.url, onGone])
   if (file.status === "loading") return <FileLoading />
   // A file that is gone stays gone; any other failure may have been the network.
-  if (file.status === "error") return <Problem message={file.message} url={item.url} onRetry={file.gone ? undefined : retry} />
+  if (file.status === "error") return file.gone ? <Problem message={file.message} /> : <Problem message={file.message} url={item.url} onRetry={retry} />
   if (file.status === "too-large")
     return <Problem message={`This file is ${formatSize(file.size)}, too big to preview here (the limit is ${formatSize(TEXT_PREVIEW_MAX)}).`} url={item.url} />
   if (text === null) return null
@@ -823,10 +918,10 @@ function TextPreview({ item, kind, raw, wrap, onText }: { item: PreviewItem; kin
     )
   if (!raw && kind === "csv") return <CsvTable text={text} tsv={/\.tsv$/i.test(item.name || item.url)} />
   if (!raw && kind === "json") {
-    if (pretty !== null) return <CodeView text={pretty} wrap={wrap} />
-    return <CodeView text={text} wrap={wrap} note="This isn't valid JSON, so it's shown as is." />
+    if (pretty !== null) return <CodeView text={pretty} wrap={wrap} scroll={scroll} />
+    return <CodeView text={text} wrap={wrap} scroll={scroll} note="This isn't valid JSON, so it's shown as is." />
   }
-  return <CodeView text={text} wrap={wrap} />
+  return <CodeView text={text} wrap={wrap} scroll={scroll} />
 }
 
 // CodeView's classes by Wrap: on, off, and (null) on only where the frame is narrow.
@@ -837,6 +932,9 @@ const CODE_LINE = {
   off: "pr-6 whitespace-pre",
   auto: "pr-4 wrap-anywhere whitespace-pre-wrap @[30rem]/preview:pr-6 @[30rem]/preview:wrap-normal @[30rem]/preview:whitespace-pre",
 }
+// A wrapped line's later rows start under its first character, not under the gutter: --hang is the line's own indent
+// (hangingIndent), taken back from the first row and added to the padding of all of them.
+const CODE_HANG = "pl-[calc(0.75rem+var(--hang,0ch))] [text-indent:calc(var(--hang,0ch)*-1)] @[30rem]/preview:pl-[calc(1rem+var(--hang,0ch))]"
 const CODE_NUMBER = "sticky left-0 border-r border-zinc-900 bg-zinc-950 pr-2 pl-3 text-right text-zinc-600 select-none @[30rem]/preview:pr-3 @[30rem]/preview:pl-4"
 
 /**
@@ -844,25 +942,39 @@ const CODE_NUMBER = "sticky left-0 border-r border-zinc-900 bg-zinc-950 pr-2 pl-
  * its number beside its first row and the rows under it are plainly its own. Over LINE_ROWS_MAX lines it is two text
  * nodes instead, so even a 2 MB log renders quickly: those don't wrap unless asked to, and then without the gutter (its
  * numbers would no longer line up). `wrap` null: wrapped only where the frame is narrow.
+ * `scroll`: where it leaves its scroller for Jump to end, and says when it is scrolled past the first screen.
  */
-const CodeView = memo(function CodeView({ text, note, wrap }: { text: string; note?: string; wrap: Wrap }) {
+const CodeView = memo(function CodeView({ text, note, wrap, scroll }: { text: string; note?: string; wrap: Wrap; scroll: Scroll }) {
   const rows = useMemo(() => (lineCount(text) > LINE_ROWS_MAX ? null : splitLines(text)), [text])
   const mode = wrap === null ? "auto" : wrap ? "on" : "off"
+  const past = useRef(false)
+  // Gone with this view (another file, the rendered form): so is "scrolled past".
+  useEffect(() => () => scroll.onPast(false), [scroll])
   return (
-    <div className="scroll-thin min-h-0 flex-1 overflow-auto bg-zinc-950">
+    <div
+      ref={scroll.box}
+      onScroll={(e) => {
+        const now = e.currentTarget.scrollTop > e.currentTarget.clientHeight
+        if (now !== past.current) scroll.onPast((past.current = now))
+      }}
+      className="scroll-thin min-h-0 flex-1 overflow-auto bg-zinc-950"
+    >
       {note && <div className="border-b border-zinc-900 px-4 py-2 text-xs text-amber-300/80">{note}</div>}
       {rows ? (
         <pre className={cx("grid grid-cols-[auto_minmax(0,1fr)]", CODE, CODE_WIDTH[mode])}>
           {rows.map((line, i) => {
             // The block's padding, on its first and last rows, so the gutter's edge runs its whole height.
             const pad = cx(i === 0 && "pt-3", i === rows.length - 1 && "pb-3")
+            const hang = hangingIndent(line)
             return (
               <Fragment key={i}>
                 <span aria-hidden className={cx(CODE_NUMBER, pad)}>
                   {i + 1}
                 </span>
                 {/* Its newline is the text's own: what a selection copies, and an empty line's height. */}
-                <span className={cx("pl-3 text-zinc-200 @[30rem]/preview:pl-4", CODE_LINE[mode], pad)}>{line + "\n"}</span>
+                <span style={hang ? ({ "--hang": `${hang}ch` } as CSSProperties) : undefined} className={cx("text-zinc-200", CODE_HANG, CODE_LINE[mode], pad)}>
+                  {line + "\n"}
+                </span>
               </Fragment>
             )
           })}
