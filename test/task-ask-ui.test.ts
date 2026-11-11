@@ -8,7 +8,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TaskSession } from "../web/src/components/TaskSession.js"
 import { Modal } from "../web/src/components/Modal.js"
 import { keys } from "../web/src/lib/queries.js"
-import { COORDINATOR_CHAT, closeThread, openThreadId, threadKeys } from "../web/src/lib/threads.js"
+import { COORDINATOR_CHAT, closeThread, openThread, openThreadId, openThreadState, taskSlot, threadKeys } from "../web/src/lib/threads.js"
+import { findQuoteRange } from "../web/src/lib/threadHighlight.js"
 import type { Project, SideThread, SideThreadMessage, Task, TaskMessage } from "../shared/types.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -69,7 +70,8 @@ beforeEach(() => {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null
     calls.push({ url, method, body })
     if (url === "/api/threads") {
-      const t = thread({ id: String(body!.id), busy: true, replies: 1 })
+      const asked = body!.kind === "ask" ? { kind: "ask" as const, projectId: String(body!.projectId), quote: String(body!.quote), parentId: (body!.parentId as string | undefined) ?? null } : {}
+      const t = thread({ id: String(body!.id), busy: true, replies: 1, ...asked })
       const m: SideThreadMessage = { id: String(body!.messageId), threadId: t.id, role: "user", content: String(body!.question), meta: null, createdAt: 6 }
       return new Response(JSON.stringify({ thread: t, message: m }), { status: 201 })
     }
@@ -94,6 +96,9 @@ afterEach(() => {
   qc.clear()
   host.remove()
   closeThread(COORDINATOR_CHAT)
+  closeThread(taskSlot(taskId))
+  window.getSelection()?.removeAllRanges()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -245,5 +250,127 @@ describe("a task's side questions in the task panel", () => {
   it("says an answer is on its way while the box is on the task", () => {
     render([thread({ busy: true })])
     expect(q("task-ask-dot")!.getAttribute("aria-label")).toBe("An answer is on its way")
+  })
+})
+
+describe("highlighted text in a task's transcript", () => {
+  const slot = taskSlot(taskId)
+  const ask = (patch: Partial<SideThread> = {}): SideThread => thread({ id: "thr_ask001", projectId: project.id, kind: "ask", quote: "the opening paragraph", replies: 1, ...patch })
+  /** The task panel, with the questions already asked about its transcript (they are the project Captain's threads). */
+  function renderWith(asks: SideThread[] = [], onClose: () => void = () => {}) {
+    qc.setQueryData(threadKeys.list(project.id), asks)
+    for (const t of asks) qc.setQueryData(threadKeys.messages(t.id), [{ ...answer("It was too long."), threadId: t.id }])
+    render([], [], onClose)
+  }
+  function select(text: string, within: Element = host) {
+    // happy-dom lays nothing out: give the selection a place on screen.
+    vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([new DOMRect(200, 300, 240, 18)] as unknown as DOMRectList)
+    const sel = window.getSelection()!
+    sel.removeAllRanges()
+    sel.addRange(findQuoteRange(within, text)!)
+    act(() => void document.dispatchEvent(new Event("selectionchange")))
+  }
+  const action = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!
+  const sheet = () => q("task-question")
+  const box = () => sheet()!.querySelector("textarea")!
+  const typeIn = (el: HTMLTextAreaElement, text: string) =>
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, text)
+      el.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+  const send = async (el: HTMLTextAreaElement) => {
+    act(() => void el.closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
+    await settle()
+  }
+
+  it("Ask opens a question about the passage over the task, for the project's Captain, with one Back to the task", async () => {
+    renderWith()
+    select("the opening paragraph")
+    expect([...document.querySelectorAll("[data-selection-task-action] button")].map((b) => b.textContent!.trim())).toEqual(["Ask", "Create task", "Ask", "Create task"])
+    tap(action("selection-ask"))
+    // Inside the press: the thread is up and the caret is in its box.
+    expect(sheet()).not.toBeNull()
+    expect(document.activeElement).toBe(box())
+    await settle()
+    expect(sheet()!.querySelector('[data-testid="side-thread-quote"]')!.textContent).toBe("the opening paragraph")
+    expect(sheet()!.querySelector('[data-testid="side-thread-ask-hint"]')!.textContent).toContain("Ask the Captain about the highlighted text. It answers here, and the task isn't interrupted.")
+    // One way out of the level, named for where it goes; the task under it is out of Tab's reach.
+    expect([...sheet()!.querySelectorAll("[data-dismiss]")].map((b) => [b.getAttribute("data-dismiss"), b.getAttribute("aria-label")])).toEqual([["back", "Back to the task"]])
+    expect(q("task-header")!.hasAttribute("inert") || q("task-header")!.closest("[inert]") !== null).toBe(true)
+    // Neither side panel of a chat opened, and nothing is sent until there's a question.
+    expect(openThreadId(COORDINATOR_CHAT)).toBeNull()
+    expect(openThreadId(project.id)).toBeNull()
+    expect(calls).toEqual([])
+
+    typeIn(box(), "Why rewrite it?")
+    await send(box())
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ url: "/api/threads", method: "POST", body: { kind: "ask", projectId: project.id, anchorId: taskId, quote: "the opening paragraph", question: "Why rewrite it?" } })
+    expect(openThreadId(slot)).toBe(calls[0]!.body!.id)
+    expect(sheet()!.textContent).toContain("Why rewrite it?")
+  })
+
+  it("Esc and Back return to the task first, and the question stays as a chip above the box", () => {
+    const onClose = vi.fn()
+    renderWith([ask()], onClose)
+    const chips = () => [...q("task-questions")!.querySelectorAll<HTMLButtonElement>('[data-testid="thread-marker"]')]
+    expect(q("task-questions")!.textContent).toContain("Asked here")
+    expect(chips().map((c) => c.textContent)).toEqual(["“the opening paragraph”· 1 reply"])
+    click(chips()[0]!)
+    expect(openThreadId(slot)).toBe("thr_ask001")
+    expect(sheet()!.textContent).toContain("It was too long.")
+    esc()
+    expect(sheet()).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(host.textContent).toContain("Rewriting the opening paragraph.")
+
+    click(chips()[0]!)
+    click(sheet()!.querySelector('[data-dismiss="back"]')!)
+    expect(sheet()).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    esc()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("a question from inside the thread nests under it, and leads back to it before the task", async () => {
+    renderWith([ask()])
+    act(() => openThread(slot, "thr_ask001"))
+    select("too long", sheet()!.querySelector('[data-testid="side-thread-reply"]')!)
+    click(action("selection-ask"))
+    expect(openThreadState(slot)).toMatchObject({ draft: { kind: "ask", anchorId: taskId, parentId: "thr_ask001", text: "too long" } })
+    expect(sheet()!.querySelector('[data-testid="side-thread-parent"]')!.textContent).toContain("“the opening paragraph”")
+    expect(sheet()!.querySelector('[data-dismiss="back"]')!.getAttribute("aria-label")).toBe("Back to the thread this was asked in")
+    typeIn(box(), "How long?")
+    await send(box())
+    expect(calls[0]).toMatchObject({ url: "/api/threads", body: { kind: "ask", projectId: project.id, anchorId: taskId, parentId: "thr_ask001", quote: "too long" } })
+    // Nested questions are their parent's: the task's own row of chips doesn't grow.
+    esc()
+    expect(openThreadId(slot)).toBe("thr_ask001")
+    expect(sheet()!.querySelector('[data-testid="side-thread-children"]')!.textContent).toContain("“too long”")
+    esc()
+    expect(sheet()).toBeNull()
+    expect(q("task-questions")!.querySelectorAll('[data-testid="thread-marker"]')).toHaveLength(1)
+  })
+
+  it("Create task goes to the project's Captain with the task it was highlighted in, and the reader stays on the task", async () => {
+    renderWith()
+    select("the opening paragraph")
+    click(action("selection-task"))
+    const dialog = document.querySelector('[data-testid="selection-quote"]')!.closest<HTMLElement>('[role="dialog"]')!
+    expect(document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent).toBe("Create task")
+    expect([...dialog.querySelectorAll("button")].map((b) => b.textContent!.trim()).filter(Boolean)).toContain("Send to marketing-site's Captain")
+    const request = dialog.querySelector("textarea")!
+    typeIn(request, "Shorten the second paragraph too")
+    await send(request)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.url).toBe(`/api/projects/${project.id}/captain/messages`)
+    const content = String(calls[0]!.body!.content)
+    expect(content).toContain("request\nShorten the second paragraph too")
+    expect(content).toContain(`- Project: marketing-site (${project.id})`)
+    expect(content).toContain(`- In the transcript of the task: ${task.title} (${taskId})`)
+    expect(content).toContain("## Highlighted text\n> the opening paragraph")
+    // Still on the task, with no thread opened.
+    expect(sheet()).toBeNull()
+    expect(host.textContent).toContain("Rewriting the opening paragraph.")
   })
 })
