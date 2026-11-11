@@ -76,7 +76,7 @@ try {
       }
       const search = page.getByRole("combobox", { name: "Search destinations" })
       await search.fill("uploads")
-      const choice = page.getByRole("option").getByRole("button", { name: /Check example uploads/ })
+      const choice = page.getByRole("option", { name: /Check example uploads/ })
       assert((await choice.boundingBox()).height >= 44)
       if (width === 400 && zoom === 1 && status === "idle") await page.screenshot({ path: `${out}/touch-picker-400.png` })
       await choice.tap()
