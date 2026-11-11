@@ -166,11 +166,10 @@ function fillGhost(el: HTMLElement, item: HTMLElement) {
   copy.append(...[...source.childNodes].map((n) => n.cloneNode(true)))
   for (const n of copy.querySelectorAll(".sr-only")) n.remove()
   for (const n of copy.querySelectorAll("[id]")) n.removeAttribute("id")
-  // Its own box, not the row's indent or width.
+  // Its own box, not the row's indent or width: as wide as its name, which a narrow sidebar may have cut, up to a bound.
   Object.assign(copy.style, { width: "100%", paddingLeft: "0.5rem", paddingRight: "0.75rem" })
   el.replaceChildren(copy)
-  const width = Math.min(Math.max(item.getBoundingClientRect().width, GHOST_MIN), GHOST_MAX)
-  Object.assign(el.style, { display: "block", width: `${width}px` })
+  Object.assign(el.style, { display: "block", width: "max-content", minWidth: `${GHOST_MIN}px`, maxWidth: `min(${GHOST_MAX}px, calc(100vw - 8px))` })
 }
 
 /** Put the row's copy by the pointer at `x`, `y`, kept on screen. */
