@@ -2,6 +2,7 @@
 // the ones the runner and server really write: Claude/Codex CLI results, git and ssh stderr, Box Yard's own wording.
 import { describe, expect, it } from "vitest"
 import { explainFailure, failureHasMore, failureSummary } from "../web/src/lib/failure.js"
+import { claudeCliRefusal, claudeCliUpdateFailed, unrecognizedModelError } from "../shared/claudeCli.js"
 
 const NOW = new Date(2026, 10, 4, 13, 0).getTime()
 const at = (h: number, m = 0, day = 4) => new Date(2026, 10, day, h, m).getTime()
@@ -152,6 +153,29 @@ describe("explainFailure: passing trouble and the rest", () => {
     const f = explainFailure("Interrupted: its Docker container stopped")
     expect(f.kind).toBe("interrupted")
     expect(f.detail).toBe("Its Docker container stopped. It was retried a few times before giving up. Retry once that's sorted.")
+  })
+
+  it("says a runner's Claude Code is too old for the model, and whose it is to update", () => {
+    const FABLE = { model: "claude-fable-5-2", cliVersion: "2.1.293" }
+    // Refused before the turn, on the owner's own machine.
+    expect(explainFailure(`Couldn't start the agent: ${claudeCliRefusal({ ...FABLE, where: "this computer" })}`)).toEqual({
+      kind: "old_cli",
+      title: "Claude Code on this computer is too old for claude-fable-5-2",
+      detail: "It has 2.1.293, and claude-fable-5-2 needs 2.1.321 or later. Update Claude Code there (claude update, or npm install -g @anthropic-ai/claude-code@latest) or pick another model, then retry.",
+    })
+    // A sandbox Box Yard couldn't update.
+    const failed = explainFailure(`Couldn't start the agent: ${claudeCliUpdateFailed({ ...FABLE, where: "the box", why: "npm error code ENOTFOUND" })}`)
+    expect(failed).toMatchObject({ kind: "old_cli", title: "Claude Code on the box is too old for claude-fable-5-2" })
+    expect(failed.detail).toBe("It has 2.1.293, and claude-fable-5-2 needs 2.1.321 or later. Box Yard couldn't update it: npm error code ENOTFOUND. Retry, or pick another model.")
+    // A turn stopped at the CLI's unrecognized-model line: in a sandbox, then on an SSH machine with a model nobody knows.
+    expect(explainFailure(unrecognizedModelError({ ...FABLE, where: "the box", managed: true })).detail).toBe(
+      "It has 2.1.293, and claude-fable-5-2 needs 2.1.321 or later. Box Yard stopped the turn before it could thrash on auto-compact, and updates Claude Code there before the next one: retry.",
+    )
+    expect(explainFailure(unrecognizedModelError({ model: "claude-next-9", cliVersion: null, where: "SSH machine build-1", managed: false }))).toEqual({
+      kind: "old_cli",
+      title: "Claude Code on SSH machine build-1 doesn't know claude-next-9",
+      detail: "Update Claude Code there (claude update, or npm install -g @anthropic-ai/claude-code@latest) or pick another model, then retry. If it's already the latest, the model name is wrong.",
+    })
   })
 
   it("keeps the first line of a start failure it doesn't know", () => {

@@ -65,6 +65,10 @@
 // The Merge PR button's standard message ("Merge your pull request #N") stands in for `gh pr merge` when
 // FAKE_GH_STATE names a file: the worker writes {"state":"MERGED"} there for a test's fake GitHub to read.
 // FAKE_CLAUDE_COMPACT_FAIL=1 makes /compact fail (after the summary was written), FAKE_CLAUDE_BAD_SUMMARY=1 the summary.
+// An old CLI: FAKE_CLAUDE_VERSION=<x.y.z> makes --version answer "<x.y.z> (Claude Code)" like a real one (without it
+// Box Yard can't tell the version and checks nothing). FAKE_CLAUDE_UNKNOWN_MODELS=<id,id> names --model values this
+// CLI doesn't know: like the real one it says so on stderr at its first request, runs on in the small window it
+// assumes, and after FAKE_CLAUDE_THRASH_MS (default 3000) ends in "Autocompact is thrashing", unless it is stopped first.
 // Usage, like the real CLI's result: `usage` counts the main loop's calls of that result only, while modelUsage and
 // total_cost_usd are the session's running totals (saved with it, so a resumed or forked session goes on from them)
 // and also count compaction calls. [autocompact] in a prompt compacts the context at the turn's start (a
@@ -89,7 +93,7 @@ const flag = (name) => {
 }
 
 if (args.includes("--version")) {
-  console.log("0.0.0 (fake claude for Box Yard)")
+  console.log(process.env.FAKE_CLAUDE_VERSION ? `${process.env.FAKE_CLAUDE_VERSION} (Claude Code)` : "0.0.0 (fake claude for Box Yard)")
   process.exit(0)
 }
 
@@ -886,6 +890,13 @@ async function turn(prompt, started) {
   if (loginError) {
     out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: "fake" })
     out({ type: "result", subtype: "success", is_error: true, result: loginError, session_id: session.id })
+    process.exit(1)
+  }
+  if ((process.env.FAKE_CLAUDE_UNKNOWN_MODELS ?? "").split(",").includes(flag("--model") ?? "")) {
+    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: flag("--model") })
+    console.error(`[claude-code:unrecognized_model] ${JSON.stringify({ model: flag("--model"), query_source: "sdk" })}`)
+    await sleep(Number(process.env.FAKE_CLAUDE_THRASH_MS) || 3000)
+    out({ type: "result", subtype: "success", is_error: true, result: "Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window.", session_id: session.id })
     process.exit(1)
   }
   // Like the real CLI, a session exists from its first turn's start: a turn killed halfway can be resumed. Its turns
