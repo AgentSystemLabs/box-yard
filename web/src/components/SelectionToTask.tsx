@@ -6,8 +6,9 @@
 // it opens that chat; "Start it myself…" starts the task directly from the full New task dialog, which shows the quote
 // and takes the instructions.
 //
-// A mouse gets the action as a pill over the selection. A finger gets a bar just above the chat's composer, or under
-// the chat's header while the selection reaches down to where the bar would be: never over the composer.
+// A mouse gets the action as a pill over the selection. A finger gets a bar as wide as its label, centred just above
+// the chat's composer, or under the chat's header when that side is the one clear of the selection: never over the
+// composer.
 import { useEffect, useId, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
 import { MessageSquarePlus, Reply } from "lucide-react"
 import { useQueryClient } from "@tanstack/react-query"
@@ -135,7 +136,7 @@ export function SelectionToTask({
           </div>
           <div
             data-selection-task-action
-            className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-40 flex gap-2 [@media(pointer:fine)]:hidden"
+            className="fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-40 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 [@media(pointer:fine)]:hidden"
             style={selection.bar ?? undefined}
           >
             <button type="button" aria-haspopup={action.popup} onMouseDown={(e) => e.preventDefault()} onClick={action.run} className={BAR}>
@@ -204,7 +205,7 @@ export function SelectionToTask({
 const PILL =
   "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-yard-200 hover:bg-zinc-800 hover:text-yard-100 focus:ring-2 focus:ring-yard-500 focus:outline-none"
 const BAR =
-  "flex min-w-0 flex-1 items-center justify-center gap-2 rounded-2xl border border-yard-400/50 bg-zinc-900/95 px-4 py-3 text-sm font-medium text-yard-100 shadow-2xl shadow-black/50 backdrop-blur"
+  "flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-2xl border border-yard-400/50 bg-zinc-900/95 px-4 py-3 text-sm font-medium text-yard-100 shadow-2xl shadow-black/50 backdrop-blur"
 
 /** The bar's height and the gap around it. */
 const BAR_ROOM = 64
@@ -220,19 +221,26 @@ function composerOf(root: HTMLElement, found: { current: HTMLElement | null }): 
 }
 
 /**
- * Where the phone bar goes: just above the composer, or, while the selection reaches down to there, under the chat's
- * header (the top of what scrolls), below a notch. Never over the composer. Null without a composer on screen: the
- * window's bottom edge then covers nothing.
+ * Where the phone bar goes: just above the composer while the selection ends clear of there, else on the side with
+ * more room clear of it, which is mostly under the chat's header (the top of what scrolls), below a notch. Never over
+ * the composer. Null without a composer on screen: the window's bottom edge then covers nothing.
  */
 function barPlace(root: HTMLElement, found: { current: HTMLElement | null }, range: Range): CSSProperties | null {
   if (window.matchMedia?.("(pointer: fine)").matches) return null
-  const top = composerOf(root, found)?.getBoundingClientRect().top ?? 0
-  if (top <= BAR_ROOM || top > window.innerHeight) return null
-  if (range.getBoundingClientRect().bottom <= top - BAR_ROOM) return { bottom: window.innerHeight - top + 8 }
+  const box = composerOf(root, found)?.getBoundingClientRect()
+  const top = box?.top ?? 0
+  if (!box || top <= BAR_ROOM || top > window.innerHeight) return null
+  // Centred on its chat, which a tablet shows beside others.
+  const left = box.left + box.width / 2
   const node = range.commonAncestorContainer
   const scroller = (node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element))?.closest("[data-scroller]")
-  const under = Math.max(0, Math.round(scroller?.getBoundingClientRect().top ?? 0)) + 8
-  return { top: `max(${under}px, calc(env(safe-area-inset-top) + 0.5rem))`, bottom: "auto" }
+  const head = Math.max(0, Math.round(scroller?.getBoundingClientRect().top ?? 0))
+  const picked = range.getBoundingClientRect()
+  // The room left on each side of the selection, of what shows of it.
+  const below = Math.max(0, top - picked.bottom)
+  const above = Math.max(0, picked.top - head)
+  if (below >= BAR_ROOM || below > above) return { left, bottom: window.innerHeight - top + 8 }
+  return { left, top: `max(${head + 8}px, calc(env(safe-area-inset-top) + 0.5rem))`, bottom: "auto" }
 }
 
 function readSelection(root: HTMLElement | null, composer: { current: HTMLElement | null }): SelectionInfo | null {
