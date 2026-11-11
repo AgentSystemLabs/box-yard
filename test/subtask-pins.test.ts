@@ -78,4 +78,11 @@ describe("spawn_subtasks pins", () => {
     expect(f.reply()).toEqual({ status: "rejected", text: `Sub-task 1 ("Cursor review"): Cursor's effort is part of its model id; omit effort.` })
     expect(check).not.toHaveBeenCalled()
   })
+
+  it("answers with the environment rule first, so a sub-task that can't start there isn't sent to fix its pin", async () => {
+    const f = fixture()
+    await f.spawn([{ title: "Cursor review", prompt: "Review it.", runsOn: "docker", agent: "cursor", effort: "high" }])
+    expect(f.yard.store.subtaskRows(f.parent.id)).toHaveLength(0)
+    expect(f.reply()).toEqual({ status: "rejected", text: expect.stringMatching(/^Subtask environment restriction/) })
+  })
 })

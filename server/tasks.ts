@@ -49,7 +49,7 @@ import { formatTokens, sessionUsageOf } from "./usage.js"
 import { errorMessage, failedStep, isRateLimited } from "./util/retry.js"
 import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
-import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
+import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
 import { AUTO_DONE_FROM, PrTracker, prNumber, restingStatus, type PrChange } from "./prs.js"
 import { PrDetailsSource } from "./prDetails.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
@@ -7967,14 +7967,16 @@ export class TaskManager {
     const problem = spawnProblem({ depth: parent.subtask_depth ?? 0, started: this.store.subtaskRows(parent.id).length, asked: asks.length, limits: this.subtaskLimits() })
     if (problem) return refuse(problem)
     const agentCli = taskAgentCli(parent)
-    const resolved = subtaskPins(asks, { agent: agentCli, model: parent.model, effort: parent.effort }, (id) => this.cursorModels.has(id))
-    if ("problem" in resolved) return refuse(resolved.problem)
-    const { pins } = resolved
     const env = this.store.taskEnv(parent.id)
     let type: ReturnType<TaskEnvironment["forChild"]>
+    let pins: SubtaskPins[]
     try {
       type = this.environment.forChild(this.requireRow(parent.id))
       for (const ask of asks) if (ask.runsOn !== "same") this.environment.runner(type, ask.runsOn, environmentGpu(type) ?? this.gpuCloudFor(parent))
+      // After the environment: where no sub-task may start (RunPod, Vast.ai), that's the answer, not a pin to fix.
+      const resolved = subtaskPins(asks, { agent: agentCli, model: parent.model, effort: parent.effort }, (id) => this.cursorModels.has(id))
+      if ("problem" in resolved) return refuse(resolved.problem)
+      pins = resolved.pins
       // Each runner asked for, once per harness. "same" is its parent's runner, which already runs its parent's harness.
       const checks = new Map<string, { runsOn: SubtaskRunsOn; agentCli: AgentCli }>()
       asks.forEach((a, i) => {
