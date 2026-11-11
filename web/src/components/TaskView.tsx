@@ -8,7 +8,7 @@ import { useTail } from "../lib/tail"
 import { chatDays } from "../lib/chatDays"
 import { ChatHistory, DayBoundary } from "./ChatHistory"
 import { AppLink, Button, Elapsed, LineIcon, Markdown, TAP_AREA, TimeAgo, cx, useRepoScope, warmMarkdown } from "./ui"
-import { StickyScroll, type StickyScrollHandle } from "./StickyScroll"
+import { StickyScroll, useLatestRow, type StickyScrollHandle } from "./StickyScroll"
 import { CaptainAnswerLine, ToCaptainLine } from "./CaptainForward"
 import { PublishedFile } from "./TaskFiles"
 import { PREVIEW_GROUP } from "./FileLink"
@@ -179,30 +179,9 @@ export const TaskThread = memo(function TaskThread({
           {working && <WorkingLine label={working} since={workingSince} tool={tool} steps={stepsSoFar} />}
           {/* At the foot, where the working line was, so it's the last thing above the box however long the thread. */}
           {ask && questions?.length ? (
-            <AskQuestions taskId={id} question={ask} questions={questions} askedAt={asked?.createdAt ?? null} />
+            <AskQuestions taskId={id} question={ask} questions={questions} askedAt={asked?.createdAt ?? null} settled={!!messages.data} />
           ) : ask && (
-            <div role="group" aria-label="The agent asks" data-testid="pending-ask" className={ASK_CARD}>
-              {/* Its first row is as tall as Answer (h-7), and so is the icon's box. A narrow card (a small phone) drops
-                  the time and Answer's icon, so the label is never cut. */}
-              <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" box="h-7!" />
-              <div className="@container/ask min-w-0 flex-1">
-                <div className="flex h-7 min-w-0 items-center gap-2 text-[11px] font-semibold text-amber-400">
-                  <span className="shrink-0">The agent asks</span>
-                  {asked && (
-                    <span className="shrink-0 text-[11px] font-normal text-zinc-400 @max-[15rem]/ask:hidden">
-                      <TimeAgo ts={asked.createdAt} />
-                    </span>
-                  )}
-                  <button type="button" data-testid="pending-ask-answer" onClick={() => focusComposer(id)} className={cx(TAP_AREA, ANSWER_BUTTON)}>
-                    <MessageSquareReply className="h-3.5 w-3.5 @max-[15rem]/ask:hidden" aria-hidden />
-                    Answer
-                  </button>
-                </div>
-                <div className="min-w-0 leading-relaxed wrap-anywhere text-zinc-100 [&>.prose-chat>:first-child]:mt-0!">
-                  <Markdown>{ask}</Markdown>
-                </div>
-              </div>
-            </div>
+            <PendingAsk taskId={id} ask={ask} askedAt={asked?.createdAt ?? null} />
           )}
           <TaskQueue taskId={id} />
         </StickyScroll>
@@ -210,6 +189,36 @@ export const TaskThread = memo(function TaskThread({
     </SelectionToTask>
   )
 })
+
+/** A plain question the task waits on, at its thread's foot: Answer puts the caret in the task's box. */
+function PendingAsk({ taskId, ask, askedAt }: { taskId: string; ask: string; askedAt: number | null }) {
+  // The chat's latest while it's there: a long question read from its top keeps "Jump to latest" off it.
+  const latestRow = useLatestRow()
+  return (
+    <div ref={latestRow} role="group" aria-label="The agent asks" data-testid="pending-ask" className={ASK_CARD}>
+      {/* Its first row is as tall as Answer (h-7), and so is the icon's box. A narrow card (a small phone) drops
+          the time and Answer's icon, so the label is never cut. */}
+      <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" box="h-7!" />
+      <div className="@container/ask min-w-0 flex-1">
+        <div className="flex h-7 min-w-0 items-center gap-2 text-[11px] font-semibold text-amber-400">
+          <span className="shrink-0">The agent asks</span>
+          {askedAt !== null && (
+            <span className="shrink-0 text-[11px] font-normal text-zinc-400 @max-[15rem]/ask:hidden">
+              <TimeAgo ts={askedAt} />
+            </span>
+          )}
+          <button type="button" data-testid="pending-ask-answer" onClick={() => focusComposer(taskId)} className={cx(TAP_AREA, ANSWER_BUTTON)}>
+            <MessageSquareReply className="h-3.5 w-3.5 @max-[15rem]/ask:hidden" aria-hidden />
+            Answer
+          </button>
+        </div>
+        <div className="min-w-0 leading-relaxed wrap-anywhere text-zinc-100 [&>.prose-chat>:first-child]:mt-0!">
+          <Markdown>{ask}</Markdown>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /** The ask card's Answer: 28px drawn, 44px to a finger (TAP_AREA). It puts the caret in the task's box. */
 const ANSWER_BUTTON =

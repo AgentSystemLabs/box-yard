@@ -203,3 +203,150 @@ describe("several questions in the ask card", () => {
     expect($("[data-testid=pending-ask]")!.textContent).toContain("Blue or green?")
   })
 })
+
+// A phone's chat can be shorter than the card. happy-dom has no layout, so the chat is VIEW tall and the card sits
+// where `card` says (its top relative to the chat's); the chat's own scrolls (scrollIntoList) are recorded.
+describe("on a phone, where the card can be taller than the chat", () => {
+  const VIEW = 300
+  let card: { top: number; height: number }
+  let frames: Map<number, FrameRequestCallback>
+  let frameId: number
+  let observers: { cb: () => void; targets: Set<Element> }[]
+  let scrolls: number[]
+  const nextFrame = () =>
+    act(() => {
+      const run = [...frames.values()]
+      frames.clear()
+      run.forEach((cb) => cb(0))
+    })
+  const list = () => $("[data-scroller]")!
+  const cardEl = () => $("[data-testid=pending-ask]")!
+  const layout = () => {
+    Object.defineProperty(list(), "clientHeight", { configurable: true, get: () => VIEW })
+    list().scrollTo = ((o: ScrollToOptions) => void scrolls.push(o.top ?? 0)) as typeof Element.prototype.scrollTo
+  }
+  // The browser reports the card's layout (as it does once it's laid out, and on each resize).
+  const resized = () => act(() => observers.filter((o) => o.targets.has(cardEl())).forEach((o) => o.cb()))
+
+  beforeEach(() => {
+    frames = new Map()
+    frameId = 0
+    observers = []
+    scrolls = []
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => (frames.set(++frameId, cb), frameId))
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id))
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        targets = new Set<Element>()
+        constructor(readonly cb: () => void) {
+          observers.push(this)
+        }
+        observe(t: Element) { this.targets.add(t) }
+        unobserve() {}
+        disconnect() { this.targets.clear() }
+      },
+    )
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const r = this.matches("[data-scroller]") ? { top: 0, height: VIEW } : this.matches("[data-testid=pending-ask]") ? card : { top: 0, height: 0 }
+      return { ...r, bottom: r.top + r.height, left: 0, right: 0, width: 0, x: 0, y: r.top, toJSON() {} } as DOMRect
+    })
+  })
+
+  it("moves between questions without scrolling, then shows a card taller than the chat from its top", () => {
+    // Pinned to the chat's bottom: the card's end (Back, Next) shows, its question is a scroll above.
+    card = { top: -150, height: 420 }
+    render()
+    layout()
+    const focus = vi.spyOn(HTMLElement.prototype, "focus")
+    const from = list().scrollTop
+    click($("[data-testid=ask-next]")!)
+    expect(progress()).toBe("2 of 3")
+    // A focused control's own scrolling would move every scrolling box around it, the chat off its bottom included.
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true })
+    expect(document.activeElement).toBe(radios()[0])
+    expect(scrolls).toEqual([from - 150])
+    // Already showing from its top: Back moves nothing.
+    card = { top: 0, height: 420 }
+    click($("[data-testid=ask-back]")!)
+    nextFrame()
+    nextFrame()
+    expect(scrolls).toHaveLength(1)
+  })
+
+  it("leaves a card that fits where it is when it's all in view, and brings the rest of it in when it isn't", () => {
+    card = { top: 20, height: 250 }
+    render()
+    layout()
+    const from = list().scrollTop
+    click($("[data-testid=ask-next]")!)
+    // Checked two frames on, once a chat pinned to its bottom has followed the card's new height.
+    nextFrame()
+    nextFrame()
+    expect(scrolls).toEqual([])
+    card = { top: 100, height: 250 }
+    click($("[data-testid=ask-next]")!)
+    nextFrame()
+    expect(scrolls).toEqual([])
+    nextFrame()
+    expect(scrolls).toEqual([from + 50])
+  })
+
+  it("as it opens at the chat's bottom, shows from its top, once the transcript is in", async () => {
+    card = { top: -150, height: 420 }
+    // The transcript still loading: its messages would count as new ones if the chat left its bottom now.
+    qc.removeQueries({ queryKey: keys.taskMessages(taskId) })
+    render()
+    layout()
+    expect(observers.some((o) => o.targets.has(cardEl()))).toBe(false)
+    qc.setQueryData(keys.taskMessages(taskId), [])
+    await flush()
+    const from = list().scrollTop
+    resized()
+    expect(scrolls).toEqual([])
+    // A frame on, after the chat's own observers followed its bottom.
+    nextFrame()
+    expect(scrolls).toEqual([from - 150])
+    // Once.
+    resized()
+    nextFrame()
+    expect(scrolls).toHaveLength(1)
+  })
+
+  it("never pulls a reader up in older messages back to it, nor moves once they touch the chat", () => {
+    // Its end below the view: someone reading older messages as it came.
+    card = { top: 120, height: 420 }
+    render()
+    layout()
+    resized()
+    nextFrame()
+    expect(scrolls).toEqual([])
+    // A finger on the chat: from here the scrolling is theirs.
+    act(() => void list().dispatchEvent(new Event("pointerdown", { bubbles: true })))
+    card = { top: -150, height: 420 }
+    resized()
+    nextFrame()
+    expect(scrolls).toEqual([])
+  })
+
+  it("Send takes the chat to its end, as the box's own send does, so the answers and the reply follow", async () => {
+    card = { top: -150, height: 420 }
+    render()
+    layout()
+    click($("[data-testid=ask-next]")!)
+    click($("[data-testid=ask-next]")!)
+    // StickyScroll hears it as a send from inside the list (scrollListToEnd).
+    const toEnd = vi.fn()
+    list().addEventListener("boxyard:to-end", toEnd)
+    click($("[data-testid=ask-send]")!)
+    expect(toEnd).toHaveBeenCalledTimes(1)
+    await flush()
+    expect(posts).toHaveLength(1)
+  })
+
+  it("takes 16px text under a finger, so iOS doesn't zoom in on it, and holds Back and Next at the chat's bottom", () => {
+    render()
+    expect($("[data-testid=ask-custom]")!.className).toContain("pointer-coarse:text-base")
+    expect($("[data-testid=ask-nav]")!.className).toContain("[@media(min-height:30rem)]:sticky")
+  })
+})

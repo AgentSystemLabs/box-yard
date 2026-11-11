@@ -7,6 +7,8 @@
 //     node scripts/perf/ask-questions.mjs http://localhost:4470 /tmp/ask-shots
 // It starts one task whose fake agent asks three questions ([asks] in scripts/fake-claude.mjs). Every width checks the
 // 44px targets on touch screens, that nothing scrolls sideways or is cut off, and that the card takes no focus on its own.
+// Then phones, short ones included, dark and light: the question, Back and Next in the chat's view and not covered (no
+// "Jump to latest" over them) as the task opens and after each tap on Next and Back, and 16px text in the answer box.
 import fs from 'node:fs/promises'
 import assert from 'node:assert/strict'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright')
@@ -31,13 +33,14 @@ console.log(`${task.id} asks ${task.questions.length} questions`)
 await fs.mkdir(out, { recursive: true })
 const browser = await chromium.launch({ ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}), args: ['--mute-audio'] })
 const results = []
-const open = async (physical, zoom, touch) => {
+const open = async (physical, zoom, touch, { height = 900, colorScheme = 'dark' } = {}) => {
   const context = await browser.newContext({
-    viewport: { width: Math.round(physical / zoom), height: Math.round(900 / zoom) },
+    viewport: { width: Math.round(physical / zoom), height: Math.round(height / zoom) },
     deviceScaleFactor: zoom * 2,
     isMobile: touch,
     hasTouch: touch,
     reducedMotion: 'reduce',
+    colorScheme,
   })
   await context.addInitScript(() => {
     localStorage.setItem('box-yard:setup-skipped', 'true')
@@ -97,6 +100,59 @@ try {
           await card.getByTestId('ask-custom').fill('A box of its own, in eu-west')
           await page.screenshot({ path: `${out}/ask-${physical}-step2-custom.png` })
         }
+        assert.deepEqual(errors, [])
+      } finally {
+        await context.close()
+      }
+    }
+
+  // Phones, as tall as their screens: a short one's chat is shorter than the card, which then shows from its top.
+  const phone = (page) =>
+    page.evaluate(() => {
+      const card = document.querySelector('[data-testid=pending-ask]')
+      const list = card.closest('[data-scroller]').getBoundingClientRect()
+      const inView = (el) => {
+        const r = el.getBoundingClientRect()
+        return r.top >= list.top - 0.5 && r.bottom <= list.bottom + 0.5
+      }
+      const usable = (el) => {
+        const r = el.getBoundingClientRect()
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+        return inView(el) && (hit === el || el.contains(hit))
+      }
+      return {
+        chat: Math.round(list.height),
+        card: Math.round(card.getBoundingClientRect().height),
+        step: card.querySelector('[data-testid=ask-progress]').textContent,
+        question: inView(card.querySelector('legend')),
+        back: usable(card.querySelector('[data-testid=ask-back]')),
+        next: usable(card.querySelector('[data-testid=ask-next], [data-testid=ask-send]')),
+        jump: document.querySelector('[data-jump]') !== null,
+        inputFont: parseFloat(getComputedStyle(card.querySelector('[data-testid=ask-custom]')).fontSize),
+      }
+    })
+  for (const [name, width, height] of [['320x568', 320, 568], ['375x667', 375, 667], ['390x664', 390, 664], ['412x839', 412, 839]])
+    for (const colorScheme of ['dark', 'light']) {
+      const { context, page, card, errors } = await open(width, 1, true, { height, colorScheme })
+      try {
+        const seen = { open: await phone(page) }
+        await page.screenshot({ path: `${out}/phone-${name}-${colorScheme}-open.png` })
+        await card.getByTestId('ask-choice').nth(1).tap()
+        await card.getByTestId('ask-next').tap()
+        await page.waitForTimeout(300)
+        seen.next = await phone(page)
+        await page.screenshot({ path: `${out}/phone-${name}-${colorScheme}-next.png` })
+        await card.getByTestId('ask-back').tap()
+        await page.waitForTimeout(300)
+        seen.back = await phone(page)
+        results.push({ phone: name, colorScheme, ...seen })
+        console.log(`${name} ${colorScheme}: chat ${seen.open.chat}px, card ${seen.open.card}px`)
+        for (const [when, m] of Object.entries(seen)) {
+          assert(m.question && m.back && m.next, `${name} ${colorScheme}, ${when}: the question, Back and Next in view and uncovered (${JSON.stringify(m)})`)
+          assert(!m.jump, `${name} ${colorScheme}, ${when}: Jump to latest over the card`)
+          assert(m.inputFont >= 16, `${name}: the answer box's text under 16px makes iOS zoom in`)
+        }
+        assert.deepEqual([seen.open.step, seen.next.step, seen.back.step], ['1 of 3', '2 of 3', '1 of 3'])
         assert.deepEqual(errors, [])
       } finally {
         await context.close()
