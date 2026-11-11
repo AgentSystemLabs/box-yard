@@ -17,10 +17,10 @@ export function runsText(cron: string, tz: string, locale?: string): string {
 /** How a schedule repeats in the form's plain-word builder. "custom" is a typed cron. */
 export type RepeatKind = "minutes" | "hours" | "daily" | "weekdays" | "weekly" | "monthly" | "custom"
 
-/** "Every … minutes" and "Every … hours" ask how many in the field beside them. */
+/** "Every few minutes" and "Every few hours" ask how many in the "Every" field beside them. */
 export const REPEAT_KINDS: { kind: RepeatKind; label: string }[] = [
-  { kind: "minutes", label: "Every … minutes" },
-  { kind: "hours", label: "Every … hours" },
+  { kind: "minutes", label: "Every few minutes" },
+  { kind: "hours", label: "Every few hours" },
   { kind: "daily", label: "Every day" },
   { kind: "weekdays", label: "Weekdays" },
   { kind: "weekly", label: "Every week" },
@@ -44,9 +44,9 @@ export interface WhenParts {
   kind: RepeatKind
   hour: number
   minute: number
-  /** One of MINUTE_STEPS. "Every … minutes" runs this often. */
+  /** One of MINUTE_STEPS. "Every few minutes" runs this often. */
   everyMinutes: number
-  /** One of HOUR_STEPS. "Every … hours" runs this often, on the hour. */
+  /** One of HOUR_STEPS. "Every few hours" runs this often, on the hour. */
   everyHours: number
   /** 0-6, Sunday is 0. "Every week" runs on these. */
   weekdays: number[]

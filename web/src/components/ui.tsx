@@ -1077,6 +1077,12 @@ export function Chip({ on, onClick, children, ...props }: { on: boolean; onClick
 export const TOUCH_SIZE = "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 
 /**
+ * TOUCH_SIZE for something typed in or picked from (an input, a textarea, a Select): its text is 16px too wherever the
+ * pointer is coarse. iOS zooms the page into a focused field whose text is smaller, and they go smaller from `sm`.
+ */
+export const TOUCH_FIELD = "pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:text-base"
+
+/**
  * A form dialog's footer line: why its button is off (role=status) and why a save failed (role=alert). Put it last in
  * the Modal's `footer`: on a phone it sits just above the primary button, and from `sm` (the footer's own breakpoint)
  * left of Cancel. `quiet` is a form nobody has touched yet: the reason reads as a hint, not a warning.

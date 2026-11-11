@@ -68,6 +68,13 @@ export function filtersSummary(d: Pick<HookDraft, "trigger" | "includeDrafts" | 
   return skips.length ? `${scope} · skips ${skips.join(" and ")}` : scope
 }
 
+/** The closed "Preview and limits" row in a line: "at most 3 fires per task · fires on its own turns too". */
+export function limitsSummary(d: Pick<HookDraft, "maxFiresPerTask" | "allowSelfTrigger">): string {
+  const max = d.maxFiresPerTask.trim()
+  const fires = max === "1" ? "at most 1 fire per task" : `at most ${max || "…"} fires per task`
+  return d.allowSelfTrigger ? `${fires} · fires on its own turns too` : fires
+}
+
 /** What POST /api/hooks takes (always with filters, from the editor). */
 export type HookInput = HookFields & { filters: HookFilters }
 

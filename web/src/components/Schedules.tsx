@@ -17,7 +17,7 @@ import {
 import { useScrollToHash } from "../lib/hash"
 import { revealChatMessage } from "../lib/reveal"
 import { isValidTimeZone, nextRuns, parseCron } from "../../../shared/cron"
-import { nextRunText, plannedRun, runDayTime, scheduleWhen, zoneTime } from "../lib/scheduleText"
+import { nextRunText, plannedRun, runDayTime, scheduleWhen, whenNamesZone, zoneTime } from "../lib/scheduleText"
 import {
   DEFAULT_WHEN,
   HOUR_STEPS,
@@ -36,7 +36,7 @@ import {
   type WhenParts,
 } from "../lib/scheduleForm"
 import { failureSummary } from "../lib/failure"
-import { Button, Chip, Empty, Field, FieldGroup, FormNote, PrChip, QuietPill, Select, TAP_AREA, TOUCH_SIZE, TimeAgo, cx, inputClass, useMinuteClock } from "./ui"
+import { Button, Chip, Empty, Field, FieldGroup, FormNote, PrChip, QuietPill, Select, TAP_AREA, TOUCH_FIELD, TOUCH_SIZE, TimeAgo, cx, inputClass, useMinuteClock } from "./ui"
 import { QuietSwitch } from "./TaskFilters"
 import { TaskStatusIcon } from "./TaskIcon"
 import { isQuietRun, withoutQuiet } from "../../../shared/quiet"
@@ -45,6 +45,8 @@ import { Modal } from "./Modal"
 import { Helm } from "./ShipIcons"
 import type { CatchUp, Schedule, ScheduleRun, ScheduleTarget, Task } from "../../../shared/types"
 import { confirmDialog } from "../lib/confirm"
+import { toast } from "../lib/toast"
+import { useOpenProjectSettings } from "../lib/projectSettings"
 
 const ACTIVE = new Set(["queued", "starting", "working", "waiting"])
 
@@ -86,6 +88,15 @@ export function SchedulesView() {
   const [params, setParams] = useSearchParams()
   const list = schedules.data ?? []
   useScrollToHash(Boolean(schedules.data))
+  // A schedule that was just created: its card comes into view, and the keyboard lands on its title.
+  const [created, setCreated] = useState<string | null>(null)
+  useEffect(() => {
+    const card = created && document.getElementById(created)
+    if (!card) return
+    setCreated(null)
+    card.scrollIntoView({ block: "center", behavior: "instant" })
+    card.querySelector<HTMLElement>("h3 button")?.focus({ preventScroll: true })
+  }, [created, schedules.data])
 
   // `?new=schedule` (from the command palette) opens the dialog once.
   const wantsNew = params.get("new") === "schedule"
@@ -116,7 +127,15 @@ export function SchedulesView() {
         </Button>
       </header>
 
-      {creating && <ScheduleDialog prefill={creating} onDone={() => setCreating(null)} />}
+      {creating && (
+        <ScheduleDialog
+          prefill={creating}
+          onDone={(id) => {
+            setCreating(null)
+            if (id) setCreated(id)
+          }}
+        />
+      )}
 
       {schedules.isLoading ? null : list.length === 0 ? (
         <Empty icon={<AlarmClock className="h-8 w-8" />} title="No schedules yet">
@@ -186,6 +205,8 @@ const FACT = "pt-px text-xs text-zinc-500"
 const LIVE_CHIP = "inline-flex items-center gap-1.5 rounded-full bg-sky-500/10 px-2 py-0.5 text-xs text-sky-300"
 /** A text-sized control: 44px tall, compact only for a mouse in a wide card. */
 const COMPACT = "min-h-11 pointer-fine:@lg:min-h-0"
+/** A card's action button: 44px to a finger, with a little less padding in a phone-width card so all four share a line. */
+const ACTION = cx(TOUCH_SIZE, "@max-[20rem]:px-1.5")
 
 export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Schedule; expanded?: boolean }) {
   const tasks = useTasks()
@@ -222,26 +243,33 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
   }
   const togglePaused = () => {
     const enabled = !s.enabled
-    update.mutate({ id: s.id, enabled })
-    const now = Date.now()
-    const next = enabled ? plannedRun({ ...s, enabled, nextRunAt: null }, now) : null
-    setFlash({
-      kind: "pause",
-      label: enabled ? "Resumed" : "Paused",
-      said: enabled ? `Resumed. ${next === null ? "No run is planned." : `Next run ${nextRunText(next, s.timezone, now)}.`}` : "Paused. Nothing runs until you resume it.",
-    })
+    // Said once the server has it: a refused change says nothing but its own error.
+    update.mutate(
+      { id: s.id, enabled },
+      {
+        onSuccess: (saved) => {
+          const now = Date.now()
+          const next = plannedRun(saved, now)
+          setFlash({
+            kind: "pause",
+            label: enabled ? "Resumed" : "Paused",
+            said: enabled ? `Resumed. ${next === null ? "No run is planned." : `Next run ${nextRunText(next, s.timezone, now)}.`}` : "Paused. Nothing runs until you resume it.",
+          })
+        },
+      },
+    )
   }
 
   return (
     <div id={s.id} className={cx("@container rounded-xl border bg-zinc-900/40 p-4", live || chatLive ? "border-sky-500/40" : "border-zinc-800/80")}>
-      {/* In a narrow card the title takes the whole line, and its pills go below it. */}
+      {/* In a narrow card the title takes the whole line, and its pills go below it. Next already says "Paused" there. */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h3 className="min-w-0 basis-full font-medium break-words text-zinc-100 @lg:basis-auto">
           <button type="button" title="Edit schedule" onClick={() => setEditing(true)} className={cx(TAP_AREA, "rounded text-left hover:underline")}>
             {s.name}
           </button>
         </h3>
-        {!s.enabled && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 uppercase">Paused</span>}
+        {!s.enabled && <span className="hidden rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 uppercase @lg:inline">Paused</span>}
         {chatLive && <span className={LIVE_CHIP}>{chatLive.status === "queued" ? "Queued in chat" : "Running in chat"}</span>}
         {live && (
           <Link href={`/tasks/${live.id}`} className={cx(TAP_AREA, LIVE_CHIP, "hover:bg-sky-500/20")}>
@@ -256,7 +284,7 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
 
       <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-sm">
         <dt className={FACT}>When</dt>
-        <dd className="text-zinc-200" data-testid="schedule-when">
+        <dd className={s.enabled ? "text-zinc-200" : "text-zinc-400"} data-testid="schedule-when">
           {scheduleWhen(s.cron, s.timezone)}
         </dd>
         <dt className={FACT}>Next</dt>
@@ -277,9 +305,9 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
 
       {live && <LiveTail task={live} />}
 
-      {/* Four buttons don't fit a 320px phone on one line: there Run now takes its own. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button size="sm" variant="subtle" className={cx(TOUCH_SIZE, "@max-[19rem]:basis-full")} loading={run.isPending} onClick={() => void runNow()}>
+      {/* A 360px phone holds all four on one line. On a 320px one Run now takes its own, and Edit is only its icon. */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <Button size="sm" variant="subtle" className={cx(ACTION, "@max-[18.125rem]:basis-full")} loading={run.isPending} onClick={() => void runNow()}>
           {run.isPending ? (
             "Starting…"
           ) : flash?.kind === "run" ? (
@@ -292,12 +320,12 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
             </>
           )}
         </Button>
-        <Button size="sm" variant={s.enabled ? "ghost" : "subtle"} className={TOUCH_SIZE} onClick={togglePaused}>
+        <Button size="sm" variant={s.enabled ? "ghost" : "subtle"} className={ACTION} onClick={togglePaused}>
           {s.enabled ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} {s.enabled ? "Pause" : "Resume"}
         </Button>
-        <Button size="sm" variant="ghost" className={TOUCH_SIZE} title="Edit schedule" aria-label={`Edit ${s.name}`} onClick={() => setEditing(true)}>
+        <Button size="sm" variant="ghost" className={ACTION} title="Edit schedule" aria-label={`Edit ${s.name}`} onClick={() => setEditing(true)}>
           <Pencil className="h-3.5 w-3.5" />
-          <span className="hidden @lg:inline">Edit</span>
+          <span className="hidden @min-[18.125rem]:inline">Edit</span>
         </Button>
         <Button
           size="sm"
@@ -313,9 +341,11 @@ export function ScheduleCard({ schedule: s, expanded = false }: { schedule: Sche
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
-        <span role="status" className="sr-only">
-          {flash?.said}
-        </span>
+        {flash && (
+          <span role="status" className="sr-only">
+            {flash.said}
+          </span>
+        )}
       </div>
 
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx(COMPACT, "mt-1 flex items-center gap-1 rounded-lg text-left text-xs text-zinc-500 hover:text-zinc-300")}>
@@ -352,8 +382,8 @@ function NextRun({ schedule: s }: { schedule: Schedule }) {
   if (!s.enabled) return <span className="text-amber-300/90">Paused</span>
   const at = plannedRun(s, now)
   if (at === null) return <span className="text-zinc-400">Never: no date matches this schedule.</span>
-  // "· in 6d" stays in one piece when the line wraps.
-  const text = nextRunText(at, s.timezone, now)
+  // "· in 6d" stays in one piece when the line wraps. The zone is said once: here only when When's words don't name it.
+  const text = nextRunText(at, s.timezone, now, { zone: !whenNamesZone(s.cron, s.timezone) })
   const cut = text.lastIndexOf(" · ")
   return (
     <span className="text-zinc-200">
@@ -513,13 +543,15 @@ const EVERY = "col-span-full @sm:col-span-1"
 
 /**
  * The schedule form: a new one, or `schedule` to edit. It stays open until the server answers, so a refused save
- * keeps what was typed. Where an existing schedule runs can't change: the form says where instead.
+ * keeps what was typed. Where an existing schedule runs can't change: the form says where instead. `onDone` gets the
+ * id of the schedule it created.
  */
-function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; prefill?: Prefill; onDone: () => void }) {
+function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; prefill?: Prefill; onDone: (created?: string) => void }) {
   const projects = useProjects()
   const settings = useSettings()
   const create = useCreateSchedule()
   const update = useUpdateSchedule()
+  const openProjectSettings = useOpenProjectSettings()
   const now = useMinuteClock()
   const [target, setTarget] = useState<ScheduleTarget>(schedule?.target ?? prefill?.target ?? "project")
   const [project, setProject] = useState(schedule?.projectId ?? prefill?.projectId ?? "")
@@ -606,7 +638,14 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
     if (!schedule) {
       create.mutate(
         { id: newClientId("sch"), target, projectId: orchestrator ? null : projectId, name: name.trim(), cron, timezone: tz, prompt: prompt.trim(), catchUp, allowOverlap },
-        { onSuccess: onDone },
+        {
+          onSuccess: (created) => {
+            const at = Date.now()
+            const next = plannedRun(created, at)
+            toast.info(`Created "${created.name}"`, next === null ? "No run is planned." : `Next run ${nextRunText(next, created.timezone, at)}`)
+            onDone(created.id)
+          },
+        },
       )
       return
     }
@@ -619,7 +658,12 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
     if (catchUp !== schedule.catchUp) patch.catchUp = catchUp
     if (allowOverlap !== schedule.allowOverlap) patch.allowOverlap = allowOverlap
     if (Object.keys(patch).length === 1) return onDone()
-    update.mutate(patch, { onSuccess: onDone })
+    update.mutate(patch, {
+      onSuccess: (saved) => {
+        toast.info(`Saved "${saved.name}"`)
+        onDone()
+      },
+    })
   }
 
   const every = when.kind === "minutes" || when.kind === "hours"
@@ -636,13 +680,28 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
 
   // Where it runs can't change here. A schedule without a runner of its own follows its project's "Runs on".
   const inProject = `Runs in ${projects.data?.find((p) => p.id === schedule?.projectId)?.name ?? "its project"}`
-  const where = !schedule
-    ? undefined
-    : schedule.target === "orchestrator"
-      ? "Messages the Coordinator"
-      : schedule.runsOn
-        ? `${inProject} · ${RUNNER_LABEL[schedule.runsOn]} (this schedule's own setting)`
-        : `${inProject}. Change where it runs in the project's settings.`
+  // The project's settings open over the panel, so the form closes first: with a question when it holds changes.
+  const toProjectSettings = async (id: string) => {
+    if (dirty && !(await confirmDialog({ title: "Discard unsaved changes?", body: "Your changes to this schedule haven't been saved.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))) return
+    onDone()
+    openProjectSettings(id)
+  }
+  const home = schedule?.projectId
+  const where = !schedule ? undefined : schedule.target === "orchestrator" ? (
+    "Messages the Coordinator"
+  ) : schedule.runsOn ? (
+    `${inProject} · ${RUNNER_LABEL[schedule.runsOn]} (this schedule's own setting)`
+  ) : home ? (
+    <>
+      {inProject}. Change where it runs in{" "}
+      <button type="button" className={cx(TAP_AREA, "rounded-sm text-yard-400 hover:text-yard-300 hover:underline")} onClick={() => void toProjectSettings(home)}>
+        the project's settings
+      </button>
+      .
+    </>
+  ) : (
+    `${inProject}. Change where it runs in the project's settings.`
+  )
 
   return (
     <Modal
@@ -650,11 +709,11 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
       title={schedule ? "Edit schedule" : "New schedule"}
       description={where}
       dirty={dirty}
-      onClose={onDone}
+      onClose={() => onDone()}
       onSubmit={submit}
       footer={
         <>
-          <Button type="button" variant="ghost" className={TOUCH_SIZE} onClick={onDone}>
+          <Button type="button" variant="ghost" className={TOUCH_SIZE} onClick={() => onDone()}>
             Cancel
           </Button>
           <Button type="submit" variant="primary" className={TOUCH_SIZE} disabled={Boolean(reason)} loading={saving} aria-describedby={reason ? reasonId : undefined}>
@@ -684,11 +743,11 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
         )}
         <div className={cx("grid gap-3", !schedule && !orchestrator && "@lg:grid-cols-2")}>
           <Field label="Name">
-            <input autoFocus={!schedule} className={cx(inputClass, TOUCH_SIZE)} value={name} onChange={(e) => setName(e.target.value)} placeholder="Morning issue triage" />
+            <input autoFocus={!schedule} className={cx(inputClass, TOUCH_FIELD)} value={name} onChange={(e) => setName(e.target.value)} placeholder="Morning issue triage" />
           </Field>
           {!schedule && !orchestrator && (
             <Field label="Project">
-              <Select className={cx(TOUCH_SIZE, "w-full")} value={projectId} onChange={(e) => setProject(e.target.value)}>
+              <Select className={cx(TOUCH_FIELD, "w-full")} value={projectId} onChange={(e) => setProject(e.target.value)}>
                 {projects.data?.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -701,12 +760,12 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
 
         {/*
           Repeats and its time share a row from 20rem; a 320px phone keeps one column. The wider fields get a row each
-          until 32rem, and "Every … minutes" needs 24rem before half a row holds its words.
+          until 32rem, and "Every few minutes" needs 24rem before half a row holds its words.
         */}
         <div className="grid gap-3 @xs:grid-cols-2">
           <div className={cx(when.kind === "custom" && WIDE, every && EVERY)}>
             <Field label="Repeats">
-              <Select className={cx(TOUCH_SIZE, "w-full")} value={when.kind} onChange={(e) => setKind(e.target.value as RepeatKind)}>
+              <Select className={cx(TOUCH_FIELD, "w-full")} value={when.kind} onChange={(e) => setKind(e.target.value as RepeatKind)}>
                 {REPEAT_KINDS.map((k) => (
                   <option key={k.kind} value={k.kind}>
                     {k.label}
@@ -717,8 +776,8 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
           </div>
           {when.kind === "minutes" && (
             <div className={EVERY}>
-              <Field label="How often">
-                <Select className={cx(TOUCH_SIZE, "w-full")} value={when.everyMinutes} onChange={(e) => set({ everyMinutes: Number(e.target.value) })}>
+              <Field label="Every">
+                <Select className={cx(TOUCH_FIELD, "w-full")} value={when.everyMinutes} onChange={(e) => set({ everyMinutes: Number(e.target.value) })}>
                   {MINUTE_STEPS.map((n) => (
                     <option key={n} value={n}>
                       {n} minutes
@@ -730,8 +789,8 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
           )}
           {when.kind === "hours" && (
             <div className={EVERY}>
-              <Field label="How often">
-                <Select className={cx(TOUCH_SIZE, "w-full")} value={when.everyHours} onChange={(e) => set({ everyHours: Number(e.target.value) })}>
+              <Field label="Every">
+                <Select className={cx(TOUCH_FIELD, "w-full")} value={when.everyHours} onChange={(e) => set({ everyHours: Number(e.target.value) })}>
                   {HOUR_STEPS.map((n) => (
                     <option key={n} value={n}>
                       {n === 1 ? "1 hour" : `${n} hours`}
@@ -746,7 +805,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
               <input
                 type="time"
                 required
-                className={cx(inputClass, TOUCH_SIZE)}
+                className={cx(inputClass, TOUCH_FIELD)}
                 value={timeValue(when)}
                 onChange={(e) => {
                   const at = timeParts(e.target.value)
@@ -770,7 +829,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
           )}
           {when.kind === "monthly" && (
             <Field label="On day" hint={when.day > 28 ? `Months without a day ${when.day} are skipped.` : undefined}>
-              <Select className={cx(TOUCH_SIZE, "w-full")} value={when.day} onChange={(e) => set({ day: Number(e.target.value) })}>
+              <Select className={cx(TOUCH_FIELD, "w-full")} value={when.day} onChange={(e) => set({ day: Number(e.target.value) })}>
                 {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
                   <option key={day} value={day}>
                     {day}
@@ -783,7 +842,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
             <div className={cx(WIDE, "space-y-1.5")}>
               <Field label="Cron expression" hint="Five fields: minute, hour, day, month, weekday.">
                 <input
-                  className={cx(inputClass, TOUCH_SIZE, "font-mono")}
+                  className={cx(inputClass, TOUCH_FIELD, "font-mono")}
                   value={when.cron}
                   onChange={(e) => set({ cron: e.target.value })}
                   placeholder="0 9 * * 1-5"
@@ -804,7 +863,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
           <div className={cx(WIDE, "space-y-1.5")}>
             <Field label="Time zone">
               <Select
-                className={cx(TOUCH_SIZE, "w-full")}
+                className={cx(TOUCH_FIELD, "w-full")}
                 value={otherZone ? OTHER_ZONE : tz}
                 aria-describedby={zoneError && !otherZone ? zoneErrorId : undefined}
                 onChange={(e) => {
@@ -824,7 +883,7 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
             {otherZone && (
               <>
                 <input
-                  className={cx(inputClass, TOUCH_SIZE)}
+                  className={cx(inputClass, TOUCH_FIELD)}
                   aria-label="Time zone name"
                   value={tz}
                   onChange={(e) => setTimezone(e.target.value)}
@@ -867,12 +926,12 @@ function ScheduleDialog({ schedule, prefill, onDone }: { schedule?: Schedule; pr
               : "Each run is a new task with this prompt, plus a note on how the previous run ended."
           }
         >
-          <textarea className={cx(inputClass, TOUCH_SIZE)} rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Look at issues opened since the last run, label them, and post a summary as an artifact." />
+          <textarea className={cx(inputClass, TOUCH_FIELD)} rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Look at issues opened since the last run, label them, and post a summary as an artifact." />
         </Field>
 
         <div className="grid gap-3 @lg:grid-cols-2 @lg:items-end">
           <Field label="If the server was down">
-            <Select className={cx(TOUCH_SIZE, "w-full")} value={catchUp} onChange={(e) => setCatchUp(e.target.value as CatchUp)}>
+            <Select className={cx(TOUCH_FIELD, "w-full")} value={catchUp} onChange={(e) => setCatchUp(e.target.value as CatchUp)}>
               <option value="once">Run once when it's back</option>
               <option value="skip">Skip the missed runs</option>
             </Select>
