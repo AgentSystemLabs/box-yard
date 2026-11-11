@@ -8,6 +8,7 @@ import { ChevronLeft, X } from "lucide-react"
 import { cx } from "./ui"
 import { bindPanelSwipeBack } from "../lib/panelSwipeBack"
 import { focusSidebar, isChatComposer } from "../lib/sidebarFocus"
+import { useKeyboardInset } from "../lib/keyboardInset"
 
 export const MODAL_SIZES = {
   sm: "sm:max-w-md",
@@ -103,10 +104,11 @@ type ModalProps = {
   label?: string
   /** Unsaved changes: a backdrop click won't close the dialog. Esc and the close button still call onClose. */
   dirty?: boolean
-  /** "top" pins near the top; "sheet" is a mobile drawer; "drawer" sits at the left edge, full height (the sidebar
-   * on a phone); "panel" fills its existing host; the default centers it. None of them animate: they appear and go at
-   * once. */
-  placement?: "center" | "top" | "sheet" | "drawer" | "panel"
+  /** "top" pins near the top; "sheet" is a mobile drawer; "picker" is a sheet on a phone and pinned near the top on a
+   * wider window, so its search field stays put while the list under it changes; "drawer" sits at the left edge, full
+   * height (the sidebar on a phone); "panel" fills its existing host; the default centers it. None of them animate:
+   * they appear and go at once. */
+  placement?: "center" | "top" | "sheet" | "picker" | "drawer" | "panel"
   /** A replaced inline view takes focus without changing the panel's original return target. */
   focusKey?: string
   /** Conversation panels: coarse touch can dismiss the full-screen panel with a right swipe. */
@@ -167,6 +169,8 @@ export function Modal({
   }, [])
   const step = steps.at(-1)
   const inline = placement === "panel"
+  // A picker's search field brings a phone's keyboard up: the sheet sits on the keys, not under them.
+  const keyboard = useKeyboardInset(placement === "picker")
   const modal = () => !inline || !panel.current || panel.current.getBoundingClientRect().width >= (panel.current.closest("aside")?.parentElement?.getBoundingClientRect().width ?? 0)
 
   useEffect(() => {
@@ -227,8 +231,9 @@ export function Modal({
         inline ? "flex h-full min-h-0 flex-col"
           : placement === "drawer" ? "fixed inset-0 z-50 flex items-stretch justify-start bg-black/60"
           : "fixed inset-0 z-50 flex justify-center bg-black/60 backdrop-blur-sm p-[env(safe-area-inset-top)_env(safe-area-inset-right)_env(safe-area-inset-bottom)_env(safe-area-inset-left)] sm:p-4",
-        !inline && placement !== "drawer" && (placement === "top" ? "items-stretch sm:items-start sm:pt-[12vh]" : placement === "sheet" ? "items-end sm:items-center" : "items-stretch sm:items-center"),
+        !inline && placement !== "drawer" && (placement === "top" ? "items-stretch sm:items-start sm:pt-[12vh]" : placement === "picker" ? "items-end sm:items-start sm:pt-[12vh]" : placement === "sheet" ? "items-end sm:items-center" : "items-stretch sm:items-center"),
       )}
+      style={keyboard ? { bottom: keyboard } : undefined}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && !dirty) {
           // Closing restores focus; the backdrop's default mousedown must not blur it again.
@@ -254,7 +259,7 @@ export function Modal({
             : placement === "drawer" ? "h-full max-w-[min(20rem,88vw)] border-r shadow-2xl"
             : "max-h-[100dvh] shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl sm:border",
           !inline && placement !== "drawer" && MODAL_SIZES[size],
-          placement === "sheet" && "max-sm:max-h-[85dvh] max-sm:rounded-t-2xl max-sm:border-t",
+          (placement === "sheet" || placement === "picker") && "max-sm:max-h-[85dvh] max-sm:rounded-t-2xl max-sm:border-t",
           className,
         )}
       >

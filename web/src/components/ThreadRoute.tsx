@@ -53,7 +53,7 @@ export const RouteLine = memo(function RouteLine({ m, chat, thread, answered }: 
   const view = routeView(route, { router: routerName(chat), hasTask: Boolean(thread.taskId), routing: !route && (thread.busy || Boolean(m.meta?.pending)), answered })
   if (!view) return null
   return (
-    <div data-testid="thread-route" data-route={route?.route ?? (thread.busy ? "routing" : "none")} className="-mt-1.5 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[11px] text-zinc-500">
+    <div data-testid="thread-route" data-route={route?.route ?? (thread.busy ? "routing" : "none")} className="-mt-1.5 flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 text-[11px] text-zinc-400">
       <span className="inline-flex min-w-0 items-center gap-1">
         <CornerDownRight className="h-3 w-3 shrink-0" aria-hidden />
         <span className={cx("min-w-0 wrap-anywhere", route?.route === "failed" && "text-red-300")}>{view.label}</span>

@@ -24,6 +24,8 @@ import type { ProjectDocker } from "../shared/docker.js"
 import { buildUsagePeriod, type PeriodBoxInterval, type PeriodClaudeRow } from "./usagePeriod.js"
 import { attributeCompute, buildUsageLedger, isDipBooking, sessionRates, type LedgerClaudeRow, type LedgerInterval, type LedgerPod, type LedgerTurn } from "./usageLedger.js"
 import { usageLedgerCache, type LedgerDay } from "./usageLedgerCache.js"
+import { buildSpend, type SpendRow, type SpendTask } from "./spendBreakdown.js"
+import type { SpendBreakdown } from "../shared/spendBreakdown.js"
 import type { UsageComputeRow, UsageLedger, UsageLlmRow } from "../shared/usageLedger.js"
 import { DAYTONA_RATES } from "../shared/daytona.js"
 import { loginName } from "../shared/agentLogins.js"
@@ -483,7 +485,9 @@ export type ClaudeUsageSource = "task" | "orchestrator" | "captain"
 
 /** SQL filters for the Coordinator and Captain usage lines, so older Captain rows still land on the Captain line. */
 export const COORDINATOR_USAGE_WHERE = "WHERE source = 'orchestrator' AND project_id IS NULL"
-export const CAPTAIN_USAGE_WHERE = "WHERE source = 'captain' OR (source = 'orchestrator' AND project_id IS NOT NULL)"
+/** CAPTAIN_USAGE_WHERE as one bracketed condition, to AND with more (one project's Captain: Store.captainSpend). */
+export const CAPTAIN_USAGE_IS = "(source = 'captain' OR (source = 'orchestrator' AND project_id IS NOT NULL))"
+export const CAPTAIN_USAGE_WHERE = `WHERE ${CAPTAIN_USAGE_IS}`
 
 export interface ClaudeUsageRow {
   id: string
@@ -3095,6 +3099,8 @@ export class Store {
     resumed?: boolean
     /** The login it ran on (server/agentLogins.ts), for usage by login. */
     loginId?: string | null
+    /** The agent CLI that ran it (the cost breakdown names it). */
+    harness?: AgentCli | null
   }) {
     const u = input.usage ?? {}
     const main = tokenUsage(u)
@@ -3110,8 +3116,8 @@ export class Store {
         `INSERT INTO claude_usage
           (id, source, run_kind, task_id, project_id, turn_id, session_id, model, started_at, ended_at, duration_ms,
            input_tokens, cache_creation_input_tokens, cache_read_input_tokens, output_tokens, total_tokens, cost_usd, reported_cost_usd, cost_estimated, raw_usage_json, login_id,
-           reported_usage_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           reported_usage_json, harness)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         newId("cu"),
@@ -3136,6 +3142,7 @@ export class Store {
         JSON.stringify(u),
         input.loginId ?? null,
         reportedTokens ? JSON.stringify(reportedTokens) : null,
+        input.harness ?? null,
       )
     return costUsd
   }
@@ -3476,6 +3483,38 @@ export class Store {
       names: this.ledgerNames(taskIds, boxIds, loginIds),
       rates: ledgerRates(rates),
     })
+  }
+
+  /**
+   * A task's cost breakdown (server/spendBreakdown.ts): its own runs, and apart from them its subtasks' at every level
+   * below it. Null when there's no such task.
+   */
+  taskSpend(taskId: string): SpendBreakdown | null {
+    const tasks = this.db
+      .prepare(
+        `WITH RECURSIVE tree(id, depth) AS (
+           SELECT id, 0 FROM tasks WHERE id = ?
+           UNION ALL SELECT t.id, tree.depth + 1 FROM tasks t JOIN tree ON t.parent_task_id = tree.id WHERE tree.depth < 20
+         )
+         SELECT t.id, t.title, t.agent_cli AS agentCli FROM tree JOIN tasks t ON t.id = tree.id ORDER BY tree.depth, t.created_at`,
+      )
+      .all(taskId) as SpendTask[]
+    if (!tasks.length) return null
+    const rows = readLedgerClaude(this.db.prepare(`${SPEND_SQL} WHERE u.task_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(tasks.map((t) => t.id)))) as SpendRow[]
+    const turns = this.db.prepare("SELECT id, turn_index AS n FROM task_turns WHERE task_id = ?").all(taskId) as { id: string; n: number }[]
+    return buildSpend({ scope: "task", rows, sessionRates: this.dipRates(rows), tasks, turnIndex: new Map(turns.map((t) => [t.id, t.n])) })
+  }
+
+  /** A project's Captain's cost breakdown (server/spendBreakdown.ts): its chat, compactions and side threads. */
+  captainSpend(projectId: string): SpendBreakdown {
+    const rows = readLedgerClaude(this.db.prepare(`${SPEND_SQL} WHERE ${CAPTAIN_USAGE_IS} AND u.project_id = ?`).all(projectId)) as SpendRow[]
+    return buildSpend({ scope: "captain", rows, sessionRates: this.dipRates(rows) })
+  }
+
+  /** $/token for the sessions of `rows`' dip bookings, from every run of each (as the ledger reprices them). */
+  private dipRates(rows: LedgerClaudeRow[]): Map<string, number> {
+    const sessions = [...new Set(rows.filter(isDipBooking).map((r) => r.sessionId).filter((id): id is string => Boolean(id)))]
+    return sessionRates(sessions.flatMap((id) => readLedgerClaude(this.db.prepare(`${LEDGER_CLAUDE_SQL} WHERE u.session_id = ?`).all(id))))
   }
 
   /** One day of the ledger, [from, to), as its day 0, from the turns read for a span that covers it. */
@@ -4348,14 +4387,16 @@ const slotPiece = (r: BoxUsageSlotRow, rates: CostRates): BoxPiece => ({
 
 /** A metered interval's cost: the provider's own compute figure when it has one, else its CPU at Settings' rates. */
 /** The ledger's Claude runs, each with the session's report before it (runCost's `prev`), for the dip check. */
-const LEDGER_CLAUDE_SQL = `SELECT u.source, u.run_kind AS runKind, u.project_id AS projectId, u.task_id AS taskId, u.session_id AS sessionId, u.model,
+const LEDGER_CLAUDE_COLUMNS = `u.source, u.run_kind AS runKind, u.project_id AS projectId, u.task_id AS taskId, u.session_id AS sessionId, u.model,
     u.login_id AS loginId, u.started_at AS startedAt, u.cost_usd AS costUsd, u.reported_cost_usd AS reportedUsd, u.cost_estimated AS costEstimated,
     u.input_tokens AS inputTokens, u.cache_creation_input_tokens AS cacheCreationInputTokens, u.cache_read_input_tokens AS cacheReadInputTokens,
     u.output_tokens AS outputTokens,
     (SELECT p.reported_cost_usd FROM claude_usage p
       WHERE p.session_id = u.session_id AND p.reported_cost_usd > 0 AND p.ended_at <= u.ended_at AND (p.ended_at < u.ended_at OR (p.ended_at = u.ended_at AND p.rowid < u.rowid))
-      ORDER BY p.ended_at DESC, p.rowid DESC LIMIT 1) AS prevReportedUsd
-   FROM claude_usage u`
+      ORDER BY p.ended_at DESC, p.rowid DESC LIMIT 1) AS prevReportedUsd`
+const LEDGER_CLAUDE_SQL = `SELECT ${LEDGER_CLAUDE_COLUMNS} FROM claude_usage u`
+/** A cost breakdown's runs (Store.taskSpend, Store.captainSpend): the ledger's columns and each run's own. */
+const SPEND_SQL = `SELECT ${LEDGER_CLAUDE_COLUMNS}, u.id, u.harness, u.turn_id AS turnId, u.duration_ms AS durationMs FROM claude_usage u`
 
 const readLedgerClaude = (rows: unknown[]) =>
   (rows as (Omit<LedgerClaudeRow, "costEstimated"> & { costEstimated: number })[]).map((r): LedgerClaudeRow => ({ ...r, costEstimated: Boolean(r.costEstimated) }))

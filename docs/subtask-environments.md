@@ -10,6 +10,12 @@ The server records the original physical provider before the first launch. Desce
 
 Top-level task creation and runner changes remain available. The original descendant type does not change when a top-level task moves: it can spawn again only while physically placed in its original type. Existing descendants keep their restriction through retries, archive/recap recovery, box replacement and server restarts. A restart requests the stop of an incompatible existing descendant turn instead of reattaching it; an unreachable provider may prevent that stop from completing.
 
+## Harness, model and effort
+
+A sub-task runs on its parent's agent (harness), model and effort unless its `spawn_subtasks` item names its own `agent`, `model` or `effort`. They are stored as the sub-task's own pins, like a `create_task` model/effort pin: every later turn uses them, and `get_task`, the task header and `turn.json` show them. A parent with no model or effort pin of its own passes none on, so its sub-tasks follow the routing chain each turn as it does. A sub-task on another harness than its parent's doesn't take the parent's model or effort (they belong to that harness): what it leaves out follows the new harness's defaults and routing, as `continue_task` does.
+
+The server checks each item before it creates any (`parseSpawn`, `subtaskPins` in `server/subtasks.ts`) and refuses the whole call with the item's number on a bad value: an unknown agent or effort, a model name with spaces, a model another harness owns (a Cursor pin must be a Cursor-only id or one in Cursor's catalog), Ultra effort off Codex, or any effort on Cursor (its ids carry the effort) or OpenCode (provider/model#variant). A different harness is checked against the runner it would run on, `same` included. None of this changes the environment type rule above.
+
 ## Existing stores
 
 The append-only migration adds the nullable type column and a trigger preventing changes once populated. It deliberately does not backfill from requested runners, project defaults or worker files. On first use, an existing lineage is checked through its parent links, project, root and depth. The root's first recorded turn must have an authoritative placement and provider record (stable own-runner IDs can use their server provider routing). A fresh task with no prior turn can use its current server placement. Verified descendants are then pinned.

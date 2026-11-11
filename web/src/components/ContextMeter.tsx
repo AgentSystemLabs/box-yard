@@ -17,6 +17,12 @@ export function contextLabel(tokens: number | null, window: number | null): stri
 
 export const CONTEXT_HINT = "How much of this agent's context window is used."
 
+/**
+ * Said under a meter from 75%. The meter shows where auto-compact is off, and then nothing compacts before the CLI's own
+ * last-resort compaction near the window's limit.
+ */
+export const CONTEXT_NEAR_FULL = "Nearly full. Auto-compact is off, so the CLI compacts only at the limit."
+
 /** Context use only gets loud near the limit: amber from 75%, red from 90%. Below that it stays muted. */
 export const CONTEXT_WARN_PCT = 75
 export const CONTEXT_DANGER_PCT = 90
@@ -48,12 +54,17 @@ export function ContextMiniBar({ tokens, window, hint = CONTEXT_HINT, className 
   )
 }
 
-/** "84k / 1m · 8%" with a small bar and automatic compaction state. */
+/**
+ * "Context 168k / 200k · 84%" over a bar, and the automatic compaction state. Sky while there's room, then the amber
+ * and red of contextTone, on the words too, so a warning never looks like the calm state; from there a line says what
+ * happens at the limit (`nearFull`).
+ */
 export function ContextMeter({
   tokens,
   window,
   compacting,
   queued,
+  nearFull = CONTEXT_NEAR_FULL,
   className,
 }: {
   tokens: number | null
@@ -61,22 +72,36 @@ export function ContextMeter({
   compacting: boolean
   /** A compaction is waiting for the current turn to end. */
   queued: boolean
+  /** What to say from 75%, while no compaction runs or waits. */
+  nearFull?: string
   className?: string
 }) {
   const pct = contextPct(tokens, window)
-  const bar = pct === null ? "bg-zinc-600" : pct >= CONTEXT_WARN_PCT ? contextTone(pct).bar : "bg-yard-500"
-  const label = contextLabel(tokens, window)
+  const warn = pct !== null && pct >= CONTEXT_WARN_PCT
+  const tone = contextTone(pct)
+  const label = tokens === null ? contextLabel(tokens, window) : `Context ${contextLabel(tokens, window)}`
+  const title = `${label}. ${CONTEXT_HINT}`
   return (
     <div className={cx("flex items-center gap-2 text-xs text-zinc-400", className)} data-testid="context-meter">
-      <div className="min-w-0">
-        <div className="wrap-anywhere tabular-nums" title={CONTEXT_HINT}>
-          {label}
-        </div>
-        <div className="mt-1 h-1 w-28 overflow-hidden rounded-full bg-zinc-800">
-          <div className={cx("h-full rounded-full transition-all", bar)} style={{ width: `${pct ?? 0}%` }} />
-        </div>
+      <div className="min-w-0 flex-1" title={title}>
+        <div className={cx("wrap-anywhere tabular-nums", warn && tone.text)}>{label}</div>
+        {/* No bar without a reading: an unknown window is not an empty one. */}
+        {pct !== null && (
+          <div
+            className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
+            role="meter"
+            aria-label="Context window used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={pct}
+            aria-valuetext={label}
+          >
+            <div className={cx("h-full rounded-full", warn ? tone.bar : "bg-sky-500")} style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        {warn && !compacting && !queued && <p className="mt-1 text-zinc-400 wrap-anywhere" data-testid="context-near-full">{nearFull}</p>}
       </div>
-      {(compacting || queued) && <span role="status" className="text-zinc-400">{compacting ? "Compacting…" : "Compact queued"}</span>}
+      {(compacting || queued) && <span role="status" className="shrink-0 text-zinc-400">{compacting ? "Compacting…" : "Compact queued"}</span>}
     </div>
   )
 }

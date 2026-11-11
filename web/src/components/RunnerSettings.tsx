@@ -12,7 +12,7 @@ import type { Settings } from "../../../shared/types"
 import { DEFAULT_PROVIDERS, DEFAULT_PROVIDER_LABEL, type DefaultProvider } from "../../../shared/runner"
 import { GPU_PROVIDERS, GPU_PROVIDER_LABEL, type GpuProvider } from "../../../shared/gpu"
 import { DEFAULT_GPU_TYPES, gpuChoices, gpuTypesWords, sameGpu } from "../../../shared/gpuCatalog"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { RunnerChoice, useRunnerDraft } from "./Setup"
 import { DockerSizes } from "./DockerSettings"
 import { DaytonaSizes } from "./DaytonaSettings"
@@ -24,7 +24,8 @@ import { Loading } from "./Loading"
 export interface PlainSettings {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: (k: keyof Settings) => ReactNode
+  /** A Row's `hint` and `changed` for a setting. */
+  row: (k: keyof Settings) => { hint: ReactNode; changed: boolean }
 }
 
 const PROVIDER_SECTION: Record<DefaultProvider, SettingsSection> = { local: "local", box: "upstash", docker: "docker", daytona: "daytona", ssh: "machines" }
@@ -119,7 +120,7 @@ function ProviderSize({ provider, fid, onSection, settings }: {
   const more = <Button type="button" variant="subtle" className="mt-2 min-h-11 sm:min-h-0" onClick={() => onSection(section)}>All {DEFAULT_PROVIDER_LABEL[provider]} settings<ChevronRight aria-hidden="true" className="h-3.5 w-3.5" /></Button>
   switch (provider) {
     case "box":
-      return <Row id={fid("ws-cards")} wide label="Upstash box size" help="The size new Upstash boxes get, unless a project sets its own Box size or auto-sizing picked one from its runs. Existing boxes keep theirs until resized on the Boxes page." hint={settings?.hint("workerSize")}>
+      return <Row id={fid("ws-cards")} wide label="Upstash box size" help="The size new Upstash boxes get, unless a project sets its own Box size or auto-sizing picked one from its runs. Existing boxes keep theirs until resized on the Boxes page." {...settings?.row("workerSize")}>
         {settings ? <UpstashSizes value={settings.s.workerSize} onPick={(z) => settings.set("workerSize", z)} /> : <Loading kind="rows" count={1} label="Loading the Upstash size" />}
         {more}
       </Row>
@@ -134,7 +135,7 @@ function ProviderSize({ provider, fid, onSection, settings }: {
         {more}
       </Row>
     case "local":
-      return <Row id={fid("local-size")} label="Size" help="Tasks on this computer share its own CPU, memory and disk, so there's no size to pick. How many run at once is in Settings › Boxes & limits.">{more}</Row>
+      return <Row id={fid("local-size")} label="Size" help={<>Tasks on this computer share its own CPU, memory and disk, so there's no size to pick. How many run at once is in <SettingsLink section="limits">Settings › Boxes & limits</SettingsLink>.</>}>{more}</Row>
     case "ssh":
       return <Row id={fid("ssh-size")} label="Size" help="Each SSH machine runs tasks with its own CPU, memory and disk, so there's no size to pick. A project's label picks which machines it uses.">{more}</Row>
   }
@@ -154,7 +155,7 @@ function GpuCloudRow({ fid, settings, active, status }: { fid: (k: string) => st
       wide
       label="Default GPU cloud"
       help="Where @gpu tasks, and GPU projects without a cloud of their own, run. A project can pick its own cloud and GPU in Project › Settings › Boxes; a task can too, with @gpu:<cloud> or @gpu:<cloud>:<gpu> in a chat."
-      hint={settings.hint("gpuProvider")}
+      {...settings.row("gpuProvider")}
     >
       <div role="radiogroup" aria-label="Default GPU cloud" className="@container grid gap-2 @lg:grid-cols-3">
         {GPU_PROVIDERS.map((p, i) => {

@@ -794,7 +794,7 @@ function ConnectorFormFields({
       <ScopeFields fid={fid} f={f} setForm={setForm} projects={projects} statusOnly={statusOnly} localOnly={builtin} />
 
       <SettingsField label="On" keywords="enabled disable connector">
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={f.enabled} onChange={(e) => setForm({ enabled: e.target.checked })} data-testid="connector-enabled" />
           On: the sessions above get it (off keeps its sign-in, but no session gets it)
         </label>
@@ -878,7 +878,7 @@ function BuiltinSetup({
         />
       </div>
       <SettingsField label="Drafts" keywords="gmail compose scope write drafts read only">
-        <label className="flex min-h-11 items-start gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-start gap-2 text-sm text-zinc-300">
           <input
             type="checkbox"
             className="mt-1"
@@ -1083,7 +1083,7 @@ function ScopeFields({
     <FormField id={fid("sessions")} label="Who gets it" hint="Start small: the Coordinator only. Captains, agents, other projects and remote runners are each a choice you make.">
       <div id={fid("sessions")} className="flex flex-col gap-1">
         {CONNECTOR_SESSIONS.map((s) => (
-          <label key={s} className="flex min-h-11 items-start gap-2 text-sm text-zinc-300 sm:min-h-0">
+          <label key={s} className="flex min-h-11 items-start gap-2 text-sm text-zinc-300">
             <input
               type="checkbox"
               className="mt-1"
@@ -1100,11 +1100,11 @@ function ScopeFields({
       {projectWide && (
         <div className="mt-2 space-y-1 rounded-lg border border-zinc-800 p-3">
           <p className="text-xs font-medium text-zinc-400">Projects (their Captains and agents)</p>
-          <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+          <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
             <input type="radio" name={fid("projects-mode")} checked={f.projects === null} onChange={() => setForm({ projects: null })} />
             Every project
           </label>
-          <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+          <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
             <input type="radio" name={fid("projects-mode")} checked={f.projects !== null} onChange={() => setForm({ projects: f.projects ?? [] })} data-testid="connector-projects-chosen" />
             Chosen projects
           </label>
@@ -1113,7 +1113,7 @@ function ScopeFields({
               {projects.map((p) => {
                 const sealed = sealedBlocked && statusOnly.has(p.id)
                 return (
-                  <label key={p.id} className={cx("flex min-h-11 items-center gap-2 text-sm sm:min-h-0", sealed ? "text-zinc-500" : "text-zinc-300")} title={sealed ? "It shows the Coordinator status only, and the Coordinator gets this connector too" : undefined}>
+                  <label key={p.id} className={cx("flex min-h-11 items-center gap-2 text-sm", sealed ? "text-zinc-500" : "text-zinc-300")} title={sealed ? "It shows the Coordinator status only, and the Coordinator gets this connector too" : undefined}>
                     <input
                       type="checkbox"
                       disabled={sealed && !f.projects?.includes(p.id)}
@@ -1136,7 +1136,7 @@ function ScopeFields({
           <p className="text-xs font-medium text-zinc-400">Agents on</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {RUNNERS.map((r) => (
-              <label key={r} className={cx("flex min-h-11 items-center gap-2 text-sm sm:min-h-0", localOnly && r !== "local" ? "text-zinc-500" : "text-zinc-300")}>
+              <label key={r} className={cx("flex min-h-11 items-center gap-2 text-sm", localOnly && r !== "local" ? "text-zinc-500" : "text-zinc-300")}>
                 <input
                   type="checkbox"
                   checked={f.runners.includes(r)}

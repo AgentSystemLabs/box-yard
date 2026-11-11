@@ -149,19 +149,31 @@ export interface UsageSeries {
  */
 export const USAGE_COLORS = ["#3987e5", "#d95926", "#9085e9", "#199e70", "#c98500", "#d55181", "#008300"] as const
 export const OTHER_COLOR = "#71717a"
-export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#3987e5", cacheWrite: "#d95926", cacheRead: "#199e70", output: "#9085e9" }
+/**
+ * Token kinds, bottom of the stack first, on the dark surface. Cache reads are most of every bar, so they are the
+ * neutral ground and the other three stand out against it: a teal ramp of a hue no model or provider has, each step
+ * 1.9:1 or more from the next. Every one is 3:1 or more against the surface (Input, the darkest, 3.4:1: any lighter
+ * and it is too near Cache write), and as stacked neighbours (validate_palette.js) CVD ΔE ≥ 11, normal-vision ΔE ≥ 15.
+ */
+export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#007086", cacheWrite: "#00a1be", cacheRead: "#71717a", output: "#8fe7fd" }
+/**
+ * The same ramp on the light surface, where the dark theme's palest step would be 2:1 against the page: each is a step
+ * darker, so Output is still 3:1 against it. Checked the same way.
+ */
+export const TOKEN_COLORS_LIGHT: Record<TokenKind, string> = { input: "#001d2d", cacheWrite: "#005264", cacheRead: "#6e6e77", output: "#009eb9" }
 const MODEL_SLOTS = 3
 const PROVIDER_COLOR: Partial<Record<ComputeProvider, number>> = { upstash: 3, daytona: 4, runpod: 5, vast: 6 }
 
 /**
  * Which models get their own colour: the dearest three over the whole loaded range, unfiltered, so a filter never
- * repaints a model. The rest fold into "Other models".
+ * repaints a model. The rest fold into "Other models". The three take their colours in name order, not cost order, so
+ * a model keeps its colour from one range to the next while the same three lead.
  */
 export function modelSlots(ledger: UsageLedger): Map<string, number> {
   const cost = new Map<string, number>()
   for (const r of ledger.llm) cost.set(r.model, (cost.get(r.model) ?? 0) + r.costUsd)
   const top = [...cost.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MODEL_SLOTS)
-  return new Map(top.map(([m], i) => [m, i]))
+  return new Map(top.map(([m]) => m).sort((a, b) => a.localeCompare(b)).map((m, i) => [m, i]))
 }
 
 export type UsageGroup = "project" | "task" | "model" | "provider" | "role" | "login" | "box"
@@ -205,6 +217,7 @@ export interface UsageView {
   }
   /** Stacked cost, bottom first: models by colour slot, other models, then compute providers. */
   cost: UsageSeries[]
+  /** Each day's cost, added row by row as `totals.costUsd` is: a day's figure here is that day's own view's total to the bit. */
   costByDay: number[]
   tokens: { kind: TokenKind; label: string; total: number; daily: number[] }[]
   tokensByDay: number[]
@@ -222,6 +235,7 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
   const seriesFor = (key: string, init: () => Omit<UsageSeries, "key" | "totalUsd" | "daily" | "estimated">) =>
     series.get(key) ?? series.set(key, { key, ...init(), totalUsd: 0, daily: zeros(), estimated: false }).get(key)!
   const tokenDaily: Record<TokenKind, number[]> = { input: zeros(), cacheWrite: zeros(), cacheRead: zeros(), output: zeros() }
+  const costByDay = zeros()
   const table = new Map<string, UsageTableRow>()
   const rowFor = (g: { key: string; label: string; detail: string | null; filter: UsageFilter | null }) =>
     table.get(g.key) ?? table.set(g.key, { ...g, llmUsd: 0, computeUsd: 0, costUsd: 0, tokens: 0, turns: 0, computeHours: 0, estimated: false }).get(g.key)!
@@ -237,6 +251,7 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
     if (!llmMatches(r, filter)) continue
     const tokens = r.input + r.cacheWrite + r.cacheRead + r.output
     totals.costUsd += r.costUsd
+    costByDay[r.day]! += r.costUsd
     totals.llmUsd += r.costUsd
     totals.estimatedUsd += r.estimatedUsd
     totals.turns += r.turns
@@ -274,6 +289,7 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
   for (const r of ledger.compute) {
     if (!computeMatches(r, filter)) continue
     totals.costUsd += r.costUsd
+    costByDay[r.day]! += r.costUsd
     totals.computeUsd += r.costUsd
     totals.computeHours += r.hours
     if (r.estimated) totals.estimatedUsd += r.costUsd
@@ -304,8 +320,6 @@ export function aggregateUsage(ledger: UsageLedger, filter: UsageFilter, group: 
 
   const order = (s: UsageSeries) => (s.kind === "llm" ? (s.color < 0 ? MODEL_SLOTS : s.color) : 10 + s.color)
   const cost = [...series.values()].filter((s) => s.totalUsd > 0).sort((a, b) => order(a) - order(b))
-  const costByDay = zeros()
-  for (const s of cost) s.daily.forEach((v, i) => (costByDay[i]! += v))
   const tokens = TOKEN_KINDS.map((kind) => ({ kind, label: TOKEN_KIND_LABEL[kind], total: totals.tokens[kind], daily: tokenDaily[kind] }))
   const tokensByDay = zeros().map((_, i) => TOKEN_KINDS.reduce((sum, k) => sum + tokenDaily[k][i]!, 0))
   const rows = [...table.values()].filter((r) => r.costUsd > 0 || r.tokens > 0 || r.computeHours > 0).sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens || a.label.localeCompare(b.label))
@@ -404,14 +418,33 @@ function computeGroup(l: UsageLedger, r: UsageComputeRow, group: UsageGroup): Gr
   }
 }
 
-/** The next table after drilling into a row, so each tap goes one level finer. */
-export function nextGroup(group: UsageGroup, filter: UsageFilter): UsageGroup {
+/** The filter a group's rows narrow by; a box and a login have none of their own. */
+const GROUP_FILTER: Partial<Record<UsageGroup, keyof UsageFilter>> = { project: "projectId", task: "taskId", model: "model", provider: "provider", role: "role" }
+
+function finerGroup(group: UsageGroup, filter: UsageFilter): UsageGroup {
   if (group === "project") return "task"
   if (group === "task") return filter.kind === "compute" || filter.provider ? "box" : "model"
   if (group === "role") return filter.role === "agent" ? "project" : "model"
   if (group === "provider") return "box"
   if (group === "model") return "project"
   return group
+}
+
+/**
+ * The next table after drilling into a row, so each tap goes one level finer. It never lands on a group the filter
+ * already narrows to one row (by model, then a project's row, with a task already picked: on to who paid).
+ */
+export function nextGroup(group: UsageGroup, filter: UsageFilter): UsageGroup {
+  const narrowed = (g: UsageGroup) => GROUP_FILTER[g] !== undefined && filter[GROUP_FILTER[g]!] !== undefined
+  const seen = new Set<UsageGroup>([group])
+  let next = finerGroup(group, filter)
+  while (narrowed(next) && !seen.has(next)) {
+    seen.add(next)
+    next = finerGroup(next, filter)
+  }
+  if (!narrowed(next)) return next
+  // Project, task and model are all picked: what is left to split by is the box or the login.
+  return filter.kind === "compute" || filter.provider ? "box" : "login"
 }
 
 /** "Opus 5.5 · RunPod GPU": what a filter narrows to, for its chip. */

@@ -3,7 +3,7 @@
 import { useAgentSettings } from "../lib/queries"
 import { DEFAULT_GPU_PROVIDER, GPU_PROVIDER_LABEL, type GpuProvider } from "../../../shared/gpu"
 import { useOpenSettings } from "./SettingsHost"
-import { Row } from "./SettingsBlocks"
+import { Row, SettingsLink } from "./SettingsBlocks"
 
 /** `draft`: the Settings dialog's Default GPU cloud, unsaved picks included; without it, the saved one. */
 export function GpuDefaultRow({ cloud, id, draft }: { cloud: GpuProvider; id: string; draft?: GpuProvider }) {
@@ -15,7 +15,7 @@ export function GpuDefaultRow({ cloud, id, draft }: { cloud: GpuProvider; id: st
     <Row
       id={id}
       label="Default GPU cloud"
-      help="Where @gpu tasks, and GPU projects without a cloud of their own (Project › Settings › Boxes › GPU cloud), run. One cloud is the default; Settings › Box providers picks it."
+      help={<>Where @gpu tasks, and GPU projects without a cloud of their own (Project › Settings › Boxes › GPU cloud), run. One cloud is the default; <SettingsLink section="runners">Settings › Box providers</SettingsLink> picks it.</>}
     >
       <p className="text-sm text-zinc-300" data-testid={`${cloud}-gpu-default`}>
         {mine ? `Yes: ${GPU_PROVIDER_LABEL[cloud]} is the default` : `No: ${GPU_PROVIDER_LABEL[current]} is the default`}

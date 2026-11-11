@@ -27,23 +27,29 @@ import {
   clearSidebarReveal,
   closeSidebarDrawer,
   coordinatorKey,
+  dropOpenedReveal,
   inboxRows,
   keepGroups,
   keepRows,
   keepSelection,
   openSidebarDrawer,
   railInitials,
+  revealOpenedTask,
   revealScroll,
   revealSidebarGroup,
   revealSidebarTask,
+  rowPath,
   setPickedRow,
   setSidebarCollapsed,
   sidebarGroups,
   sidebarSelection,
+  takeRowClick,
   taskKey,
   toggleSidebarFold,
   toggleTreeFold,
   treeHidden,
+  unfoldRowPath,
+  unfoldSidebarGroup,
   usePickedRow,
   useSidebarFolds,
   useSidebarReveal,
@@ -55,10 +61,11 @@ import {
   type TreeCount,
 } from "../lib/sidebar"
 import { usePanels, viewOf } from "../lib/panelStack"
-import { TREE_ACTION, TREE_OPEN, TREE_TOGGLE, useTreeView } from "../lib/treeView"
+import { TREE_ACTION, TREE_OPEN, TREE_TOGGLE, treeItems, useTreeView } from "../lib/treeView"
 import { FOCUS_SIDEBAR, focusSidebar } from "../lib/sidebarFocus"
 import { chatRef, useChatHidden, useFocus } from "../lib/columns"
 import { DismissButton, isDialogOpen } from "./Modal"
+import { reducedMotion, scrollListTo } from "./StickyScroll"
 import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigation"
 import { focusComposer, keepFocusForPick, pickFocusesComposer } from "../lib/chatSwitch"
 import { isTouchDevice } from "../lib/composer"
@@ -341,6 +348,40 @@ function usePick(drawer: boolean): Pick {
 }
 
 /**
+ * The centre chat's project (null: the Coordinator), whether the panels hide it, and the panel Cody looks at: the item
+ * opened last, else the rightmost; none when it's the chat (lib/columns.ts).
+ */
+function useLookedAt() {
+  const current = useChatProjectFilter()
+  const panels = usePanels()
+  const focus = useFocus()
+  const chatHidden = useChatHidden() && panels.length > 0
+  const lookedAt = focus !== null && panels.includes(focus) ? focus : focus === chatRef(current) && !chatHidden ? undefined : panels.at(-1)
+  const overlay = useMemo(() => (lookedAt ? viewOf(lookedAt) : null), [lookedAt])
+  return { current, chatHidden, overlay }
+}
+
+/**
+ * A task opened from anywhere but its own row (a link in a chat, a notice, the palette, the Inbox, a PR chip, Back or
+ * Forward, the address bar): the sidebar unfolds to its row and brings it into view, at once in the column, or when the
+ * list next shows (the drawer opening, the rail widening). Mounted once, by the app's shell, so it sees what opens
+ * while the drawer is shut.
+ */
+export function RevealOpenedTask() {
+  const { overlay } = useLookedAt()
+  const taskId = overlay?.kind === "session" ? overlay.id : null
+  const last = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (taskId === last.current) return
+    last.current = taskId
+    const clicked = takeRowClick()
+    if (taskId && taskId !== clicked) revealOpenedTask(taskId)
+    else dropOpenedReveal()
+  }, [taskId])
+  return null
+}
+
+/**
  * The sidebar. `rail`: the narrow strip of icons (Cody folded it, or a panel needs the room); `onExpand` widens it
  * again. `drawer`: drawn inside the phone drawer, which a pick closes.
  */
@@ -350,13 +391,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   const tasks = useTasks()
   const pins = useBarPins()
   const closing = usePendingCloses()
-  const current = useChatProjectFilter()
-  // The panel Cody looks at: the item opened last, else the rightmost; none when it's the chat (lib/columns.ts).
-  const panels = usePanels()
-  const focus = useFocus()
-  const chatHidden = useChatHidden() && panels.length > 0
-  const lookedAt = focus !== null && panels.includes(focus) ? focus : focus === chatRef(current) && !chatHidden ? undefined : panels.at(-1)
-  const overlay = useMemo(() => (lookedAt ? viewOf(lookedAt) : null), [lookedAt])
+  const { current, chatHidden, overlay } = useLookedAt()
   const folds = useSidebarFolds()
   const treeFolds = useTreeFolds()
   const picked = usePickedRow()
@@ -464,17 +499,56 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
   // A group asked to be revealed (a project, or Waiting on you), or a tree row: it scrolls into view once the full list is
   // on screen (this column, or the drawer opened in the rail's place). A group's head row takes the focus when the keyboard pressed the rail button that asked, since that
   // button went with the rail; a click leaves the focus where it was (in the drawer, the drawer's own first stop).
+  // A task opened elsewhere than its row (RevealOpenedTask): its project and the trees above it unfold, then its row
+  // scrolls just into view, gliding unless Cody prefers reduced motion. Only the list moves, never the page or a panel,
+  // and the focus stays where it is. A list that has just come (the column back from the rail, the drawer opening)
+  // shows its current row, and anything it reveals before its first paint, at once: there's nothing to glide from.
   const reveal = useSidebarReveal()
   const list = useRef<HTMLDivElement>(null)
+  /** The list was on screen at the last commit; `fresh`: its current row isn't revealed yet; `painted`: it has been. */
+  const shown = useRef({ list: false, fresh: false, painted: false })
   useLayoutEffect(() => {
-    if (!reveal || rail) return
-    clearSidebarReveal()
     const box = list.current
-    const [attr, id] = "taskId" in reveal ? ["data-tree-node", reveal.taskId] : ["data-sidebar-group", reveal.group]
-    const target = [...(box?.querySelectorAll<HTMLElement>(`[${attr}]`) ?? [])].find((el) => el.getAttribute(attr) === id)
-    if (box && target) box.scrollTop += revealScroll(box.getBoundingClientRect(), target.getBoundingClientRect())
-    if (reveal.focus) target?.querySelector<HTMLElement>("[role=treeitem]")?.focus({ preventScroll: true })
-  }, [reveal, rail])
+    const s = shown.current
+    if (box && !s.list) {
+      Object.assign(s, { fresh: true, painted: false })
+      requestAnimationFrame(() => (s.painted = true))
+    }
+    s.list = box !== null
+    if (!box) return
+    if (reveal && !("opened" in reveal)) {
+      clearSidebarReveal()
+      s.fresh = false
+      const [attr, id] = "taskId" in reveal ? ["data-tree-node", reveal.taskId] : ["data-sidebar-group", reveal.group]
+      const target = [...box.querySelectorAll<HTMLElement>(`[${attr}]`)].find((el) => el.getAttribute(attr) === id)
+      if (target) box.scrollTop += revealScroll(box.getBoundingClientRect(), target.getBoundingClientRect())
+      if (reveal.focus) target?.querySelector<HTMLElement>("[role=treeitem]")?.focus({ preventScroll: true })
+      return
+    }
+    let key: string | null
+    if (reveal) {
+      const id = reveal.opened
+      // A task the list doesn't know yet (still loading, or just started) waits for it.
+      if (!tasks.data?.some((t) => t.id === id)) return
+      const isRow = (k: string | null) => k === taskKey(id, "project") || k === taskKey(id, "waiting")
+      if (!isRow(selection.selected)) {
+        // Unfolded, the list draws again and this runs again, its row on screen.
+        const path = rowPath(groups.shown, id)
+        if (path && unfoldRowPath(path)) return
+        // Under no project the list shows (one moved to More projects), only in Waiting on you.
+        if (!path && selection.inside === WAITING_FOLD) {
+          unfoldSidebarGroup(WAITING_FOLD)
+          return
+        }
+      }
+      clearSidebarReveal()
+      key = isRow(selection.selected) ? selection.selected : null
+    } else if (s.fresh) key = currentTreeKey(selection)
+    else return
+    s.fresh = false
+    const row = treeItems(box).find((el) => el.getAttribute("data-tree-key") === key)
+    if (row) scrollListTo(box, row, { block: "nearest", behavior: s.painted && !reducedMotion() ? "smooth" : "auto" })
+  })
 
   if (rail)
     return (

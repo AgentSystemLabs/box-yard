@@ -29,7 +29,8 @@ export const ReplySources = memo(function ReplySources({ sources }: { sources: U
       aria-expanded={open}
       onClick={toggle}
       title={open ? "Fold the updates this reply is about" : `Show the ${count === 1 ? "update" : `${count} updates`} this reply is about`}
-      className="mt-1 flex max-w-full min-w-0 items-center gap-1 rounded-sm text-[11px] text-zinc-500 hover:text-zinc-300 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none [@media(pointer:coarse)]:min-h-8"
+      // 44px tall to a finger: a real box, not a tap area laid over the reply's last line and its next steps.
+      className="mt-1 flex max-w-full min-w-0 items-center gap-1 rounded-sm text-[11px] text-zinc-400 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:min-h-11"
     >
       <CornerLeftUp className="h-3 w-3 shrink-0" aria-hidden />
       <span className="shrink-0">from:</span>

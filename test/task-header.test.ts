@@ -132,7 +132,7 @@ describe("TaskHeader", () => {
       ),
     )
 
-  it("is one row in a panel: back, the task's icon and title, the PR, preview and files, then ⓘ", () => {
+  it("is one row in a panel: back, the task's icon and title, the PR, preview and files, its cost, then ⓘ", () => {
     renderInPanel(task(), [file(1), file(2)])
     const row = meta()
     const controls = [...row.querySelectorAll<HTMLElement>("button, a")]
@@ -142,6 +142,7 @@ describe("TaskHeader", () => {
       "open",
       "preview-chip",
       "2 files, 2 new",
+      "spend-button",
       "Task details and more actions",
     ])
     expect(row.querySelector("h2")!.contains(controls[1]!)).toBe(true)
@@ -236,10 +237,10 @@ describe("TaskHeader", () => {
   const stopItem = () => menuButtons().find((b) => b.textContent!.trim() === "Stop task")
   const openMenu = () => act(async () => void document.querySelector<HTMLButtonElement>('button[aria-label="Task details and more actions"]')!.click())
 
-  it("keeps Stop out of the header: a running task's state sits with its title, and ⓘ is the only other control", () => {
+  it("keeps Stop out of the header: a running task's state sits with its title, and its cost and ⓘ are the only other controls", () => {
     render(task())
     const controls = [...meta().querySelectorAll("button, a")].filter((el) => !el.closest('[data-testid="task-chips"]'))
-    expect(controls.map((el) => el.getAttribute("aria-label") ?? el.getAttribute("data-testid"))).toEqual(["task-title", "Task details and more actions"])
+    expect(controls.map((el) => el.getAttribute("aria-label") ?? el.getAttribute("data-testid"))).toEqual(["task-title", "Cost breakdown", "Task details and more actions"])
     // An info icon: it opens the task's details (with its less common actions under them), not a short ⋯ menu.
     const details = controls.at(-1)!
     expect(details.querySelector("svg")!.getAttribute("class")).toContain("lucide-info")

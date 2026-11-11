@@ -19,13 +19,14 @@ export type ChatTarget = { label: string; color?: ProjectColor }
 
 /** The line's pills: 28px with a mouse, 44px under a finger. */
 const LINE_PILL =
-  "flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:px-3.5"
+  "flex h-7 items-center justify-center gap-1.5 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3.5"
 
 export const DockComposer = memo(function DockComposer({
   jumpStore,
   chat,
   onSubmit,
   placeholder,
+  label,
   historyKey,
   textareaRef,
   handleRef,
@@ -40,6 +41,8 @@ export const DockComposer = memo(function DockComposer({
   /** The chat's own box: what it sends to and says. */
   onSubmit: (text: string, attachments: Attachment[], extra?: ComposerExtra) => Promise<unknown> | void
   placeholder: string
+  /** The text field's name to a screen reader (Composer `label`). */
+  label: string
   historyKey: string
   textareaRef: RefObject<HTMLTextAreaElement | null>
   handleRef: RefObject<ComposerHandle | null>
@@ -70,6 +73,7 @@ export const DockComposer = memo(function DockComposer({
         <Composer
           onSubmit={onSubmit}
           placeholder={placeholder}
+          label={label}
           textareaRef={textareaRef}
           handleRef={handleRef}
           panelRef={panelRef}
@@ -102,7 +106,8 @@ function JumpPill({ store }: { store: JumpStore }) {
   return (
     <button type="button" data-testid="jump-latest" onClick={store.jump} aria-label={label} title={label} className={cx(LINE_PILL, "shrink-0 border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800")}>
       <ArrowDown className="h-3.5 w-3.5" aria-hidden />
-      <span className="@max-[22rem]/dock:sr-only">{label}</span>
+      {/* A count says something the arrow doesn't, so it keeps its words in a narrower chat than "Jump to latest" does. */}
+      <span className={unread > 0 ? "@max-[22rem]/dock:sr-only" : "@max-[30rem]/dock:sr-only"}>{label}</span>
     </button>
   )
 }
