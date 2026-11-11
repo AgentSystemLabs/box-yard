@@ -1281,6 +1281,12 @@ export const MIGRATIONS: string[] = [
     SELECT RAISE(ABORT, 'Task environment type is immutable');
   END;
   `,
+  `
+  -- Which agent CLI ran it (shared/agentCli.ts): a task can continue on another harness and a Captain can switch between
+  -- Claude Code and Codex, so the cost breakdown (server/spendBreakdown.ts) names each run's own. NULL on older rows:
+  -- read from the task's harness, or the model's name.
+  ALTER TABLE claude_usage ADD COLUMN harness TEXT;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

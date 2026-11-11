@@ -41,6 +41,7 @@ import { PlacementDetails } from "./PlacementChip"
 import { IdentityBadge } from "./IdentityBadge"
 import { useOpenSettings } from "./SettingsHost"
 import { HEAD_CONTAINER } from "../lib/contextVisibility"
+import { SpendButton } from "./SpendBreakdown"
 import { DismissButton, Modal, modalDepth } from "./Modal"
 import { TaskCrumbs } from "./TreeNav"
 import { SidebarMenuButton } from "./Sidebar"
@@ -109,6 +110,9 @@ export function TaskHeader({
     </div>
   )
   const menu = <TaskMenu task={task} project={project} schedule={schedule} open={details} setOpen={setDetails} />
+  // Its spend so far, after the chips (Mark done and Reopen stay last before ⓘ): an open breakdown follows a running
+  // turn, as the version is what the task's cost says.
+  const spend = <SpendButton scope={{ kind: "task", id: task.id, title: task.title, version: `${task.claudeCostUsd}:${task.claudeTokens}` }} />
   if (phone && onBack)
     return (
       <header data-testid="task-header" className={cx(HEAD_CONTAINER, "sticky top-0 z-20 shrink-0 border-b border-zinc-800/70 bg-zinc-950/95 backdrop-blur")}>
@@ -117,6 +121,7 @@ export function TaskHeader({
             <SidebarMenuButton />
             {tree ? <TaskCrumbs task={task} project={project} /> : <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-1", backClassName)} />}
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
+              {spend}
               {ready ? <MarkDoneButton task={task} crowded={false} /> : task.status === "done" && <ReopenButton task={task} crowded={false} />}
               {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
               {tools}
@@ -148,6 +153,7 @@ export function TaskHeader({
       {/* Chips and ⓘ wrap together, so ⓘ stays last. */}
       <div className="ml-auto flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5">
         {chips}
+        {spend}
         {ready && <MarkDoneButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
         {task.status === "done" && <ReopenButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
         {task.status === "failed" && <DeleteFailedTaskButton task={task} />}

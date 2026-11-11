@@ -8815,6 +8815,7 @@ export class TaskManager {
       resumed: ev.resumed === true,
       costScope: taskAgentCli(row) === "opencode" ? "run" : "session",
       loginId: (turnId ? this.store.getTaskTurn(turnId)?.login_id : null) ?? null,
+      harness: taskAgentCli(row),
     })
     return hasCost ? cost : null
   }

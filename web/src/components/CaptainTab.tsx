@@ -69,6 +69,7 @@ import { ChatControls } from "./ColumnControls"
 import { EmptyCaptain } from "./EmptyCaptain"
 import { focusComposer, useComposerFocus } from "../lib/chatSwitch"
 import { Loading } from "./Loading"
+import { SpendButton } from "./SpendBreakdown"
 import type { Attachment, CaptainCompaction, CaptainMessage, CaptainSource, CaptainState, Project } from "../../../shared/types"
 
 const NO_MESSAGES: CaptainMessage[] = []
@@ -205,7 +206,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
         }
       >
         <div className="relative flex min-w-0 flex-1 flex-col">
-          {centre ? <CentreCaptainHeader project={project} state={state.data} lastActive={lastActive} /> : <CaptainHeader projectId={project.id} state={state.data} lastActive={lastActive} />}
+          {centre ? <CentreCaptainHeader project={project} state={state.data} lastActive={lastActive} /> : <CaptainHeader project={project} state={state.data} lastActive={lastActive} />}
           {state.data?.error && (
             <div className="flex gap-2 border-b border-red-900/50 bg-red-950/30 px-4 py-2 text-xs text-red-300">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -604,6 +605,7 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
           {/* Context readings stay out of the chat, as in the Coordinator's: the full meter is in ⋯. */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {!sidebarInline && <SearchButton />}
+            <SpendButton scope={{ kind: "captain", projectId: project.id, name: project.name, version: String(lastActive ?? "") }} />
             <CaptainMenu projectId={project.id} meter={meter} model={model} lastActive={lastActive} />
             <ChatControls name={`the ${project.name} Captain`} />
           </div>
@@ -613,7 +615,8 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
   )
 }
 
-function CaptainHeader({ projectId, state, lastActive }: { projectId: string; state: CaptainState | undefined; lastActive: number | null }) {
+function CaptainHeader({ project, state, lastActive }: { project: Project; state: CaptainState | undefined; lastActive: number | null }) {
+  const projectId = project.id
   const { model, meter, headerMeter } = useCaptainMeter(state)
   const color = useTiles().colors.get(projectId)
   return (
@@ -627,6 +630,7 @@ function CaptainHeader({ projectId, state, lastActive }: { projectId: string; st
         {meter && headerMeter !== null && (
           <ContextMiniBar tokens={meter.tokens} window={meter.window} hint="How much of the Captain's context window is used." className={cx("mr-1", headerMeter)} />
         )}
+        <SpendButton scope={{ kind: "captain", projectId, name: project.name, version: String(lastActive ?? "") }} />
         <CaptainMenu projectId={projectId} meter={meter} model={model} lastActive={lastActive} />
       </div>
     </header>
