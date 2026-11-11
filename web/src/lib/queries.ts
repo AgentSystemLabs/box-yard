@@ -15,6 +15,7 @@ import { DEFAULT_IDENTITY_ID, type Identity, type IdentityCheckResult, type Iden
 import type { CaptainIconId } from "../../../shared/captainIcons"
 import type { Connector, ConnectorInput, ConnectorSignIn } from "../../../shared/connectors"
 import type { TtsInfo } from "../../../shared/tts"
+import type { UpdateStatus } from "../../../shared/selfUpdate"
 import type { LimitsReport } from "../../../shared/loginLimits"
 import type { CredentialKey, CredentialTest, CredentialsPatch, RecentRepos, SetupStatus } from "../../../shared/setup"
 import type { AgentLogin, AgentLoginInput, LoginHarness } from "../../../shared/agentLogins"
@@ -103,6 +104,8 @@ export const keys = {
   vastGpus: ["vast-gpus"] as const,
   daytona: ["daytona"] as const,
   docker: ["docker"] as const,
+  /** The Update button's state (GET /api/update); the "update" event keeps it live. */
+  update: ["update"] as const,
   /** Cody's SSH machines (Settings › Machines, the Boxes page); the "machines" event keeps it live. */
   machines: ["machines"] as const,
   /** The chats' "@" list of where tasks run (GET /api/run-targets): the Coordinator's (null) or a Captain's. */
@@ -161,6 +164,18 @@ function snapshot<T>(qc: QueryClient, key: readonly unknown[]) {
 export const useMe = () => useQuery({ queryKey: keys.me, queryFn: () => api<{ authed: boolean; authRequired: boolean }>("/api/me") })
 export const useHealth = () =>
   useQuery({ queryKey: keys.health, queryFn: () => api<Health>("/api/health"), refetchInterval: 30_000 })
+/** Whether a newer Box Yard is out, and how its update is going (shared/selfUpdate.ts). The stream keeps it current. */
+export const useUpdateStatus = () => useQuery({ queryKey: keys.update, queryFn: () => api<UpdateStatus>("/api/update"), staleTime: 60_000 })
+/**
+ * Look for a newer version, build it (Update), or restart into the built one now. The launcher's progress comes back on
+ * the stream ("update" events), so the answer isn't written over it.
+ */
+export function useUpdateAction() {
+  return useMutation({
+    mutationFn: (action: "check" | "start" | "restart") => api<UpdateStatus>(`/api/update/${action}`, { method: "POST" }),
+    onError: (err) => toast.error("Couldn't update Box Yard", (err as Error).message),
+  })
+}
 /**
  * For views that read a list once, like the command palette: re-render when the list loads, not on every live update.
  * `data` is still current whenever the view renders for another reason (a keystroke).

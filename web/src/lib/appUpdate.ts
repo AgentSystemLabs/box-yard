@@ -31,6 +31,13 @@ let own: string | null | undefined
 let newer: string | null = null
 let toasted: string | null = null
 let resumedAt = -Infinity
+/** The Update banner (components/UpdateBanner.tsx) already offers Refresh for this restart. */
+let bannerOffers = false
+
+/** Set while the Update banner says "updated, Refresh", so a toast doesn't say it again. */
+export function setBannerOffersReload(on: boolean) {
+  bannerOffers = on
+}
 
 /** Something a reload would lose: an unsent draft (text or files), or a dialog with unsaved changes (Modal's dirty). */
 export function unsavedWork(): boolean {
@@ -53,7 +60,7 @@ export function noteServerBuild(web: string | null | undefined) {
 
 /** Cody is looking at the page: ask, once per build. A hidden page just waits to be shown again. */
 function offerReload(web: string) {
-  if (document.hidden || toasted === web) return
+  if (document.hidden || toasted === web || bannerOffers) return
   toasted = web
   toast.info("Box Yard was updated", "Reload to get the new version.", { action: { label: "Reload", onClick: reload }, duration: UPDATE_TOAST_MS })
 }

@@ -24,7 +24,7 @@ Each agent works in its own folder on this computer by default — or inside its
 [**Quick start**](#quick-start) · [**Deploy**](#deploy) · [**How it works**](#how-it-works) · [**Development**](#development) · [**License**](#license)
 
 ```sh
-git clone https://github.com/AgentSystemLabs/box-yard && cd box-yard && ./yard demo
+npx github:AgentSystemLabs/box-yard
 ```
 
 </div>
@@ -55,6 +55,21 @@ You tell the **Coordinator** what you want. It sets up **projects** (with or wit
 
 ## Quick start
 
+You need Node.js 22.12+ and git. Then, on your computer or a server:
+
+```bash
+npx github:AgentSystemLabs/box-yard        # install from main and start on http://localhost:3000
+npx github:AgentSystemLabs/box-yard demo   # no keys needed: a fake Claude drives everything, with its own data
+```
+
+The first run checks this computer (Node, git, root, folders, disk, port, and `claude`/`gh` as warnings) and stops with the exact command that fixes anything missing. It then installs Box Yard into `~/.boxyard` (about a minute), offers to install Claude Code if it's missing, and opens the browser. Later runs start in seconds. Settings live in `~/.boxyard/.env`; keys can also go in Settings › Credentials.
+
+**Updates are a button.** When `main` has a newer commit, a banner in the app offers **Update**. It builds in the background, restarts once no reply is running (task agents keep working through it), and offers **Refresh**. If the new version doesn't start, it goes back by itself.
+
+**On a VPS**, as a normal user: `npx github:AgentSystemLabs/box-yard service install --public` keeps it running with systemd and writes a strong password. [docs/npx.md](docs/npx.md) has every command, what each check does, HTTPS with Caddy, updates and troubleshooting.
+
+### From a git checkout
+
 ```bash
 git clone https://github.com/AgentSystemLabs/box-yard && cd box-yard
 
@@ -62,7 +77,7 @@ git clone https://github.com/AgentSystemLabs/box-yard && cd box-yard
 ./yard local    # the real thing on http://localhost:3000 (fill in .env first)
 ```
 
-`./yard local` creates `.env` from `.env.example` the first time. The keys:
+A checkout uses its own `.env` and `./data`, and updates with `git pull`. `./yard local` creates `.env` from `.env.example` the first time. The same keys go in `~/.boxyard/.env` for an npx install. The keys:
 
 | Variable | What it's for |
 | --- | --- |
@@ -101,11 +116,13 @@ Or pick a passphrase of four or more random words. Restart Box Yard after changi
 
 **Logging in.** Only wrong passwords count against you. After 3 wrong tries from one device, each next try waits a little longer (1 s, 2 s, 4 s … 30 s), and 10 wrong tries in 15 minutes lock that device out for 15 minutes ("Too many attempts, try again in N minutes"); other devices keep working. Failed logins are logged with their address. A login keeps you signed in for 90 days with a random, httpOnly session cookie (Secure over https).
 
-Use Node 22.12+ (the server image uses Node 22) and git. The package’s `>=20.11` engine declaration and `yard`’s major-version check are looser than the installed [Vite build requirement](https://vite.dev/guide/) (`^20.19.0 || >=22.12.0`); Node 20.11 cannot build the web app. `./yard local` installs the Claude Code CLI if it's missing. If `claude` is missing or signed out anyway, Box Yard still starts: the startup log and the setup card say what to install or run (`claude`, then log in), and tasks on this computer wait for it instead of failing halfway.
+Use Node 22.12+ (the server image uses Node 22) and git: the [Vite build](https://vite.dev/guide/) needs it, and `package.json`, `./yard` and the npx launcher all check for it. `./yard local` installs the Claude Code CLI if it's missing. If `claude` is missing or signed out anyway, Box Yard still starts: the startup log and the setup card say what to install or run (`claude`, then log in), and tasks on this computer wait for it instead of failing halfway.
 
 **Where agents run.** A fresh install runs agents on this computer: the first-run setup card (and Settings › Box providers) shows **This computer** already picked, so there's no Upstash key to set up. Projects run on the local runner (below), with this computer's own `claude` login (or a token) and its `gh auth` login standing in for `GITHUB_TOKEN` (a token saved or in the env wins). The card lists what local agents use and whether it's there: Node, `claude` and its login, `gh` and its login, and Chrome (optional, for browser checks). New projects follow the choice. Pick **Upstash boxes** or **Docker containers** there instead any time (projects that exist stay where they run), add an Upstash key in Settings › Box providers › Upstash boxes to make **Upstash box** available per project, and a project's own Settings › Runs on picks boxes, Docker, a GPU pod or SSH machines for it alone. `BOXYARD_DEFAULT_RUNNER` (`local`, `box` or `docker`) changes what a fresh install starts with; the Docker image (`deploy-vps`) and `deploy-box` set `box`, since "this computer" is the server there. Installs from before this default keep what they had: with an Upstash key, boxes; without one, the setup card asks.
 
 ## Deploy
+
+The simplest server setup is the npx one above (`service install --public`, [docs/npx.md › On a server](docs/npx.md#on-a-server-vps)). These two ship the app from a checkout instead:
 
 ```bash
 ./yard deploy-box              # run Box Yard inside its own Upstash Box (keep-alive)
@@ -312,6 +329,7 @@ The mock Claude (`scripts/fake-claude.mjs`) speaks the same headless protocol an
 | --- | --- |
 | `server/` | API, SQLite store, task manager, Coordinator/Captains, MCP tools, providers for Upstash, local, Docker, SSH, RunPod, Vast.ai and Daytona |
 | `runner/box-runner.mjs` | Copied into each worker box. Runs turns and serves the agent's MCP tools, with no dependencies. |
+| `bin/`, `launcher/` | The `npx github:AgentSystemLabs/box-yard` command: checks, install into `~/.boxyard`, and the supervisor behind the Update button ([docs/npx.md](docs/npx.md)). No dependencies. |
 | `web/` | The React app |
 | `scripts/` | Deploy scripts and the fake Claude |
 

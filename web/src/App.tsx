@@ -20,6 +20,7 @@ import { ConfirmHost } from "./components/ConfirmDialog"
 import { FilePreviewHost } from "./components/FilePreview"
 import { LightboxHost } from "./components/Lightbox"
 import { HealthBanner, Login } from "./components/Views"
+import { UpdateBanner } from "./components/UpdateBanner"
 import { dismissOverlay, useOverlay } from "./lib/overlays"
 import { COORDINATOR_CHAT, closeThread, openThreadState, restoreThread, useThreadShown } from "./lib/threads"
 import { OverlayHost } from "./components/OverlayHost"
@@ -145,6 +146,7 @@ export function App() {
     <Router aroundNav={appAroundNav}>
       <main data-app className="@container/app flex h-[100dvh] min-w-0 flex-col overflow-hidden">
         <HealthBanner />
+        <UpdateBanner />
         <div className="flex min-h-0 flex-1">
           {inlineSidebar && (
             <SidebarPane rail={rail}>

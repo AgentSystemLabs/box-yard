@@ -179,4 +179,33 @@ describe("sendHosted", () => {
     expect(await res.text()).toBe("original bytes")
     warn.mockRestore()
   })
+
+  it("serves a file under a dot folder, like a data dir in ~/.local/share, and a dot-named file", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const dir = path.join(tmpDir(), ".local", "share", "box-yard", "artifacts", "123-abc")
+    fs.mkdirSync(dir, { recursive: true })
+    for (const name of ["shot.png", ".hidden.png"]) {
+      const file = path.join(dir, name)
+      fs.writeFileSync(file, Buffer.from(`bytes of ${name}`))
+      const url = await serve(file, new Thumbs(noSharp))
+      for (const q of ["", "?w=320"]) {
+        const res = await fetch(`${url}${q}`)
+        expect(res.status, `${name}${q}`).toBe(200)
+        expect(await res.text()).toBe(`bytes of ${name}`)
+      }
+      await new Promise((res) => server!.close(() => res(null)))
+      server = null
+    }
+    warn.mockRestore()
+  })
+
+  it.skipIf(!sharp)("sends a thumbnail made beside a file under a dot folder", async () => {
+    const dir = path.join(tmpDir(), ".local", "share", "box-yard")
+    fs.mkdirSync(dir, { recursive: true })
+    const file = await png(dir, "shot.png", 1600, 900)
+    const thumb = await fetch(`${await serve(file, new Thumbs(counting().load))}?w=320`)
+    expect(thumb.status).toBe(200)
+    expect(thumb.headers.get("content-type")).toBe("image/webp")
+    expect(fs.existsSync(path.join(thumbsDir(file), "320.webp"))).toBe(true)
+  })
 })

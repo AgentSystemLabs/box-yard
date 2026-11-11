@@ -88,6 +88,7 @@ import { projectDockerPatch } from "./docker/settings.js"
 import { prTasks } from "./prTasks.js"
 import { BOX_SIZES, EFFORTS, PROJECT_BOX_LIMITS, type Health } from "../shared/types.js"
 import { serverCliProblems } from "../shared/claudeCli.js"
+import { launcherChannel, SelfUpdate, type UpdateChannel } from "./selfUpdate.js"
 import { BOX_ACTORS, BOX_EVENT_TYPES, type BoxActorKind, type BoxEventType } from "../shared/boxHistory.js"
 import { CLOUD_PROVIDERS, MAX_TTS_CHARS } from "../shared/tts.js"
 
@@ -423,6 +424,8 @@ export interface BoxYard {
   connectors: ConnectorService
   /** Settings › Credentials › More Claude / Codex logins and their rotation (docs/logins.md). */
   logins: AgentLogins
+  /** The app's Update button, when the npx launcher started this server (docs/npx.md › Updates). */
+  selfUpdate: SelfUpdate
   start(): Promise<void>
   stop(): void
 }
@@ -464,6 +467,8 @@ export function createBoxYard(
     connectorFetch?: typeof globalThis.fetch
     /** A made-up computer for machine_stats to read instead of this one (tests). */
     machine?: MachineReaders
+    /** Stands in for the npx launcher's IPC channel (tests); null for none. Default: this process's, when it has one. */
+    updateChannel?: UpdateChannel | null
   } = {},
 ): BoxYard {
   // A data folder with no database yet is a fresh install: its agents run where c.defaultRunner says (Setup.firstStart).
@@ -713,6 +718,12 @@ export function createBoxYard(
   const orchestrator = new Orchestrator(c, store, hub, { url: mcpUrl, token: mcpToken, handshakes }, settings)
   const scheduler = new Scheduler({ config: c, store, tasks, hub, orchestrator, qstash, now: opts.now })
   const threads = new SideThreads(c, store, hub, settings, mcpUrl, (projectId) => (projectId ? captains.threadHost(projectId) : orchestrator.threadHost()))
+  // A restart for an update waits for these: they run inside the server, so it would cut their replies off.
+  const selfUpdate = new SelfUpdate({
+    channel: opts.updateChannel === undefined ? launcherChannel() : opts.updateChannel,
+    busy: () => [orchestrator.busy && "the Coordinator", captains.anyBusy() && "a Captain", threads.anyBusy && "a side thread"].filter((x): x is string => Boolean(x)),
+    broadcast: (status) => hub.broadcast({ type: "update", status }),
+  })
   tasks.onNotice = (content, meta, opts) => {
     const wake = opts.wake !== false
     const handled = captains.notice(content, meta, { wake })
@@ -1033,6 +1044,26 @@ export function createBoxYard(
   api.get("/health", async (_req, res) => {
     await lookUpClis()
     res.json(health())
+  })
+
+  // ---- the Update button (docs/npx.md › Updates): only a server the npx launcher started can update itself.
+  api.get("/update", (_req, res) => {
+    res.json(selfUpdate.status())
+  })
+  /** Look at main for a newer commit now; SSE "update" follows. */
+  api.post("/update/check", (_req, res) => {
+    selfUpdate.check()
+    res.json(selfUpdate.status())
+  })
+  /** Build the newest main in the background; Box Yard restarts into it once no reply is running. */
+  api.post("/update/start", (_req, res) => {
+    selfUpdate.start()
+    res.json(selfUpdate.status())
+  })
+  /** Restart into the built update now, even mid-reply. */
+  api.post("/update/restart", (_req, res) => {
+    selfUpdate.restartNow()
+    res.json(selfUpdate.status())
   })
 
   // The GETs every page load makes, in one gzipped response the page asks for as it starts (shared/boot.ts). All read in
@@ -2225,6 +2256,7 @@ export function createBoxYard(
     identities,
     connectors,
     logins,
+    selfUpdate,
     async start() {
       // A "This computer" setup's gh login can stand in for the GitHub token: look for it before PRs are followed.
       if (setup.onThisComputer()) await setup.refreshLocal()
@@ -2257,6 +2289,7 @@ export function createBoxYard(
       captains.stop()
       orchestrator.stop()
       threads.stopAll()
+      selfUpdate.stop()
       stopSnapshots?.()
       stopHold?.()
       hub.close()

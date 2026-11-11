@@ -59,4 +59,7 @@ const shutdown = (signal: string) => {
 }
 process.on("SIGINT", () => shutdown("SIGINT"))
 process.on("SIGTERM", () => shutdown("SIGTERM"))
+// Started by the npx launcher (launcher/supervisor.mjs): if it goes (its terminal closed, it was killed), so does this
+// server, or the next start would find the data folder locked by a server nobody supervises.
+if (process.env.BOXYARD_LAUNCHER === "1" && process.send) process.on("disconnect", () => shutdown("the launcher exited"))
 process.on("unhandledRejection", (err) => console.error("[box-yard] unhandled rejection", err))

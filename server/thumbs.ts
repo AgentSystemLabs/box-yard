@@ -128,5 +128,8 @@ export async function sendHosted(
   res.setHeader("Cache-Control", HOSTED_CACHE_CONTROL)
   const thumb = await thumbs.get(file.path, file.mime, thumbWidth(req.query.w))
   if (thumb) res.setHeader("Content-Type", "image/webp")
-  res.sendFile(thumb ?? file.path)
+  // The path is Box Yard's own (the artifact or upload store), never the URL's. send's default (dotfiles: "ignore")
+  // would 404 every file under a dot folder, such as a BOXYARD_DATA_DIR of ~/.local/share/box-yard, and `{ root }`
+  // alone wouldn't do either: safeFilename keeps a leading dot, so a published ".env.example" would still 404.
+  res.sendFile(thumb ?? file.path, { dotfiles: "allow" })
 }
