@@ -1,27 +1,25 @@
-import type { Server } from "node:http"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createBoxYard, type BoxYard } from "../server/app.js"
 import { closeFromOwnerChat } from "../server/ownerClose.js"
 import type { TaskRow } from "../server/store.js"
 import type { Task, TaskStatus } from "../shared/types.js"
-import { freePort, testConfig } from "./helpers.js"
+import { testConfig } from "./helpers.js"
 
 // Mark done (TaskManager.closeTask) on a task closes its whole tree: every sub-task at any depth, a running one
 // stopped first through the same stop path as Stop (its turn's end keeps it done), each with the close its parent got.
 // One done already is left as it was, though the open ones under it still close. Closing again changes nothing.
-// Nothing here starts a worker turn: the yard isn't started, the tasks are seeded, and a turn's kill is a stub.
+// Nothing here starts a worker turn or a server: the yard isn't started, the tasks are seeded, and a turn's kill is a
+// stub. POST /api/tasks/:id/close on a tree mid-turn is in test/subtasks.e2e.test.ts.
 
 const yards: BoxYard[] = []
-const servers: Server[] = []
 
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks()
-  for (const s of servers.splice(0)) await new Promise((res) => s.close(() => res(null)))
   for (const y of yards.splice(0)) y.stop()
 })
 
-function yard(port?: number) {
-  const y = createBoxYard(testConfig(port ? { port } : {}), { webDir: "/nonexistent" })
+function yard() {
+  const y = createBoxYard(testConfig(), { webDir: "/nonexistent" })
   yards.push(y)
   const p = y.store.createProject({ name: "kitchen" })
   /** A task resting (or running) in `status`, under `parent` when given. */
@@ -173,20 +171,8 @@ describe("Mark done closes the whole tree", () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
-  it("is what POST /api/tasks/:id/close and the owner's chat close do", async () => {
-    const port = await freePort()
-    const { y, p, task } = yard(port)
-    servers.push(await new Promise<Server>((resolve) => {
-      const s = y.app.listen(port, "127.0.0.1", () => resolve(s))
-    }))
-    const viaApi = task("Plan the menu", "idle")
-    const apiKid = task("Starters", "idle", viaApi)
-    const apiGrandkid = task("Soups", "idle", apiKid)
-    const res = await fetch(`http://127.0.0.1:${port}/api/tasks/${viaApi.id}/close`, { method: "POST" })
-    expect(res.status).toBe(200)
-    expect(((await res.json()) as Task).status).toBe("done")
-    expect([viaApi, apiKid, apiGrandkid].map((t) => row(y, t.id).status)).toEqual(["done", "done", "done"])
-
+  it("is what the owner's chat close does", async () => {
+    const { y, p, task } = yard()
     const viaChat = task("Plan the drinks", "pr_ready")
     const chatKid = task("Wine", "idle", viaChat)
     const chatGrandkid = task("Reds", "idle", chatKid)
