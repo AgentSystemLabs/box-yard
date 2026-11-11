@@ -1,0 +1,27 @@
+- palette-empty-1440.png: palette open, empty query, 1440px
+- palette-query-1440.png: palette with query "box" (tasks, projects, settings), 1440px
+- palette-keyboard-1440.png: palette after 3× ArrowDown: keyboard selection
+- palette-noresults-1440.png: palette no-results state
+- palette-newtask-1440.png: palette query "new task": the New task… command
+- shortcuts-1440.png: shortcuts help sheet (?)
+- palette-empty-400.png: palette open, empty query, 400px
+- palette-query-400.png: palette with query "box" (tasks, projects, settings), 400px
+- palette-noresults-400.png: palette no-results state, 400
+- palette-empty-320.png: palette open, empty query, 320px
+- palette-query-320.png: palette with query "box" (tasks, projects, settings), 320px
+- palette-newtask-dialog-1440.png: New task dialog opened from the palette (empty), 1440
+- palette-newtask-dialog-filled-1440.png: palette New task dialog filled, 1440
+- palette-newtask-dialog-400.png: New task dialog opened from the palette (empty), 400
+- palette-newtask-dialog-filled-400.png: palette New task dialog filled, 400
+- selection-chip-1440.png: text selected in a task transcript: the new-task-from-selection action
+- newtask-empty-1440.png: New task popover from selection (quote, empty instructions), 1440
+- newtask-filled-1440.png: New task popover with instructions typed, 1440
+- newtask-dialog-1440.png: full New task dialog from selection, 1440
+- selection-chip-400.png: text selected in a task transcript: the new-task-from-selection action
+- newtask-empty-400.png: New task popover from selection (quote, empty instructions), 400
+- newtask-filled-400.png: New task popover with instructions typed, 400
+- newtask-dialog-400.png: full New task dialog from selection, 400
+- selection-chip-1440.png: text selected in a task transcript: the new-task-from-selection action
+- newtask-empty-1440-light.png: New task popover from selection (quote, empty instructions), 1440-light
+- selection-chip-1152.png: text selected in a task transcript: the new-task-from-selection action
+- newtask-empty-z125.png: New task popover from selection (quote, empty instructions), z125
