@@ -1,0 +1,21 @@
+# Round 3 screenshots
+- coordinator-1440.png: Settings › Coordinator, desktop dark
+- agents-1440.png: Settings › Box agents, desktop dark
+- appearance-1440.png: Settings › Appearance, desktop dark
+- appearance-light-1440.png: Settings › Appearance, desktop light theme
+- agents-zoom125-1152.png: Settings › Box agents at 125% zoom
+- search-1440.png: Settings search for 'model' with results
+- search-400.png: Settings search for 'model' on phone (opens search first if it's behind a button)
+- unsaved-1440.png: Unsaved draft state after changing a select on Coordinator
+- invalid-1440.png: Draft with a validation error (Auto-compact threshold)
+- nav-400.png: Settings section nav on phone (400)
+- nav-320.png: Settings section nav on phone (320)
+- coordinator-400.png: Settings › Coordinator on phone (400)
+- coordinator-320.png: Settings › Coordinator on phone (320)
+- unsaved-320.png: Unsaved draft footer on phone (320)
+- projects-400.png: Settings › Projects on phone (400)
+- project-settings-1440.png: Project settings for prj_heavy-yard, desktop
+- project-settings-400.png: Project settings for prj_heavy-yard, phone
+- project-unsaved-400.png: Project settings with an unsaved name edit, phone
+- project-danger-400.png: Project settings General tab scrolled to the end (Danger zone), phone
+- new-project-1440.png: New project dialog, desktop
