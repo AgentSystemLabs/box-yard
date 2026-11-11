@@ -4,6 +4,7 @@ import { useSearchParams } from "wouter"
 import { useQueryClient } from "@tanstack/react-query"
 import { USAGE_RANGES, type UsageRangeDays } from "../../../shared/usageLedger"
 import { prefetchUsageLedger } from "../lib/queries"
+import { SETTINGS_PARAM, type SettingsSection } from "../lib/settingsNav"
 import { localDayStarts } from "../lib/usageChart"
 import { LoadFailed, lazyPart } from "./LazyPart"
 import { Loading } from "./Loading"
@@ -33,6 +34,12 @@ const parseDays = (v: string | null): UsageRangeDays => USAGE_RANGES.find((d) =>
 export function useOpenUsage() {
   const [, setParams] = useSearchParams()
   return (days: UsageRangeDays = 30) => setParams((p) => withParam(p, USAGE_PARAM, String(days)), { replace: true })
+}
+
+/** Leaves Usage for a Settings section in one URL change, so the two dialogs never stack (Settings › Usage opens Usage back). */
+export function useUsageToSettings() {
+  const [, setParams] = useSearchParams()
+  return (section: SettingsSection) => setParams((p) => withParam(withParam(p, USAGE_PARAM, null), SETTINGS_PARAM, section), { replace: true })
 }
 
 /** Starts fetching a range's numbers before Usage opens (a pointer on its button, a finger pressing it, focus). */

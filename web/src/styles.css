@@ -398,6 +398,7 @@ body.resizing iframe {
 .task-title-failed { color: var(--color-red-400); }
 :root:not(.dark) .task-title-failed { color: var(--color-red-500); }
 
-/* Match bars and legend swatches, including the selected day's tinted surface. */
+/* Match bars and legend swatches, including the selected day's tinted surface. On the light surface a series is its
+   own light colour where it has one (the token kinds), else a shade darker. */
 .usage-fill { background: var(--series-color); }
-:root:not(.dark) .usage-fill { background: color-mix(in srgb, var(--series-color) 85%, #18181b); }
+:root:not(.dark) .usage-fill { background: var(--series-light, color-mix(in srgb, var(--series-color) 85%, #18181b)); }
