@@ -32,7 +32,9 @@
 // A Captain's "📝 Notes retro" wake accepts every suggestion it lists (resolve_suggestion, with a reason) and
 // replies "(no update)"; FAKE_RETRO=reject rejects them instead, and FAKE_RETRO=skip leaves them all pending.
 // Worker prompts understand these markers anywhere in the text:
-//   [ask] [fail] [slow] [slow:<seconds>] [hang] [preview] [artifact] [agent:<taskId>] [note] [noop] [pr]
+//   [ask] [asks] [fail] [slow] [slow:<seconds>] [hang] [preview] [artifact] [agent:<taskId>] [note] [noop] [pr]
+// [asks] asks three questions at once (ask_user's questions, each with a default and options); the answers start the
+// next turn like any reply.
 // [connectors] (any session) connects to the --mcp-config servers besides Box Yard's own, expanding their ${VAR}s from
 // the env, and replies with each one's tools (and, for a command with an env_keys tool, the env var names it got).
 // [slow:<seconds>] says "Working on it slowly." and then takes that long (a turn to restart Box Yard under).
@@ -682,6 +684,18 @@ async function worker(mcp, prompt) {
     return reply
   }
 
+  if (/\[asks\]/i.test(prompt) && !session.turns.length) {
+    await useTool(mcp, "ask_user", {
+      question: "A few choices before I build the settings page.",
+      questions: [
+        { question: "Which database should it use?", default_answer: "Postgres", options: ["SQLite", "MySQL"] },
+        { question: "Where should it deploy?", default_answer: "Fly.io", options: ["Render", "A box of its own"] },
+        { question: "What should the service be called?", default_answer: "acme-settings" },
+      ],
+    })
+    if (noop) await markNoop()
+    return "I asked three questions."
+  }
   if (/\[ask\]/i.test(prompt) && !session.turns.length) {
     await useTool(mcp, "ask_user", { question: "Which color should the button be: blue or green?" })
     if (noop) await markNoop()

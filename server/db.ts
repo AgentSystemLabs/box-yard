@@ -1307,6 +1307,12 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE side_threads ADD COLUMN parent_id TEXT;
   CREATE INDEX side_threads_parent ON side_threads(parent_id);
   `,
+  `
+  -- ask_user with several questions (shared/askQuestions.ts): JSON [{question, defaultAnswer, options}], the form the
+  -- task page asks them with. It goes with the task's question (their text version) and is cleared with it
+  -- (Store.updateTask). NULL: a plain question, or none.
+  ALTER TABLE tasks ADD COLUMN questions_json TEXT;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

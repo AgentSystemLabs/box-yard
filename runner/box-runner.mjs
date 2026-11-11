@@ -2058,6 +2058,39 @@ function clockUnionMs(spans) {
 // ---------------------------------------------------------------------------
 // MCP mode: newline-delimited JSON-RPC over stdio.
 
+// ask_user's `questions`: several questions answered together (shared/askQuestions.ts, which this file can't import:
+// the same limits, and askProblem matches its questionsProblem). The server cleans the event's copy up again.
+const ASK_MAX_QUESTIONS = 10
+const ASK_MAX_OPTIONS = 7
+const ASK_MAX_TEXT = 2000
+const ASK_MAX_OPTION = 500
+
+const askField = (v) => (typeof v === "string" ? v.trim() : "")
+const askDefault = (q) => askField(q?.default_answer ?? q?.defaultAnswer ?? q?.default)
+
+/** What's wrong with ask_user's `questions` (null: fine), for the tool's error so the agent can fix the call. */
+function askProblem(raw) {
+  if (!Array.isArray(raw) || !raw.length) return "questions must be a non-empty array"
+  if (raw.length > ASK_MAX_QUESTIONS) return `at most ${ASK_MAX_QUESTIONS} questions per ask`
+  for (const [i, item] of raw.entries()) {
+    const q = item && typeof item === "object" ? item : null
+    if (!askField(q?.question)) return `questions[${i}].question is required`
+    if (!askDefault(q)) return `questions[${i}].default_answer is required: your recommended answer, pre-selected`
+    if (q.options !== undefined && !Array.isArray(q.options)) return `questions[${i}].options must be an array of strings`
+    if (Array.isArray(q.options) && q.options.length > ASK_MAX_OPTIONS) return `questions[${i}] has more than ${ASK_MAX_OPTIONS} options`
+  }
+  return null
+}
+
+/** The questions as the event carries them (AskQuestion in shared/askQuestions.ts). */
+function askQuestions(raw) {
+  return raw.map((q) => ({
+    question: askField(q.question).slice(0, ASK_MAX_TEXT),
+    defaultAnswer: askDefault(q).slice(0, ASK_MAX_OPTION),
+    options: (Array.isArray(q.options) ? q.options : []).map(askField).filter(Boolean).map((o) => o.slice(0, ASK_MAX_OPTION)),
+  }))
+}
+
 const NOTE_SCHEMA = {
   type: "object",
   properties: {
@@ -2071,11 +2104,27 @@ const TOOLS = [
   {
     name: "ask_user",
     description:
-      "Ask Cody (the human) a question when you need a decision, credentials, or information you cannot find. After calling this, end your turn; the answer arrives as your next message.",
+      "Ask Cody (the human) a question when you need a decision, credentials, or information you cannot find. After calling this, end your turn; the answer arrives as your next message. " +
+      `To ask several things at once, pass questions (up to ${ASK_MAX_QUESTIONS}) instead: Cody sees them one at a time, each with your default answer pre-selected, your other options, and a box for an answer of their own, and submits them together. The answers arrive as one message, each question with its answer.`,
     inputSchema: {
       type: "object",
-      properties: { question: { type: "string", description: "One clear question, with the options if there are any." } },
-      required: ["question"],
+      properties: {
+        question: { type: "string", description: "One clear question, with the options if there are any. With questions: an optional one-line intro." },
+        questions: {
+          type: "array",
+          maxItems: ASK_MAX_QUESTIONS,
+          description: "Several questions, answered together. Each needs your recommended answer; options are the other answers worth offering.",
+          items: {
+            type: "object",
+            properties: {
+              question: { type: "string", description: "One clear question." },
+              default_answer: { type: "string", description: "Your recommended answer, pre-selected." },
+              options: { type: "array", maxItems: ASK_MAX_OPTIONS, items: { type: "string" }, description: `Up to ${ASK_MAX_OPTIONS} other answers, short. Cody can always type their own.` },
+            },
+            required: ["question", "default_answer"],
+          },
+        },
+      },
     },
   },
   {
@@ -2336,8 +2385,17 @@ async function liveNotes() {
 async function callTool(name, args = {}) {
   switch (name) {
     case "ask_user": {
-      if (!args.question?.trim()) return text("question is required", true)
-      await emit({ t: "ask_user", question: args.question.trim() })
+      const intro = typeof args.question === "string" ? args.question.trim() : ""
+      // An empty list is a plain ask, so a call that sends questions: [] with its question still works.
+      if (args.questions != null && !(Array.isArray(args.questions) && !args.questions.length)) {
+        const problem = askProblem(args.questions)
+        if (problem) return text(problem, true)
+        await emit({ t: "ask_user", question: intro, questions: askQuestions(args.questions) })
+        const n = args.questions.length
+        return text(owner(`Your ${n === 1 ? "question was" : `${n} questions were`} sent to Cody. End your turn now; the answers will arrive as your next message.`))
+      }
+      if (!intro) return text("question is required (or questions, to ask several at once)", true)
+      await emit({ t: "ask_user", question: intro })
       return text(owner("Your question was sent to Cody. End your turn now; the answer will arrive as your next message."))
     }
     case "list_agents": {
