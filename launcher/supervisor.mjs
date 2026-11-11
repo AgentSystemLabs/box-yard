@@ -39,6 +39,8 @@ export class Supervisor {
    * @param {string} o.host where the server listens; a wildcard is checked on 127.0.0.1
    * @param {string} o.repo
    * @param {string} [o.ownVersion] the version this launcher runs from, never pruned
+   * @param {NodeJS.WritableStream} [o.stdout] where the server's output goes (this terminal)
+   * @param {NodeJS.WritableStream} [o.stderr]
    */
   constructor(o) {
     this.o = o
@@ -118,8 +120,8 @@ export class Supervisor {
         for (const line of String(chunk).split(/\r?\n/)) if (line.trim()) this.output.push(line)
         if (this.output.length > OUTPUT_LINES) this.output.splice(0, this.output.length - OUTPUT_LINES)
       })
-    tee(child.stdout, process.stdout)
-    tee(child.stderr, process.stderr)
+    tee(child.stdout, this.o.stdout ?? process.stdout)
+    tee(child.stderr, this.o.stderr ?? process.stderr)
     child.on("message", (msg) => this.onMessage(msg))
     let gone = false
     child.once("exit", (code, signal) => {
