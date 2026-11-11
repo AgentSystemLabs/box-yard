@@ -1,6 +1,7 @@
 // How a task's transcript groups its lines (TaskThread in TaskView.tsx). Back-to-back published files share one row
 // of file chips, and back-to-back housekeeping events (Box Yard's own bookkeeping: "Waiting for…", "Cloned…",
 // "Moved from…", "Turn 2 finished") fold under the newest one, so the agent's replies aren't buried under them.
+// Tool calls aren't lines: each back-to-back run of them is one closed "12 steps" row before the line it led to.
 import type { TaskMessage } from "../../../shared/types"
 import { dayKey } from "./calendarDay"
 
@@ -39,4 +40,28 @@ export function threadRuns(messages: readonly TaskMessage[]): ThreadRun[] {
     } else out.push({ kind: "line", m })
   }
   return out
+}
+
+/** `steps`' key for the tool calls after the newest line: the running turn's, so far. */
+export const STEPS_SO_FAR = ""
+
+/**
+ * The transcript's lines, which leave tool calls out, and each back-to-back run of tool calls by the id of the line
+ * after it (STEPS_SO_FAR for the ones no line follows yet). `skip` is a line left out as well (the pending question,
+ * which shows as a card): the tool calls around it stay one run.
+ */
+export function threadLines(messages: readonly TaskMessage[], skip: string | null = null): { lines: TaskMessage[]; steps: Map<string, TaskMessage[]> } {
+  const lines: TaskMessage[] = []
+  const steps = new Map<string, TaskMessage[]>()
+  let run: TaskMessage[] | null = null
+  for (const m of messages) {
+    if (m.role === "tool") (run ??= []).push(m)
+    else if (m.id !== skip) {
+      lines.push(m)
+      if (run) steps.set(m.id, run)
+      run = null
+    }
+  }
+  if (run) steps.set(STEPS_SO_FAR, run)
+  return { lines, steps }
 }

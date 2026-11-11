@@ -1,20 +1,32 @@
 import { useState } from "react"
+import { ArrowRightLeft } from "lucide-react"
 import { AGENT_CLIS, AGENT_CLI_LABEL } from "../../../shared/agentCli"
 import type { Task } from "../../../shared/types"
 import type { TaskContinuation } from "../../../shared/taskContinuation"
 import { useContinueTask } from "../lib/queries"
 import { Modal } from "./Modal"
+import { menuItem } from "./TaskHeader"
 import { Button, Select } from "./ui"
 
-/** An explicit action: ordinary Retry and messages keep the task's saved harness. */
-export function ContinueTask({ task, className }: { task: Pick<Task, "id" | "agentCli" | "status">; className?: string }) {
+/**
+ * An explicit action: ordinary Retry and messages keep the task's saved harness. `menu`: a row of the details sheet's
+ * actions, drawn like the rows beside it; elsewhere (a failed task's banner) it's a button.
+ */
+export function ContinueTask({ task, className, menu = false }: { task: Pick<Task, "id" | "agentCli" | "status">; className?: string; menu?: boolean }) {
   const [open, setOpen] = useState(false)
   const [agent, setAgent] = useState<NonNullable<TaskContinuation["agent"]>>(task.agentCli)
   const continuation = useContinueTask()
   if (!["failed", "idle", "pr_ready"].includes(task.status)) return null
   const reset = agent === "default" || agent !== task.agentCli
+  const pick = () => { setAgent(task.agentCli); setOpen(true) }
   return <>
-    <Button size="sm" variant="subtle" className={className} onClick={() => { setAgent(task.agentCli); setOpen(true) }}>Continue with another agent…</Button>
+    {menu ? (
+      <button type="button" className={menuItem} onClick={pick}>
+        <ArrowRightLeft className="h-3.5 w-3.5 text-zinc-500" aria-hidden /> Continue with another agent…
+      </button>
+    ) : (
+      <Button size="sm" variant="subtle" className={className} onClick={pick}>Continue with another agent…</Button>
+    )}
     {open && <Modal
       title="Continue this task"
       size="sm"

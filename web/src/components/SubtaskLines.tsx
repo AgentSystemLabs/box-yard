@@ -76,28 +76,34 @@ function SubtaskRows({ items }: { items: Listed[] }) {
   )
 }
 
-const REPORT_WORD: Partial<Record<TaskStatus, string>> = { done: "done", failed: "failed", needs_input: "asks", idle: "replied", pr_ready: "opened a PR" }
+/** How a report ended, where that needs Cody or the parent: one that's done or just replied says so in its reply. */
+const REPORT_WORD: Partial<Record<TaskStatus, string | null>> = { done: null, idle: null, failed: "failed", needs_input: "asks", pr_ready: "opened a PR" }
 
-/** A sub-task's report: who sent it and how it ended (its PR as a link, once it has one), then its reply as Markdown. */
+/**
+ * A sub-task's report: who sent it and how it ended on one line (the title gives way, never the time), then its reply
+ * as Markdown. Its PR is a link there unless the reply links it itself.
+ */
 export function SubtaskReportLine({ m }: { m: TaskMessage }) {
   const from = String(m.meta?.from ?? "")
+  const name = String(m.meta?.fromTitle ?? from)
   const status = String(m.meta?.subtaskReport ?? "") as TaskStatus
   const child = useTask(from).data
-  const pr = child?.prUrl ? child : null
-  // The PR link already says "opened a PR".
-  const word = status === "pr_ready" && pr ? null : (REPORT_WORD[status] ?? status)
+  const pr = child?.prUrl && !m.content.includes(child.prUrl) ? child : null
+  // A PR link, here or in the reply, already says "opened a PR".
+  const word = status === "pr_ready" && child?.prUrl ? null : status in REPORT_WORD ? REPORT_WORD[status] : status
   return (
     <div data-testid="subtask-report" className={cx(MESSAGE_BLOCK, "flex items-start gap-2 rounded-lg bg-violet-500/5 px-3 py-2 text-sm text-violet-100")}>
       <LineIcon icon={Users} className="h-4 w-4 text-violet-400" />
       <div className="min-w-0 flex-1">
-        <div className="mb-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[11px] leading-5 font-semibold text-violet-400 pointer-coarse:min-h-9 pointer-coarse:items-center">
-          <span>Report from</span>
-          <AppLink href={`/tasks/${from}`} className={cx(TAP_AREA, "min-w-0 wrap-anywhere text-yard-300 hover:underline")}>
-            {String(m.meta?.fromTitle ?? from)}
+        {/* A narrow card (a phone) leaves "Report from" to screen readers, so the title has the row. */}
+        <div className="@container/report mb-0.5 flex min-w-0 items-baseline gap-x-1.5 text-[11px] leading-5 font-semibold text-violet-400 pointer-coarse:min-h-9 pointer-coarse:items-center">
+          <span className="shrink-0 font-normal @max-[22rem]/report:sr-only">Report from</span>
+          <AppLink href={`/tasks/${from}`} title={name} className={cx(TAP_AREA, "flex min-w-0 text-yard-300 hover:underline")}>
+            <span className="truncate">{name}</span>
           </AppLink>
-          {word && <span className={cx("font-normal", status === "failed" ? "text-red-300" : status === "needs_input" ? "text-amber-300" : "text-violet-300/80")}>{word}</span>}
-          {pr && <PrChip task={pr} variant="number" className={cx(TAP_AREA, "font-normal tabular-nums")} />}
-          <span className="text-[10px] font-normal text-zinc-600">
+          {word && <span className={cx("shrink-0 font-normal", status === "failed" ? "text-red-300" : status === "needs_input" ? "text-amber-300" : "text-violet-300/80")}>{word}</span>}
+          {pr && <PrChip task={pr} variant="number" className={cx(TAP_AREA, "shrink-0 font-normal tabular-nums")} />}
+          <span className="shrink-0 text-[10px] font-normal text-zinc-600">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>

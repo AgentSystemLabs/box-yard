@@ -30,7 +30,7 @@ const ICON_BUTTONS = "-my-0.5 flex shrink-0 pointer-coarse:-my-2.5"
 
 /** Steer, with its name: 24px tall, 44px on a touch screen. */
 const STEER_BUTTON =
-  "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold text-yard-300 transition hover:bg-zinc-800 hover:text-yard-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none disabled:opacity-50 pointer-coarse:h-11 pointer-coarse:px-2.5"
+  "flex h-6 shrink-0 items-center gap-1 rounded-md border border-yard-300/40 px-2 text-[11px] font-semibold text-yard-300 transition hover:border-yard-300/70 hover:bg-zinc-800 hover:text-yard-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none disabled:opacity-50 pointer-coarse:h-11 pointer-coarse:px-2.5"
 
 /** A turn is taking the row, or has: it can't be edited, cancelled or steered any more. */
 const isLocked = (m: QueuedMessage) => m.status === "delivering" || m.status === "steering" || m.status === "accepted" || m.status === "uncertain"

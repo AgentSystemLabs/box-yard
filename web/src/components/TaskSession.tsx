@@ -109,7 +109,7 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
                 <TaskThread handle={handle} id={id} bare scrollKey={scrollKey}
                   working={onTurn(task) ? workingLabel(task.status) : null}
                   workingSince={onTurn(task) ? runningSince(task) : null}
-                  asking={task.status === "needs_input"}
+                  ask={task.status === "needs_input" ? task.question : null}
                   selectionSource={project ? { kind: "task", project: projectContext(project)!, task: taskContext(task)! } : null}
                   onStartFromSelection={selection} onFollowUp={followUp}
                 />

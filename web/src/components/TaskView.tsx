@@ -1,126 +1,31 @@
 import { useTranscriptHistory } from "../lib/transcriptHistory"
 import { HistoryNavigation } from "./HistoryNavigation"
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
-import { Bot, MessageCircleQuestion, Navigation2, Users, Webhook } from "lucide-react"
-import {
-  newClientId,
-  useArtifacts,
-  useProjects,
-  useSchedules,
-  useSendChat,
-  useSendTaskMessage,
-  useTask,
-  useTaskMessages,
-} from "../lib/queries"
+import { Bot, MessageCircleQuestion, MessageSquareReply, Navigation2, Users, Webhook } from "lucide-react"
+import { useOwnerName, useTaskMessages } from "../lib/queries"
 import { useEntityIndex } from "../lib/entities"
 import { useTail } from "../lib/tail"
 import { chatDays } from "../lib/chatDays"
 import { ChatHistory, DayBoundary } from "./ChatHistory"
-import { AppLink, Button, Elapsed, Empty, InRepo, LineIcon, Markdown, TAP_AREA, TimeAgo, cx, useRepoScope, warmMarkdown, WaitIcon } from "./ui"
+import { AppLink, Button, Elapsed, LineIcon, Markdown, TAP_AREA, TimeAgo, cx, useRepoScope, warmMarkdown } from "./ui"
 import { StickyScroll, type StickyScrollHandle } from "./StickyScroll"
-import { CaptainAnswerLine, TaskComposer, ToCaptainLine } from "./CaptainForward"
-import { PAGE_BLEED_BOTTOM } from "../lib/layout"
-import { TaskHeader } from "./TaskHeader"
+import { CaptainAnswerLine, ToCaptainLine } from "./CaptainForward"
 import { PublishedFile } from "./TaskFiles"
 import { PREVIEW_GROUP } from "./FileLink"
-import { threadRuns } from "../lib/taskThread"
+import { STEPS_SO_FAR, threadLines, threadRuns } from "../lib/taskThread"
+import { focusComposer } from "../lib/chatSwitch"
 import { AttachmentList } from "./Attachments"
 import { TaskQueue } from "./QueuedMessages"
 import { RecommendedNextSteps, nextStepsFromMeta } from "./RecommendedNextSteps"
 import { SelectionToTask } from "./SelectionToTask"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
-import { projectContext, taskContext, type SelectionTaskSource } from "../lib/selectionTask"
-import type { Attachment, TaskMessage, TaskStatus } from "../../../shared/types"
+import type { SelectionTaskSource } from "../lib/selectionTask"
+import type { TaskMessage, TaskStatus } from "../../../shared/types"
 import { submissionId } from "../lib/taskSubmissions"
 import { userMessageLabel } from "../../../shared/sender"
-import { useOwnerName } from "../lib/queries"
-import { WaitFixButton, WaitReason } from "./WaitReason"
-import { TaskFailure } from "./TaskFailure"
 import { TurnTimingChip, timingOf } from "./TurnTimingChip"
-import { runningSince } from "../lib/runningTasks"
 import { Loading } from "./Loading"
 import { SubtaskReportLine, SubtasksLine } from "./SubtaskLines"
-
-/** A task's page. "#12" and "PR #12" in its text link to its project's repo. */
-export function TaskView({ id }: { id: string }) {
-  return (
-    <InRepo taskId={id}>
-      <TaskPage id={id} />
-    </InRepo>
-  )
-}
-
-function TaskPage({ id }: { id: string }) {
-  // Only this task: other tasks' live updates don't re-render the view.
-  const tasks = useTask(id)
-  const projects = useProjects()
-  const schedules = useSchedules()
-  const artifacts = useArtifacts()
-  const send = useSendTaskMessage(id)
-  const sendChat = useSendChat()
-  const panel = useRef<HTMLDivElement>(null)
-  const thread = useRef<StickyScrollHandle>(null)
-  const task = tasks.data
-  const project = projects.data?.find((p) => p.id === task?.projectId)
-  const schedule = task?.scheduleId ? schedules.data?.find((s) => s.id === task.scheduleId) : null
-  // A message to a busy task shows as a queued row at the end of the transcript: either way, scroll to it.
-  const submit = useCallback(
-    (content: string, attachments: Attachment[]) => {
-      const sending = send.mutateAsync({ content, attachments })
-      sending.catch(() => {}) // onError already says so; the Composer puts the text back.
-      thread.current?.scrollToEnd()
-      return sending
-    },
-    [send.mutateAsync],
-  )
-  const scrollToEnd = useCallback(() => thread.current?.scrollToEnd(), [])
-  const sendFollowUp = useCallback((content: string) => submit(content, []), [submit])
-  const startFromSelection = useCallback(
-    (content: string) => sendChat.mutate({ id: newClientId("chat"), content, attachments: [] }),
-    [sendChat.mutate],
-  )
-  // Memoized so the header's files chip and drawer only recompute when this task's files change.
-  const files = useMemo(() => (artifacts.data ?? []).filter((a) => a.taskId === id), [artifacts.data, id])
-  const selectionSource: SelectionTaskSource | null = project && task ? { kind: "task", project: projectContext(project)!, task: taskContext(task)! } : null
-
-  if (tasks.isLoading) return null
-  if (!task) return <Empty title="Task not found">It may have been deleted.</Empty>
-
-  const running = task.status === "working" || task.status === "starting"
-
-  return (
-    // Runs through the page's bottom padding so the composer lines up with the Coordinator panel's.
-    <div ref={panel} className={cx("relative flex min-w-0 flex-col", PAGE_BLEED_BOTTOM)}>
-      <TaskHeader task={task} project={project} schedule={schedule} files={files} />
-
-      {task.status === "queued" && task.waitReason && (
-        <div role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          <WaitIcon task={task} className="h-4 w-4 shrink-0 text-amber-300" />
-          <span className="min-w-0 flex-1">
-            {/* A wait with a fix says when it ends itself ("…, or it resets at midnight"). */}
-            <WaitReason task={task} />.
-            {!task.waitFix && ` It starts on its own once there is room${task.waitBoxSize ? `, and never on a box smaller than ${task.waitBoxSize}` : ""}.`}
-          </span>
-          <WaitFixButton task={task} className="shrink-0" />
-        </div>
-      )}
-      <TaskFailure task={task} project={project} className="mb-4" />
-
-      <TaskThread
-        handle={thread}
-        id={id}
-        working={running ? workingLabel(task.status) : null}
-        workingSince={running ? runningSince(task) : null}
-        asking={task.status === "needs_input"}
-        selectionSource={selectionSource}
-        onStartFromSelection={startFromSelection}
-        onFollowUp={sendFollowUp}
-      />
-
-      <TaskComposer task={task} project={project} panelRef={panel} onSubmit={submit} onForwarded={scrollToEnd} />
-    </div>
-  )
-}
 
 /** The live line's words while a turn runs: what is going on, never the task's state (its icon says that). */
 export const workingLabel = (status: TaskStatus) => (status === "starting" ? "Preparing the workspace" : "Turn running")
@@ -130,7 +35,7 @@ const TOOL_SCAN = 200
 /** "Turn 3 finished · $0.42." (server/tasks.ts): the event that closes a turn. */
 const TURN_END = /^Turn (\d+ )?(finished|stopped|failed)\b/
 
-/** The running turn's newest tool call ("Edit web/src/…"), on one line: the transcript leaves tool calls out. */
+/** The running turn's newest tool call ("Edit web/src/…"), on one line: the transcript folds tool calls away. */
 function latestTool(items: readonly TaskMessage[]): string | null {
   for (let i = items.length - 1, end = Math.max(0, items.length - TOOL_SCAN); i >= end; i--) {
     const m = items[i]!
@@ -147,7 +52,7 @@ export const TaskThread = memo(function TaskThread({
   id,
   working,
   workingSince = null,
-  asking = false,
+  ask = null,
   selectionSource,
   onStartFromSelection,
   onFollowUp,
@@ -162,8 +67,8 @@ export const TaskThread = memo(function TaskThread({
   working: string | null
   /** Since when it has been working, for the live "· 12m" after `working`. */
   workingSince?: number | null
-  /** The task waits for an answer (needs_input): its newest question shows as a card, not a quiet event line. */
-  asking?: boolean
+  /** The question the task waits on (needs_input), as a card at the thread's foot until it's answered. */
+  ask?: string | null
   selectionSource: SelectionTaskSource | null
   onStartFromSelection: (prompt: string) => void
   onFollowUp: (message: string) => void
@@ -181,14 +86,18 @@ export const TaskThread = memo(function TaskThread({
     for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === "assistant") return list[i]!.id
     return null
   }, [history.items])
-  const pendingAsk = useMemo(() => {
-    if (!asking) return null
+  // The pending question's own event: the card at the foot says it, so its line steps aside until it's answered.
+  const asked = useMemo(() => {
+    if (!ask) return null
     const list = history.items
-    for (let i = list.length - 1; i >= 0; i--) if (list[i]!.role === "event" && list[i]!.meta?.kind === "question") return list[i]!.id
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]!
+      if (m.role === "event" && m.meta?.kind === "question") return m.content.endsWith(ask) ? m : null
+    }
     return null
-  }, [asking, history.items])
+  }, [ask, history.items])
   const tool = useMemo(() => (working ? latestTool(history.items) : null), [working, history.items])
-  const shown = useMemo(() => history.items.filter((m) => m.role !== "tool"), [history.items])
+  const { lines: shown, steps } = useMemo(() => threadLines(history.items, asked?.id), [history.items, asked])
   const days = useMemo(() => chatDays(shown), [shown])
   // Opening a task paints its newest rows first, then the rest of the tail right after.
   const tail = useTail(shown, id, { first: firstPaintCount(shown), max: 200 })
@@ -201,6 +110,18 @@ export const TaskThread = memo(function TaskThread({
   }, [tailReveal])
   const runs = useMemo(() => threadRuns(tail.visible), [tail.visible])
   const firstMessages = useMemo(() => runs.map((r) => r.kind === "line" ? r.m : r.messages[0]!), [runs])
+  // The tool calls each row followed; a fold's are the ones before any of its lines.
+  const runSteps = useMemo(
+    () =>
+      runs.map((r) => {
+        if (r.kind === "line") return steps.get(r.m.id) ?? null
+        const all = r.messages.flatMap((m) => steps.get(m.id) ?? [])
+        return all.length ? all : null
+      }),
+    [runs, steps],
+  )
+  // The running turn's so far, after the newest line (not while reading older rows).
+  const stepsSoFar = tail.later ? null : (steps.get(STEPS_SO_FAR) ?? null)
 
   // Older replies aren't rendered yet: parse their markdown in idle time so loading them is quick.
   const hidden = tail.hidden
@@ -228,29 +149,62 @@ export const TaskThread = memo(function TaskThread({
         >
           {messages.isLoading && <Loading kind="chat" label="Loading the transcript" />}
           {messages.isError && <div role="alert" className="text-sm text-red-300">Couldn't load the transcript. <Button variant="ghost" onClick={() => void messages.refetch()}>Retry</Button></div>}
-          {runs.map((r, i) => (
-            <Fragment key={submissionId(firstMessages[i]!)}>
-              <DayBoundary at={firstMessages[i]!.createdAt} previousAt={firstMessages[i - 1]?.createdAt} messageId={firstMessages[i]!.id} />
-              {r.kind === "published" ? <PublishedRun messages={r.messages} />
-              : r.kind === "housekeeping" ? <HousekeepingRun messages={r.messages} revealRequest={r.messages.some((m) => m.id === revealedMessage?.id) ? revealedMessage : null} />
-              : <Line m={r.m} next={r.m.id === newestReply} ask={r.m.id === pendingAsk} onFollowUp={onFollowUp} />}
-            </Fragment>
-          ))}
+          {/* One list, so a run of steps keeps its row (and whether it's open) once the line it led to arrives. */}
+          {[
+            ...runs.flatMap((r, i) => {
+              const before = runSteps[i]
+              const row = (
+                <Fragment key={submissionId(firstMessages[i]!)}>
+                  <DayBoundary at={firstMessages[i]!.createdAt} previousAt={firstMessages[i - 1]?.createdAt} messageId={firstMessages[i]!.id} />
+                  {r.kind === "published" ? <PublishedRun messages={r.messages} />
+                  : r.kind === "housekeeping" ? <HousekeepingRun messages={r.messages} revealRequest={r.messages.some((m) => m.id === revealedMessage?.id) ? revealedMessage : null} />
+                  : <Line m={r.m} next={r.m.id === newestReply} onFollowUp={onFollowUp} />}
+                </Fragment>
+              )
+              return before ? [<StepsRun key={stepsKey(before)} messages={before} />, row] : [row]
+            }),
+            stepsSoFar && <StepsRun key={stepsKey(stepsSoFar)} messages={stepsSoFar} />,
+          ]}
           <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={historyHandle} />
           {working && (
-            // In the events' column (pl-6), with no dot of its own: the task's icon in the header says it works.
-            <div data-testid="working-line" className="flex min-w-0 items-baseline gap-1.5 pt-1 pl-6 text-xs text-sky-400">
+            // In the events' column (pl-6), with no dot or colour of its own: the task's icon in the header says it works.
+            <div data-testid="working-line" className="flex min-w-0 items-baseline gap-1.5 pt-1 pl-6 text-xs text-zinc-400">
               <span className="shrink-0">{working}</span>
               {workingSince !== null && (
-                <span data-testid="working-for" className="shrink-0 text-zinc-500">
+                <span data-testid="working-for" className="shrink-0">
                   · <Elapsed since={workingSince} title="Started" className="tabular-nums" />
                 </span>
               )}
               {tool && (
-                <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px] text-zinc-500">
+                <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px]">
                   · {tool}
                 </span>
               )}
+            </div>
+          )}
+          {ask && (
+            // At the foot, where the working line was, so it's the last thing above the box however long the thread.
+            <div role="group" aria-label="The agent asks" data-testid="pending-ask" className="flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-sm">
+              {/* Its first row is as tall as Answer (h-7), and so is the icon's box. A narrow card (a small phone) drops
+                  the time, so the label is never cut. */}
+              <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" box="h-7!" />
+              <div className="@container/ask min-w-0 flex-1">
+                <div className="flex h-7 min-w-0 items-center gap-2 text-[11px] font-semibold text-amber-400">
+                  <span className="min-w-0 truncate">The agent asks</span>
+                  {asked && (
+                    <span className="shrink-0 text-[10px] font-normal text-zinc-600 @max-[15rem]/ask:hidden">
+                      <TimeAgo ts={asked.createdAt} />
+                    </span>
+                  )}
+                  <button type="button" data-testid="pending-ask-answer" onClick={() => focusComposer(id)} className={cx(TAP_AREA, ANSWER_BUTTON)}>
+                    <MessageSquareReply className="h-3.5 w-3.5" aria-hidden />
+                    Answer
+                  </button>
+                </div>
+                <div className="min-w-0 leading-relaxed wrap-anywhere text-zinc-100 [&>.prose-chat>:first-child]:mt-0!">
+                  <Markdown>{ask}</Markdown>
+                </div>
+              </div>
             </div>
           )}
           <TaskQueue taskId={id} />
@@ -259,6 +213,10 @@ export const TaskThread = memo(function TaskThread({
     </SelectionToTask>
   )
 })
+
+/** The ask card's Answer: 28px drawn, 44px to a finger (TAP_AREA). It puts the caret in the task's box. */
+const ANSWER_BUTTON =
+  "ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-amber-500/45 bg-amber-500/15 px-2.5 text-xs font-semibold whitespace-nowrap text-amber-100 transition hover:bg-amber-500/25 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none"
 
 /** Rows a task's first paint shows: even short ones fill a tall screen. */
 const FIRST_PAINT_ROWS = 20
@@ -317,6 +275,48 @@ const HousekeepingRun = memo(
   (a, b) => a.revealRequest === b.revealRequest && a.messages.length === b.messages.length && a.messages.every((m, i) => m === b.messages[i]),
 )
 
+const stepsKey = (messages: TaskMessage[]) => `steps:${messages[0]!.id}`
+
+/**
+ * Back-to-back tool calls (lib/taskThread.ts) as one closed row, "12 steps": what a turn ran is there to unfold (after
+ * a failed turn, say) and costs one row until then.
+ */
+const StepsRun = memo(
+  function StepsRun({ messages }: { messages: TaskMessage[] }) {
+    const [open, setOpen] = useState(false)
+    const steps = `${messages.length} ${messages.length === 1 ? "step" : "steps"}`
+    const failed = messages.reduce((n, m) => n + (m.meta?.error ? 1 : 0), 0)
+    return (
+      <div data-testid="tool-steps" data-open={open || undefined} className="space-y-1">
+        <div className="flex min-w-0 items-center pl-6 text-[11px] text-zinc-500 pointer-coarse:min-h-8">
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            className={cx(TAP_AREA, "rounded underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300 hover:decoration-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-500/50 focus-visible:outline-none")}
+          >
+            {open ? "Hide steps" : steps}
+          </button>
+          {open && <span className="ml-2">{steps}</span>}
+          {failed > 0 && <span className="ml-2 text-red-300">{failed} failed</span>}
+        </div>
+        {open && messages.map((m) => <ToolText key={m.id} m={m} />)}
+      </div>
+    )
+  },
+  (a, b) => a.messages.length === b.messages.length && a.messages.every((m, i) => m === b.messages[i]),
+)
+
+/** One tool call, or a tool's error: the tool and what it was given, on up to three lines. */
+function ToolText({ m }: { m: TaskMessage }) {
+  return (
+    <div className={cx("line-clamp-3 pl-6 font-mono text-[11px] whitespace-pre-wrap wrap-anywhere", m.meta?.error ? "text-red-300" : "text-zinc-400")}>
+      {m.meta?.error ? "✗ " : "› "}
+      {m.content}
+    </div>
+  )
+}
+
 /** A plain event: dim small text, its time, and a finished turn's timing. */
 function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
   const url = typeof m.meta?.url === "string" ? m.meta.url : null
@@ -339,11 +339,7 @@ function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
   )
 }
 
-/** "Asked Cody: " before an ask_user question's text (server/tasks.ts), whatever the owner is called. */
-const ASKED_PREFIX = /^Asked [^:\n]{1,80}:\s*/
-
-/** `ask`: the question the task is waiting on right now, as a card; once answered it's a quiet event line again. */
-export const Line = memo(function Line({ m, onFollowUp, next = true, ask = false }: { m: TaskMessage; onFollowUp: (message: string) => void; next?: boolean; ask?: boolean }) {
+export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: TaskMessage; onFollowUp: (message: string) => void; next?: boolean }) {
   const ownerName = useOwnerName()
   const time = (
     <span className="ml-2 text-[10px] text-zinc-600">
@@ -391,12 +387,7 @@ export const Line = memo(function Line({ m, onFollowUp, next = true, ask = false
         </div>
       )
     case "tool":
-      return (
-        <div className={cx("overflow-x-auto pl-6 font-mono text-[11px] whitespace-nowrap", m.meta?.error ? "text-red-400/80" : "text-zinc-600")}>
-          {m.meta?.error ? "✗ " : "› "}
-          {m.content}
-        </div>
-      )
+      return <ToolText m={m} />
     case "agent":
       if (m.meta?.subtaskReport) return <SubtaskReportLine m={m} />
       return (
@@ -417,21 +408,6 @@ export const Line = memo(function Line({ m, onFollowUp, next = true, ask = false
       if (m.meta?.kind === "to_captain") return <ToCaptainLine m={m} />
       if (m.meta?.kind === "captain_answer") return <CaptainAnswerLine m={m} />
       if (m.meta?.kind === "subtasks") return <SubtasksLine m={m} />
-      if (ask && m.meta?.kind === "question")
-        return (
-          <div data-chat-id={m.id} data-testid="pending-ask" className="flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 text-sm">
-            <LineIcon icon={MessageCircleQuestion} className="h-4 w-4 text-amber-400" />
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] leading-5 font-semibold text-amber-400">
-                The agent asks
-                {time}
-              </div>
-              <div className="min-w-0 leading-relaxed wrap-anywhere text-zinc-100 [&>.prose-chat>:first-child]:mt-0!">
-                <Markdown>{m.content.replace(ASKED_PREFIX, "")}</Markdown>
-              </div>
-            </div>
-          </div>
-        )
       if (m.meta?.kind === "hook")
         return (
           <div className={cx("flex items-start gap-1.5 pl-1 text-xs leading-relaxed", m.meta.status === "fired" ? "text-teal-300/90" : "text-amber-200/80")} data-testid="hook-event">

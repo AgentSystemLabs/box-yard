@@ -8,7 +8,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
-  GitMerge,
+  DoorOpen,
   Globe,
   Info,
   Plug,
@@ -48,7 +48,7 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
 
 /**
  * The task's header, in the task panel (`onBack`: an h2 with a back button before it) and the task page (an h1
- * under the breadcrumb). One row, like a phone's navigation bar: back, the task's icon and its title (one line; a tap
+ * under the breadcrumb). One row, like a phone's navigation bar: back, the task's icon and its title (two lines at most; a tap
  * opens the details), then what to act on (its PR, previews and files, and Mark done once it's ready for review, or
  * Reopen once it's done, or Delete if it failed) and ⓘ (its details) last. The icon is the header's status (TaskStatusIcon): it pulses while
  * the task works and has a still dot when it asks or failed, and its name says the state to screen readers; the details
@@ -62,7 +62,7 @@ import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
  *
  * On a phone (under SIDEBAR_INLINE, where the panel covers the chat) it's two rows. The first is the way around: the
  * sidebar's ☰, the levels above as crumbs in Back's place (TreeNav.tsx), Mark done or Reopen, and ⓘ. Under it, the
- * task: its icon and its whole title, wrapping (a tap opens the details), with its chips.
+ * task: its icon and its whole title, wrapping (a tap opens the details), and its chips on a row of their own under it.
  */
 export function TaskHeader({
   task,
@@ -100,6 +100,8 @@ export function TaskHeader({
   const [details, setDetails] = useState(false)
   const phone = !useMinWidth(SIDEBAR_INLINE)
   const ready = readyForReview(task.status)
+  // Its PR, files or a preview: chips that share the header with the title.
+  const crowded = Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0
   const chips = (
     <div data-testid="task-chips" className="flex items-center gap-0.5 @min-[36rem]/head:gap-1.5">
       <TaskStateMore task={task} />
@@ -125,11 +127,13 @@ export function TaskHeader({
             </div>
           </div>
         </div>
-        <div data-testid="task-meta" className={cx(CHAT_COLUMN, "flex min-w-0 flex-wrap items-start gap-x-0.5 pb-0.5 text-xs text-zinc-500")}>
-          <Heading className={cx("flex min-w-[min(100%,9rem)] flex-1 basis-0", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
+        {/* The title has the row to itself, and the chips their own under it, starting where the title's text does
+            (past its icon): a narrow header never squeezes the title beside them. */}
+        <div data-testid="task-meta" className={cx(CHAT_COLUMN, "min-w-0 pb-0.5 text-xs text-zinc-500")}>
+          <Heading className={cx("flex min-w-0", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
             <TitleButton task={task} open={details} onOpen={() => setDetails(true)} wrap />
           </Heading>
-          <div className="ml-auto flex h-11 shrink-0 items-center">{chips}</div>
+          {crowded && <div className="-mt-2 flex h-11 min-w-0 items-center pl-6">{chips}</div>}
         </div>
       </header>
     )
@@ -151,8 +155,8 @@ export function TaskHeader({
           header's edge (a touch screen's 44px ⓘ already does). */}
       <div className="my-1 ml-auto flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5 pointer-coarse:my-0">
         {chips}
-        {ready && <MarkDoneButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
-        {task.status === "done" && <ReopenButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
+        {ready && <MarkDoneButton task={task} crowded={crowded} />}
+        {task.status === "done" && <ReopenButton task={task} crowded={crowded} />}
         {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
         {tools}
         {menu}
@@ -253,10 +257,10 @@ const ICON_BUTTON =
   "grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:w-11"
 
 /**
- * The task's icon and the title, on one line. A tap opens the details (the full title, the state in words, where it
+ * The task's icon and the title, on up to two lines. A tap opens the details (the full title, the state in words, where it
  * runs). The icon says the state (TaskStatusIcon): to the eye while it works, asks or failed, and always by name to
  * screen readers and in the tooltip. Task state is separate from its PR state, including after the PR merges. `wrap`
- * (a phone's second row): the whole title, up to three lines, the icon on its first.
+ * (a phone's second row, the title's alone): the whole title, up to three lines, the icon on its first.
  */
 function TitleButton({ task, open, onOpen, wrap = false }: { task: Task; open: boolean; onOpen: () => void; wrap?: boolean }) {
   return (
@@ -277,7 +281,7 @@ function TitleButton({ task, open, onOpen, wrap = false }: { task: Task; open: b
         <TaskStatusIcon task={task} size="lg" label={STATUS[task.status].label} muted={task.status === "idle"} />
         <PriorityPill task={task} compact />
       </span>
-      <span className={cx("min-w-0 flex-1 font-semibold tracking-tight", wrap ? "line-clamp-3 wrap-anywhere" : "truncate text-[15px] leading-snug @min-[32rem]/head:text-base")}>{task.title}</span>
+      <span className={cx("min-w-0 flex-1 font-semibold tracking-tight", wrap ? "line-clamp-3 wrap-anywhere" : "line-clamp-2 text-[15px] leading-snug wrap-anywhere @min-[32rem]/head:text-base")}>{task.title}</span>
     </button>
   )
 }
@@ -498,7 +502,7 @@ function TaskMenu({
               title="On: this task is never moved to done or archived when its PR merges, for a long-running task like a dev server or runner."
               data-testid="task-stay-open-on-merge"
             >
-              <GitMerge className="h-3.5 w-3.5 text-zinc-500" />
+              <DoorOpen className="h-3.5 w-3.5 text-zinc-500" />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span>Stay open when its PR merges</span>
                 {!task.stayOpenOnMerge && (
@@ -519,7 +523,7 @@ function TaskMenu({
               {primary === "retry" && <button type="button" className={menuItem} onClick={() => { retry.mutate(task.id); setOpen(false) }}>
                 <RefreshCcw className="h-3.5 w-3.5 text-zinc-500" /> Retry task
               </button>}
-              <ContinueTask task={task} className="justify-start" />
+              <ContinueTask task={task} menu />
               {task.status !== "done" && (
                 <button
                   type="button"
@@ -588,7 +592,7 @@ function TaskMenu({
                 <CopyButton text={task.id} label="Copy task id" />
               </Detail>
               <Detail label="Link">
-                <span className="min-w-0 flex-1 truncate text-zinc-300">Open this task</span>
+                <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300">{taskSessionHref(task.id)}</span>
                 <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link" />
               </Detail>
               {task.branch && (
@@ -623,7 +627,7 @@ function TaskMenu({
             </DetailGroup>
             <div className="min-w-0 space-y-5">
               <DetailGroup title="Agent">
-                <Detail label="Agent">
+                <Detail label="Harness">
                   <span className="min-w-0 wrap-anywhere text-zinc-300" data-testid="task-agent-cli">
                     {AGENT_CLI_LABEL[task.agentCli ?? "claude"]}
                   </span>
