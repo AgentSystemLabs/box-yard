@@ -60,6 +60,11 @@ export function scrollIntoList(el: Element, options: ScrollIntoListOptions = {})
   releaseListBottom(el)
   const list = el.parentElement?.closest<HTMLElement>("[data-scroller]")
   if (!list) return void el.scrollIntoView?.(options)
+  scrollListTo(list, el, options)
+}
+
+/** Scroll `list`, and nothing around it, so `el` inside it shows at `block` (a list that isn't a StickyScroll). */
+export function scrollListTo(list: HTMLElement, el: Element, options: ScrollIntoListOptions = {}) {
   const top = listScrollTop(list, el, options.block ?? "start")
   if (top !== null) list.scrollTo({ top, behavior: options.behavior ?? "auto" })
 }
@@ -767,4 +772,4 @@ export function StickyScroll({
   )
 }
 
-const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches
+export const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches

@@ -353,7 +353,18 @@ export const closeSidebarDrawer = () => drawer.set(false)
 /** Where Cody last picked a task row from: of a task's two rows, the clicked one is drawn selected. */
 const picked = store<{ taskId: string; spot: RowSpot } | null>(() => null)
 export const usePickedRow = picked.use
-export const setPickedRow = (taskId: string, spot: RowSpot) => picked.set({ taskId, spot })
+export function setPickedRow(taskId: string, spot: RowSpot) {
+  clicked = taskId
+  picked.set({ taskId, spot })
+}
+/** The task a click on its row just opened, until the next task opened takes it (takeRowClick). */
+let clicked: string | null = null
+/** The task a row click opened last, once: a task opened from its own row is in view already, so nothing scrolls to it. */
+export function takeRowClick() {
+  const id = clicked
+  clicked = null
+  return id
+}
 
 /**
  * Sub-task trees Cody folded, by the task they're under. In memory only: a reload shows every tree open again, and
@@ -391,17 +402,52 @@ export const unfoldSidebarGroup = (key: string) => folds.set(withFold(folds.get(
  * What the sidebar brings into view once it's a full list again: a group, unfolded, or a task's row with its sub-tasks.
  * A group: a project (a double click on its rail icon asks) or WAITING_FOLD (the rail's "Waiting on you" does);
  * `focus`: its head takes the focus there, for a rail button the keyboard pressed, which goes away with the rail. A
- * task's row: a double click on it that took it off screen asks. In memory only; a new object each time, so asking
- * again scrolls again.
+ * task's row: a double click on it that took it off screen asks. `opened`: a task opened from anywhere but its own row
+ * (a link, the palette, Back): its row, unfolded out of its project and the trees above it, as soon as the list shows
+ * (the drawer opens on it). In memory only; a new object each time, so asking again scrolls again.
  */
-const reveal = store<{ group: string; focus: boolean } | { taskId: string; focus?: never } | null>(() => null)
+export type SidebarReveal = { group: string; focus: boolean } | { taskId: string; focus?: never } | { opened: string; focus?: never }
+const reveal = store<SidebarReveal | null>(() => null)
 export const useSidebarReveal = reveal.use
 export function revealSidebarGroup(group: string, focus = false) {
   unfoldSidebarGroup(group)
   reveal.set({ group, focus })
 }
 export const revealSidebarTask = (taskId: string) => reveal.set({ taskId })
+export const revealOpenedTask = (taskId: string) => reveal.set({ opened: taskId })
 export const clearSidebarReveal = () => reveal.set(null)
+/** The opened task's reveal, if it's still waiting for the list: another page opened since. */
+export function dropOpenedReveal() {
+  const r = reveal.get()
+  if (r && "opened" in r) reveal.set(null)
+}
+
+/** Where a task's row sits under a project: the project, and the tasks it's nested under, outermost first. */
+export function rowPath(groups: readonly Pick<SidebarGroup, "project" | "rows">[], taskId: string): { project: string; parents: string[] } | null {
+  const find = (rows: readonly SidebarRow[] | undefined, parents: string[]): string[] | null => {
+    for (const r of rows ?? []) {
+      if (r.task.id === taskId) return parents
+      const below = find(r.kids, [...parents, r.task.id])
+      if (below) return below
+    }
+    return null
+  }
+  for (const g of groups) {
+    const parents = find(g.rows, [])
+    if (parents) return { project: g.project.id, parents }
+  }
+  return null
+}
+
+/** Unfold what hides a row at `path` (rowPath): its project's list and the sub-task trees above it. Whether any was folded. */
+export function unfoldRowPath(path: { project: string; parents: readonly string[] }): boolean {
+  const before = { groups: folds.get(), trees: treeFolds.get() }
+  unfoldSidebarGroup(path.project)
+  let trees = before.trees
+  for (const id of path.parents) trees = withFold(trees, id, false)
+  treeFolds.set(trees)
+  return folds.get() !== before.groups || trees !== before.trees
+}
 
 /** Two taps on one row this close together are a double tap: a touch screen doesn't fire dblclick reliably. */
 export const DOUBLE_TAP_MS = 350
