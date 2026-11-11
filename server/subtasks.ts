@@ -7,8 +7,10 @@
 // subtasks-reply-<id>.json; wait_for_subtasks and finish read subtasks.json, which TaskManager rewrites in the
 // parent's task folder whenever one of its sub-tasks changes (SubtasksFile below).
 
+import { AGENT_CLIS, AGENT_CLI_LABEL, CODEX_EFFORTS, cliForModel, isAgentCli, pinProblem, type AgentCli } from "../shared/agentCli.js"
+import { BUILTIN_MODELS, MAX_MODEL_NAME, MODEL_NAME, checkEffort } from "../shared/models.js"
 import { RUNNERS, type Runner } from "../shared/runner.js"
-import type { TaskStatus } from "../shared/types.js"
+import type { Effort, TaskStatus } from "../shared/types.js"
 
 /** Where spawn_subtasks may run a sub-task: a runner of its inherited physical environment type, or "same" (sharing its parent's slot). */
 export type SubtaskRunsOn = Runner | "same"
@@ -18,6 +20,10 @@ export interface SubtaskAsk {
   title: string
   prompt: string
   runsOn: SubtaskRunsOn
+  /** Its own harness, model and effort, pinned like create_task's; left out, its parent's (subtaskPins). */
+  agent?: AgentCli
+  model?: string
+  effort?: Effort
 }
 
 /** A sub-task still on its way to a report: running, or waiting to run (its own sub-tasks, a slot). */
@@ -47,14 +53,70 @@ export function parseSpawn(raw: unknown): { asks: SubtaskAsk[] } | { problem: st
     if (!title) return { problem: `Sub-task ${i + 1} has no title.` }
     if (!prompt) return { problem: `Sub-task ${i + 1} ("${title}") has no prompt.` }
     if (where !== "same" && !(RUNNERS as readonly string[]).includes(where)) return { problem: `Sub-task ${i + 1} ("${title}"): runs_on must be "same" or one of ${RUNNERS.join(", ")}.` }
+    // Left out (or empty), each is its parent's. A value of the wrong shape refuses the call rather than running on a default.
+    const agent = lower(given(o.agent))
+    const model = given(o.model)
+    const effort = lower(given(o.effort))
+    if (agent === null || (agent && !isAgentCli(agent))) return { problem: `Sub-task ${i + 1} ("${title}"): agent must be one of ${AGENT_CLIS.join(", ")}, or left out to run on yours.` }
+    if (model === null || (model && (model.length > MAX_MODEL_NAME || !MODEL_NAME.test(model)))) {
+      return { problem: `Sub-task ${i + 1} ("${title}"): model must be a model id (no spaces, at most ${MAX_MODEL_NAME} characters), or left out to use yours.` }
+    }
+    if (effort === null || (effort && !(CODEX_EFFORTS as readonly string[]).includes(effort))) {
+      return { problem: `Sub-task ${i + 1} ("${title}"): effort must be one of ${CODEX_EFFORTS.join(", ")} (ultra on Codex only), or left out to use yours.` }
+    }
     asks.push({
       id: typeof o.id === "string" && TASK_ID.test(o.id) ? o.id : null,
       title: title.slice(0, MAX_SUBTASK_TITLE),
       prompt: prompt.slice(0, MAX_SUBTASK_PROMPT),
       runsOn: where as SubtaskRunsOn,
+      ...(agent ? { agent: agent as AgentCli } : {}),
+      ...(model ? { model } : {}),
+      ...(effort ? { effort: effort as Effort } : {}),
     })
   }
   return { asks }
+}
+
+/** An optional string option: its trimmed text, undefined when left out or empty, null when it isn't a string. */
+const given = (v: unknown): string | undefined | null => (v === undefined || v === null ? undefined : typeof v === "string" ? v.trim() || undefined : null)
+const lower = (v: string | undefined | null) => (typeof v === "string" ? v.toLowerCase() : v)
+
+/** The harness, model and effort a sub-task runs on: its task row's agent_cli, model and effort. */
+export interface SubtaskPins {
+  agent: AgentCli
+  model: string | null
+  effort: Effort | null
+}
+
+/**
+ * Each sub-task's pins: what it asked for, else its parent's, as every sub-task got before it could ask (a parent's
+ * null model or effort follows the routing chain each turn, and so does its sub-task's). On another harness than its
+ * parent's, the parent's model and effort stay behind (they're that harness's): what it leaves out follows the new
+ * harness's defaults and routing, as continue_task does. What it asks for is checked like a continue_task pin
+ * (pinProblem, with Cursor's catalog in `knownCursor`), and one bad item refuses the whole call, as parseSpawn does.
+ */
+export function subtaskPins(asks: readonly SubtaskAsk[], parent: SubtaskPins, knownCursor?: (id: string) => boolean): { pins: SubtaskPins[] } | { problem: string } {
+  const pins: SubtaskPins[] = []
+  for (const [i, ask] of asks.entries()) {
+    const agent = ask.agent ?? parent.agent
+    const problem = pinProblem(agent, ask.model, ask.effort, knownCursor)
+    if (problem) {
+      // A model another harness owns, on the harness it inherited: say which agent to ask for.
+      const owner = cliForModel(ask.model)
+      const hint = !ask.agent && owner && owner !== agent ? ` It runs on ${AGENT_CLI_LABEL[agent]} like you unless it asks for another agent: pass agent "${owner}" with that model.` : ""
+      return { problem: `Sub-task ${i + 1} ("${ask.title}"): ${problem}${hint}` }
+    }
+    const same = agent === parent.agent
+    pins.push({ agent, model: ask.model ?? (same ? parent.model : null), effort: ask.effort ?? (same ? parent.effort : null) })
+  }
+  return { pins }
+}
+
+/** What spawn_subtasks' reply says a sub-task with pins of its own runs on ("Claude Code · claude-sonnet-5-5 · high effort"), with any effort note. */
+export function pinsLabel(p: SubtaskPins): string {
+  const label = [AGENT_CLI_LABEL[p.agent], p.model, p.effort ? `${p.effort} effort` : null].filter(Boolean).join(" · ")
+  const effort = p.agent === "claude" && p.model && p.effort ? checkEffort(BUILTIN_MODELS, p.model, p.effort) : null
+  return effort && !effort.ok ? `${label} (${effort.message})` : label
 }
 
 export interface SubtaskLimits {
