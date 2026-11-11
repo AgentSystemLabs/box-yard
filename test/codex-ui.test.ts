@@ -17,6 +17,7 @@ import { DEFAULT_SETTINGS } from "../server/settings.js"
 import { CODEX_MODEL_SUGGESTIONS } from "../shared/agentCli.js"
 import type { Project, Settings, SettingsInfo, Task } from "../shared/types"
 import type { CredentialKey, CredentialStatus, SetupStatus } from "../shared/setup"
+import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -197,13 +198,13 @@ describe("Settings › Coordinator", () => {
     expect(cli.value).toBe("claude")
     expect([...cli.options].map((o) => o.textContent)).toEqual(["Claude Code", "Codex"])
     expect($("orchestrator-codex-model")).toBeNull()
-    expect(document.body.textContent).toContain("The Claude model the Coordinator chat runs on, and its quick questions unless Quick questions below picks one.")
+    expect(document.body.textContent).toContain("The Claude model the Coordinator chat runs on. Its quick questions use it too, unless Quick questions below picks one.")
 
     await choose(cli, "codex")
     const model = $<HTMLSelectElement>("orchestrator-codex-model")!
     expect(model.tagName).toBe("SELECT")
     expect([...model.options].map((o) => o.value)).toEqual(["", ...CODEX_MODEL_SUGGESTIONS])
-    expect(document.body.textContent).not.toContain("The Claude model the Coordinator chat runs on, and its quick questions unless Quick questions below picks one.")
+    expect(document.body.textContent).not.toContain("The Claude model the Coordinator chat runs on. Its quick questions use it too, unless Quick questions below picks one.")
     await choose(model, "gpt-6.1-sol")
 
     await saveSettings()
@@ -257,6 +258,12 @@ describe("Settings › Box agents", () => {
     await choose($<HTMLSelectElement>("agent-cli")!, "codex")
     await choose($<HTMLSelectElement>("agent-codex-model")!, "gpt-6-luna")
     act(() => button("Discard")!.click())
+    // Two changes: Discard asks first, and keeps them until confirmed.
+    const ask = currentConfirm()!
+    expect(ask).toMatchObject({ title: "Discard unsaved changes?", confirmLabel: "Discard" })
+    expect($<HTMLSelectElement>("agent-cli")!.value).toBe("codex")
+    await act(async () => settleConfirm(ask.id, true))
+    expect(currentConfirm()).toBeUndefined()
     expect($<HTMLSelectElement>("agent-cli")!.value).toBe("claude")
     expect(sent("PUT", "/api/agent-settings")).toEqual([])
     act(() => root.render(null))

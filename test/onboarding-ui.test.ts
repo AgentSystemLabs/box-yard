@@ -289,7 +289,9 @@ describe("owner name setup", () => {
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!
     const label = [...dialog.querySelectorAll("label")].find((l) => l.textContent?.includes("Your name"))!
     const input = document.getElementById(label.htmlFor) as HTMLInputElement
-    expect(input.value).toBe("the owner")
+    // A default name shows as a placeholder, with an empty value.
+    expect(input.value).toBe("")
+    expect(input.placeholder).toBe("the owner")
     type(input, "Sam")
     expect(calls.some((c) => c.method === "PUT")).toBe(false)
     act(() => byText("Save", dialog)!.click())

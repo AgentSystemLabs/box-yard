@@ -368,11 +368,11 @@ describe("Project settings › General › Captain icon", () => {
   it("says what Use default shows, and why: the cap, Settings' icon, or the project's image", () => {
     render()
     expect($("project-captain-icon-current")!.textContent).toBe("Default")
-    expect(status()).toBe("Its Captain shows the Captain's cap: it uses the default, every Captain's icon in Settings › Coordinator.")
+    expect(status()).toBe("Its Captain shows the Captain's cap, the default for every Captain. Change it in Settings › Coordinator.")
     remount()
 
     render(PROJECT, settingsInfo({ captainIcon: "anchor" }))
-    expect(status()).toBe("Its Captain shows the Anchor: it uses the default, every Captain's icon in Settings › Coordinator.")
+    expect(status()).toBe("Its Captain shows the Anchor, the default for every Captain. Change it in Settings › Coordinator.")
     remount()
 
     render({ ...PROJECT, iconUrl: ICON_URL }, settingsInfo({ captainIcon: "anchor" }))

@@ -90,7 +90,9 @@ function ProjectSettingsDialog({ id, onClose }: { id: string; onClose: () => voi
   const project = projects.data?.find((p) => p.id === id)
   const [dirty, setDirty] = useState(false)
   const mayLeave = async () => !dirty || (await confirmDialog({ title: "Discard unsaved changes?", body: "Your project settings haven't been saved.", confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true }))
+  // A clean draft closes in the same tick; only a dirty one waits for the confirm.
   const close = async () => {
+    if (!dirty) return onClose()
     if (await mayLeave()) onClose()
   }
   return (
