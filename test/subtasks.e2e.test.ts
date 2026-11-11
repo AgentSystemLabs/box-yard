@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import type { Server } from "node:http"
 import { createBoxYard, type BoxYard } from "../server/app.js"
+import { buildMcpServer } from "../server/mcp.js"
 import type { Project, Task, TaskMessage } from "../shared/types.js"
 import { freePort, testConfig, waitFor } from "./helpers.js"
 
@@ -55,6 +61,17 @@ const resting = (r: Running, id: string, statuses: string[], what: string, timeo
     const row = r.yard.store.getTaskRow(id)
     return row && !row.current_turn_id && statuses.includes(row.status) ? r.yard.store.getTask(id) : null
   }, what, timeoutMs)
+
+/** What fake-claude got on each turn of a task's session: its --model and --effort. */
+const launches = (r: Running, id: string) => {
+  const session = r.yard.store.getTaskRow(id)!.session_id!
+  const file = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".fake-claude"), "fake-sessions", `${session}.json`)
+  return (JSON.parse(fs.readFileSync(file, "utf8")) as { turns: { model: string | null; effort: string | null }[] }).turns.map((t) => [t.model, t.effort])
+}
+const turnJson = (r: Running, id: string) => {
+  const row = r.yard.store.getTaskRow(id)!
+  return JSON.parse(fs.readFileSync(path.join(r.yard.tasks.taskDir(row.box_id!, id), "turn.json"), "utf8")) as { model: string | null; effort: string | null; resume: boolean }
+}
 
 describe("sub-tasks", () => {
   it("runs one parent and its sub-tasks (one of them nested), and the parent answers from their reports", async () => {
@@ -127,6 +144,67 @@ describe("sub-tasks", () => {
     expect(r.yard.store.hasInputs(parent.id)).toBe(false)
     expect(r.yard.store.getTask(parent.id)!.summary ?? "").toMatch(/Combined answer from 2 sub-tasks/)
   }, 90_000)
+
+  it("launches a sub-task on the model and effort it asked for, on its first and resumed turns", async () => {
+    const r = await start()
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const parent = await call<Task>(r, "POST", "/api/tasks", {
+      projectId: project.id,
+      title: "Review the recipe",
+      prompt: "spawn subtasks: Sonnet review {model=claude-sonnet-5-5} {effort=high} | Same review\n[wait]",
+      model: "claude-opus-5-5",
+      effort: "low",
+    })
+    await resting(r, parent.id, ["idle"], "the parent to finish from its sub-tasks' reports")
+    const [pinned, same] = kids(r, parent.id)
+    expect([pinned!.title, same!.title]).toEqual(["Sonnet review", "Same review"])
+    // Its own pins, saved like create_task's; the one that asked for nothing keeps its parent's, as before.
+    expect(pinned).toMatchObject({ agentCli: "claude", model: "claude-sonnet-5-5", effort: "high" })
+    expect(same).toMatchObject({ agentCli: "claude", model: "claude-opus-5-5", effort: "low" })
+    expect(launches(r, pinned!.id)).toEqual([["claude-sonnet-5-5", "high"]])
+    expect(launches(r, same!.id)).toEqual([["claude-opus-5-5", "low"]])
+
+    // A later turn of the sub-task resumes its session on the same pins.
+    await call(r, "POST", `/api/tasks/${pinned!.id}/messages`, { content: "Check the salt as well." })
+    await waitFor(() => r.yard.store.getTaskRow(pinned!.id)?.turn_count === 2 || null, "the sub-task's second turn to start")
+    await resting(r, pinned!.id, ["idle"], "the sub-task's second turn to end")
+    expect(launches(r, pinned!.id)).toEqual([
+      ["claude-sonnet-5-5", "high"],
+      ["claude-sonnet-5-5", "high"],
+    ])
+    expect(turnJson(r, pinned!.id)).toMatchObject({ model: "claude-sonnet-5-5", effort: "high", resume: true })
+    expect(r.yard.store.listTaskTurns(pinned!.id).map((t) => [t.model, t.effort])).toEqual([
+      ["claude-sonnet-5-5", "high"],
+      ["claude-sonnet-5-5", "high"],
+    ])
+
+    // get_task shows them to the Captain.
+    const mcp = buildMcpServer({ store: r.yard.store, tasks: r.yard.tasks, hub: r.yard.hub, artifacts: null as never, uploads: null as never, publicUrl: () => "", settings: r.yard.settings, identities: r.yard.identities }, { kind: "captain", projectId: project.id })
+    const [a, b] = InMemoryTransport.createLinkedPair()
+    await mcp.connect(a)
+    const client = new Client({ name: "subtask-pins-test", version: "0" })
+    await client.connect(b)
+    try {
+      const got = await client.callTool({ name: "get_task", arguments: { task: pinned!.id } })
+      expect(JSON.parse((got.content as { text: string }[])[0]!.text)).toMatchObject({ agent: "claude", model: "claude-sonnet-5-5", effort: "high" })
+    } finally {
+      await client.close()
+    }
+    // Its new report woke the parent once more: let that turn end before the server stops.
+    await waitFor(() => r.yard.store.getTaskRow(parent.id)?.turn_count === 2 || null, "the parent to take the new report")
+    await resting(r, parent.id, ["idle"], "the parent to answer the new report")
+  }, 120_000)
+
+  it("refuses a sub-task pinned to a model its harness can't run, starting none", async () => {
+    const r = await start()
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const parent = await call<Task>(r, "POST", "/api/tasks", { projectId: project.id, title: "Mixed review", prompt: "spawn subtasks: Fine | Wrong harness {model=gpt-6.1-sol}" })
+    await resting(r, parent.id, ["idle"], "the refused spawn's turn to end")
+    expect(kids(r, parent.id)).toHaveLength(0)
+    expect(transcript(r, parent.id).find((m) => m.meta?.refused)?.content).toBe(
+      'Sub-tasks not started: Sub-task 2 ("Wrong harness"): Model gpt-6.1-sol cannot run on Claude Code. Choose a compatible model or use its defaults. It runs on Claude Code like you unless it asks for another agent: pass agent "codex" with that model.',
+    )
+  }, 60_000)
 
   it("refuses sub-tasks over Settings' depth and fan-out caps", async () => {
     const r = await start()

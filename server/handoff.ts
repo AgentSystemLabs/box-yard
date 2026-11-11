@@ -116,6 +116,8 @@ export interface StateOptions {
   sealed?: (t: Task) => boolean
   /** Name each task's project (the Coordinator's view spans projects). */
   projectNames?: Map<string, string>
+  /** A project's live defaults for new tasks as one line (server/projectDefaults.ts), under a project the message names. */
+  projectDefaults?: (projectId: string) => string | null
   now?: number
 }
 
@@ -158,14 +160,16 @@ function taskBlock(t: Task, o: StateOptions, now: number): string {
   return lines.join("\n")
 }
 
-/** A project's open tasks, one line each, most recently active first. */
+/** A project's open tasks, one line each, most recently active first, then its live defaults for new tasks. */
 function projectBlock(p: Project, open: Task[], o: StateOptions, now: number): string {
   const shown = open.slice(0, NAMED_PROJECT_TASKS_MAX)
   const more = open.length - shown.length
+  const defaults = o.projectDefaults?.(p.id)
   return [
     `- ${p.name} (${p.id}): ${open.length ? `${open.length} open task${open.length === 1 ? "" : "s"}` : "no open tasks"}`,
     ...shown.map((t) => `  - ${t.id} "${t.title}" ${t.status}${prLine(t, o, now)} · updated ${ago(t.updatedAt, now)}`),
     more > 0 ? `  - …and ${more} more: list_tasks` : "",
+    defaults ? `  ${defaults}` : "",
   ]
     .filter(Boolean)
     .join("\n")
