@@ -232,6 +232,34 @@ export function byProject(rows: readonly SidebarRow[]): SidebarRow[] {
   return [...runs.values()].flat()
 }
 
+const letters = (text: string) => [...text].filter((c) => /[\p{L}\p{N}]/u.test(c))
+
+/** A project's one or two letters: its first two words' first letters ("box-yard": BY), or its name's first two. */
+export function projectInitials(name: string): string {
+  const [a, b] = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const two = a && b ? [...letters(a).slice(0, 1), ...letters(b).slice(0, 1)] : letters(a ?? "").slice(0, 2)
+  return two.join("").toUpperCase()
+}
+
+/**
+ * Each project's letters on the folded sidebar's tiles, which must differ by more than their colour. Two projects that
+ * would get the same ("recipes" and "research": RE) differ by their second letter: the later one by name takes the
+ * next letter of its name that makes a pair nobody has (RS). The same for every project however the list is sorted
+ * or pinned, so a tile's letters don't change as tasks come and go.
+ */
+export function railInitials(projects: readonly { id: string; name: string }[]): Map<string, string> {
+  const taken = new Set<string>()
+  const out = new Map<string, string>()
+  for (const p of [...projects].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
+    const first = projectInitials(p.name)
+    const [head, ...rest] = letters(p.name)
+    const pick = [first, ...rest.map((c) => `${head}${c}`.toUpperCase())].find((c) => c && !taken.has(c)) ?? first
+    taken.add(pick)
+    out.set(p.id, pick)
+  }
+  return out
+}
+
 /**
  * The "Waiting on you" rows on screen: the first `cap` (the most urgent, whatever their project), or all once Cody
  * asked for them, then each project's together (byProject). The open task (`keep`) always stays, so the row drawn

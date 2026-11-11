@@ -10,7 +10,7 @@
 // chats' headers do.
 import { Fragment, createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react"
 import { Link } from "wouter"
-import { AlarmClock, BarChart3, Check, ChevronDown, ChevronRight, Inbox, Keyboard, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Plus, Settings as SettingsIcon } from "lucide-react"
+import { AlarmClock, BarChart3, Check, ChevronDown, ChevronRight, FolderPlus, Inbox, Keyboard, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Plus, Settings as SettingsIcon } from "lucide-react"
 import type { Task } from "../../../shared/types"
 import { useCaptainState, useCoordinatorStatus, useProjects, useTasks } from "../lib/queries"
 import { inInbox, usePendingCloses } from "../lib/inbox"
@@ -32,6 +32,7 @@ import {
   keepRows,
   keepSelection,
   openSidebarDrawer,
+  railInitials,
   revealScroll,
   revealSidebarGroup,
   revealSidebarTask,
@@ -62,7 +63,7 @@ import { APP_HOME, navigateApp, openChat, taskSessionHref } from "../lib/navigat
 import { focusComposer, keepFocusForPick, pickFocusesComposer } from "../lib/chatSwitch"
 import { isTouchDevice } from "../lib/composer"
 import { COORDINATOR_CHAT } from "../lib/threads"
-import { useTiles } from "../lib/taskTiles"
+import { useProjectCaptainIcon, useTiles } from "../lib/taskTiles"
 import { useOpenSettings } from "./SettingsHost"
 import { useOpenUsage, usePrefetchUsage } from "./UsageHost"
 import { useOpenProjectSettings } from "../lib/projectSettings"
@@ -70,7 +71,7 @@ import { NewProjectDialog } from "./NewProjectDialog"
 import { openShortcuts } from "./ShortcutsHelp"
 import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
-import { TaskStatusIcon, agentIconLabel, projectColorStyle } from "./TaskIcon"
+import { CUE_DOT, CueDot, ProjectAvatar, TaskStatusIcon, WORKING_PULSE, agentIconCue, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
 import { AgentIcon, PrChip, STATUS, TAP_AREA, cx } from "./ui"
 
@@ -110,10 +111,10 @@ const InTree = createContext(false)
 
 /**
  * A row's treeitem attributes: its key, its level, whether it's unfolded (none: it has no children), whether it's the
- * page on screen, and its open button's id, which names it. The tree writes its place among its siblings and the tab
+ * page on screen, its open button's id, which names it, and whether it has an action for Shift+Enter (Mark done). The tree writes its place among its siblings and the tab
  * stop.
  */
-function treeItem(key: string, level: number, label: string, { expanded, current }: { expanded?: boolean | null; current?: boolean } = {}) {
+function treeItem(key: string, level: number, label: string, { expanded, current, action }: { expanded?: boolean | null; current?: boolean; action?: boolean } = {}) {
   return {
     role: "treeitem",
     "data-tree-key": key,
@@ -121,6 +122,7 @@ function treeItem(key: string, level: number, label: string, { expanded, current
     "aria-expanded": expanded ?? undefined,
     "aria-current": current ? ("page" as const) : undefined,
     "aria-labelledby": label,
+    "aria-keyshortcuts": action ? "Shift+Enter" : undefined,
     tabIndex: -1,
   }
 }
@@ -330,6 +332,7 @@ function usePick(drawer: boolean): Pick {
  */
 export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onExpand }: { rail?: boolean; drawer?: boolean; onExpand?: () => void }) {
   const projects = useProjects()
+  const initials = useMemo(() => railInitials(projects.data ?? []), [projects.data])
   const tasks = useTasks()
   const pins = useBarPins()
   const closing = usePendingCloses()
@@ -365,7 +368,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
     keepRows,
   )
   const waiting = useMemo(() => cappedRows(waitingAll, { expanded: allWaiting, keep: openTask }), [waitingAll, allWaiting, openTask])
-  /** "Show all n" and "Show fewer". Back to the first few, the list starts over: it's much shorter than where Cody was. */
+  /** "Show all n" and "Show 5". Back to the first few, the list starts over: it's much shorter than where Cody was. */
   const expandWaiting = useCallback((all: boolean) => {
     setAllWaiting(all)
     if (!all && list.current) list.current.scrollTop = 0
@@ -483,7 +486,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         <div className="my-1 h-px w-6 bg-zinc-800" />
         <div className="scroll-thin flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
           {groups.shown.map((g) => (
-            <RailProject key={g.project.id} group={g} mark={mark(selection, captainKey(g.project.id), g.project.id)} onPick={railPick} onExpand={expandTo} />
+            <RailProject key={g.project.id} group={g} initials={initials.get(g.project.id) ?? ""} mark={mark(selection, captainKey(g.project.id), g.project.id)} onPick={railPick} onExpand={expandTo} />
           ))}
         </div>
         <button type="button" onClick={() => openSettings("orchestrator")} title="Settings" aria-label="Settings" className={ICON_BUTTON}>
@@ -599,7 +602,7 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
 
       <div className="flex shrink-0 items-center gap-1 border-t border-zinc-900 px-2 py-1.5">
         <button type="button" onClick={() => setCreating(true)} title="New project" aria-label="New project" className={ICON_BUTTON}>
-          <Plus className="h-4 w-4" />
+          <FolderPlus className="h-4 w-4" />
         </button>
         <button
           type="button"
@@ -712,23 +715,44 @@ function RailButton({ label, title = label, mark, captain, onClick, onDoubleClic
 }
 
 /**
- * A Captain on the rail: the same icon and status as its expanded row. A click opens its Captain; a double click (or tap) also expands the sidebar on its tasks.
+ * A Captain on the rail: its project's image, or its project's letters in its colour (lib/sidebar.ts railInitials: every
+ * Captain's default icon is the same cap, so the tiles would differ by colour alone), or the icon the project picked for
+ * its Captain. It says the Captain's status as its expanded row does, with an amber dot at its corner when one of its
+ * tasks asks Cody (as the folded row's count). A click opens its Captain; a double click (or tap) also expands the
+ * sidebar on its tasks.
  */
-const RailProject = memo(function RailProject({ group, mark, onPick, onExpand }: { group: SidebarGroup; mark: Mark; onPick: (projectId: string, e: PickEvent) => void; onExpand: (projectId: string) => void }) {
-  const color = useTiles().colors.get(group.project.id)
-  const state = useCaptainState(group.project.id).data
+const RailProject = memo(function RailProject({ group, initials, mark, onPick, onExpand }: { group: SidebarGroup; initials: string; mark: Mark; onPick: (projectId: string, e: PickEvent) => void; onExpand: (projectId: string) => void }) {
+  const { project, needs } = group
+  const color = useTiles().colors.get(project.id)
+  const picked = useProjectCaptainIcon(project.id)
+  const state = useCaptainState(project.id).data
   const status = agentIconLabel(state)
-  const label = `${group.project.name} Captain${status ? `, ${status}` : ""}`
+  const working = Boolean(state?.busy || state?.compacting)
+  const label = `${project.name} Captain${status ? `, ${status}` : ""}${needs ? `, ${needs} asking you` : ""}`
   return (
     <RailButton
       label={label}
       title={`${label} (double-click to expand)`}
       mark={mark}
-      captain={group.project.id}
-      onClick={(e) => onPick(group.project.id, e)}
-      onDoubleClick={() => onExpand(group.project.id)}
+      captain={project.id}
+      onClick={(e) => onPick(project.id, e)}
+      onDoubleClick={() => onExpand(project.id)}
     >
-      <AgentIcon announce={false} projectId={group.project.id} color={color} busy={Boolean(state?.busy)} compacting={state?.compacting} error={Boolean(state?.error)} tile />
+      {picked ? (
+        <AgentIcon announce={false} projectId={project.id} color={color} busy={Boolean(state?.busy)} compacting={state?.compacting} error={Boolean(state?.error)} tile />
+      ) : (
+        <span data-testid="rail-project-tile" className="relative flex shrink-0" style={projectColorStyle(color)}>
+          <span data-busy={working || undefined} className={cx("grid h-6 w-6 place-items-center", working && WORKING_PULSE)}>
+            <ProjectAvatar src={project.iconUrl} className="h-6 w-6 rounded-md">
+              <span aria-hidden className={cx("grid h-6 w-6 place-items-center rounded-md text-[11px] leading-none font-semibold", color ? "bg-(--pc)/15 text-(--pc)" : "bg-zinc-800 text-zinc-300")}>
+                {initials}
+              </span>
+            </ProjectAvatar>
+          </span>
+          <CueDot cue={agentIconCue(state)} />
+        </span>
+      )}
+      {needs > 0 && <span aria-hidden data-testid="rail-project-asks" className={cx("absolute top-1 right-1 h-2 w-2 rounded-full ring-2 ring-zinc-950", CUE_DOT.asks)} />}
     </RailButton>
   )
 })
@@ -803,7 +827,7 @@ function GroupCountChip({ group }: { group: SidebarGroup }) {
   if (!count) return null
   return (
     <span className="flex h-5 shrink-0 items-center gap-1 rounded-full bg-zinc-800/80 px-1.5 text-[11px] font-normal text-zinc-400 tabular-nums">
-      {group.needs > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
+      {group.needs > 0 && <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", CUE_DOT.asks)} />}
       {count}
       <span className="sr-only"> {count === 1 ? "task" : "tasks"}{group.needs > 0 ? `, ${group.needs} asking you` : ""}</span>
     </span>
@@ -834,6 +858,11 @@ const META_TONE: Partial<Record<Task["status"], string>> = { pr_ready: "text-eme
  * in) it's the number alone, without its ↗: the title needs the room, and its colour and its name still say it's a PR.
  */
 const ROW_PR = cx(FOCUS, "shrink-0 tabular-nums pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center @max-[15rem]/side:[&>[data-external-mark]]:hidden")
+/**
+ * In a zoomed phone's drawer two 44px targets leave a title two letters. Mark done stays, as the row's own action; the
+ * PR is one tap away, in the task's header.
+ */
+const ROW_PR_YIELDS = "pointer-coarse:@max-[15rem]/side:hidden"
 
 /**
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
@@ -848,9 +877,10 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
   const prMeta = Boolean(task.prUrl)
   const tree = useContext(InTree)
   const id = useId()
+  const closable = readyForReview(task.status) || task.status === "failed"
   return (
     <div
-      {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected }) : undefined)}
+      {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected, action: closable }) : undefined)}
       className={cx("flex items-center rounded-lg transition", tree && FOCUS, selected ? SELECTED : dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900")}
     >
       <button
@@ -875,8 +905,8 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         {project?.name && <span className="sr-only">, {project.name}</span>}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
-      {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0")} />}
-      {(readyForReview(task.status) || task.status === "failed") && <DoneButton task={task} />}
+      {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0", closable && ROW_PR_YIELDS)} />}
+      {closable && <DoneButton task={task} />}
     </div>
   )
 })
@@ -925,7 +955,7 @@ export const nestAt = (level: number) => {
   const kept = Math.min(Math.max(level - 1, 0), NEST_KEPT)
   const floor = 1.25 + kept * NEST_FLOOR
   const budget = 13 + (NEST_KEPT - kept) * NEST_FLOOR
-  return `min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(${floor}rem, calc(100cqw - ${budget}rem)))`
+  return `calc(min(calc(min(${level}, var(--tree-full)) * 1.25rem + max(${level} - var(--tree-full), 0) * var(--tree-deep)), max(${floor}rem, calc(100cqw - ${budget}rem))) - var(--nest-trim, 0rem))`
 }
 /**
  * A nested list's guide: a still, faint 1px line in the border colour, 10px left of its rows' icons (under the middle
@@ -936,26 +966,31 @@ const GUIDE = cx(
   "relative before:pointer-events-none before:absolute before:bottom-0 before:z-1 before:w-px before:bg-zinc-800",
   "before:left-[calc(1.5rem+var(--nest)-0.625rem-0.5px)] pointer-coarse:before:left-[calc(2.75rem+var(--nest)-0.625rem-0.5px)]",
 )
-/** A project's tasks: one step in, beside a guide from under the Captain's tile. Its trees' steps are set here. */
-const PROJECT_TASKS = cx(GUIDE, TREE_STEPS, "[--nest:1.25rem] before:top-0")
+/**
+ * A project's tasks: one step in, beside a guide from under the Captain's tile. Its trees' steps are set here. In a
+ * zoomed phone's drawer (a finger's 44px chevron column, under 15rem) that step is 6px, not 20: `--nest-trim` takes the
+ * 14px off every level's indent (nestAt), so a row with a PR and Mark done keeps a few letters of its title. The rows'
+ * boxes stay put (TREE_BOX); their content and their chevrons move left with it.
+ */
+const PROJECT_TASKS = cx(GUIDE, TREE_STEPS, "[--nest-trim:0rem] pointer-coarse:@max-[15rem]/side:[--nest-trim:0.875rem] [--nest:calc(1.25rem_-_var(--nest-trim))] before:top-0")
 /** A task's sub-tasks: one step in from it (`--nest`, nestAt), beside a guide that starts in its row, just under its icon. */
 const SUBTASKS = cx(GUIDE, "before:-top-3")
 /** A tree row's box: from one step left of its icon, so a project's top task's spans the list and a sub-task's moves in. */
-const TREE_BOX = "ml-[calc(var(--nest)-1.25rem)]"
+const TREE_BOX = "ml-[calc(var(--nest)-1.25rem+var(--nest-trim,0rem))]"
 /** A tree row's content: past the chevron's column and one step, wherever its box starts (NEST_PAD at the first level). */
-const TREE_PAD = "pl-[2.75rem] pointer-coarse:pl-[4rem]"
+const TREE_PAD = "pl-[calc(2.75rem-var(--nest-trim,0rem))] pointer-coarse:pl-[calc(4rem-var(--nest-trim,0rem))]"
 /**
  * A tree row's chevron in the sidebar: on its parent's guide, level with its icon (the row is one line, so its
  * middle), the guide broken behind it by a patch of the row's fill. Its target is the row's height and reaches left
  * over the indent, clear of the icon: 24px wide to a mouse, 44px to a finger.
  */
-const NESTED_CHEVRON = "absolute inset-y-0 left-[17px] z-2 flex w-6 items-center justify-end rounded-lg pointer-coarse:w-11"
+const NESTED_CHEVRON = "absolute inset-y-0 left-[calc(17px-var(--nest-trim,0rem))] z-2 flex w-6 items-center justify-end rounded-lg pointer-coarse:w-11"
 
 /** "2 of 5 running": a folded tree's count, with an amber dot when one of them asks. */
 function TreeCountChip({ tree }: { tree: TreeCount }) {
   return (
     <span className="inline-flex h-4 shrink-0 items-center gap-1 rounded-full bg-zinc-800/80 px-1.5 text-[10px] text-zinc-400 tabular-nums">
-      {tree.asks > 0 && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-400" />}
+      {tree.asks > 0 && <span aria-hidden className={cx("h-1.5 w-1.5 rounded-full", CUE_DOT.asks)} />}
       <span aria-hidden>
         {tree.running}/{tree.total}
       </span>
@@ -1029,11 +1064,13 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
   const twice = useTreeDoubleClick(task.id, foldTwice && folded !== null)
   const inTree = useContext(InTree)
   const id = useId()
+  // Mark done closes the whole tree, so not while a sub-task runs or asks.
+  const closable = (readyForReview(task.status) || task.status === "failed") && !tree?.running && !tree?.asks
   const glyph = folded ? <ChevronRight className="h-3.5 w-3.5" aria-hidden /> : <ChevronDown className="h-3.5 w-3.5" aria-hidden />
   return (
     <div
       // A project's task is level 2, so a sub-task at `depth` is one level in from its parent's.
-      {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected }) : undefined)}
+      {...(inTree ? treeItem(taskKey(task.id, "project"), depth + 2, id, { expanded: folded === null ? null : !folded, current: selected, action: closable }) : undefined)}
       // The rail popover has a narrower chevron column and no sidebar guide padding. Reserve its content/actions too.
       style={depth && !guides ? { "--rail-indent": `calc(${depth} * var(--tree-step))` } as CSSProperties : undefined}
       className={cx("flex items-stretch rounded-lg transition", inTree && FOCUS, guides ? cx("group/tree relative", TREE_BOX) : "ml-[min(var(--rail-indent,0rem),max(0rem,calc(100cqw-12rem)))]", selected ? SELECTED : cx(dim ? "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300" : "text-zinc-300 hover:bg-zinc-900", inside && INSIDE))}
@@ -1076,18 +1113,19 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           <RowIcon task={task} label={label} dim={dim} />
           {folded && tree && <span className="col-start-3 row-start-1"><TreeCountChip tree={tree} /></span>}
         </button>
-        {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "text-[11px]")} />}
+        {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "text-[11px]", closable && ROW_PR_YIELDS)} />}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("shrink-0 text-[11px] @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </div>
-      {(readyForReview(task.status) || task.status === "failed") && !tree?.running && !tree?.asks && <DoneButton task={task} subtasks={tree?.total} />}
+      {closable && <DoneButton task={task} subtasks={tree?.total} />}
     </div>
   )
 })
 
 /**
- * ✓ in a box at the end of a failed row or one ready for Cody's review: Mark done without opening the
- * task, done at once with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target; Shift+Enter on
- * its row in the tree (lib/treeView.ts TREE_ACTION).
+ * An empty circle at the end of a failed row or one ready for Cody's review: Mark done without opening the task, done
+ * at once with an Undo toast (lib/markDone.ts). Always drawn, with a 44px touch target; its ✓ shows under the pointer,
+ * with the keyboard's focus on it or on its row, and faintly on a touch screen, which has neither. Shift+Enter on its
+ * row in the tree (lib/treeView.ts TREE_ACTION), as its tooltip there says.
  * On a tree's row it closes the whole tree (`subtasks`), so a tree with a
  * sub-task running or asking has none. Search results have none: they list finished work, and the task's header has it.
  */
@@ -1105,14 +1143,14 @@ function DoneButton({ task, subtasks = 0 }: { task: Task; subtasks?: number }) {
       }}
       tabIndex={tree ? -1 : undefined}
       aria-label={`Mark ${task.title}${kids} done`}
-      title={`Mark done${kids ? `, with its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""}. Messaging it picks it back up.`}
+      title={`Mark done${tree ? " (Shift+Enter)" : ""}${kids ? `, with its ${subtasks} sub-task${subtasks === 1 ? "" : "s"}` : ""}. Messaging it picks it back up.`}
       data-testid="sidebar-mark-done"
       {...(tree ? ACTION_PART : undefined)}
       className={cx("group/done mr-0.5 grid h-8 w-8 shrink-0 place-items-center self-center rounded-md text-zinc-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 pointer-coarse:h-11 pointer-coarse:w-11", FOCUS)}
     >
-      {/* In a box, as a checkbox to tick: a bare check at a row's end reads as "done already". */}
-      <span className="grid h-5 w-5 place-items-center rounded-md border border-zinc-700 transition-colors group-hover/done:border-emerald-400/50">
-        <Check className="h-3 w-3" aria-hidden />
+      {/* Empty until it's about to be pressed: a check drawn at rest, boxed or bare, reads as "done already". */}
+      <span className="grid h-5 w-5 place-items-center rounded-full border border-zinc-600 transition-colors group-hover/done:border-emerald-400/50">
+        <Check className="h-3 w-3 opacity-0 group-hover/done:opacity-100 group-focus-visible/done:opacity-100 pointer-coarse:opacity-40 [[role=treeitem]:focus-visible_&]:opacity-100" aria-hidden />
       </span>
     </button>
   )
@@ -1158,20 +1196,23 @@ function ProjectSettingsButton({ id, name, bright }: { id: string; name: string;
   )
 }
 
-/** "Show fewer", in the head of the whole "Waiting on you" list: quiet, in the head's amber, 44px to a finger. */
-const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 @max-[19rem]/side:mr-0 @max-[19rem]/side:px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5 pointer-coarse:@max-[19rem]/side:px-1", FOCUS)
+/** "Show 5" (WAITING_CAP), in the head of the whole "Waiting on you" list: quiet, in the head's amber, 44px to a finger. */
+const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium whitespace-nowrap text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 @max-[19rem]/side:mr-0 @max-[19rem]/side:px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5 pointer-coarse:@max-[19rem]/side:px-1", FOCUS)
+/** Back to the capped list, in the head and under the rows. */
+const SHOW_CAPPED = `Show ${WAITING_CAP}`
 /**
- * The head's " on you" goes where "Waiting", its count and "Fewer" need the row: a sidebar narrower than its default
- * (16rem less its border), a zoomed phone's drawer. A finger's "Fewer" is 44px wide, so it goes a little sooner.
+ * The head's " on you" goes where "Waiting", its count and "Show 5" need the row: a sidebar narrower than its default
+ * (16rem less its border, which just fits), a zoomed phone's drawer. A finger's "Show 5" is 44px wide, so it goes a
+ * little sooner. By the sidebar's width only, never by what's open.
  */
-const HEAD_SHORT = "@max-[15.5rem]/side:sr-only pointer-coarse:@max-[16.5rem]/side:sr-only"
+const HEAD_SHORT = "@max-[15.9rem]/side:sr-only pointer-coarse:@max-[16.5rem]/side:sr-only"
 /** The head of the whole list stays in view above its rows, on the section's own tint (opaque: rows pass under it). */
 const WAITING_STUCK = "sticky top-0 z-10 rounded-b-none border-b border-amber-300/15 bg-[color-mix(in_oklab,var(--color-amber-300)_3%,var(--color-zinc-950))]"
 
 /**
  * "Waiting on you": what asks Cody, failed, or has a PR to review, above the projects. It isn't a mode: it folds like
  * any group, says how many it holds, and is gone when nothing waits. Long lists stop at WAITING_CAP with "Show all n";
- * the whole list ends with "Show fewer", and its head, which stays in view while it scrolls, has one too, so the
+ * the whole list ends with "Show 5", and its head, which stays in view while it scrolls, has one too, so the
  * projects under it are never a long scroll away. `mixed`: its tasks are from more than one project, so each run of
  * rows from one project sits under that project's name.
  */
@@ -1195,14 +1236,14 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
   const moreId = useId()
   if (!total) return null
   const inside = selection.inside === WAITING_FOLD
-  /** The whole list is on screen, and it's longer than the cap: "Show fewer" takes it back. */
+  /** The whole list is on screen, and it's longer than the cap: "Show 5" takes it back. */
   const whole = expanded && total > WAITING_CAP
-  /** Then its head stays in view while the list scrolls, with a "Show fewer" of its own. */
+  /** Then its head stays in view while the list scrolls, with a "Show 5" of its own. */
   const stuck = whole && !folded
   const fewer = () => onExpand(false)
   return (
     <div data-sidebar-group={WAITING_FOLD} className="mt-1 mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.03]">
-      {/* The fold button covers the whole head (its ::after), under "Show fewer": one row, two targets. */}
+      {/* The fold button covers the whole head (its ::after), under "Show 5": one row, two targets. */}
       <div {...treeItem(WAITING_HEAD, 1, headId, { expanded: !folded })} className={cx("flex items-center rounded-lg", FOCUS, stuck ? WAITING_STUCK : "relative")}>
         <button
           type="button"
@@ -1210,23 +1251,23 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
           aria-expanded={!folded}
           {...OPEN_TOGGLE_PART}
           id={headId}
-          className={cx("flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg pl-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase after:absolute after:inset-0 after:rounded-lg hover:text-amber-100 @max-[19rem]/side:gap-1.5 pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
+          className={cx("flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg pl-2 text-left text-[11px] font-semibold tracking-wider text-amber-200/80 uppercase after:absolute after:inset-0 after:rounded-lg hover:text-amber-100 @max-[19rem]/side:gap-1.5 @max-[19rem]/side:tracking-wide pointer-coarse:min-h-11", FOCUS, inside && INSIDE)}
         >
-          <Inbox className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          {/* Narrow, "Waiting" alone fits; the rest stays in its name. By the sidebar's width only, never by what's open. */}
+          {/* At the sidebar's narrowest the icon goes too: "Waiting", its count and "Show 5" take the row. */}
+          <Inbox className="h-3.5 w-3.5 shrink-0 @max-[13.5rem]/side:hidden" aria-hidden />
+          {/* Narrow, "Waiting" alone fits; the rest stays in its name. */}
           <span className="min-w-0 truncate">
             Waiting<span className={HEAD_SHORT}> on you</span>
           </span>
           <Badge count={total} asks={asks} className="h-4 min-w-4 px-1 text-[10px]" />
         </button>
         {stuck && (
-          // It goes with the click, so the press doesn't take the focus to it. Under 19rem it's "Fewer", to fit.
-          <button type="button" onClick={fewer} onMouseDown={(e) => e.preventDefault()} tabIndex={-1} aria-label="Show fewer" className={FEWER}>
-            <span className="@max-[19rem]/side:hidden">Show fewer</span>
-            <span className="@min-[19rem]/side:hidden">Fewer</span>
+          // It goes with the click, so the press doesn't take the focus to it.
+          <button type="button" onClick={fewer} onMouseDown={(e) => e.preventDefault()} tabIndex={-1} title={`Show only the first ${WAITING_CAP}`} className={FEWER}>
+            {SHOW_CAPPED}
           </button>
         )}
-        <span className="mr-2 ml-1 shrink-0 text-amber-200/50 @max-[19rem]/side:ml-0.5" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
+        <span className="mr-2 ml-1.5 shrink-0 text-amber-200/50 @max-[19rem]/side:mr-1.5" aria-hidden>{folded ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</span>
       </div>
       {!folded && (
         <div role="group" aria-label="Waiting on you" className="space-y-px px-1 pb-1">
@@ -1236,9 +1277,9 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
               <Fragment key={r.task.id}>
                 {/* The row's own name ends with its project, so this line is for the eye only. */}
                 {mixed && project.name && rows[i - 1]?.task.projectId !== r.task.projectId && (
-                  <div aria-hidden className="grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 px-2 pt-1 text-[11px] leading-4 text-zinc-500">
+                  <div aria-hidden className={cx("grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 px-2 text-xs leading-4 text-zinc-400", i ? "pt-1.5" : "pt-1")}>
                     {/* The project's square, as under More projects: a round dot here would read as a task's state. */}
-                    <span className="grid place-items-center"><span style={projectColorStyle(project.color)} className="h-2 w-2 rounded-[3px] bg-(--pc)" /></span>
+                    <span className="grid place-items-center"><span style={projectColorStyle(project.color)} className="h-2 w-2 rounded-[2px] bg-(--pc)" /></span>
                     <span className="min-w-0 truncate">{project.name}</span>
                   </div>
                 )}
@@ -1250,7 +1291,7 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
             <div {...treeItem(WAITING_MORE, 2, moreId)} className={cx("rounded-lg", FOCUS)}>
               <button type="button" onClick={whole ? fewer : () => onExpand(true)} {...openPart(moreId)} className={cx(ROW, "text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200")}>
                 <span className="w-5 shrink-0" aria-hidden />
-                {whole ? "Show fewer" : `Show all ${total}`}
+                {whole ? SHOW_CAPPED : `Show all ${total}`}
               </button>
             </div>
           )}
@@ -1326,7 +1367,7 @@ function MoreProject({ group: g, color, selected, onPick }: { group: SidebarGrou
         className={cx(ROW, "min-w-0 flex-1", selected ? "text-zinc-50" : "text-zinc-400 hover:text-zinc-200")}
       >
         <span className="grid h-5 w-5 shrink-0 place-items-center" aria-hidden>
-          <span style={projectColorStyle(color)} className="h-2 w-2 rounded-[3px] bg-(--pc)" />
+          <span style={projectColorStyle(color)} className="h-2 w-2 rounded-[2px] bg-(--pc)" />
         </span>
         <span className="min-w-0 flex-1 truncate">{g.project.name}</span>
         <GroupCountChip group={g} />
