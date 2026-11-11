@@ -93,7 +93,7 @@ describe("TaskComposer: send to the Captain", () => {
   it("on a resting task the chip sends to the Captain, then stays for the next message, back on the task", async () => {
     render(task({ status: "pr_ready", pendingCount: 0 }))
     act(() => q("captain-target")!.click())
-    expect(textarea().placeholder).toBe("Ask the demo Captain: split, reprioritise, new tasks…")
+    expect(textarea().placeholder).toBe("Message the Captain…")
     expect(q("captain-forward-note")!.textContent).toBe("To the demo Captain, not the agent. Its reply shows here.")
     type("start a task for the docs")
     await act(async () => submitForm())
@@ -115,7 +115,7 @@ describe("TaskComposer: send to the Captain", () => {
     render(task())
     act(() => q("captain-target")!.click())
     expect(q("captain-target")!.getAttribute("aria-pressed")).toBe("true")
-    expect(textarea().placeholder).toContain("demo Captain")
+    expect(textarea().placeholder).toBe("Message the Captain…")
     expect(q("captain-forward-note")!.textContent).toContain("with this task's 2 queued messages")
     type("what's left in the queue")
     await act(async () => submitForm())

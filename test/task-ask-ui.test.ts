@@ -182,11 +182,11 @@ describe("a task's side questions in the task panel", () => {
     expect(textarea().placeholder).toBe("Ask about this task…")
     expect(document.activeElement).toBe(textarea())
 
-    // Turning it off leaves the focus where it is.
+    // Turning it off puts the caret back in the box too, ready to type to the agent.
     act(() => q("task-ask-toggle")!.focus())
     click(q("task-ask-toggle")!)
     expect(q("task-ask")).toBeNull()
-    expect(document.activeElement).toBe(q("task-ask-toggle"))
+    expect(document.activeElement).toBe(textarea())
   })
 
   it("Esc and Back leave the side questions first, and only then the panel", () => {
