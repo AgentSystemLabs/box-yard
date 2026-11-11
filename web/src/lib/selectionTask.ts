@@ -54,7 +54,8 @@ export function buildSelectionTaskPrompt(input: { source: SelectionTaskSource; s
       input.ownerName,
     ),
     "",
-    withOwner("## Cody's request", input.ownerName),
+    // No name in a heading: unset, the owner reads "the owner", which doesn't start one.
+    "## The request",
     instructions || withOwner("(Cody didn't write one: work out the task from the highlighted text.)", input.ownerName),
     "",
     "## Where it was highlighted",

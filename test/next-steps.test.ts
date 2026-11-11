@@ -68,7 +68,7 @@ describe("selection task prompt", () => {
     expect(prompt.split("\n")[0]).toContain("Create a new task from Ada's request and the text Ada highlighted")
     // A task's goes to its project's Captain, which keeps it in the project.
     expect(prompt).toContain("It belongs in this project unless the request says otherwise.")
-    expect(prompt).toContain("## Ada's request\nMake this a separate investigation.")
+    expect(prompt).toContain("## The request\nMake this a separate investigation.")
     expect(prompt).toContain("Project: site (prj_site)")
     expect(prompt).toContain("In the transcript of the task: Fix nav (task_123)")
     expect(prompt).toContain("That task's branch: boxyard/fix-nav")

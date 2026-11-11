@@ -365,7 +365,7 @@ describe("highlighted text in a task's transcript", () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]!.url).toBe(`/api/projects/${project.id}/captain/messages`)
     const content = String(calls[0]!.body!.content)
-    expect(content).toContain("request\nShorten the second paragraph too")
+    expect(content).toContain("## The request\nShorten the second paragraph too")
     expect(content).toContain(`- Project: marketing-site (${project.id})`)
     expect(content).toContain(`- In the transcript of the task: ${task.title} (${taskId})`)
     expect(content).toContain("## Highlighted text\n> the opening paragraph")

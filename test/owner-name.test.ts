@@ -165,7 +165,7 @@ describe("generated output boundaries", () => {
     expect(inlinePicksNote([{ kind: "project", token: "Cody", label: "Cody", value: "prj_1", where: 'item 1 ("Cody")', reason: "item" }], "Ana", false)).toContain('item 1 ("Cody")')
     const selection = buildSelectionTaskPrompt({ source: { kind: "orchestrator" }, selectedText: "Cody said hello", instructions: "Ask Cody", ownerName: "Ana" })
     expect(selection).toContain("Create a new task from Ana's request and the text Ana highlighted")
-    expect(selection).toContain("## Ana's request\nAsk Cody")
+    expect(selection).toContain("## The request\nAsk Cody")
     expect(selection).toContain("> Cody said hello")
   })
 })
