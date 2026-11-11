@@ -164,7 +164,7 @@ export function afterCompactBlock(file: string, markdown: string, live: string[]
 export function resetPrompt(saved: string | null, recapHeading: string, recap: string, now: string): string {
   return [
     saved,
-    `${recapHeading} (your session was reset; saved history, not new messages):\n${recap}`,
+    `${recapHeading} (your session was reset; saved history):\n${recap}`,
     "---\n[End of saved history. Everything below is live: where it differs from the history above, it wins.]",
     now,
   ]
