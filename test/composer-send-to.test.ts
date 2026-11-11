@@ -23,6 +23,22 @@ const text = () => host.querySelector("textarea")!
 const menu = () => document.querySelector('[data-testid="send-to-menu"]')
 const note = () => host.querySelector('[data-testid="send-to-note"]')
 const options = () => Array.from(document.querySelectorAll<HTMLElement>('[role="listbox"][aria-label="Send to destination"] [role="option"] button'))
+/** The click-opened sheet, its search field and its rows (the typed ">" list above is `menu` and `options`). */
+const sheet = () => document.querySelector('[data-testid="send-to-sheet"]')
+const search = () => document.querySelector<HTMLInputElement>('[aria-label="Search destinations"]')!
+const choices = () => Array.from(sheet()?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])
+const picked = () => document.getElementById(search().getAttribute("aria-activedescendant") ?? "")
+async function find(value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search(), value)
+    search().dispatchEvent(new Event("input", { bubbles: true }))
+  })
+}
+const sheetKey = (key: string) => {
+  const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })
+  act(() => void search().dispatchEvent(e))
+  return e
+}
 const key = (key: string, extra: KeyboardEventInit = {}) => {
   const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra })
   act(() => void text().dispatchEvent(e))
@@ -117,12 +133,13 @@ describe("Send to from every chat", () => {
     mount(); await type("Touch draft")
     await click(host.querySelector('button[aria-label="Send to…"]')!)
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Send to")
-    await click(options()[0]!)
+    expect(document.activeElement).toBe(search())
+    await click(choices()[0]!)
     expect(text().value).toBe("Touch draft"); expect(document.activeElement).toBe(text())
     expect(note()?.textContent).toContain("Send to Coordinator")
     for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
       key("Enter", { shiftKey: true, ...modifier })
-      expect(document.querySelector('[aria-label="Search destinations"]')).not.toBeNull()
+      expect(sheet()).not.toBeNull()
       await click(document.querySelector('[aria-label="Close"]')!)
       expect(text().value).toBe("Touch draft")
       expect(note()?.textContent).toContain("Send to Coordinator")
@@ -139,14 +156,40 @@ describe("Send to from every chat", () => {
     key("ArrowDown"); key("Enter")
     expect(note()?.textContent).toContain("Sending reopens this task")
     key("Enter", { shiftKey: true, ctrlKey: true })
-    const input = document.querySelector<HTMLInputElement>('[aria-label="Search destinations"]')!
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Captain")
-      input.dispatchEvent(new Event("input", { bubbles: true }))
-    })
-    expect(options()).toHaveLength(1)
-    act(() => void input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })))
+    await find("Captain")
+    expect(choices()).toHaveLength(1)
+    sheetKey("Enter")
     expect(note()?.textContent).toContain("Example Captain")
+  })
+  it("the sheet lists chats then tasks under headings, ranks words, and Esc clears the search before it closes", async () => {
+    mount(); await type("Draft")
+    await click(host.querySelector('button[aria-label="Send to…"]')!)
+    expect(choices().map((el) => el.textContent)).toEqual(["CoordinatorAll projects", "Example Captainacme/site", "Fix uploadsExample · Done · sending reopens it"])
+    expect(sheet()?.textContent).toMatch(/Chats.*Coordinator.*Tasks.*Fix uploads/)
+    expect(picked()?.textContent).toContain("Coordinator")
+    // The pointer and the keys move one highlight.
+    act(() => void choices()[2]!.dispatchEvent(new MouseEvent("mousemove", { bubbles: true })))
+    expect(picked()?.textContent).toContain("Fix uploads")
+    sheetKey("ArrowUp")
+    expect(picked()?.textContent).toContain("Example Captain")
+    // Words in any order, each from a different part of the row: the task's name and its project.
+    await find("example fix")
+    expect(choices().map((el) => el.textContent)).toEqual(["Fix uploadsExample · Done · sending reopens it"])
+    expect([...choices()[0]!.querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["Fix", "Example"])
+    await find("zzzz")
+    expect(choices()).toHaveLength(0)
+    expect(sheet()?.textContent).toContain("No chat or task matches “zzzz”")
+    sheetKey("Enter")
+    expect(sheet()).not.toBeNull()
+    expect(sheetKey("Escape").defaultPrevented).toBe(true)
+    expect(search().value).toBe("")
+    expect(choices()).toHaveLength(3)
+    await find("fix")
+    sheetKey("Enter")
+    expect(sheet()).toBeNull()
+    expect(text().value).toBe("Draft"); expect(document.activeElement).toBe(text())
+    expect(note()?.textContent).toContain("Send to Fix uploads")
+    expect(calls).toHaveLength(0)
   })
   it("swaps drafts without carrying a destination to another chat", async () => {
     mount(); await type("Draft >Fix"); key("Enter")
@@ -176,12 +219,8 @@ describe("Send to from every chat", () => {
     writeDraft("coordinator", { text: "", files: [uploadedFile(file)] })
     mount()
     key("Enter", { shiftKey: true, ctrlKey: true })
-    const input = document.querySelector<HTMLInputElement>('[aria-label="Search destinations"]')!
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, search)
-      input.dispatchEvent(new Event("input", { bubbles: true }))
-    })
-    await click(options()[0]!)
+    await find(search)
+    await click(choices()[0]!)
     key("Enter"); await wait()
     expect(calls).toHaveLength(1)
     expect(calls[0]).toMatchObject({ url: path, body: { content: "", attachments: [file.id] } })
