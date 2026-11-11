@@ -6,7 +6,8 @@ import { useSettings } from "../lib/queries"
 import { Button, cx } from "./ui"
 import { ComposerAttachments } from "./ComposerAttachments"
 import { DictationStatus, MicButton } from "./Dictation"
-import { insertTranscript } from "../lib/dictation"
+import { insertTranscript, isMacPlatform } from "../lib/dictation"
+import { chordLabel, sendToChord } from "../lib/shortcuts"
 import { useDictation } from "../lib/useDictation"
 import { primeSendSound } from "../lib/sendSound"
 import { browseStep, readHistory, rememberPrompt, type Browse } from "../lib/promptHistory"
@@ -52,15 +53,20 @@ const TEXT = `px-3 pb-1 ${TEXT_TOP} ${LINE}`
 
 /**
  * A button on the row: 44px (a finger's size) below 32rem, where lib/composerRow.ts counts it as one slot; a mouse gets
- * 32px from there. Tools passed in (Pull requests) match it.
+ * 32px from there (the min-* undo Button's own 44px floor, which only a wide window lifts). Tools passed in (Pull
+ * requests) match it.
  */
-const TOOL = "h-11 w-11 shrink-0 !p-0 pointer-fine:@min-[32rem]/composer:h-8 pointer-fine:@min-[32rem]/composer:w-8"
+const TOOL =
+  "h-11 w-11 shrink-0 !p-0 pointer-fine:@min-[32rem]/composer:h-8 pointer-fine:@min-[32rem]/composer:min-h-0 pointer-fine:@min-[32rem]/composer:w-8 pointer-fine:@min-[32rem]/composer:min-w-0"
+/** The 44px buttons sit edge to edge, which is what lib/composerRow.ts counts on; the mouse's 32px ones get a gap. */
+const TOOL_GAP = "gap-0 pointer-fine:@min-[32rem]/composer:gap-1"
 
 const NO_TAGS: TextTag[] = []
 
 /**
  * The message box shared by the orchestrator chat and task threads: Enter
- * sends, Shift+Enter adds a line, files can be picked, dropped or pasted.
+ * sends, Shift+Enter adds a line, files can be picked, dropped or pasted. On a touch screen Enter adds a line and the
+ * Send button sends; Cmd/Ctrl+Enter sends on every device.
  * `onSubmit` gets the text and the uploaded files; the box then clears itself.
  * If it returns the send's promise, a failed send puts the text and files back (focus
  * never left), and a successful one on a touch device blurs the box to close the keyboard.
@@ -167,6 +173,8 @@ export function Composer({
   overflowingRef.current = overflowing
   const [expanded, setExpanded] = useState(false)
   const input = useRef<HTMLTextAreaElement | null>(null)
+  // On a phone, Enter adds a line and the Send button sends. Read once: typing never asks the media query again.
+  const [touch] = useState(isTouchDevice)
   const picker = useRef<HTMLInputElement>(null)
   const maxMb = useSettings().data?.maxUploadMb ?? 20
   const boxRef = useRef<HTMLDivElement>(null)
@@ -192,8 +200,9 @@ export function Composer({
     picks: runTargets ? picks.kinds.length : 0,
     expand: showExpand ? 1 : 0,
     tools: toolsMenu ? toolWidth : 0,
-    attach: (allowFiles ? 1 : 0) + (sendTo.enabled ? 1 : 0),
-  }, { toolsLast: sendTo.enabled })
+    sendTo: sendTo.enabled ? 1 : 0,
+    attach: allowFiles ? 1 : 0,
+  }, { stop: Boolean(stop) })
 
   // Uploads run in the draft store, so they finish (or fail, with Retry) while the box is away.
   const add = (picked: File[]) => attachFiles(key, picked, maxMb)
@@ -305,6 +314,8 @@ export function Composer({
 
   // Sent while the live stream is down: it waits in the box (Send now tries anyway) instead of failing.
   const [held, setHeld] = useState(false)
+  // What Send says of itself, also while it can't be pressed.
+  const sendLabel = held ? "Waiting to send" : uploading ? "Uploading files…" : "Send"
   const live = useConnectionLive()
   const submit = (now = false) => {
     // Still listening: stop, let the last words land, then send (dictation calls submit again).
@@ -501,7 +512,7 @@ export function Composer({
       <div
         ref={boxRef}
         data-composer-box
-        className="@container/composer rounded-xl border border-control bg-zinc-900 focus-within:border-yard-500"
+        className="@container/composer rounded-xl border border-control bg-zinc-900"
         onMouseDown={(e) => {
           // A press on the box's empty space (around the text, between the buttons) puts the caret in the text.
           const target = e.target as HTMLElement
@@ -528,7 +539,8 @@ export function Composer({
             data-chat-composer
             ref={setTextarea}
             rows={1}
-            aria-label={label}
+            aria-label={label ?? placeholder}
+            enterKeyHint={touch ? "enter" : "send"}
             value={value}
             onChange={(e) => {
               setValue(e.target.value)
@@ -574,6 +586,8 @@ export function Composer({
               }
               if (step.handled) return
               if (e.key === "Enter" && !e.shiftKey) {
+                // A touch keyboard's Return adds a line and the Send button sends; with Cmd/Ctrl, Enter sends anywhere.
+                if (touch && !e.metaKey && !e.ctrlKey) return
                 e.preventDefault()
                 submit()
               }
@@ -583,7 +597,7 @@ export function Composer({
             // Reserve the same inset for text and its history ghost; the icon never covers either.
             className={cx(
               textMetrics,
-              "scroll-thin block w-full resize-none overflow-y-hidden bg-transparent placeholder:text-zinc-600 placeholder-shown:truncate",
+              "scroll-thin block w-full resize-none overflow-y-hidden bg-transparent placeholder:text-zinc-500 placeholder-shown:truncate",
               // Over the tags' layer, which draws the text; the caret, the selection and the IME's marks stay its own.
               tinted ? "relative text-transparent caret-zinc-100 forced-colors:text-[color:CanvasText]" : "text-zinc-100",
             )}
@@ -605,7 +619,7 @@ export function Composer({
         {runTargets && <PickScope scoped={picks.scoped} />}
         {picks.conflict && <PickConflict text={picks.conflict} />}
         {/* One row at every width (lib/composerRow.ts): what doesn't fit folds into More, and Send never moves. */}
-        <div data-testid="composer-row" className="flex flex-nowrap items-center gap-1 px-1.5 pb-1.5">
+        <div data-testid="composer-row" className="flex flex-nowrap items-center gap-1 px-1 pb-1 pointer-fine:@min-[32rem]/composer:px-1.5 pointer-fine:@min-[32rem]/composer:pb-1.5">
           <input
             ref={picker}
             type="file"
@@ -616,24 +630,27 @@ export function Composer({
               e.target.value = ""
             }}
           />
-          {/* If a tool is wider than counted, this part scrolls rather than pushing Send to a second line. */}
-          <div className="-m-0.5 flex min-w-0 items-center gap-1 overflow-x-auto p-0.5 [scrollbar-width:none]">
+          {/* If a tool is wider than counted, this part scrolls rather than pushing Send to a second line. Its padding
+              leaves a focused button's outline whole. */}
+          <div className={cx("-m-1 flex min-w-0 items-center overflow-x-auto p-1 [scrollbar-width:none]", TOOL_GAP)}>
             {allowFiles && (
-              <Button type="button" variant="ghost" size="sm" className={cx(TOOL, onRow(fold.attach))} title="Attach files" onClick={() => picker.current?.click()}>
-                <Paperclip className="h-4 w-4" />
+              <Button type="button" variant="ghost" size="sm" className={cx(TOOL, onRow(fold.attach))} title="Attach files" aria-label="Attach files" onClick={() => picker.current?.click()}>
+                <Paperclip className="h-4 w-4" aria-hidden />
               </Button>
             )}
-            {sendTo.enabled && <Button type="button" variant="ghost" size="sm" className={cx(TOOL, onRow(fold.attach))} title={sendToHint()} aria-label="Send to…" onClick={() => { more.close(); sendTo.openSheet() }}><ArrowUpRight className="h-4 w-4" aria-hidden /></Button>}
+            {sendTo.enabled && <Button type="button" variant="ghost" size="sm" className={cx(TOOL, onRow(fold.sendTo))} title={sendToHint()} aria-label="Send to…" onClick={() => { more.close(); sendTo.openSheet() }}><ArrowUpRight className="h-4 w-4" aria-hidden /></Button>}
             {fold.more !== null && <MoreButton more={more} className={cx(TOOL, inMenu(fold.more))} dot={toolsMenu && toolsDot ? { label: toolsDot.label, className: cx(toolsDot.className, inMenu(fold.tools)) } : null} />}
             {runTargets && (
-              <span className={cx("flex shrink-0 items-center gap-1", onRow(fold.picks))}>
+              <span className={cx("flex shrink-0 items-center", TOOL_GAP, onRow(fold.picks))}>
                 <PickButtons picks={picks} className={TOOL} />
               </span>
             )}
             <MicButton machine={dictation} />
-            {tools && <span className={cx("flex shrink-0 items-center gap-1 empty:hidden", toolsMenu ? onRow(fold.tools) : null)}>{tools}</span>}
+            {/* A mouse's chips are drawn smaller than their slot, so they keep their gap. */}
+            {tools && <span className={cx("flex shrink-0 items-center gap-1 pointer-coarse:gap-0 empty:hidden", toolsMenu ? onRow(fold.tools) : null)}>{tools}</span>}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* Stop stands apart from Send, so a thumb doesn't take one for the other. */}
+          <div className={cx("ml-auto flex shrink-0 items-center", stop ? "gap-2" : "gap-1")}>
             {showExpand && (
               <Button
                 type="button"
@@ -656,8 +673,8 @@ export function Composer({
                 <Square className="h-3.5 w-3.5 fill-current" aria-hidden />
               </Button>
             )}
-            <Button type="submit" variant="primary" size="sm" className={TOOL} disabled={!canSend} aria-label={held ? "Waiting to send" : "Send"}>
-              {held ? <Clock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+            <Button type="submit" variant="primary" size="sm" className={TOOL} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
+              {held ? <Clock className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
             </Button>
           </div>
         </div>
@@ -677,7 +694,17 @@ export function Composer({
               }}
             />
           )}
-          {sendTo.enabled && <ComposerMenuItem data-testid="more-send-to" icon={ArrowUpRight} label="Send to…" detail="Type > or press Cmd/Ctrl+Shift+Enter" className={inMenu(fold.attach)} onClick={() => { more.close(); sendTo.openSheet() }} />}
+          {sendTo.enabled && (
+            <ComposerMenuItem
+              data-testid="more-send-to"
+              icon={ArrowUpRight}
+              label="Send to…"
+              // The key chord is for a keyboard; a phone's narrow menu keeps the line short.
+              detail={<>Or type &gt; in the message<span className="pointer-coarse:hidden"> ({chordLabel(sendToChord, isMacPlatform(navigator.platform))})</span></>}
+              className={inMenu(fold.sendTo)}
+              onClick={() => { more.close(); sendTo.openSheet() }}
+            />
+          )}
           {runTargets && <PickMenuItems picks={picks} className={inMenu(fold.picks)} onDone={more.close} />}
           {toolsMenu && <div className={cx("flex flex-col", inMenu(fold.tools))}>{toolsMenu}</div>}
           {showExpand && (

@@ -167,6 +167,11 @@ body {
   outline-offset: 2px;
 }
 
+/* The composer's indicator lies over its 1px border: one ring, not a gold line around a gray one. */
+[data-composer-box]:has(> div > [data-chat-composer]:focus) {
+  outline-offset: -1px;
+}
+
 /* The box supplies the textarea's indicator. Other composer controls keep their own outlines. */
 [data-composer-box] > div > [data-chat-composer]:focus {
   outline: none;

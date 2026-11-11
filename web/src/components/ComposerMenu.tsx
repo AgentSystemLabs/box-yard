@@ -85,7 +85,7 @@ export function MoreButton({ more, className, dot }: { more: MoreMenuState; clas
       data-testid="composer-more"
       className={cx("relative", className, more.open && "bg-zinc-800 text-zinc-100")}
       aria-label={dot ? `More (${dot.label})` : "More"}
-      title="More: the buttons that don't fit"
+      title="More actions"
       aria-expanded={more.open}
       aria-controls={more.open ? more.id : undefined}
       // The caret stays in the text, where a picked @ ! % goes.
@@ -157,7 +157,7 @@ export function ComposerMenuItem({
       <Icon className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{label}</span>
-        {detail && <span className="truncate text-xs text-zinc-500">{detail}</span>}
+        {detail && <span className="line-clamp-2 text-xs text-zinc-500">{detail}</span>}
       </span>
       {keyHint && (
         <kbd aria-hidden className="shrink-0 rounded border border-zinc-700 px-1.5 font-mono text-xs text-zinc-400">

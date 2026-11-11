@@ -1,17 +1,19 @@
 /**
  * Keeps the composer's row of buttons on one line at every width: the buttons that don't fit fold into its More (⋯) menu.
  *
- * Below 32rem every row button is 2.75rem wide (44px, a finger's size) with 0.25rem between them, inside the box's
- * 0.375rem padding, so `n` of them need a box of 3n + 0.5 rem. The least used fold first: the @ ! % pick buttons, then
- * Expand, then the tools (Pull requests; a task's Side question and Captain chips), then Attach. Mic (hold to talk),
- * Send to shares Attach’s group. Chat rows use toolsLast so that pair folds before Captain and Side question.
- * Stop and Send never fold. Each width goes to CSS as a container query on the box (`@max-[Xrem]/composer`), never a
- * measurement or a viewport breakpoint, so a resize re-lays the row without a render. styles.css generates the classes
- * (`@source inline`), every half rem from 8 to 36, and `labelFrom`'s for the chips' labels.
+ * To a finger, and to a mouse below 32rem, every row button is 2.75rem wide (44px, a finger's size) and they sit edge
+ * to edge inside the row's 0.25rem padding, with 0.25rem between the tools at its start and Send's group at its end.
+ * Send's group (Expand, Stop, Send) keeps 0.25rem between its buttons, 0.5rem while Stop is there, so a thumb doesn't
+ * take one for the other. `n` buttons then need a box of 2.75n + 0.75 rem plus that group's gaps (`fitWidth`).
+ * The least used fold first: the @ ! % pick buttons, then Send to (the text's ">" opens it too), then Expand, then the
+ * tools (Pull requests; a task's Side question and Captain chips), and last Attach, a phone's most used. Mic (hold to
+ * talk), Stop and Send never fold. Each width goes to CSS as a container query on the box (`@max-[Xrem]/composer`),
+ * never a measurement or a viewport breakpoint, so a resize re-lays the row without a render. styles.css generates the
+ * classes (`@source inline`), every half rem from 8 to 36, and `labelFrom`'s for the chips' labels.
  */
 
 /** The groups that can fold, first to fold first. */
-export const FOLD_ORDER = ["picks", "expand", "tools", "attach"] as const
+export const FOLD_ORDER = ["picks", "sendTo", "expand", "tools", "attach"] as const
 export type FoldGroup = (typeof FOLD_ORDER)[number]
 
 /**
@@ -29,22 +31,35 @@ export type FoldPlan = Record<FoldGroup | "more", number | null>
 const MIN = 8
 const MAX = 36
 
-/** The narrowest box (rem, rounded up to a half) whose row fits `slots` buttons. */
+const half = (rem: number) => Math.min(MAX, Math.max(MIN, Math.ceil(rem * 2) / 2))
+
+/**
+ * The narrowest box (rem, rounded up to a half) whose row fits `slots` buttons with a 0.25rem gap after each: the
+ * roomy count the task box's labelled chips are measured in (`labelFrom`). The fold widths are tighter (`fitWidth`).
+ */
 export function rowWidth(slots: number): number {
-  return Math.min(MAX, Math.max(MIN, Math.ceil((3 * slots + 0.5) * 2) / 2))
+  return half(3 * slots + 0.5)
 }
 
-export function foldPlan(parts: RowParts, { toolsLast = false }: { toolsLast?: boolean } = {}): FoldPlan {
-  const plan: FoldPlan = { picks: null, expand: null, tools: null, attach: null, more: null }
-  const order: readonly FoldGroup[] = toolsLast ? ["picks", "expand", "attach", "tools"] : FOLD_ORDER
-  const there = order.filter((g) => parts[g] > 0)
+/** The narrowest box (rem, rounded up to a half) whose row fits `slots` buttons edge to edge, with `gaps` rem in Send's group. */
+function fitWidth(slots: number, gaps: number): number {
+  return half(2.75 * slots + 0.75 + gaps)
+}
+
+/** `stop`: Stop is on the row (counted in `fixed`), which widens the gaps of Send's group. */
+export function foldPlan(parts: RowParts, { stop = false }: { stop?: boolean } = {}): FoldPlan {
+  const plan: FoldPlan = { picks: null, sendTo: null, expand: null, tools: null, attach: null, more: null }
+  const there = FOLD_ORDER.filter((g) => parts[g] > 0)
   const first = there[0]
   // One button alone gains nothing from folding: the More button would take its place.
   if (first === undefined || (there.length === 1 && parts[first] <= 1)) return plan
+  const gap = stop ? 0.5 : 0.25
   there.forEach((g, i) => {
+    const staying = there.slice(i)
     // On the row with it: what never folds, this group and those that fold after it, and More for the ones before.
-    const slots = parts.fixed + there.slice(i).reduce((n, h) => n + parts[h], 0) + (i > 0 ? 1 : 0)
-    plan[g] = rowWidth(slots)
+    const slots = parts.fixed + staying.reduce((n, h) => n + parts[h], 0) + (i > 0 ? 1 : 0)
+    // Send's group: a gap before Send for Stop, and one more for Expand while it's on the row.
+    plan[g] = fitWidth(slots, gap * ((stop ? 1 : 0) + (staying.includes("expand") ? 1 : 0)))
   })
   plan.more = plan[first]
   return plan

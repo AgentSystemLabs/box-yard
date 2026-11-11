@@ -25,7 +25,7 @@ export function ComposerAttachments({ files, onRemove, onRetry }: { files: reado
   return (
     <>
       {files.length > 0 && (
-        <ul aria-label="Attachments" className="flex flex-wrap gap-2 px-3 pt-3 pointer-coarse:gap-y-4 pointer-coarse:pt-4" {...PREVIEW_GROUP}>
+        <ul aria-label="Attachments" className="flex flex-wrap items-center gap-2 px-3 pt-3 pointer-coarse:gap-y-4 pointer-coarse:pt-4" {...PREVIEW_GROUP}>
           {files.map((f) => {
             // A restored draft's image has no object URL: show the uploaded copy.
             const thumb = f.preview ?? (f.attachment && isImage(f.mime) ? attachmentUrl(f.attachment) : null)
