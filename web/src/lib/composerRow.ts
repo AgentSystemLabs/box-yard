@@ -9,8 +9,8 @@
  * tools (Pull requests; a task's Side question and Captain chips, one at a time from the row's end), and last Attach,
  * a phone's most used. Mic (hold to talk), Stop and Send never fold. Each width goes to CSS as a container query on the
  * box (`@max-[Xrem]/composer`), never a measurement or a viewport breakpoint, so a resize re-lays the row without a
- * render. styles.css generates the classes (`@source inline`), every half rem from 8 to 36, and `labelFrom`'s for the
- * chips' labels.
+ * render. styles.css generates the classes (`@source inline`), every quarter rem from 8 to 36, and `labelFrom`'s for
+ * the chips' labels, every half rem.
  */
 
 /** The groups that can fold, first to fold first. */
@@ -34,19 +34,23 @@ export type FoldPlan = Record<FoldGroup | "more", number | null> & { tool: (numb
 const MIN = 8
 const MAX = 36
 
-const half = (rem: number) => Math.min(MAX, Math.max(MIN, Math.ceil(rem * 2) / 2))
+/** Rounded up to one of `per` steps a rem, within the widths styles.css has classes for. */
+const step = (rem: number, per: number) => Math.min(MAX, Math.max(MIN, Math.ceil(rem * per) / per))
 
 /**
  * The narrowest box (rem, rounded up to a half) whose row fits `slots` buttons with a 0.25rem gap after each: the
  * roomy count the task box's labelled chips are measured in (`labelFrom`). The fold widths are tighter (`fitWidth`).
  */
 export function rowWidth(slots: number): number {
-  return half(3 * slots + 0.5)
+  return step(3 * slots + 0.5, 2)
 }
 
-/** The narrowest box (rem, rounded up to a half) whose row fits `slots` buttons edge to edge, with `gaps` rem in Send's group. */
+/**
+ * The narrowest box (rem, rounded up to a quarter) whose row fits `slots` buttons edge to edge, with `gaps` rem in
+ * Send's group. A quarter, not a half: a 320px phone's box is 17.875rem, and a working task's six buttons need 17.75.
+ */
 function fitWidth(slots: number, gaps: number): number {
-  return half(2.75 * slots + 0.75 + gaps)
+  return step(2.75 * slots + 0.75 + gaps, 4)
 }
 
 /** `stop`: Stop is on the row (counted in `fixed`), which widens the gaps of Send's group. */

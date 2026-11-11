@@ -687,8 +687,8 @@ export function Composer({
                 <Square className="h-3.5 w-3.5 fill-current text-red-300" aria-hidden />
               </Button>
             )}
-            {/* With nothing to send it's a plain gray button, not a dimmed gold one; it turns gold once there is. */}
-            <Button type="submit" variant="primary" size="sm" className={cx(TOOL, "disabled:bg-zinc-800! disabled:text-zinc-500! disabled:opacity-100!")} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
+            {/* With nothing to send it's a plain gray button, not a dimmed gold one; it turns gold once there is. Beside Stop it has no tile, so Stop is the row's one filled button. */}
+            <Button type="submit" variant="primary" size="sm" className={cx(TOOL, "disabled:text-zinc-500! disabled:opacity-100!", stop ? "disabled:bg-transparent!" : "disabled:bg-zinc-800!")} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
               {held ? <Clock className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
             </Button>
           </div>
