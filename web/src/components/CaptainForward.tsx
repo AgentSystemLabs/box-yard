@@ -2,9 +2,9 @@
 // (lib/captainForward.ts), and the two thread lines that follow: "→ Captain" and the Captain's reply.
 import { memo, useCallback, useMemo, useRef, useState, type ComponentProps, type RefObject } from "react"
 import { flushSync } from "react-dom"
-import { MessageCircleQuestion, X } from "lucide-react"
+import { ListPlus, MessageCircleQuestion, X } from "lucide-react"
 import { COMPOSER_FOOTER, Composer, type ComposerHandle } from "./Composer"
-import { ComposerMenuItem, useCloseMore, useToolFold } from "./ComposerMenu"
+import { ComposerMenuItem, useCloseMore, useToolFold, useToolLabel } from "./ComposerMenu"
 import { ComposerIcon, TaskComposerIcon } from "./ChatIcons"
 import { CaptainIcon, captainIconFor } from "./CaptainIcon"
 import { WORKING_PULSE, projectColorStyle } from "./TaskIcon"
@@ -16,17 +16,18 @@ import { AppLink, LineIcon, Markdown, TAP_AREA, TimeAgo, cx } from "./ui"
 import { useForwardToCaptain, useOwnerName, useStopTask } from "../lib/queries"
 import { looksLikeTaskManagement, suggestsCaptain } from "../lib/captainForward"
 import { useComposerFocus } from "../lib/chatSwitch"
-import { inMenu, labelFrom, onRow, rowWidth } from "../lib/composerRow"
+import { inMenu, labelFrom, onRow } from "../lib/composerRow"
 import type { Attachment, Project, Task, TaskMessage } from "../../../shared/types"
 
 /**
- * How many of the row's 44px buttons (and the gap after one) a chip takes with its label, at text-xs to a finger:
- * "Side question" 119px, "Captain" 85px, "To Captain" 104px. Without its label a chip counts as one 44px touch slot.
+ * How many of the row's 44px buttons a chip takes with its label, at text-xs to a finger: "Side question" 115.2px,
+ * "Captain" 81.6px, "To Captain" 99px, each rounded up. Without its label a chip is one 44px slot. A 390px phone's
+ * box (356px) then fits a working task's Attach, More, Mic, "Side question", Stop and Send exactly.
  */
-const LABELLED = { ask: 2.6, captain: 1.9, toCaptain: 2.25 }
+const LABELLED = { ask: 116 / 44, captain: 82 / 44, toCaptain: 100 / 44 }
 
 const CHIP =
-  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3"
+  "inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5"
 
 /**
  * The line under the text that says where the next message goes instead of the agent (the Captain, a side question),
@@ -90,26 +91,28 @@ export const TaskComposer = memo(function TaskComposer({
   const { mutate: stopTask } = useStopTask()
   const stop = useMemo(() => (running && !asking ? { label: "Stop the agent's turn", onStop: () => stopTask(task.id) } : null), [running, asking, stopTask, task.id])
   const showCaptain = !asking
-  // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts), one at a time:
-  // Captain first, then Side question. A slot each, in the row's order. Their labels show only where the whole row
-  // fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
-  const chips = [...(ask ? [1] : []), ...(showCaptain ? [1] : [])]
+  const queues = running && !asking && !toCaptain
+  // The chips give way when the row is too narrow for them (lib/composerRow.ts), one at a time and in the row's order
+  // from its end: Captain loses its label, then folds into the box's More menu; then Side question does the same. So a
+  // phone keeps "Side question" spelled out for as long as it fits, rather than two bare icons.
+  const chips = [...(ask ? [{ slots: 1, labelled: LABELLED.ask }] : []), ...(showCaptain ? [{ slots: 1, labelled: toCaptain ? LABELLED.toCaptain : LABELLED.captain }] : [])]
   const captainAt = ask ? 1 : 0
-  const labels = labelFrom(
-    rowWidth(4 + (stop ? 1 : 0) + (asking ? 0 : 1) + (ask ? LABELLED.ask : 0) + (showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0)),
-  )
   const askToggle = ask?.toggle
   const toggleAsk = useCallback(() => {
     handle.current?.clearSendTo()
     setToCaptain(false)
     askToggle?.()
   }, [askToggle])
-  // Turned on, the text takes the caret at once, inside the press: on a phone that's what brings up the keyboard.
-  const pressAsk = useCallback(() => {
-    if (!asking) box.current?.focus()
-    toggleAsk()
-  }, [asking, toggleAsk])
   const toggleCaptain = useCallback(() => { handle.current?.clearSendTo(); setToCaptain((on) => !on) }, [])
+  // A chip on the row: the text takes the caret inside the press, which on a phone brings the keyboard up or keeps it.
+  const pressAsk = useCallback(() => {
+    box.current?.focus()
+    toggleAsk()
+  }, [toggleAsk])
+  const pressCaptain = useCallback(() => {
+    box.current?.focus()
+    toggleCaptain()
+  }, [toggleCaptain])
   const answer = !asking && ask && (ask.busy || ask.unread) ? (ask.busy ? "An answer is on its way" : "A new answer") : null
 
   const submit = useCallback(
@@ -193,7 +196,8 @@ export const TaskComposer = memo(function TaskComposer({
       hint={hint}
       stop={stop}
       // While the agent works, a message to it waits for the turn's end.
-      sendLabel={running && !asking && !toCaptain ? "Queue message" : undefined}
+      sendLabel={queues ? "Queue message" : undefined}
+      sendIcon={queues ? ListPlus : undefined}
       icon={asking ? <ComposerIcon kind="side-question" label="Side question to the Coordinator about this task" /> : <TaskComposerIcon task={task} captain={toCaptain ? captain : null} />}
       tools={
         <>
@@ -207,7 +211,7 @@ export const TaskComposer = memo(function TaskComposer({
               className={cx(CHIP, "relative", asking ? "bg-yard-500/15 text-yard-200 ring-1 ring-yard-500/40" : "text-zinc-500 hover:text-zinc-200")}
             >
               <MessageCircleQuestion className="h-3.5 w-3.5 text-yard-400" aria-hidden />
-              <span className={labels}>Side question</span>
+              <ChipLabel tool={0}>Side question</ChipLabel>
               {!asking && (ask.busy || ask.unread) && (
                 <span
                   data-testid="task-ask-dot"
@@ -223,7 +227,7 @@ export const TaskComposer = memo(function TaskComposer({
               tool={captainAt}
               data-testid="captain-target"
               aria-pressed={toCaptain}
-              onClick={toggleCaptain}
+              onClick={pressCaptain}
               title={
                 toCaptain
                   ? "Sending to the Captain: tap to send to the task's agent instead"
@@ -232,7 +236,7 @@ export const TaskComposer = memo(function TaskComposer({
               className={cx(CHIP, toCaptain ? "bg-yard-500/15 text-yard-200 ring-1 ring-yard-500/40" : "text-zinc-500 hover:text-zinc-200")}
             >
               <CaptainIcon projectId={task.projectId} style={projectColorStyle(color)} className={cx("h-3.5 w-3.5", color ? "text-(--pc)" : "text-zinc-300")} />
-              <span className={labels}>{toCaptain ? "To Captain" : "Captain"}</span>
+              <ChipLabel tool={captainAt}>{toCaptain ? "To Captain" : "Captain"}</ChipLabel>
             </RowChip>
           )}
         </>
@@ -311,6 +315,11 @@ function NoteClose({ onClose, box }: { onClose: () => void; box: RefObject<HTMLT
 /** A chip on the box's row (`tool`: which one, in the row's order), gone below the width where its ChipLine takes over. */
 function RowChip({ tool, className, ...button }: ComponentProps<"button"> & { tool: number }) {
   return <button type="button" {...button} className={cx(className, onRow(useToolFold(tool)))} />
+}
+
+/** A RowChip's text, gone (but for a screen reader) below the width where the row has no room for it. */
+function ChipLabel({ tool, children }: { tool: number; children: string }) {
+  return <span className={labelFrom(useToolLabel(tool))}>{children}</span>
 }
 
 /** A chip's line in the box's More menu, where it goes when the row is too narrow: it toggles, then closes the menu. */

@@ -63,10 +63,12 @@ export const useCloseMore = () => useContext(CloseMore)
 /**
  * Per tool the caller passed in (Composer `toolSlots` as a list), the box width it folds into the menu below
  * (lib/composerRow.ts): a tool's button takes `onRow` of its own, and its menu line `inMenu`. Outside a box, or for
- * tools that fold together, there's none (null), which leaves a button on the row.
+ * tools that fold together, there's none (null), which leaves a button on the row. `label` is the width below which
+ * a tool's text label goes first (`labelFrom`; null: it stays).
  */
-export const ToolFolds = createContext<readonly (number | null)[]>([])
-export const useToolFold = (tool: number) => useContext(ToolFolds)[tool] ?? null
+export const ToolFolds = createContext<{ tool: readonly (number | null)[]; label: readonly (number | null)[] }>({ tool: [], label: [] })
+export const useToolFold = (tool: number) => useContext(ToolFolds).tool[tool] ?? null
+export const useToolLabel = (tool: number) => useContext(ToolFolds).label[tool] ?? null
 
 function firstShown(menu: HTMLElement | null): HTMLElement | undefined {
   const lines = Array.from(menu?.querySelectorAll<HTMLElement>("button") ?? [])
