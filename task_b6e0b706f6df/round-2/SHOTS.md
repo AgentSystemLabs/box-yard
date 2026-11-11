@@ -1,0 +1,19 @@
+- schedules-empty-1440.png: Schedules panel, no schedules (fresh mock)
+- hooks-empty-1440.png: Settings › Hooks, no hooks
+- schedules-list-1440.png: Schedules panel with 4 schedules (3 project, 1 Coordinator; one paused)
+- schedules-list-1440-light.png: Schedules list, light theme
+- schedules-list-400.png: Schedules list on phone 400
+- schedules-list-320.png: Schedules list on phone 320
+- schedules-list-z125.png: Schedules list at 125% zoom
+- schedule-detail-1440.png: A schedule's panel with run history (one manual run)
+- schedule-detail-400.png: Schedule panel / run history on phone
+- schedule-new-1440.png: New schedule form, desktop
+- schedule-new-400.png: New schedule form, phone 400
+- schedule-new-320.png: New schedule form, phone 320
+- schedule-edit-1440.png: Edit schedule form, desktop
+- schedule-edit-400.png: Edit schedule form, phone 400
+- hooks-list-1440.png: Settings › Hooks with one hook
+- hooks-list-400.png: Settings › Hooks with one hook, phone
+- hook-new-1440.png: Hook editor (new), desktop
+- hook-new-400.png: Hook editor (new), phone 400
+- hook-edit-400.png: Hook editor (edit existing), phone 400
