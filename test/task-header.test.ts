@@ -98,18 +98,20 @@ describe("TaskHeader", () => {
 
   const icon = () => document.querySelector<HTMLElement>('[data-testid="task-title"] [data-testid="task-status-icon"]')!
 
-  it("reads top-down: the task's icon and title, then the PR and preview to act on, then the files", () => {
+  it("reads top-down: the task's icon and title, then the PR, the files, then the preview", () => {
     render(task(), [file(1), file(2)])
     const text = metaText()
-    const order = ["Generic hook system", "PR #76", "Preview", "2 files"].map((s) => text.indexOf(s))
+    const order = ["Generic hook system", "PR #76", "2 files", "Preview"].map((s) => text.indexOf(s))
     expect(order.every((i) => i >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     // No status word: the task's icon is its status, and names it to screen readers.
     expect(text).not.toContain("Working")
     expect(icon().getAttribute("aria-label")).toBe("Working")
-    // One preview needs no port in its label (the tooltip has it); several show theirs.
+    // One preview needs no port in its label on a wide header (the tooltip has it); folded, the port stands in for
+    // the word. Several show theirs.
     const preview = document.querySelector<HTMLAnchorElement>('[data-testid="preview-chip"]')!
-    expect(preview.textContent!.trim()).toBe("Preview")
+    expect(preview.textContent!.trim()).toBe("Preview:4020")
+    expect([...preview.querySelectorAll("span")].find((el) => el.textContent === ":4020")!.className).toContain("@min-[36rem]/head:hidden")
     expect(preview.title).toContain("port 4020")
     render(task({ previews: [{ port: 4020, url: "https://example.com/4020", label: "Web" }, { port: 4021, url: "https://example.com/4021", label: "API" }] }))
     expect([...document.querySelectorAll('[data-testid="preview-chip"]')].map((a) => a.textContent!.trim())).toEqual(["Preview:4020", "Preview:4021"])
@@ -132,7 +134,7 @@ describe("TaskHeader", () => {
       ),
     )
 
-  it("is one row in a panel: back, the task's icon and title, the PR, preview and files, then ⓘ", () => {
+  it("is one row in a panel: back, the task's icon and title, the PR, files and preview, then ⓘ", () => {
     renderInPanel(task(), [file(1), file(2)])
     const row = meta()
     const controls = [...row.querySelectorAll<HTMLElement>("button, a")]
@@ -140,14 +142,14 @@ describe("TaskHeader", () => {
       "Back",
       "task-title",
       "open",
-      "preview-chip",
       "2 files, 2 new",
+      "preview-chip",
       "Task details and more actions",
     ])
     expect(row.querySelector("h2")!.contains(controls[1]!)).toBe(true)
-    // The title is one truncated line, with the task's icon before it.
+    // The title is at most two lines, with the task's icon before it.
     const title = controls[1]!
-    expect(title.lastElementChild!.className).toContain("truncate")
+    expect(title.lastElementChild!.className).toContain("line-clamp-2")
     expect(title.firstElementChild!.contains(icon())).toBe(true)
     expect(icon().dataset.status).toBe("working")
     expect(title.title).toContain("Generic hook system")
@@ -161,7 +163,9 @@ describe("TaskHeader", () => {
     expect(icon().getAttribute("role")).toBe("img")
     const pr = document.querySelector<HTMLButtonElement>('[data-pr-state="open"]')!
     expect(pr.textContent).toContain("PR #76")
-    expect([...pr.querySelectorAll("span")].find((el) => el.textContent === "PR #76")!.className).toBe(FOLDED)
+    // Folded, its word goes and its number stays: "#76".
+    expect([...pr.querySelectorAll("span")].find((el) => el.textContent === "PR ")!.className).toBe(FOLDED)
+    expect([...pr.querySelectorAll("span")].find((el) => el.textContent === "PR #76")!.className).not.toContain("sr-only")
     // It opens the PR sheet (which has Open on GitHub), so it has no ↗.
     expect(pr.getAttribute("aria-haspopup")).toBe("dialog")
     expect(pr.querySelector("[data-external-mark]")).toBeNull()
@@ -172,7 +176,11 @@ describe("TaskHeader", () => {
     expect(files.querySelector("span")!.className).toBe(FOLDED)
     expect(files.querySelector('[data-testid="files-new-dot"]')).not.toBeNull()
     // Each folded chip is an icon button: 32px drawn, 44px to a finger, like back and ⓘ.
-    for (const chip of [pr, preview, files]) expect(chip.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
+    for (const chip of [pr, files]) expect(chip.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
+    // The preview keeps its sky fill and its port when folded, 44px to a finger.
+    expect(preview.className).toContain("bg-sky-500/20")
+    expect(preview.className).not.toContain("@max-[36rem]/head:bg-transparent")
+    expect(preview.className).toContain("pointer-coarse:after:h-11")
     // The harness is absent even on wide headers; the details still have it.
     renderInPanel(task({ agentCli: "codex" }))
     expect(document.querySelector('[data-testid="agent-cli-chip"]')).toBeNull()
@@ -284,7 +292,7 @@ describe("TaskHeader", () => {
     expect(stop.className).toContain("text-red-300")
     expect(stop.title).toBe("Stop the agent's current turn")
     // With Delete, under the other actions.
-    const labels = menuButtons().map((b) => b.textContent!.trim())
+    const labels = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] section[aria-label="Task actions"] button')].map((b) => b.textContent!.trim())
     expect(labels.slice(-2)).toEqual(["Stop task", "Delete task…"])
     await act(async () => void stop.click())
     expect(calls).toContain("POST /api/tasks/task_head000001/stop")
@@ -337,7 +345,7 @@ describe("TaskHeader", () => {
     expect(del.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
     if (phone) expect(document.querySelector('[data-testid="task-nav"]')!.contains(del)).toBe(true)
     act(() => del.click())
-    expect(currentConfirm()).toMatchObject({ title: "Delete task?", body: "Delete this task, its workspace and its archive? This also permanently deletes 5 queued messages. They won't be sent.", danger: true })
+    expect(currentConfirm()).toMatchObject({ title: "Delete task?", body: `Delete "${t.title}", its workspace and its archive? This also permanently deletes 5 queued messages. They won't be sent.`, danger: true })
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("permanently deletes 5 queued messages")
     expect(calls).toEqual([])
     await act(async () => settleConfirm(currentConfirm()!.id, false))
@@ -361,11 +369,12 @@ describe("TaskHeader", () => {
     await act(async () => void trigger.click())
     const panel = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent?.includes("Task details"))!
     const text = panel.textContent!
-    for (const s of ["Generic hook system (Coordinator/Captain automations on task events)", "task_head000001", "boxyard/hooks", "pleasing-shepherd-27426", "claude-opus-5-5 · xhigh effort", "big-features", "Multi-file feature", "Active", "Created", "Open this task"]) {
+    for (const s of ["Generic hook system (Coordinator/Captain automations on task events)", "task_head000001", "boxyard/hooks", "pleasing-shepherd-27426", "claude-opus-5-5 · xhigh effort", "big-features", "Multi-file feature", "Active", "Created", "Copy link"]) {
       expect(text).toContain(s)
     }
     expect(panel.querySelector('button[aria-label="Copy task id"]')).not.toBeNull()
-    expect(panel.querySelector('button[aria-label="Copy task link"]')).not.toBeNull()
+    const link = [...panel.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Copy link")!
+    expect(link.title).toContain("task_head000001")
     expect(panel.textContent).not.toContain("Show tool calls")
     expect(panel.textContent).not.toContain("58%")
     expect(panel.textContent).not.toContain("Compact queued")

@@ -65,7 +65,9 @@ const render = () => act(() => root.render(createElement(QueryClientProvider, { 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 20))))
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
 const rows = () => [...host.querySelectorAll("[data-testid=queued-message]")]
-const steerButton = (row: Element) => row.querySelector('button[aria-label="Steer the queued messages into the running turn"]')
+// Steer takes the whole queue, so it is once, on the line under the rows that says when they go out.
+const delivery = () => host.querySelector("[data-testid=queue-delivery]")
+const steerButton = () => delivery()?.querySelector('button[aria-label="Steer the queued messages into the running turn"]') ?? null
 const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)
 const posts = () => calls.filter((c) => c.method === "POST")
 
@@ -73,7 +75,7 @@ describe("Steer on Queued rows", () => {
   it("offers Steer for Codex and distinguishes acceptance from processing", async () => {
     seed({ status: "working", agentCli: "codex" })
     render(); await settle()
-    expect(steerButton(rows()[0]!)).not.toBeNull()
+    expect(steerButton()).not.toBeNull()
     queue = [{ ...queue[0]!, status: "accepted" }, { ...queue[1]!, status: "uncertain" }]
     act(() => qc.setQueryData(keys.taskQueue(TASK), queue))
     await settle()
@@ -89,17 +91,19 @@ describe("Steer on Queued rows", () => {
     render()
     await settle()
     const labels = [...rows()[1]!.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))
-    expect(labels).toEqual(["Steer the queued messages into the running turn", "Edit queued message", "Cancel queued message"])
-    const steer = steerButton(rows()[1]!)!
+    expect(labels).toEqual(["Edit queued message", "Cancel queued message"])
+    // Once for the whole queue, under the rows, not on each row.
+    expect(host.querySelectorAll('button[aria-label="Steer the queued messages into the running turn"]')).toHaveLength(1)
+    const steer = steerButton()!
     // Its name shows, not only an icon, and its title says what it does.
     expect(steer.textContent?.trim()).toBe("Steer")
     expect(steer.getAttribute("title")).toBe("Steer: request delivery of the queued messages into the running turn")
-    // 44px to a finger, 24px from sm.
-    expect(steer.className).toMatch(/\bh-11\b/)
-    expect(steer.className).toMatch(/\bsm:h-6\b/)
-    expect(rows()[0]!.textContent).toContain("Delivered when the current turn ends, or during the turn with Steer.")
+    // 24px, 44px to a finger.
+    expect(steer.className).toMatch(/\bh-6\b/)
+    expect(steer.className).toMatch(/\bpointer-coarse:h-11\b/)
+    expect(delivery()!.textContent).toContain("Sent at turn end, or now with Steer.")
 
-    // On the second row it still steers the whole queue, at once: nothing stops, so nothing asks.
+    // It still steers the whole queue, at once: nothing stops, so nothing asks.
     click(steer)
     expect(host.querySelector("[role=alertdialog]")).toBeNull()
     await settle()
@@ -111,7 +115,7 @@ describe("Steer on Queued rows", () => {
     seed({ status: "working", mergeRequest: { prNumber: 12, prUrl: "https://github.com/a/b/pull/12", requestedAt: 1, deliveredAt: 2, inputId: "in_x", requestedBy: null } })
     render()
     await settle()
-    click(steerButton(rows()[0]!)!)
+    click(steerButton()!)
     expect(host.querySelector("[role=alertdialog]")).toBeNull()
     await settle()
     expect(posts()).toHaveLength(1)
@@ -121,18 +125,18 @@ describe("Steer on Queued rows", () => {
     seed({ status: "queued" })
     render()
     await settle()
-    expect(steerButton(rows()[0]!)).toBeNull()
-    expect(rows()[0]!.textContent).toContain("Delivered when the agent's next turn starts.")
+    expect(steerButton()).toBeNull()
+    expect(delivery()!.textContent).toContain("Delivered when the agent's next turn starts.")
 
     act(() => seed({ status: "working", compacting: true }))
     await settle()
-    expect(steerButton(rows()[0]!)).toBeNull()
-    expect(rows()[0]!.textContent).toContain("Delivered once the agent has compacted its context.")
+    expect(steerButton()).toBeNull()
+    expect(delivery()!.textContent).toContain("Delivered once the agent has compacted its context.")
 
     act(() => seed({ status: "working", agentCli: "cursor" }))
     await settle()
-    expect(steerButton(rows()[0]!)).toBeNull()
-    expect(rows()[0]!.textContent).toContain("Delivered when the current turn ends: Cursor can't take a message mid-turn.")
+    expect(steerButton()).toBeNull()
+    expect(delivery()!.textContent).toContain("Delivered when the current turn ends: Cursor can't take a message mid-turn.")
   })
 
   it("shows a steer on its way as a locked Steering row, without a spinner", async () => {
@@ -145,7 +149,7 @@ describe("Steer on Queued rows", () => {
     expect(steering!.textContent).toContain("Delivery requested; waiting for the runner to acknowledge it.")
     expect(steering!.querySelectorAll("button")).toHaveLength(0)
     expect(steering!.querySelector(".animate-spin")).toBeNull()
-    expect(steerButton(queued!)).not.toBeNull()
+    expect(steerButton()).not.toBeNull()
   })
 
   it("says when the turn can't be steered, and shows the server's error", async () => {
@@ -153,12 +157,12 @@ describe("Steer on Queued rows", () => {
     steerReply = { status: 200, data: { task: { id: TASK }, delivery: "after_turn", queued: 2, note: "the box couldn't be reached (timeout)" } }
     render()
     await settle()
-    click(steerButton(rows()[0]!)!)
+    click(steerButton()!)
     await settle()
     expect(toasts().some((t) => t.title === "Couldn't steer" && t.body === "The box couldn't be reached (timeout): all 2 queued messages go in when the turn ends.")).toBe(true)
 
     steerReply = { status: 404, data: { error: "Task not found" } }
-    click(steerButton(rows()[0]!)!)
+    click(steerButton()!)
     await settle()
     expect(toasts().some((t) => t.kind === "error" && t.title === "Couldn't steer" && /Task not found/.test(t.body ?? ""))).toBe(true)
   })
@@ -173,8 +177,8 @@ describe("A steered message in the transcript", () => {
     const mark = [...host.querySelectorAll("span")].find((s) => s.textContent === "Steered")
     expect(mark).toBeDefined()
     expect(mark!.getAttribute("title")).toBe("Written to the agent's input stream; model processing is not confirmed")
-    // Its sender's label stays.
-    expect(host.textContent).toContain("the owner")
+    // Its sender's label stays: with no owner name in Settings, the owner's own message says "You".
+    expect(host.textContent).toContain("You")
   })
 
   it("labels a Codex acknowledgment without claiming processing", () => {

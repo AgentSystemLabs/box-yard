@@ -93,16 +93,17 @@ const type = (el: HTMLTextAreaElement, value: string) =>
   })
 
 describe("Queued rows", () => {
-  it("lists queued messages in send order with Queued, the sender and the time", async () => {
+  it("lists queued messages in send order with Queued, another sender's name and the time", async () => {
     render(createElement(TaskQueue, { taskId: TASK }))
     await settle()
     expect(rows()).toHaveLength(2)
     expect(rows()[0]!.textContent).toContain("Queued")
-    expect(rows()[0]!.textContent).toContain("Cody")
+    // The owner's own messages need no name; another sender's say who.
+    expect(rows()[0]!.textContent).not.toContain("Cody")
     expect(rows()[0]!.textContent).toContain("use blue")
     expect(rows()[1]!.textContent).toContain("Coordinator")
     expect(rows()[0]!.querySelector("time, [title]")).not.toBeNull()
-    expect(host.querySelector("[aria-label='Queued messages']")?.id).toBe("task-queue")
+    expect(host.querySelector("#task-queue [role=list][aria-label='Queued messages']")).not.toBeNull()
   })
 
   it("edits a row in place: Save sends the text with its version, Cancel and Escape keep the old text", async () => {

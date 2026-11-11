@@ -49,7 +49,7 @@ const submit = () => act(async () => {
 describe("Continue with a harness", () => {
   it("requires an explicit choice and sends the same id, leaving Retry and saved choices alone", async () => {
     render()
-    click("Continue with…")
+    click("Continue with another agent…")
     expect(document.querySelector("select")?.value).toBe("claude")
     expect(document.body.textContent).toContain("Keep the saved model and effort choices")
     choose("codex")
@@ -63,9 +63,9 @@ describe("Continue with a harness", () => {
 
   it("exposes explicit default resolution with predictable pin reset", async () => {
     render({ status: "idle" })
-    click("Continue with…")
+    click("Continue with another agent…")
     choose("default")
-    expect(document.body.textContent).toContain("Changing the default harness in Settings only affects new tasks")
+    expect(document.body.textContent).toContain("Clear this task's model, effort and routing pins and use the chosen harness's defaults and routing.")
     await submit()
     expect(requests[0]?.body).toEqual({ agent: "default" })
   })
@@ -73,7 +73,7 @@ describe("Continue with a harness", () => {
   it("keeps the choice open and cache unchanged on a busy conflict", async () => {
     rejected = true
     render()
-    click("Continue with…")
+    click("Continue with another agent…")
     choose("codex")
     await submit()
     expect(document.querySelector("[role=dialog]")).not.toBeNull()
