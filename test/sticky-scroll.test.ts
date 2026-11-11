@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Activity, act, createElement, createRef } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { StickyScroll, createJumpStore, scrollIntoList, type JumpStore, type StickyScrollHandle } from "../web/src/components/StickyScroll.js"
+import { StickyScroll, createJumpStore, scrollIntoList, useLatestRow, type JumpStore, type StickyScrollHandle } from "../web/src/components/StickyScroll.js"
 import { firstPaintRows, holdTailGrowth, resetFirstPaintRows, useTail } from "../web/src/lib/tail.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -39,9 +39,20 @@ class FakeMutationObserver {
 class FakeIntersectionObserver {
   static all = new Set<FakeIntersectionObserver>()
   constructor(readonly cb: IntersectionObserverCallback) { FakeIntersectionObserver.all.add(this) }
-  observe() {}
+  targets = new Set<Element>()
+  observe(target: Element) { this.targets.add(target) }
   disconnect() { FakeIntersectionObserver.all.delete(this) }
 }
+
+// The browser reports how much of `target` shows in the list's view (VIEW tall).
+const intersect = (target: Element, shown: number) =>
+  act(() => {
+    for (const io of FakeIntersectionObserver.all) {
+      if (!io.targets.has(target)) continue
+      const entry = { target, isIntersecting: shown > 0, intersectionRect: { height: shown }, boundingClientRect: { height: height(target) }, rootBounds: { height: view } }
+      io.cb([entry as unknown as IntersectionObserverEntry], io as unknown as IntersectionObserver)
+    }
+  })
 
 let root: Root
 let host: HTMLElement
@@ -109,11 +120,17 @@ const handle = createRef<StickyScrollHandle>()
 // Where "Jump to latest" goes when the caller shows it (the Coordinator chat's line over its box).
 let jumpStore: JumpStore | undefined
 
+// A row after the messages that marks itself the list's latest (a task's pending ask), this tall; null: none.
+let latestHeight: number | null = null
+
+function LatestRow({ h }: { h: number }) {
+  return createElement("div", { ref: useLatestRow(), "data-h": h, "data-latest": "" }, "the agent asks")
+}
+
 function Thread({ heights }: { heights: number[] }) {
-  return createElement(
-    StickyScroll,
-    { handle, count: heights.length, jumpStore, children: heights.map((h, i) => createElement("div", { key: i, "data-h": h }, `row ${i}`)) },
-  )
+  const rows = heights.map((h, i) => createElement("div", { key: i, "data-h": h }, `row ${i}`))
+  if (latestHeight !== null) rows.push(createElement(LatestRow, { key: "latest", h: latestHeight }))
+  return createElement(StickyScroll, { handle, count: heights.length, jumpStore, children: rows })
 }
 
 let heights: number[]
@@ -149,6 +166,7 @@ let viewport: EventTarget
 
 beforeEach(() => {
   jumpStore = undefined
+  latestHeight = null
   frames = new Map()
   frameId = 0
   clock = 1000
@@ -572,6 +590,50 @@ describe("StickyScroll", () => {
     glideFrames()
     expect(atBottom()).toBe(true)
     expect(store.get()).toEqual({ away: false, unread: 0 })
+  })
+
+  it("keeps Jump to latest off the latest row (a pending ask) while it fills the view, unless new messages come", () => {
+    // An ask taller than the view, read from its top: away from the bottom, but at the latest.
+    latestHeight = 600
+    render()
+    frame()
+    expect(atBottom()).toBe(true)
+    const latest = host.querySelector("[data-latest]")!
+    userScroll(-200)
+    frame()
+    intersect(latest, VIEW)
+    expect(jumpButton()).toBeUndefined()
+    // Half the view is still the ask's.
+    intersect(latest, VIEW / 2)
+    expect(jumpButton()).toBeUndefined()
+    // Mostly older messages in view: there's something to jump to.
+    intersect(latest, VIEW / 2 - 1)
+    expect(jumpButton()).toBeDefined()
+    intersect(latest, VIEW)
+    expect(jumpButton()).toBeUndefined()
+    // A new message below it says so, over the ask too.
+    heights.push(100)
+    render()
+    frame()
+    expect(jumpButton()?.textContent).toMatch(/1 new message/)
+  })
+
+  it("a short latest row counts once half of it shows, and a jumpStore hears it isn't away", () => {
+    const store = (jumpStore = createJumpStore())
+    latestHeight = 120
+    render()
+    frame()
+    const latest = host.querySelector("[data-latest]")!
+    userScroll(-60)
+    frame()
+    intersect(latest, 60)
+    expect(store.get()).toEqual({ away: false, unread: 0 })
+    intersect(latest, 59)
+    expect(store.get()).toEqual({ away: true, unread: 0 })
+    // Gone (answered): away is the list's own again.
+    latestHeight = null
+    render()
+    expect(store.get().away).toBe(true)
   })
 
   it("starts pinned when loading history first supplies layout", () => {

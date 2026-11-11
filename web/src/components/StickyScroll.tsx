@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react"
+import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, useSyncExternalStore, type Dispatch, type ReactNode, type Ref, type SetStateAction } from "react"
 import { ArrowDown } from "lucide-react"
 import { cx } from "./ui"
 import { takeSpot, watchScroll, type LiveSpot } from "../lib/scrollMemory"
@@ -109,6 +109,24 @@ function listScrollTop(list: HTMLElement, el: Element, block: NonNullable<Scroll
     return (above && end - start <= view) || (below && end - start > view) ? start : end - view
   }
   return start
+}
+
+// The list's latest row while it's there (useLatestRow), for "Jump to latest" to keep off it.
+const LatestRow = createContext<Dispatch<SetStateAction<Element | null>> | null>(null)
+
+/**
+ * The ref callback that marks its row as the list's latest while it's mounted: a task's pending ask at its foot.
+ * Taller than a phone's screen, it's read from its top, a scroll up from the bottom; that isn't leaving the latest, so
+ * while the row fills half the view (or half of it shows) "Jump to latest" doesn't come up over it, unless new
+ * messages came meanwhile.
+ */
+export function useLatestRow() {
+  const set = useContext(LatestRow)
+  return useCallback((el: Element | null) => {
+    if (!set || !el) return
+    set(el)
+    return () => set((now) => (now === el ? null : now))
+  }, [set])
 }
 
 /**
@@ -727,8 +745,27 @@ export function StickyScroll({
       jumpStore.set(NOT_AWAY)
     }
   }, [jumpStore])
-  useEffect(() => jumpStore?.set({ away, unread }), [jumpStore, away, unread])
-  const floatJump = away && !jumpStore
+  // The latest row (useLatestRow) in view: at least half of it, or of the view. Watched by an IntersectionObserver,
+  // not on every scroll; its thresholds step 5% of the row, fine enough for a row up to a few screens tall.
+  const [latestRow, setLatestRow] = useState<Element | null>(null)
+  const [atLatest, setAtLatest] = useState(false)
+  useEffect(() => {
+    const root = scroller.current
+    if (!latestRow || !root || typeof IntersectionObserver === "undefined") return setAtLatest(false)
+    const io = new IntersectionObserver(
+      (entries) => {
+        const e = entries.at(-1)!
+        const view = e.rootBounds?.height ?? root.getBoundingClientRect().height
+        setAtLatest(e.isIntersecting && e.intersectionRect.height >= Math.min(e.boundingClientRect.height, view) / 2)
+      },
+      { root, threshold: Array.from({ length: 21 }, (_, i) => i / 20) },
+    )
+    io.observe(latestRow)
+    return () => io.disconnect()
+  }, [latestRow])
+  const jumpAway = away && (unread > 0 || !atLatest)
+  useEffect(() => jumpStore?.set({ away: jumpAway, unread }), [jumpStore, jumpAway, unread])
+  const floatJump = jumpAway && !jumpStore
 
   // Whether the overlay shows something besides "Jump to latest" (`overlay` may render nothing), for the room under
   // the last row. Watched on the overlay itself, not with a CSS :has() on the list: with that, any element added
@@ -766,7 +803,7 @@ export function StickyScroll({
               {earlierLabel ?? `Show ${hidden} earlier message${hidden === 1 ? "" : "s"}`}
             </button>
           )}
-          {children}
+          <LatestRow.Provider value={setLatestRow}>{children}</LatestRow.Provider>
         </div>
         {/* Room under the last row while the overlay shows something, so at the bottom it covers nothing. Not for "Jump to
             latest": it shows only away from the bottom, and room that came and went with it moved the list every time
