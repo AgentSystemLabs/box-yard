@@ -50,13 +50,13 @@ for (const [sz, scheme, tag] of [["1440", "dark", ""], ["400", "dark", ""], ["14
     await shot(p, `newtask-empty-${sz}${tag}`, `New task popover from selection (quote, empty instructions), ${sz}${tag}`)
     if (scheme === "dark" && sz !== "z125") {
       const all = p.getByRole("button", { name: /show all/i }).first()
-      if (sz === "400" && await all.count()) { await all.click(); await shot(p, `newtask-showall-400`, "popover quote expanded with Show all, 400") }
+      if (sz === "400" && await all.count()) { await all.click(); await shot(p, `newtask-showall-400`, "popover quote expanded with Show all, 400"); await p.locator("textarea").last().focus() }
       await p.keyboard.type("Add a retry with backoff to the acme/example-api webhook client.")
       await shot(p, `newtask-filled-${sz}`, `New task popover with instructions typed, ${sz}`)
       if (sz === "1440") {
         await p.keyboard.press("Enter"); await shot(p, `sent-toast-1440`, "after Send to the Coordinator: the Sent toast with Open chat")
       } else {
-        await p.getByRole("button", { name: /start it myself|more options/i }).first().click()
+        await p.getByRole("button", { name: /start it myself|more options/i }).first().click({ force: true })
         await shot(p, `newtask-dialog-${sz}`, `full New task dialog from selection, ${sz}`)
       }
     }

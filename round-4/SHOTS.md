@@ -1,0 +1,30 @@
+- palette-empty-1440.png: palette open, empty query, 1440px
+- palette-query-1440.png: palette with query "box" (tasks, projects, settings), 1440px
+- palette-keyboard-1440.png: palette after 3× ArrowDown: keyboard selection
+- palette-noresults-1440.png: palette no-results state
+- palette-newtask-1440.png: palette query "new task": the New task… command
+- shortcuts-1440.png: shortcuts help sheet (?)
+- palette-empty-400.png: palette open, empty query, 400px
+- palette-query-400.png: palette with query "box" (tasks, projects, settings), 400px
+- palette-noresults-400.png: palette no-results state, 400
+- palette-empty-320.png: palette open, empty query, 320px
+- palette-query-320.png: palette with query "box" (tasks, projects, settings), 320px
+- palette-newtask-dialog-1440.png: New task dialog opened from the palette (empty), 1440
+- palette-newtask-dialog-filled-1440.png: palette New task dialog filled, 1440
+- palette-newtask-dialog-400.png: New task dialog opened from the palette (empty), 400
+- palette-newtask-dialog-filled-400.png: palette New task dialog filled, 400
+- palette-newtask-options-400.png: New task dialog with the Runs with options unfolded, 400
+- palette-draft-400.png: palette reopened after cancelling a New task draft: draft subtitle
+- selection-chip-1440.png: text selected in a task transcript: the New task from selection action, 1440
+- newtask-empty-1440.png: New task popover from selection (quote, empty instructions), 1440
+- newtask-filled-1440.png: New task popover with instructions typed, 1440
+- sent-toast-1440.png: after Send to the Coordinator: the Sent toast with Open chat
+- selection-chip-400.png: text selected in a task transcript: the New task from selection action, 400
+- newtask-empty-400.png: New task popover from selection (quote, empty instructions), 400
+- newtask-showall-400.png: popover quote expanded with Show all, 400
+- newtask-filled-400.png: New task popover with instructions typed, 400
+- newtask-dialog-400.png: full New task dialog from selection, 400
+- selection-chip-1440-light.png: text selected in a task transcript: the New task from selection action, 1440-light
+- newtask-empty-1440-light.png: New task popover from selection (quote, empty instructions), 1440-light
+- selection-chip-z125.png: text selected in a task transcript: the New task from selection action, z125
+- newtask-empty-z125.png: New task popover from selection (quote, empty instructions), z125
