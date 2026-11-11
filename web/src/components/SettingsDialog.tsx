@@ -33,10 +33,12 @@ import { MachinesPanel } from "./MachineSettings"
 import { useOpenUsage } from "./UsageHost"
 import { ProjectSettingsPicker } from "./ProjectSettingsDialog"
 import { Modal } from "./Modal"
-import { Panel, Row, SourceHint } from "./SettingsBlocks"
+import { Panel, Row, SAVE_IDLE, SourceHint } from "./SettingsBlocks"
 import { UpstashSizes } from "./SizeCards"
 import { SettingsTabs, type SettingsTab } from "./SettingsTabs"
 import { confirmDialog } from "../lib/confirm"
+import { isTouchDevice } from "../lib/composer"
+import { DEFAULT_OWNER_NAME } from "../../../shared/owner"
 import { EffortPicker, ModelPicker } from "./ModelPicker"
 import { CaptainIconPicker } from "./CaptainIconPicker"
 import { EFFORT_LABEL } from "../../../shared/models"
@@ -261,7 +263,12 @@ export function SettingsDialog({
     setVisited((v) => (v.includes(section) ? v : [...v, section]))
   }, [section])
 
-  useEffect(() => { searchRef.current?.focus() }, [])
+  // Search takes focus on open, except under a finger: there it would raise the keyboard over the settings, so the
+  // panel takes it instead (Modal's own pick is the header's ×).
+  useEffect(() => {
+    if (isTouchDevice()) panelRef.current?.focus({ preventScroll: true })
+    else searchRef.current?.focus()
+  }, [])
 
   // A provider drill-in hides its button. Keep keyboard focus in the visible level, and return it on Back.
   useEffect(() => {
@@ -357,6 +364,26 @@ export function SettingsDialog({
     return own ?? [...form.elements].find((el): el is HTMLInputElement => el instanceof HTMLInputElement && el.willValidate && refusedByBrowser(el.validity)) ?? null
   }
 
+  /** Shows the first field to fix, if there is one: Save does, and the footer's "Fix 1 field to save". */
+  const showProblem = (form: HTMLFormElement) => {
+    const problem = firstProblem(form)
+    if (problem) showField(problem)
+    // A problem with no control on screen (its field is switched off): at least open its section.
+    else if (problemCount) onSection(SETTINGS_SECTIONS.find((sec) => problemRoots.has(sec.key))?.key ?? section)
+    return Boolean(problem) || problemCount > 0
+  }
+
+  const resetAll = async () => {
+    if (!(await confirmDialog({ title: "Reset settings to defaults?", body: "Forget every value saved here? Env vars and defaults apply again.", confirmLabel: "Reset", danger: true }))) return
+    reset.mutate(undefined, {
+      onSuccess: () => {
+        setDraft(null)
+        setPinned([])
+        setResets([])
+      },
+    })
+  }
+
   const failedSave = (error: unknown) => {
     setSaveError(error instanceof Error ? error.message : "Couldn't save")
     if (error instanceof SettingsFieldError) {
@@ -379,10 +406,7 @@ export function SettingsDialog({
       failedSave(error)
       return
     }
-    const problem = firstProblem(e.currentTarget as HTMLFormElement)
-    if (problem) return showField(problem)
-    // A problem with no control on screen (its field is switched off): at least open its section.
-    if (problemCount) return onSection(SETTINGS_SECTIONS.find((sec) => problemRoots.has(sec.key))?.key ?? section)
+    if (showProblem(e.currentTarget as HTMLFormElement)) return
     setSaving(true)
     setSaveError(null)
     const jobs = [...(changed.length ? [saveCore()] : []), ...partList.map((p) => p.save())]
@@ -396,7 +420,7 @@ export function SettingsDialog({
     <Modal
       size="xl"
       title="Settings"
-      description="Changes apply from the next turn. Values shown are the ones in effect."
+      description="Nothing changes until you Save."
       dirty={dirty}
       onClose={() => void close()}
       onSubmit={submit}
@@ -404,72 +428,58 @@ export function SettingsDialog({
       bodyClassName="settings-body @container flex min-h-0 flex-1 flex-col"
       footer={
         <>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            loading={reset.isPending}
-            onClick={() => {
-              void confirmDialog({
-                title: "Reset settings to defaults?",
-                body: "Forget every value saved here? Env vars and defaults apply again.",
-                confirmLabel: "Reset",
-                danger: true,
-              }).then((ok) => ok && reset.mutate(undefined, {
-                    onSuccess: () => {
-                      setDraft(null)
-                      setPinned([])
-                      setResets([])
-                    },
-                  }))
-            }}
-            title="Forget saved values: env vars and defaults apply again"
-          >
-            Reset to defaults
-          </Button>
-          <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:items-center sm:gap-3">
-            {saveError ? (
-              <span className="text-xs text-red-300 wrap-anywhere" role="alert">
-                Couldn't save: {saveError}
-              </span>
-            ) : problemCount && dirty ? (
-              <span className="text-xs text-red-300" role="status" data-testid="settings-problems">
-                {problemCount === 1 ? "Fix 1 field to save" : `Fix ${problemCount} fields to save`}
+          {saveError && (
+            <span className="text-xs text-red-300 wrap-anywhere" role="alert">
+              Couldn't save: {saveError}
+            </span>
+          )}
+          {/* One row at any width: what Save would do on the left, always there so the buttons never move. */}
+          <div className="min-w-0 text-xs @2xl/settings:text-right">
+            {saveError ? null : problemCount && dirty ? (
+              <span role="status" data-testid="settings-problems">
+                <button
+                  type="button"
+                  className="min-h-11 rounded text-left text-red-300 underline underline-offset-2 hover:text-red-200"
+                  title="Show the first field to fix"
+                  onClick={(e) => e.currentTarget.form && showProblem(e.currentTarget.form)}
+                >
+                  {problemCount === 1 ? "Fix 1 field to save" : `Fix ${problemCount} fields to save`}
+                </button>
               </span>
             ) : dirty ? (
-              <span className="text-xs text-amber-300" role="status" data-testid="unsaved-count">
+              <span className="text-amber-300" role="status" data-testid="unsaved-count">
                 {changeCount === 1 ? "1 unsaved change" : `${changeCount} unsaved changes`}
               </span>
             ) : savedAt ? (
-              <span className="inline-flex items-center gap-1 text-xs text-emerald-400" role="status">
+              <span className="inline-flex items-center gap-1 text-emerald-400" role="status">
                 <Check className="h-3.5 w-3.5" /> Saved
               </span>
             ) : null}
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={discard}>
-                Discard
-              </Button>
-            )}
-            {!dirty && (
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Close
-              </Button>
-            )}
-            {/* Save checks every field itself: the browser's check can't reach a hidden section and refuses numbers between steps. */}
-            <Button type="submit" variant="primary" loading={saving} disabled={!dirty} formNoValidate>
-              Save
-            </Button>
           </div>
+          {dirty ? (
+            <Button type="button" variant="ghost" onClick={discard}>
+              Discard
+            </Button>
+          ) : (
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          )}
+          {/* Save checks every field itself: the browser's check can't reach a hidden section and refuses numbers between steps. */}
+          <Button type="submit" variant="primary" loading={saving} disabled={!dirty} className={dirty ? undefined : SAVE_IDLE} formNoValidate>
+            Save
+          </Button>
         </>
       }
     >
       <SettingsSearchProvider value={searchRegistry}>
       <div className="shrink-0 border-b border-zinc-900 p-3">
-        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 focus-within:border-yard-500 focus-within:ring-2 focus-within:ring-yard-500/20">
+        {/* One focus ring, the box's (as the composer's): the field inside draws none of its own. */}
+        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 has-[>input:focus-visible]:border-yard-500 has-[>input:focus-visible]:outline-2 has-[>input:focus-visible]:outline-offset-2 has-[>input:focus-visible]:outline-(color:--focus-ink)">
           <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-zinc-500" />
           <input
             ref={searchRef} type="search" aria-label="Search settings" placeholder="Search settings…" value={query}
-            className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-zinc-100 outline-none [&::-webkit-search-cancel-button]:appearance-none"
+            className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-zinc-100 outline-none! [&::-webkit-search-cancel-button]:appearance-none"
             onChange={(e) => {
               setQuery(e.target.value)
               if (e.target.value.trim()) setVisited(SETTINGS_SECTIONS.map((s) => s.key))
@@ -540,7 +550,7 @@ export function SettingsDialog({
               ) : category === "appearance" ? (
                 <AppearancePanel />
               ) : category === "about" ? (
-                <AboutPanel />
+                <AboutPanel onReset={() => void resetAll()} resetting={reset.isPending} />
               ) : !s ? (
                 <Panel section={category}><Loading label="Loading settings" /></Panel>
               ) : category === "orchestrator" ? (
@@ -799,10 +809,19 @@ export function SettingsDialog({
                   <Row
                     id={fid("on")}
                     label="Your name"
-                    help={'What the Coordinator, Captains and agents call you in their prompts and labels. The default is “the owner” until you save your name.'}
+                    help="What the Coordinator, Captains and agents call you in their prompts and labels. Until you save a name, that’s “the owner”."
                     hint={hint("ownerName")}
                   >
-                    <input id={fid("on")} className={inputClass} value={s.ownerName} maxLength={40} onChange={(e) => set("ownerName", e.target.value)} {...field("ownerName")} />
+                    {/* Never saved: the default is the placeholder, not a name someone typed, and emptying the field goes back to it. */}
+                    <input
+                      id={fid("on")}
+                      className={inputClass}
+                      value={current?.sources.ownerName === "default" && !changed.includes("ownerName") ? "" : s.ownerName}
+                      placeholder={DEFAULT_OWNER_NAME}
+                      maxLength={40}
+                      onChange={(e) => set("ownerName", e.target.value || (current?.sources.ownerName === "default" ? current.settings.ownerName : ""))}
+                      {...field("ownerName")}
+                    />
                   </Row>
                   <Row
                     id={fid("acli")}
@@ -1588,7 +1607,7 @@ function AboutRow({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function AboutPanel() {
+function AboutPanel({ onReset, resetting }: { onReset: () => void; resetting: boolean }) {
   const health = useHealth()
   const server = useSettings()
   const h = health.data
@@ -1628,6 +1647,14 @@ function AboutPanel() {
         </AboutRow>
       </dl>
       <p className="mt-6 text-xs text-zinc-500">Time zone, upload size, provider and data directory come from env vars on the server (see the README).</p>
+      {/* Not a draft: it happens at once, after its own confirmation. */}
+      <div className="mt-6 border-t border-zinc-900 pt-4">
+        <Row label="Reset all settings" help="Forgets every value marked “saved here”, so env vars and defaults apply again. Credentials, identities, connectors, hooks and projects stay as they are.">
+          <Button type="button" variant="danger" loading={resetting} onClick={onReset} data-testid="reset-settings">
+            Reset all settings…
+          </Button>
+        </Row>
+      </div>
     </Panel>
   )
 }

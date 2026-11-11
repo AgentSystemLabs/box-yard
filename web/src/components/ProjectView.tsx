@@ -21,7 +21,7 @@ import {
 } from "../lib/queries"
 import { Button, Field, LineIcon, Select, cx, inputClass, parseEnv } from "./ui"
 import { useOpenSettings } from "./SettingsHost"
-import { PanelFrame } from "./SettingsBlocks"
+import { PanelFrame, Row, SAVE_IDLE } from "./SettingsBlocks"
 import { SettingsTabs, type SettingsTab } from "./SettingsTabs"
 import { MachineLabelPicker } from "./MachineSettings"
 import { IdentityBadge } from "./IdentityBadge"
@@ -795,7 +795,7 @@ function ProjectIdentityField({
         )}
       </p>
       <Field label="Identity">
-        <Select className="w-full sm:w-80" disabled={!list} value={value} onChange={(e) => onChange(e.target.value)} data-testid="project-identity">
+        <Select id="project-identity" className="w-full sm:w-80" disabled={!list} value={value} onChange={(e) => onChange(e.target.value)} data-testid="project-identity">
           {!picked && <option value={value}>{identities.isError ? "Couldn’t load identities" : !list ? "Loading identities…" : "Removed identity (acts as Default)"}</option>}
           {list?.map((i) => (
             <option key={i.id} value={i.id}>
@@ -872,14 +872,35 @@ function ProjectPanel({ section, open, children }: { section: ProjectSection; op
   const info = PROJECT_SECTIONS.find((s) => s.key === section)!
   return (
     <div hidden={!open} data-project-section={section} className="@container">
-      <PanelFrame title={info.label} description={info.description}>
+      <PanelFrame title={info.label} description={info.description} inNav>
         <div className="space-y-4">{children}</div>
       </PanelFrame>
     </div>
   )
 }
 
-export function ProjectSettings({ project, onDone, onDirtyChange }: { project: Project; onDone: () => void; onDirtyChange?: (dirty: boolean) => void }) {
+/** A project's settings. Its drafts are the form's own state, so Discard starts the form over from the saved project, on the same tab. */
+export function ProjectSettings(props: { project: Project; onDone: () => void; onDirtyChange?: (dirty: boolean) => void }) {
+  const [tab, setTab] = useState<ProjectSection>("general")
+  const [round, setRound] = useState(0)
+  return <ProjectSettingsForm key={round} {...props} tab={tab} setTab={setTab} onDiscard={() => setRound((n) => n + 1)} />
+}
+
+function ProjectSettingsForm({
+  project,
+  onDone,
+  onDirtyChange,
+  tab,
+  setTab,
+  onDiscard,
+}: {
+  project: Project
+  onDone: () => void
+  onDirtyChange?: (dirty: boolean) => void
+  tab: ProjectSection
+  setTab: (tab: ProjectSection) => void
+  onDiscard: () => void
+}) {
   const update = useUpdateProject()
   const remove = useDeleteProject()
   const [, navigate] = useLocation()
@@ -957,12 +978,17 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
   const dirty = changeCount > 0
   // Save waits while the identity can't be used: its tab gets Settings' needs-a-fix dot.
   const blocked = Boolean(identityMisfit) || Boolean(identityBusy) || (identityChanged && !identity)
-  const [tab, setTab] = useState<ProjectSection>("general")
   const ids = useId()
   const panelRef = useRef<HTMLDivElement>(null)
-  // A field the browser refuses, found by Save in another tab: its tab opens first, then it's focused with the message.
-  const [reveal, setReveal] = useState<HTMLInputElement | null>(null)
+  // A field Save can't take (the browser refuses it, or the identity can't be used), maybe in another tab: its tab opens
+  // first, then it's focused with the message.
+  const [reveal, setReveal] = useState<HTMLInputElement | HTMLSelectElement | null>(null)
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange])
+  // It opens (and starts over after Discard) with focus on the panel, not on the dialog's ×: Tab then goes to the first field.
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!panel?.closest("form")?.contains(document.activeElement)) panel?.focus({ preventScroll: true })
+  }, [])
   useEffect(() => {
     panelRef.current?.scrollTo?.({ top: 0 })
   }, [tab])
@@ -972,10 +998,9 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
     reveal.reportValidity()
     setReveal(null)
   }, [reveal, tab])
-  const cancel = async () => {
-    if (dirty && !(await confirmDialog({ title: "Discard unsaved changes?", body: `Your edits to ${project.name}'s settings haven't been saved.`, confirmLabel: "Discard", cancelLabel: "Keep editing", danger: true })))
-      return
-    onDone()
+  const showProblem = (form: HTMLFormElement) => {
+    setTab("agents")
+    setReveal(form.querySelector<HTMLSelectElement>("#project-identity"))
   }
 
   return (
@@ -986,7 +1011,8 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
       noValidate
       onSubmit={async (e) => {
         e.preventDefault()
-        if (!dirty || saving || blocked) return
+        if (!dirty || saving) return
+        if (blocked) return showProblem(e.currentTarget)
         const refused = [...e.currentTarget.elements].find((el): el is HTMLInputElement => el instanceof HTMLInputElement && el.willValidate && refusedByBrowser(el.validity))
         if (refused) {
           setTab((refused.closest<HTMLElement>("[data-project-section]")?.dataset.projectSection as ProjectSection | undefined) ?? tab)
@@ -1095,12 +1121,29 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
               image={icon.kind === "new" ? icon.url : icon.kind === "saved" ? project.iconUrl : null}
               pending={icon.kind !== "saved" || captainIcon !== (project.captainIcon ?? null)}
             />
+            <div className="border-t border-zinc-900 pt-4">
+              <Row label="Danger zone" help={`Deletes ${project.name} and all its tasks. This can't be undone.`}>
+                <Button
+                  type="button"
+                  variant="danger"
+                  data-testid="project-delete"
+                  onClick={async () => {
+                    if (await confirmDialog({ title: "Delete project?", body: `Delete ${project.name} and all its tasks? This can't be undone.`, confirmLabel: "Delete project", danger: true })) {
+                      remove.mutate(project.id)
+                      navigate("/")
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" /> Delete project…
+                </Button>
+              </Row>
+            </div>
           </ProjectPanel>
           <ProjectPanel section="agents" open={tab === "agents"}>
             <div className="space-y-2">
               <Field
                 label="Runs on"
-                hint={`Upstash box: each agent runs in an isolated Upstash box. This computer: agents run straight on the computer running Box Yard (its GPU, its logged-in claude and gh), each task in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"}, ${settings.data?.settings.localAgents ?? 2} at a time (Settings → Tasks running at once on this computer). RunPod GPU: the project gets GPU pods of its own at RunPod (up to its Max boxes, within its GPU cap), started when a task needs one and stopped when idle (Settings → RunPod GPU). Docker container: the project gets an isolated container of its own on this computer, started when a task needs it and stopped when idle (Settings → Docker). SSH machine: agents run on one of your own computers over SSH, a free one with the label you pick (Settings → Machines). Tasks move over when nothing would be lost.`}
+                hint={`Upstash box: each agent runs in an isolated Upstash box. This computer: agents run straight on the computer running Box Yard (its GPU, its logged-in claude and gh), each task in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"}, ${settings.data?.settings.localAgents ?? 2} at a time (Settings › Tasks running at once on this computer). RunPod GPU: the project gets GPU pods of its own at RunPod (up to its Max boxes, within its GPU cap), started when a task needs one and stopped when idle (Settings › RunPod GPU). Docker container: the project gets an isolated container of its own on this computer, started when a task needs it and stopped when idle (Settings › Docker). SSH machine: agents run on one of your own computers over SSH, a free one with the label you pick (Settings › Machines). Tasks move over when nothing would be lost.`}
               >
                 <Select className="w-full sm:w-80" value={runner} onChange={(e) => setRunner(e.target.value as Runner)} data-testid="project-runner">
                   {RUNNERS.map((r) => (
@@ -1235,11 +1278,11 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
             />
             <Field
               label="Dependency cache"
-              hint="On: a task with a package-lock.json and no node_modules (a fresh clone, or one the idle cleanup emptied) gets the box's installed copy for that lockfile, hard-linked in under a second, so it needs no npm ci. Off: agents install as usual."
+              hint="On: a task with a package-lock.json and no node_modules (a fresh clone, or one the idle cleanup emptied) gets the box's installed copy for that lockfile, hard-linked in under a second, so it needs no npm ci. Off: agents install as usual. Default: Settings › Dependency cache."
             >
               <Select className="w-full sm:w-80" value={depCache} onChange={(e) => setDepCache(e.target.value as "" | "on" | "off")} data-testid="project-dep-cache">
-                <option value="">Default ({settings.data?.settings.depCacheEnabled ? "on" : "off"}: Settings → Dependency cache)</option>
-                <option value="on">On: restore node_modules from the box cache</option>
+                <option value="">Default ({settings.data?.settings.depCacheEnabled ? "on" : "off"})</option>
+                <option value="on">On: reuse the box’s node_modules</option>
                 <option value="off">Off: agents install dependencies</option>
               </Select>
             </Field>
@@ -1247,48 +1290,48 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
           <ProjectPanel section="git" open={tab === "git"}>
             <Field
               label="Partial clone mirror"
-              hint="On: each box's mirror of the repo skips old file versions (blob:none) and fetches them from GitHub when git log -p, blame or a checkout needs them. Off: full mirror, for repos where agents dig through history a lot. Applies to mirrors made from now on; a mirror no task uses is re-made to match."
+              hint="On: each box's mirror of the repo skips old file versions (blob:none) and fetches them from GitHub when git log -p, blame or a checkout needs them. Off: full mirror, for repos where agents dig through history a lot. Applies to mirrors made from now on; a mirror no task uses is re-made to match. Default: Settings › Partial clone mirrors."
             >
               <Select className="w-full sm:w-80" value={partialClone} onChange={(e) => setPartialClone(e.target.value as "" | "on" | "off")} data-testid="project-partial-clone">
-                <option value="">Default ({settings.data?.settings.gitPartialClone === false ? "off" : "on"}: Settings → Partial clone mirrors)</option>
+                <option value="">Default ({settings.data?.settings.gitPartialClone === false ? "off" : "on"})</option>
                 <option value="on">On: blob:none mirror</option>
                 <option value="off">Off: full mirror</option>
               </Select>
             </Field>
             <Field
               label="Push at turn end"
-              hint="On: after every turn Box Yard pushes the task's branch and keeps uncommitted work on a hidden ref (refs/boxyard/wip/<task>), so archives stay small and any box can go without losing code. Off: Box Yard pushes nothing itself, and archives hold the whole workspace. Needs write access to the repo; without it Box Yard falls back to full archives by itself."
+              hint="On: after every turn Box Yard pushes the task's branch and keeps uncommitted work on a hidden ref (refs/boxyard/wip/<task>), so archives stay small and any box can go without losing code. Off: Box Yard pushes nothing itself, and archives hold the whole workspace. Needs write access to the repo; without it Box Yard falls back to full archives by itself. Default: Settings › Push at turn end."
             >
               <Select className="w-full sm:w-80" value={pushAtTurnEnd} onChange={(e) => setPushAtTurnEnd(e.target.value as "" | "on" | "off")} data-testid="project-push-at-turn-end">
-                <option value="">Default ({settings.data?.settings.gitPushAtTurnEnd === false ? "off" : "on"}: Settings → Push at turn end)</option>
-                <option value="on">On: push branch and WIP, small archives</option>
+                <option value="">Default ({settings.data?.settings.gitPushAtTurnEnd === false ? "off" : "on"})</option>
+                <option value="on">On: push branch and WIP</option>
                 <option value="off">Off: full archives</option>
               </Select>
             </Field>
             <Field
               label="Done when its PR merges"
-              hint="On: when a task's pull request merges and its turn is over, it moves to done and its workspace is archived, as Mark done would. A task with queued messages or another open PR stays, and one set to stay open in its details (ⓘ) always does."
+              hint="On: when a task's pull request merges and its turn is over, it moves to done and its workspace is archived, as Mark done would. A task with queued messages or another open PR stays, and one set to stay open in its details (ⓘ) always does. Default: Settings › Done when its PR merges."
             >
               <Select className="w-full sm:w-80" value={autoDoneOnMerge} onChange={(e) => setAutoDoneOnMerge(e.target.value as "" | "on" | "off")} data-testid="project-auto-done-on-merge">
-                <option value="">Default ({defaults?.autoDoneOnMerge === false ? "off" : "on"}: Settings → Done when its PR merges)</option>
-                <option value="on">On: a merged PR moves its task to done</option>
-                <option value="off">Off: you mark its tasks done yourself</option>
+                <option value="">Default ({defaults?.autoDoneOnMerge === false ? "off" : "on"})</option>
+                <option value="on">On: its task moves to done</option>
+                <option value="off">Off: you mark tasks done</option>
               </Select>
             </Field>
             <Field
               label="Close the issues it names"
-              hint="On: when a task's pull request merges into a branch other than the repo's default (an epic branch), Box Yard closes the open issues of this repo it names with Fixes, Closes or Resolves #N, and comments with a link to the PR. GitHub already does this for the default branch."
+              hint="On: when a task's pull request merges into a branch other than the repo's default (an epic branch), Box Yard closes the open issues of this repo it names with Fixes, Closes or Resolves #N, and comments with a link to the PR. GitHub already does this for the default branch. Default: Settings › Close the issues it names."
             >
               <Select className="w-full sm:w-80" value={closeIssuesOnMerge} onChange={(e) => setCloseIssuesOnMerge(e.target.value as "" | "on" | "off")} data-testid="project-close-issues-on-merge">
-                <option value="">Default ({defaults?.closeIssuesOnMerge === false ? "off" : "on"}: Settings → Close the issues it names)</option>
-                <option value="on">On: close them after a merge into an epic branch</option>
+                <option value="">Default ({defaults?.closeIssuesOnMerge === false ? "off" : "on"})</option>
+                <option value="on">On: close them after the merge</option>
                 <option value="off">Off: leave issues to GitHub</option>
               </Select>
             </Field>
           </ProjectPanel>
           <ProjectPanel section="notes" open={tab === "notes"}>
             <div className="grid max-w-xl gap-3 @md:grid-cols-2">
-              <Field label="Max notes" hint={`This project's own notes budget for agents' prompts. Blank: ${defaults?.notesMaxCount ?? DEFAULT_NOTE_BUDGET.maxNotes} (Settings → Max notes).`}>
+              <Field label="Max notes" hint={`This project's own notes budget for agents' prompts. Blank: ${defaults?.notesMaxCount ?? DEFAULT_NOTE_BUDGET.maxNotes} (Settings › Max notes).`}>
                 <input
                   type="number"
                   inputMode="numeric"
@@ -1336,41 +1379,44 @@ export function ProjectSettings({ project, onDone, onDirtyChange }: { project: P
             </Field>
           </ProjectPanel>
         </SettingsTabs>
-        {/* One Save for every tab, as in Settings. */}
+        {/* One Save for every tab, as in Settings: what's unsaved or needs a fix beside Discard (Close, with nothing to save) and Save, on one row. */}
         <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-zinc-900 px-4 py-3 sm:px-5">
-          <Button
-            type="button"
-            variant="danger"
-            onClick={async () => {
-              if (await confirmDialog({ title: "Delete project?", body: `Delete ${project.name} and all its tasks? This can't be undone.`, confirmLabel: "Delete project", danger: true })) {
-                remove.mutate(project.id)
-                navigate("/")
-              }
-            }}
-          >
-            <Trash2 className="h-4 w-4" /> Delete project
-          </Button>
-          <div className="flex flex-1 flex-wrap items-center justify-end gap-2 sm:gap-3">
-            {update.isError ? (
-              <p role="alert" className="basis-full text-right text-xs text-red-300 wrap-anywhere" data-testid="project-settings-error">
-                Couldn’t save {project.name}’s settings: {update.error.message.replace(/\.$/, "")}. Your edits are still here, so you can try Save again.
-              </p>
-            ) : blocked && dirty ? (
-              <span role="status" className="basis-full text-right text-xs text-red-300" data-testid="project-settings-problem">
-                Fix 1 field to save
+          {update.isError && (
+            <p role="alert" className="basis-full text-xs text-red-300 wrap-anywhere" data-testid="project-settings-error">
+              Couldn’t save {project.name}’s settings: {update.error.message.replace(/\.$/, "")}. Your edits are still here, so you can try Save again.
+            </p>
+          )}
+          <div className="min-w-0 flex-1 text-xs @2xl:text-right">
+            {blocked && dirty ? (
+              <span role="status" data-testid="project-settings-problem">
+                <button
+                  type="button"
+                  className="min-h-11 rounded text-left text-red-300 underline underline-offset-2 hover:text-red-200"
+                  title="Show the field to fix"
+                  onClick={(e) => e.currentTarget.form && showProblem(e.currentTarget.form)}
+                >
+                  Fix 1 field to save
+                </button>
               </span>
             ) : dirty ? (
-              <span role="status" className="basis-full text-right text-xs text-amber-300" data-testid="project-unsaved-count">
+              <span role="status" className="text-amber-300" data-testid="project-unsaved-count">
                 {changeCount === 1 ? "1 unsaved change" : `${changeCount} unsaved changes`}
               </span>
             ) : null}
-            <Button type="button" variant="ghost" onClick={() => void cancel()}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" disabled={!dirty || saving || blocked} data-testid="project-settings-save">
-              {saving ? "Saving…" : "Save"}
-            </Button>
           </div>
+          {dirty ? (
+            <Button type="button" variant="ghost" onClick={onDiscard}>
+              Discard
+            </Button>
+          ) : (
+            <Button type="button" variant="ghost" onClick={onDone}>
+              Close
+            </Button>
+          )}
+          {/* With a field to fix, Save stays on and shows it. */}
+          <Button type="submit" variant="primary" disabled={!dirty || saving} className={dirty ? undefined : SAVE_IDLE} data-testid="project-settings-save">
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </footer>
       </fieldset>
     </form>

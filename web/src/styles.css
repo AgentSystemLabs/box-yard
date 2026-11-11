@@ -353,15 +353,16 @@ body.resizing iframe {
 .settings-body input, .settings-body select, .settings-body textarea { max-width: 100%; }
 .settings-body [data-settings-category], .settings-body [data-settings-field] { min-width: 0; }
 .settings-searching [data-settings-category] { margin-bottom: 2rem; }
-.settings-searching [data-settings-context] { display: none; }
+.settings-searching [data-settings-context], .settings-searching [data-settings-description] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .settings-body *, .settings-body *::before, .settings-body *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+/* One footer row at any width: the draft's status takes what Discard (or Close) and Save leave, so they never move.
+   Only a save error gets a line of its own, above them. */
 .settings-dialog > footer { flex-flow: row wrap; align-items: center; }
 .settings-dialog > footer > button { width: auto; min-height: 44px; }
-.settings-dialog > footer > div { display: flex; width: auto; flex: 1 1 auto; flex-flow: row wrap; justify-content: flex-end; align-items: center; }
-.settings-dialog > footer > div > button { min-height: 44px; }
-.settings-dialog > footer [role=status], .settings-dialog > footer [role=alert] { flex: 1 0 100%; text-align: right; }
+.settings-dialog > footer > div { width: auto; min-width: 0; flex: 1 1 0; }
+.settings-dialog > footer > [role=alert] { flex: 1 0 100%; }
 
 .settings-dialog > header button { min-height: 44px; min-width: 44px; }
 
