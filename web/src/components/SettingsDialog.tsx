@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
+import { flushSync } from "react-dom"
 import { ArrowLeft, Palette, BarChart3, Bell, Bot, Boxes, Check, CircleAlert, Cloud, Container, Laptop, Cpu, DollarSign, Fingerprint, FolderGit2, Info, KeyRound, Network, Plug, Server, Search, X, Volume2, Webhook, type LucideIcon } from "lucide-react"
-import { useAgentSettings, useHealth, useResetSettings, useSaveSettings, useSettings } from "../lib/queries"
+import { useAgentSettings, useHealth, useModels, useResetSettings, useSaveSettings, useSettings } from "../lib/queries"
 import {
   SETTINGS_SECTIONS,
   SETTINGS_TOP_SECTIONS,
@@ -33,17 +34,19 @@ import { MachinesPanel } from "./MachineSettings"
 import { useOpenUsage } from "./UsageHost"
 import { ProjectSettingsPicker } from "./ProjectSettingsDialog"
 import { Modal } from "./Modal"
-import { Panel, Row, SourceHint } from "./SettingsBlocks"
+import { Panel, Row, SAVE_IDLE, SettingsLink, SourceHint } from "./SettingsBlocks"
 import { UpstashSizes } from "./SizeCards"
 import { SettingsTabs, type SettingsTab } from "./SettingsTabs"
 import { confirmDialog } from "../lib/confirm"
+import { isTouchDevice } from "../lib/composer"
+import { DEFAULT_OWNER_NAME } from "../../../shared/owner"
 import { EffortPicker, ModelPicker } from "./ModelPicker"
 import { CaptainIconPicker } from "./CaptainIconPicker"
-import { EFFORT_LABEL } from "../../../shared/models"
+import { EFFORT_LABEL, findModel } from "../../../shared/models"
 import { CodexModelSelect } from "./CodexModelSelect"
 import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
-import { Button, LineIcon, NewTabLink, Select, cx, inputClass } from "./ui"
+import { Button, LineIcon, NewTabLink, Select, TAP_AREA, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { BOX_SIZE_SPECS } from "../../../shared/boxSizes"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
@@ -71,13 +74,18 @@ import {
 
 const SECTION_ICON: Record<SettingsSection, LucideIcon> = { orchestrator: Network, projects: FolderGit2, agents: Bot, runners: Server, local: Laptop, upstash: Cloud, credentials: KeyRound, identities: Fingerprint, connectors: Plug, runpod: Cpu, vast: Cpu, daytona: Cpu, docker: Container, machines: Server, hooks: Webhook, limits: Boxes, costs: DollarSign, notifications: Bell, voice: Volume2, appearance: Palette, about: Info }
 const TOP_TABS: SettingsTab<SettingsSection>[] = SETTINGS_TOP_SECTIONS.map((s) => ({ key: s.key, label: s.label, icon: SECTION_ICON[s.key] }))
+/** Categories with nothing to save: a list, or facts. With no change pending anywhere, their footer is just Close. */
+const NO_DRAFT_SECTIONS: SettingsSection[] = ["projects", "about"]
 
 // ------------------------------------------------------------------ building blocks
 
 /** A field's problem, under its control, which points at it with aria-describedby. Search doesn't index it. */
 function FieldError({ id, children }: { id: string; children: ReactNode }) {
+  const ref = useRef<HTMLParagraphElement>(null)
+  // It can appear under the fold, below a field at the bottom of the panel: the panel scrolls just enough to show it.
+  useEffect(() => ref.current?.scrollIntoView?.({ block: "nearest" }), [])
   return (
-    <p id={id} data-settings-search-ignore className="flex basis-full items-start gap-1.5 text-xs leading-relaxed text-red-300">
+    <p ref={ref} id={id} data-settings-search-ignore className="flex basis-full items-start gap-1.5 text-xs leading-relaxed text-red-300">
       <LineIcon icon={CircleAlert} className="h-3.5 w-3.5" />
       <span className="min-w-0">{children}</span>
     </p>
@@ -87,7 +95,8 @@ function FieldError({ id, children }: { id: string; children: ReactNode }) {
 /** On a field's control: Save finds a problem by `data-setting`, and the control names its error. */
 type FieldProps = InputHTMLAttributes<HTMLInputElement> & { "data-setting": SettingPath }
 type FieldCheck = (path: SettingPath) => FieldProps
-type Hint = (k: keyof Settings, problems?: SettingPath[]) => ReactNode
+/** A Row's `hint` and `changed` for a setting: its problems and where its value comes from, and "unsaved" beside its label. */
+type RowMeta = (k: keyof Settings, problems?: SettingPath[]) => { hint: ReactNode; changed: boolean }
 type NumberKey = { [K in keyof Settings]-?: Settings[K] extends number ? K : never }[keyof Settings]
 
 function AutoCompactControl({
@@ -111,7 +120,7 @@ function AutoCompactControl({
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-sm text-zinc-300">
         <input id={id} type="checkbox" checked={value.enabled} onChange={(e) => onChange({ ...value, enabled: e.target.checked })} />
-        Enabled
+        <SearchHighlight text={value.enabled ? "On: compacts past the threshold below" : "Off: only the CLI's own compaction"} />
       </label>
       <div className="flex flex-col gap-2 @sm:flex-row @sm:items-center">
         <input
@@ -184,7 +193,14 @@ export function SettingsDialog({
   const [visited, setVisited] = useState<SettingsSection[]>([section])
   const [query, setQuery] = useState("")
   const searchRef = useRef<HTMLInputElement>(null)
-  const { registry: searchRegistry, matches, searching } = useSettingsSearch(query)
+  // Where the tabs fold into a dropdown (a phone), search folds into a button beside it: pressing it swaps the field in.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchToggle = useRef<HTMLButtonElement>(null)
+  // After a clear or Esc, focus goes to whichever of the two is on screen: `first` is tried first.
+  const [refocus, setRefocus] = useState<{ first: "toggle" | "field" | "panel" } | null>(null)
+  const models = useModels()
+  const modelName = (id: string) => findModel(models, id)?.label ?? id
+  const { registry: searchRegistry, matches, searching } = useSettingsSearch(query, (target) => leaveSearchFor(target))
   const searchCategories = new Set(matches.map((f) => f.category))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -226,13 +242,16 @@ export function SettingsDialog({
   const fid = (k: string) => `${ids}-${k}`
   const errorId = (path: SettingPath) => fid(`error-${path}`)
   const field: FieldCheck = (path) => ({ "data-setting": path, ...(problems[path] && { "aria-invalid": true, "aria-describedby": errorId(path) }) })
-  // Under the control: the field's problems (by default its key's), then where its value comes from.
-  const hint: Hint = (k, paths = [k]) => (
-    <>
-      {paths.map((p) => problems[p] && <FieldError key={p} id={errorId(p)}>{problems[p]}</FieldError>)}
-      <SourceHint source={current?.sources[k]} env={SETTING_ENV[k]} changed={changed.includes(k)} />
-    </>
-  )
+  // Under the control: the field's problems (by default its key's), then where its value comes from. "unsaved" goes beside the label.
+  const row: RowMeta = (k, paths = [k]) => ({
+    changed: changed.includes(k),
+    hint: (
+      <>
+        {paths.map((p) => problems[p] && <FieldError key={p} id={errorId(p)}>{problems[p]}</FieldError>)}
+        <SourceHint source={current?.sources[k]} env={SETTING_ENV[k]} changed={false} />
+      </>
+    ),
+  })
 
   const discard = () => {
     setDraft(null)
@@ -242,26 +261,75 @@ export function SettingsDialog({
     for (const p of partList) p.discard()
   }
 
+  const mayDiscard = () =>
+    confirmDialog({
+      title: "Discard unsaved changes?",
+      body: `${changeCount === 1 ? "1 change" : `${changeCount} changes`} to settings haven't been saved.`,
+      confirmLabel: "Discard",
+      cancelLabel: "Keep editing",
+      danger: true,
+    })
+
   const close = async () => {
-    if (
-      dirty &&
-      !(await confirmDialog({
-        title: "Discard unsaved changes?",
-        body: `${changeCount === 1 ? "1 change" : `${changeCount} changes`} to settings haven't been saved.`,
-        confirmLabel: "Discard",
-        cancelLabel: "Keep editing",
-        danger: true,
-      }))
-    )
-      return
+    if (dirty && !(await mayDiscard())) return
     onClose()
+  }
+
+  // One change is as quick to make again as to confirm; more than one asks first, as closing does.
+  const discardAsked = async () => {
+    if (changeCount > 1 && !(await mayDiscard())) return
+    discard()
   }
 
   useEffect(() => {
     setVisited((v) => (v.includes(section) ? v : [...v, section]))
   }, [section])
 
-  useEffect(() => { searchRef.current?.focus() }, [])
+  // Search takes focus on open, except under a finger: there it would raise the keyboard over the settings, so the
+  // panel takes it instead (Modal's own pick is the header's ×).
+  useEffect(() => {
+    if (!isTouchDevice()) searchRef.current?.focus()
+    // Also where search is folded away (a narrow window): its field can't take focus there.
+    if (document.activeElement !== searchRef.current) panelRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  /** Focuses search, opening it first where it's folded into its button. */
+  const focusSearch = () => {
+    searchRef.current?.focus()
+    if (document.activeElement !== searchRef.current) {
+      flushSync(() => setSearchOpen(true))
+      searchRef.current?.focus()
+    }
+    searchRef.current?.select()
+  }
+  const closeSearch = () => {
+    setQuery("")
+    setRefocus({ first: searchOpen ? "toggle" : "field" })
+    setSearchOpen(false)
+  }
+  useEffect(() => {
+    if (!refocus) return
+    if (refocus.first === "panel") return panelRef.current?.focus({ preventScroll: true })
+    const order = refocus.first === "toggle" ? [searchToggle.current, searchRef.current] : [searchRef.current, searchToggle.current]
+    for (const el of order) {
+      el?.focus()
+      if (document.activeElement === el) break
+    }
+  }, [refocus])
+
+  /** A search result's category header: search ends and that category opens, with focus on its panel (the header is gone). */
+  const leaveSearchFor = (target: SettingsSection) => {
+    setQuery("")
+    setSearchOpen(false)
+    if (target !== section) onSection(target)
+    setRefocus({ first: "panel" })
+  }
+
+  // Another category (a tab, a link in a help text or a search result) leaves search.
+  useEffect(() => {
+    setQuery("")
+    setSearchOpen(false)
+  }, [section])
 
   // A provider drill-in hides its button. Keep keyboard focus in the visible level, and return it on Back.
   useEffect(() => {
@@ -270,6 +338,8 @@ export function SettingsDialog({
     if (previous === section) return
     if (settingsRoot(section) !== section) panelRef.current?.querySelector<HTMLButtonElement>("[data-settings-back]")?.focus()
     else if (settingsRoot(previous) === section) panelRef.current?.querySelector<HTMLButtonElement>(`[data-runner-section=${previous}]`)?.focus()
+    // A link in a dialog that closed to show this category (a project's settings): its focus has nowhere to go back to.
+    else if (document.activeElement === document.body) panelRef.current?.focus({ preventScroll: true })
   }, [section])
 
   // Document runs before the window palette/Modal handlers. Nested dialogs keep their own keys.
@@ -282,18 +352,21 @@ export function SettingsDialog({
       const typing = target.closest?.("input, textarea, [contenteditable=true]")
       if ((e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f")) {
         e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
+        focusSearch()
       } else if (e.key === "Escape" && query) {
         e.preventDefault()
         e.stopPropagation()
         setQuery("")
-        searchRef.current?.focus()
+        setRefocus({ first: "field" })
+      } else if (e.key === "Escape" && searchOpen) {
+        e.preventDefault()
+        e.stopPropagation()
+        closeSearch()
       }
     }
     document.addEventListener("keydown", onKey, true)
     return () => document.removeEventListener("keydown", onKey, true)
-  }, [query])
+  }, [query, searchOpen])
 
   useEffect(() => {
     panelRef.current?.scrollTo({ top: 0 })
@@ -357,6 +430,26 @@ export function SettingsDialog({
     return own ?? [...form.elements].find((el): el is HTMLInputElement => el instanceof HTMLInputElement && el.willValidate && refusedByBrowser(el.validity)) ?? null
   }
 
+  /** Shows the first field to fix, if there is one: Save does, and the footer's "Fix 1 field to save". */
+  const showProblem = (form: HTMLFormElement) => {
+    const problem = firstProblem(form)
+    if (problem) showField(problem)
+    // A problem with no control on screen (its field is switched off): at least open its section.
+    else if (problemCount) onSection(SETTINGS_SECTIONS.find((sec) => problemRoots.has(sec.key))?.key ?? section)
+    return Boolean(problem) || problemCount > 0
+  }
+
+  const resetAll = async () => {
+    if (!(await confirmDialog({ title: "Reset settings to defaults?", body: "Forget every value saved here? Env vars and defaults apply again.", confirmLabel: "Reset", danger: true }))) return
+    reset.mutate(undefined, {
+      onSuccess: () => {
+        setDraft(null)
+        setPinned([])
+        setResets([])
+      },
+    })
+  }
+
   const failedSave = (error: unknown) => {
     setSaveError(error instanceof Error ? error.message : "Couldn't save")
     if (error instanceof SettingsFieldError) {
@@ -379,10 +472,7 @@ export function SettingsDialog({
       failedSave(error)
       return
     }
-    const problem = firstProblem(e.currentTarget as HTMLFormElement)
-    if (problem) return showField(problem)
-    // A problem with no control on screen (its field is switched off): at least open its section.
-    if (problemCount) return onSection(SETTINGS_SECTIONS.find((sec) => problemRoots.has(sec.key))?.key ?? section)
+    if (showProblem(e.currentTarget as HTMLFormElement)) return
     setSaving(true)
     setSaveError(null)
     const jobs = [...(changed.length ? [saveCore()] : []), ...partList.map((p) => p.save())]
@@ -396,7 +486,7 @@ export function SettingsDialog({
     <Modal
       size="xl"
       title="Settings"
-      description="Changes apply from the next turn. Values shown are the ones in effect."
+      description="Nothing changes until you Save."
       dirty={dirty}
       onClose={() => void close()}
       onSubmit={submit}
@@ -404,79 +494,74 @@ export function SettingsDialog({
       bodyClassName="settings-body @container flex min-h-0 flex-1 flex-col"
       footer={
         <>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            loading={reset.isPending}
-            onClick={() => {
-              void confirmDialog({
-                title: "Reset settings to defaults?",
-                body: "Forget every value saved here? Env vars and defaults apply again.",
-                confirmLabel: "Reset",
-                danger: true,
-              }).then((ok) => ok && reset.mutate(undefined, {
-                    onSuccess: () => {
-                      setDraft(null)
-                      setPinned([])
-                      setResets([])
-                    },
-                  }))
-            }}
-            title="Forget saved values: env vars and defaults apply again"
-          >
-            Reset to defaults
-          </Button>
-          <div className="flex flex-col-reverse gap-2 sm:ml-auto sm:flex-row sm:items-center sm:gap-3">
-            {saveError ? (
-              <span className="text-xs text-red-300 wrap-anywhere" role="alert">
-                Couldn't save: {saveError}
-              </span>
-            ) : problemCount && dirty ? (
-              <span className="text-xs text-red-300" role="status" data-testid="settings-problems">
-                {problemCount === 1 ? "Fix 1 field to save" : `Fix ${problemCount} fields to save`}
+          {saveError && (
+            <span className="text-xs text-red-300 wrap-anywhere" role="alert">
+              Couldn't save: {saveError}
+            </span>
+          )}
+          {/* One row at any width: what Save would do on the left, always there so the buttons never move. */}
+          <div className="min-w-0 text-xs @2xl/settings:text-right">
+            {saveError ? null : problemCount && dirty ? (
+              <span role="status" data-testid="settings-problems">
+                <button
+                  type="button"
+                  className={cx(TAP_AREA, "rounded text-left text-red-300 underline underline-offset-2 hover:text-red-200")}
+                  title="Show the first field to fix"
+                  onClick={(e) => e.currentTarget.form && showProblem(e.currentTarget.form)}
+                >
+                  {problemCount === 1 ? "Fix 1 field to save" : `Fix ${problemCount} fields to save`}
+                </button>
               </span>
             ) : dirty ? (
-              <span className="text-xs text-amber-300" role="status" data-testid="unsaved-count">
+              <span className="text-amber-300" role="status" data-testid="unsaved-count">
                 {changeCount === 1 ? "1 unsaved change" : `${changeCount} unsaved changes`}
               </span>
             ) : savedAt ? (
-              <span className="inline-flex items-center gap-1 text-xs text-emerald-400" role="status">
+              <span className="inline-flex items-center gap-1 text-emerald-400" role="status">
                 <Check className="h-3.5 w-3.5" /> Saved
               </span>
             ) : null}
-            {dirty && (
-              <Button type="button" variant="ghost" onClick={discard}>
-                Discard
-              </Button>
-            )}
-            {!dirty && (
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Close
-              </Button>
-            )}
-            {/* Save checks every field itself: the browser's check can't reach a hidden section and refuses numbers between steps. */}
-            <Button type="submit" variant="primary" loading={saving} disabled={!dirty} formNoValidate>
+          </div>
+          {dirty ? (
+            <Button type="button" variant="ghost" onClick={() => void discardAsked()}>
+              Discard
+            </Button>
+          ) : (
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          )}
+          {/* Save checks every field itself: the browser's check can't reach a hidden section and refuses numbers between steps. */}
+          {(dirty || searching || !NO_DRAFT_SECTIONS.includes(section)) && (
+            <Button type="submit" variant="primary" loading={saving} disabled={!dirty} className={dirty ? undefined : SAVE_IDLE} formNoValidate>
               Save
             </Button>
-          </div>
+          )}
         </>
       }
     >
       <SettingsSearchProvider value={searchRegistry}>
-      <div className="shrink-0 border-b border-zinc-900 p-3">
-        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 focus-within:border-yard-500 focus-within:ring-2 focus-within:ring-yard-500/20">
+      {/* Where the tabs fold into a dropdown (SettingsTabs), search is a button beside it until pressed, then takes its place (at the dropdown's height, so nothing under it moves). */}
+      <div className={cx("shrink-0 border-b border-zinc-900 p-3", !(searchOpen || query) && "@max-3xl:hidden")}>
+        {/* One focus ring, the box's (as the composer's): the field inside draws none of its own. */}
+        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 @max-3xl:h-11 has-[>input:focus-visible]:border-yard-500 has-[>input:focus-visible]:outline-2 has-[>input:focus-visible]:outline-offset-2 has-[>input:focus-visible]:outline-(color:--focus-ink)">
           <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-zinc-500" />
           <input
             ref={searchRef} type="search" aria-label="Search settings" placeholder="Search settings…" value={query}
-            className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-zinc-100 outline-none [&::-webkit-search-cancel-button]:appearance-none"
+            className="min-h-11 min-w-0 flex-1 bg-transparent text-base text-zinc-100 outline-none! [&::-webkit-search-cancel-button]:appearance-none"
             onChange={(e) => {
               setQuery(e.target.value)
               if (e.target.value.trim()) setVisited(SETTINGS_SECTIONS.map((s) => s.key))
             }}
             onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault() }}
+            // Left empty, it folds back into its button (where it folds at all).
+            onBlur={(e) => {
+              if (e.target.value.trim() || e.currentTarget.parentElement?.contains(e.relatedTarget as Node | null)) return
+              setQuery("")
+              setSearchOpen(false)
+            }}
           />
-          {query && <button type="button" aria-label="Clear settings search" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400 focus-visible:ring-2 focus-visible:ring-yard-400" onClick={() => { setQuery(""); searchRef.current?.focus() }}><X className="h-4 w-4" /></button>}
+          {(query || searchOpen) && <button type="button" aria-label={query ? "Clear settings search" : "Close settings search"} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400" onClick={closeSearch}><X className="h-4 w-4" /></button>}
         </div>
         {searching && <p role="status" className="mt-2 text-xs text-zinc-400">{matches.length} matching {matches.length === 1 ? "field" : "fields"} in {searchCategories.size} {searchCategories.size === 1 ? "category" : "categories"}</p>}
       </div>
@@ -489,12 +574,26 @@ export function SettingsDialog({
         selectLabel="Settings category"
         idPrefix={ids}
         navHidden={searching}
+        selectHidden={searchOpen || Boolean(query)}
+        selectTrailing={
+          <button
+            ref={searchToggle}
+            type="button"
+            aria-label="Search settings"
+            aria-expanded={searchOpen}
+            title="Search settings"
+            onClick={focusSearch}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-control bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+          >
+            <Search aria-hidden="true" className="h-4 w-4" />
+          </button>
+        }
         className={searching ? "settings-searching" : undefined}
         panelRef={panelRef}
         panelRole={searching ? "region" : "tabpanel"}
         panelLabel={searching ? "Settings search results" : SETTINGS_SECTIONS.find((s) => s.key === section)!.label}
       >
-        {!searching && rootSection !== section && <button type="button" data-settings-back onClick={() => onSection(rootSection)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-yard-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yard-400"><ArrowLeft aria-hidden="true" className="h-4 w-4" />Box providers</button>}
+        {!searching && rootSection !== section && <button type="button" data-settings-back onClick={() => onSection(rootSection)} className="mb-4 flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm text-yard-300"><ArrowLeft aria-hidden="true" className="h-4 w-4" />Box providers</button>}
         {searching && matches.length === 0 && <div className="py-10 text-center"><p className="text-sm text-zinc-200">No settings found</p><p className="mt-2 text-xs text-zinc-500">Try a different word, like model, signing or voice.</p></div>}
         <SettingsDraftContext.Provider value={registry}>
           {SETTINGS_SECTIONS.filter((sec) => visited.includes(sec.key)).map(({ key: category }) => (
@@ -504,13 +603,13 @@ export function SettingsDialog({
               ) : category === "voice" ? (
                 <VoicePanel fid={fid} />
               ) : category === "runners" ? (
-                <RunnerSettings fid={fid} onSection={onSection} dirtySections={dirtySections} active={!searching && rootSection === "runners"} settings={s ? { s, set, hint } : null} />
+                <RunnerSettings fid={fid} onSection={onSection} dirtySections={dirtySections} active={!searching && rootSection === "runners"} settings={s ? { s, set, row } : null} />
               ) : category === "local" ? (
                 <LocalRunnerPanel fid={fid} />
               ) : category === "upstash" ? (
                 <UpstashPanel fid={fid}>
                   {s ? (
-                    <UpstashBoxRows s={s} set={set} hint={hint} field={field} fid={fid} sources={current?.sources} changed={changed} current={current?.settings} pin={pin} resetKeys={resetKeys} resets={resets} />
+                    <UpstashBoxRows s={s} set={set} row={row} field={field} fid={fid} sources={current?.sources} changed={changed} current={current?.settings} pin={pin} resetKeys={resetKeys} resets={resets} />
                   ) : (
                     <Loading label="Loading box sizes" />
                   )}
@@ -536,11 +635,11 @@ export function SettingsDialog({
                   <HooksPanel projectId={null} intro={false} />
                 </Panel>
               ) : category === "projects" ? (
-                <Panel section="projects"><SettingsField label="Project" keywords="configure repository project settings"><ProjectSettingsPicker /></SettingsField></Panel>
+                <Panel section="projects"><SettingsField label="Projects" keywords="configure repository project settings"><ProjectSettingsPicker /></SettingsField></Panel>
               ) : category === "appearance" ? (
                 <AppearancePanel />
               ) : category === "about" ? (
-                <AboutPanel />
+                <AboutPanel onReset={() => void resetAll()} resetting={reset.isPending} />
               ) : !s ? (
                 <Panel section={category}><Loading label="Loading settings" /></Panel>
               ) : category === "orchestrator" ? (
@@ -548,8 +647,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("ocli")}
                     label="Agent"
-                    help="The coding agent the Coordinator chat runs on; Codex needs a Codex login in Settings › Credentials."
-                    hint={hint("orchestratorCli")}
+                    help={<>The coding agent the Coordinator chat runs on; Codex needs a Codex login in <SettingsLink section="credentials">Settings › Credentials</SettingsLink>.</>}
+                    {...row("orchestratorCli")}
                   >
                     <AgentCliSelect id={fid("ocli")} clis={MANAGER_CLIS} value={s.orchestratorCli} onChange={(v) => set("orchestratorCli", v)} testId="orchestrator-cli" />
                   </Row>
@@ -558,7 +657,7 @@ export function SettingsDialog({
                       id={fid("ocm")}
                       label="Codex model"
                       help="The OpenAI model the Coordinator runs on; leave it empty for Codex's own default."
-                      hint={hint("orchestratorCodexModel")}
+                      {...row("orchestratorCodexModel")}
                     >
                       <CodexModelSelect id={fid("ocm")} value={s.orchestratorCodexModel} onChange={(v) => set("orchestratorCodexModel", v)} testId="orchestrator-codex-model" />
                     </Row>
@@ -566,13 +665,14 @@ export function SettingsDialog({
                     <Row
                       id={fid("om")}
                       label="Model"
-                      help="The Claude model the Coordinator chat runs on, and its quick questions unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
-                      hint={hint("orchestratorModel")}
+                      help="The Claude model the Coordinator chat runs on."
+                      more="Its quick questions use it too, unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
+                      {...row("orchestratorModel")}
                     >
                       <ModelPicker id={fid("om")} value={s.orchestratorModel} onChange={(v) => set("orchestratorModel", v)} testId="orchestrator-model" customInputProps={field("orchestratorModel")} />
                     </Row>
                   )}
-                  <Row id={fid("oe")} label="Effort" help="How hard it thinks before answering. Higher is slower and costs more." hint={hint("orchestratorEffort")}>
+                  <Row id={fid("oe")} label="Effort" help="How hard it thinks before answering. Higher is slower and costs more." {...row("orchestratorEffort")}>
                     <EffortPicker
                       id={fid("oe")}
                       cli={s.orchestratorCli}
@@ -585,8 +685,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("oac")}
                     label="Auto-compact"
-                    help={`Compacts the Coordinator and every Captain between turns once context usage passes this. A summary is saved to the compaction log first and shown again after the compaction. Default: ${DEFAULT_AUTOCOMPACT_TOKENS / 1000}k tokens; every turn re-sends the whole context, so a lower threshold makes turns cheaper. Off: only the CLI's own last-resort compaction near the window limit.`}
-                    hint={hint("orchestratorAutoCompact")}
+                    help="Compacts the Coordinator and every Captain between turns once context usage passes this." more={`A summary is saved to the compaction log first and shown again after the compaction. Default: ${DEFAULT_AUTOCOMPACT_TOKENS / 1000}k tokens; every turn re-sends the whole context, so a lower threshold makes turns cheaper. Off: only the CLI's own last-resort compaction near the window limit.`}
+                    {...row("orchestratorAutoCompact")}
                   >
                     <AutoCompactControl
                       id={fid("oac")}
@@ -602,11 +702,11 @@ export function SettingsDialog({
                     <Row
                       id={fid("orl")}
                       label="Relay turns"
-                      help="Runs the Coordinator's relay-only turns (woken by task updates and Captain replies, with no message from you) on this model and effort. Off by default: another model or effort can't reuse the last turn's prompt cache, so each relay turn sends the whole context again. That's quick and cheap on a small model, slow and costly on a big one. Your own messages always use the model above."
-                      hint={hint("orchestratorRelay", ["orchestratorRelay.model"])}
+                      help="Runs the Coordinator's relay-only turns (woken by task updates and Captain replies, with no message from you) on a model and effort of their own." more="Off by default: another model or effort can't reuse the last turn's prompt cache, so each relay turn sends the whole context again. That's quick and cheap on a small model, slow and costly on a big one. Your own messages always use the model above."
+                      {...row("orchestratorRelay", ["orchestratorRelay.model"])}
                     >
                       <div className="space-y-2">
-                        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                           <input
                             id={fid("orl")}
                             type="checkbox"
@@ -616,22 +716,31 @@ export function SettingsDialog({
                           />
                           {s.orchestratorRelay.enabled ? "On: relay turns use this" : "Off: every turn uses the model above"}
                         </label>
-                        <ModelPicker
-                          value={s.orchestratorRelay.model}
-                          onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, model: v })}
-                          disabled={!s.orchestratorRelay.enabled}
-                          ariaLabel="Relay turn model"
-                          testId="orchestrator-relay-model"
-                          customInputProps={field("orchestratorRelay.model")}
-                        />
-                        <EffortPicker
-                          value={s.orchestratorRelay.effort}
-                          onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, effort: v as Settings["orchestratorEffort"] })}
-                          model={s.orchestratorRelay.model}
-                          disabled={!s.orchestratorRelay.enabled}
-                          ariaLabel="Relay turn effort"
-                          testId="orchestrator-relay-effort"
-                        />
+                        {/* The pickers only while it's on (or its model needs a fix): off, one line says what it would use. */}
+                        {s.orchestratorRelay.enabled || problems["orchestratorRelay.model"] ? (
+                          <>
+                            <ModelPicker
+                              value={s.orchestratorRelay.model}
+                              onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, model: v })}
+                              disabled={!s.orchestratorRelay.enabled}
+                              ariaLabel="Relay turn model"
+                              testId="orchestrator-relay-model"
+                              customInputProps={field("orchestratorRelay.model")}
+                            />
+                            <EffortPicker
+                              value={s.orchestratorRelay.effort}
+                              onChange={(v) => set("orchestratorRelay", { ...s.orchestratorRelay, effort: v as Settings["orchestratorEffort"] })}
+                              model={s.orchestratorRelay.model}
+                              disabled={!s.orchestratorRelay.enabled}
+                              ariaLabel="Relay turn effort"
+                              testId="orchestrator-relay-effort"
+                            />
+                          </>
+                        ) : (
+                          <p className="text-xs text-zinc-500" data-testid="orchestrator-relay-resolved">
+                            Uses {modelName(s.orchestratorRelay.model)} · {EFFORT_LABEL[s.orchestratorRelay.effort]} when on.
+                          </p>
+                        )}
                       </div>
                     </Row>
                   )}
@@ -643,8 +752,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("ccli")}
                     label="Captain agent"
-                    help="The coding agent every project's Captain runs on; Codex needs a Codex login in Settings › Credentials."
-                    hint={hint("captainCli")}
+                    help={<>The coding agent every project's Captain runs on; Codex needs a Codex login in <SettingsLink section="credentials">Settings › Credentials</SettingsLink>.</>}
+                    {...row("captainCli")}
                   >
                     <AgentCliSelect id={fid("ccli")} clis={MANAGER_CLIS} value={s.captainCli} onChange={(v) => set("captainCli", v)} testId="captain-cli" />
                   </Row>
@@ -653,7 +762,7 @@ export function SettingsDialog({
                       id={fid("ccm")}
                       label="Captain Codex model"
                       help="The OpenAI model every Captain runs on; leave it empty for Codex's own default."
-                      hint={hint("captainCodexModel")}
+                      {...row("captainCodexModel")}
                     >
                       <CodexModelSelect id={fid("ccm")} value={s.captainCodexModel} onChange={(v) => set("captainCodexModel", v)} testId="captain-codex-model" />
                     </Row>
@@ -661,13 +770,14 @@ export function SettingsDialog({
                     <Row
                       id={fid("cm")}
                       label="Captain model"
-                      help="The Claude model every project Captain runs on, and its quick questions unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
-                      hint={hint("captainModel")}
+                      help="The Claude model every project Captain runs on."
+                      more="Their quick questions use it too, unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
+                      {...row("captainModel")}
                     >
                       <ModelPicker id={fid("cm")} value={s.captainModel} onChange={(v) => set("captainModel", v)} testId="captain-model" customInputProps={field("captainModel")} />
                     </Row>
                   )}
-                  <Row id={fid("ce")} label="Captain effort" help="How hard Captains think before answering. Lower is faster and cheaper." hint={hint("captainEffort")}>
+                  <Row id={fid("ce")} label="Captain effort" help="How hard Captains think before answering. Lower is faster and cheaper." {...row("captainEffort")}>
                     <EffortPicker
                       id={fid("ce")}
                       cli={s.captainCli}
@@ -680,8 +790,9 @@ export function SettingsDialog({
                   <Row
                     id={fid("cicon")}
                     label="Captain icon"
-                    help="What every project's Captain shows in the sidebar, its chat and its messages, in its project's colour. A project's settings can pick its own; one with an uploaded image and no pick shows the image."
-                    hint={hint("captainIcon")}
+                    help="What every project's Captain shows in the sidebar, its chat and its messages, in its project's colour."
+                    more="A project's settings can pick its own; one with an uploaded image and no pick shows the image."
+                    {...row("captainIcon")}
                   >
                     <CaptainIconPicker id={fid("cicon")} value={s.captainIcon} onChange={(v) => v && set("captainIcon", v)} testId="captain-icon" />
                   </Row>
@@ -693,14 +804,25 @@ export function SettingsDialog({
                   <Row
                     id={fid("qqm")}
                     label="Quick question model"
-                    help="The Claude model quick questions run on. Same as its chat: the Coordinator's model in its chat and for a task's side questions, the Captain model in a Captain's chat. Another model can't reuse the chat's prompt cache, so a thread's first answer reads the chat's whole context again, which is cheap on Haiku. A chat on Codex keeps its own model."
-                    hint={hint("quickQuestionModel")}
+                    changed={changed.includes("quickQuestionModel")}
+                    help="The Claude model quick questions run on." more="Same as chat: the Coordinator's model in its chat and for a task's side questions, the Captain model in a Captain's chat. Another model can't reuse the chat's prompt cache, so a thread's first answer reads the chat's whole context again, which is cheap on Haiku. A chat on Codex keeps its own model."
+                    hint={
+                      <>
+                        {/* The option says only "Same as chat", so it fits a phone: which model that is goes here. */}
+                        {!s.quickQuestionModel && (
+                          <span className="basis-full text-xs text-zinc-500" data-testid="quick-question-model-resolved">
+                            {s.orchestratorModel === s.captainModel ? `Uses ${modelName(s.orchestratorModel)}.` : `Uses ${modelName(s.orchestratorModel)} for the Coordinator, ${modelName(s.captainModel)} for Captains.`}
+                          </span>
+                        )}
+                        {row("quickQuestionModel").hint}
+                      </>
+                    }
                   >
                     <ModelPicker
                       id={fid("qqm")}
                       value={s.quickQuestionModel}
                       onChange={(v) => set("quickQuestionModel", v)}
-                      defaultLabel={s.orchestratorModel === s.captainModel ? `Same as its chat (${s.orchestratorModel})` : "Same as its chat"}
+                      defaultLabel="Same as chat"
                       testId="quick-question-model"
                       customInputProps={field("quickQuestionModel")}
                     />
@@ -708,8 +830,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("qqe")}
                     label="Quick question effort"
-                    help="How hard quick questions think before answering. Same as its chat: the Coordinator's or Captain effort above."
-                    hint={hint("quickQuestionEffort")}
+                    help="How hard quick questions think before answering. Same as chat: the Coordinator's or Captain effort above."
+                    {...row("quickQuestionEffort")}
                   >
                     <EffortPicker
                       id={fid("qqe")}
@@ -717,7 +839,7 @@ export function SettingsDialog({
                       onChange={(v) => set("quickQuestionEffort", v as Settings["quickQuestionEffort"])}
                       model={s.quickQuestionModel}
                       effective={s.quickQuestionEffort || s.orchestratorEffort}
-                      lead={<option value="">Same as its chat{s.orchestratorEffort === s.captainEffort ? ` (${EFFORT_LABEL[s.orchestratorEffort]})` : ""}</option>}
+                      lead={<option value="">Same as chat{s.orchestratorEffort === s.captainEffort ? ` (${EFFORT_LABEL[s.orchestratorEffort]})` : ""}</option>}
                       testId="quick-question-effort"
                     />
                   </Row>
@@ -729,10 +851,11 @@ export function SettingsDialog({
                   <Row
                     id={fid("nre")}
                     label="Notes retro"
-                    help="When a task's PR merges, or a task without a PR ends done, its project's Captain decides on each note suggestion the agent left: it accepts, merges or rejects it, with a one-line reason. Nobody needs to approve them; the Notes tab shows what was decided."
-                    hint={hint("notesRetroEnabled")}
+                    help="When a task's PR merges, or a task without a PR ends done, its project's Captain decides on each note suggestion the agent left."
+                    more="It accepts, merges or rejects each one, with a one-line reason. Nobody needs to approve them; the Notes tab shows what was decided."
+                    {...row("notesRetroEnabled")}
                   >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                       <input id={fid("nre")} type="checkbox" checked={s.notesRetroEnabled} onChange={(e) => set("notesRetroEnabled", e.target.checked)} data-testid="notes-retro" />
                       {s.notesRetroEnabled ? "On: Captains curate suggestions" : "Off: suggestions stay pending until it's on again"}
                     </label>
@@ -740,8 +863,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("nmc")}
                     label="Max notes"
-                    help="Most notes an agent's first prompt gets; Captains keep their project under it. Over it, agents get the newest notes that fit, their prompt says how many were left out, and the Captain is asked to prune. A project can set its own on its Settings tab."
-                    hint={hint("notesMaxCount")}
+                    help="Most notes an agent's first prompt gets; Captains keep their project under it." more="Over it, agents get the newest notes that fit, their prompt says how many were left out, and the Captain is asked to prune. A project can set its own on its Settings tab."
+                    {...row("notesMaxCount")}
                   >
                     <input
                       id={fid("nmc")}
@@ -754,7 +877,7 @@ export function SettingsDialog({
                       {...field("notesMaxCount")}
                     />
                   </Row>
-                  <Row id={fid("nmt")} label="Max note tokens" help="About how many tokens all the notes may take in that prompt, next to Max notes (4 characters is about 1 token)." hint={hint("notesMaxTokens")}>
+                  <Row id={fid("nmt")} label="Max note tokens" help="About how many tokens all the notes may take in that prompt, next to Max notes (4 characters is about 1 token)." {...row("notesMaxTokens")}>
                     <input
                       id={fid("nmt")}
                       type="number"
@@ -774,10 +897,10 @@ export function SettingsDialog({
                   <Row
                     id={fid("adm")}
                     label="Done when its PR merges"
-                    help="When a task's pull request merges and its turn is over (it's idle or waiting for review), it moves to done and its workspace is archived, as Mark done does. It stays as it is while messages are queued for it, while it has another PR open, or when it's set to stay open. Turning it on also moves resting tasks whose PR has already merged. Off: a merged PR leaves its task idle until you mark it done. Messaging a done task picks it back up."
-                    hint={hint("autoDoneOnMerge")}
+                    help="When a task's pull request merges and its turn is over (it's idle or waiting for review), it moves to done and its workspace is archived, as Mark done does." more="It stays as it is while messages are queued for it, while it has another PR open, or when it's set to stay open. Turning it on also moves resting tasks whose PR has already merged. Off: a merged PR leaves its task idle until you mark it done. Messaging a done task picks it back up."
+                    {...row("autoDoneOnMerge")}
                   >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                       <input id={fid("adm")} type="checkbox" checked={s.autoDoneOnMerge ?? true} onChange={(e) => set("autoDoneOnMerge", e.target.checked)} data-testid="auto-done-on-merge" />
                       {(s.autoDoneOnMerge ?? true) ? "On: a merged PR moves its task to done" : "Off: you mark tasks done yourself"}
                     </label>
@@ -785,10 +908,11 @@ export function SettingsDialog({
                   <Row
                     id={fid("cim")}
                     label="Close the issues it names"
-                    help="GitHub closes the issues a PR names with Fixes, Closes or Resolves #N only when it merges into the repo's default branch. For a PR merged into any other branch (an epic branch), Box Yard closes them: open issues of the same repo only, never PRs or other repos' issues, each with a comment linking the PR."
-                    hint={hint("closeIssuesOnMerge")}
+                    help="When a PR merges into a branch other than the repo's default (an epic branch), Box Yard closes the issues it names with Fixes, Closes or Resolves #N."
+                    more="GitHub closes them itself only on a merge into the default branch. Box Yard closes open issues of the same repo only, never PRs or other repos' issues, each with a comment linking the PR."
+                    {...row("closeIssuesOnMerge")}
                   >
-                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                       <input id={fid("cim")} type="checkbox" checked={s.closeIssuesOnMerge ?? true} onChange={(e) => set("closeIssuesOnMerge", e.target.checked)} data-testid="close-issues-on-merge" />
                       {(s.closeIssuesOnMerge ?? true) ? "On: closed after a merge into an epic branch, with a comment" : "Off: only GitHub closes them (default branch)"}
                     </label>
@@ -799,38 +923,47 @@ export function SettingsDialog({
                   <Row
                     id={fid("on")}
                     label="Your name"
-                    help={'What the Coordinator, Captains and agents call you in their prompts and labels. The default is “the owner” until you save your name.'}
-                    hint={hint("ownerName")}
+                    help="What the Coordinator, Captains and agents call you in their prompts and labels. Until you save a name, that’s “the owner”."
+                    {...row("ownerName")}
                   >
-                    <input id={fid("on")} className={inputClass} value={s.ownerName} maxLength={40} onChange={(e) => set("ownerName", e.target.value)} {...field("ownerName")} />
+                    {/* Never saved: the default is the placeholder, not a name someone typed, and emptying the field goes back to it. */}
+                    <input
+                      id={fid("on")}
+                      className={inputClass}
+                      value={current?.sources.ownerName === "default" && !changed.includes("ownerName") ? "" : s.ownerName}
+                      placeholder={DEFAULT_OWNER_NAME}
+                      maxLength={40}
+                      onChange={(e) => set("ownerName", e.target.value || (current?.sources.ownerName === "default" ? current.settings.ownerName : ""))}
+                      {...field("ownerName")}
+                    />
                   </Row>
                   <Row
                     id={fid("acli")}
                     label="Agent"
-                    help="The coding agent new tasks run on: a project can pick its own. Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given provider/model runs on OpenCode, one given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
-                    hint={hint("agentCli")}
+                    help="The coding agent new tasks run on: a project can pick its own." more="Existing tasks keep their saved harness; use Continue with… on a resting task to switch it explicitly. A new task given provider/model runs on OpenCode, one given a gpt-* model runs on Codex, and one given a Cursor-only model (composer-2.5, gemini-…) on Cursor."
+                    {...row("agentCli")}
                   >
                     <AgentCliSelect id={fid("acli")} clis={AGENT_CLIS} value={s.agentCli} onChange={(v) => set("agentCli", v)} testId="agent-cli" />
                   </Row>
                   {s.agentCli === "opencode" ? (
-                    <Row id={fid("aoc")} label="OpenCode model" help="Provider and model for OpenCode tasks. An optional #variant selects provider-specific reasoning. Generic effort and Box Yard compaction thresholds do not apply." hint={hint("agentOpencodeModel")}>
+                    <Row id={fid("aoc")} label="OpenCode model" help="Provider and model for OpenCode tasks. An optional #variant selects provider-specific reasoning. Generic effort and Box Yard compaction thresholds do not apply." {...row("agentOpencodeModel")}>
                       <OpenCodeModelInput id={fid("aoc")} value={s.agentOpencodeModel} onChange={(v) => set("agentOpencodeModel", v)} testId="agent-opencode-model" />
                     </Row>
                   ) : s.agentCli === "cursor" ? (
                     <Row
                       id={fid("acu")}
                       label="Cursor model"
-                      help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has. Auto lets Cursor pick per request. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
-                      hint={hint("agentCursorModel")}
+                      help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has." more="Auto lets Cursor pick per request. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
+                      {...row("agentCursorModel")}
                     >
                       <CursorModelSelect id={fid("acu")} value={s.agentCursorModel} onChange={(v) => set("agentCursorModel", v)} testId="agent-cursor-model" />
                     </Row>
                   ) : s.agentCli === "codex" ? (
-                    <Row id={fid("acm")} label="Codex model" help="The model tasks on Codex run on, unless the task or its project's Routing YAML entry picks one. Options depend on your Codex account and CLI version." hint={hint("agentCodexModel")}>
+                    <Row id={fid("acm")} label="Codex model" help="The model tasks on Codex run on, unless the task or its project's Routing YAML entry picks one. Options depend on your Codex account and CLI version." {...row("agentCodexModel")}>
                       <CodexModelSelect id={fid("acm")} value={s.agentCodexModel} onChange={(v) => set("agentCodexModel", v)} testId="agent-codex-model" />
                     </Row>
                   ) : (
-                    <Row id={fid("am")} label="Model" help="The Claude model each task's agent runs on, unless the task or its project's Routing YAML entry picks one. Once saved here or set by an env var, it wins over the YAML's defaults and fallback." hint={hint("agentModel")}>
+                    <Row id={fid("am")} label="Model" help="The Claude model each task's agent runs on, unless the task or its project's Routing YAML entry picks one." more="Once saved here or set by an env var, it wins over the YAML's defaults and fallback." {...row("agentModel")}>
                       <ModelPicker id={fid("am")} value={s.agentModel} onChange={(v) => set("agentModel", v)} testId="agent-model" customInputProps={field("agentModel")} />
                     </Row>
                   )}
@@ -840,10 +973,15 @@ export function SettingsDialog({
                       label="Effort"
                       help={
                         (s.agentCli === "codex" ? s.agentCodexEffort : s.agentEffort) === "orchestrator"
-                          ? "The Coordinator picks an effort in create_task and send_to_task: low for one-command chores, high for real coding. Without one, Routing YAML or the harness default applies."
-                          : "Every agent turn uses this effort, unless the task or its project's Routing YAML entry picks one. Once saved here or set by an env var, it wins over the YAML's defaults and fallback."
+                          ? "The Coordinator picks an effort in create_task and send_to_task: low for one-command chores, high for real coding."
+                          : "Every agent turn uses this effort, unless the task or its project's Routing YAML entry picks one."
                       }
-                      hint={hint(s.agentCli === "codex" ? "agentCodexEffort" : "agentEffort")}
+                      more={
+                        (s.agentCli === "codex" ? s.agentCodexEffort : s.agentEffort) === "orchestrator"
+                          ? "Without one, Routing YAML or the harness default applies."
+                          : "Once saved here or set by an env var, it wins over the YAML's defaults and fallback."
+                      }
+                      {...row(s.agentCli === "codex" ? "agentCodexEffort" : "agentEffort")}
                     >
                       <EffortPicker
                         id={fid("ae")}
@@ -859,8 +997,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("arc")}
                     label="Routing YAML"
-                    help="Optional rules for task model and effort, also read from routing.yaml in the data directory. Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (OpenCode: provider/model above, no generic effort; Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
-                    hint={hint("agentRoutingConfig")}
+                    help="Optional rules for task model and effort, also read from routing.yaml in the data directory." more="Each turn the first match wins: the task's own choice, then its project's entry, then Model and Effort above when saved or set by an env var, then defaults, then fallback, then the harness default (OpenCode: provider/model above, no generic effort; Codex: gpt-6.1-sol at extra high; Claude: claude-opus-5-5 at high; Cursor: its Cursor model above, which only takes ids Cursor lists)."
+                    {...row("agentRoutingConfig")}
                   >
                     <textarea
                       id={fid("arc")}
@@ -875,7 +1013,7 @@ export function SettingsDialog({
                     id={fid("aac")}
                     label="Custom auto-compact threshold"
                     help="Passed to each agent's CLI as its auto-compact window (100k–1M tokens). Off: the CLI's own default."
-                    hint={hint("agentAutoCompact")}
+                    {...row("agentAutoCompact")}
                   >
                     <AutoCompactControl id={fid("aac")} label="Agent auto-compact" value={s.agentAutoCompact} onChange={(v) => set("agentAutoCompact", v)} field={field("agentAutoCompact")} />
                   </Row>
@@ -883,7 +1021,7 @@ export function SettingsDialog({
                     id={fid("smd")}
                     label="Sub-task depth"
                     help="How deep sub-tasks may nest. An agent splits its work with spawn_subtasks; each sub-task runs as a task of its own and reports back. 1: a sub-task can't start its own."
-                    hint={hint("subtaskMaxDepth")}
+                    {...row("subtaskMaxDepth")}
                   >
                     <input
                       id={fid("smd")}
@@ -896,7 +1034,7 @@ export function SettingsDialog({
                       {...field("subtaskMaxDepth")}
                     />
                   </Row>
-                  <Row id={fid("smc")} label="Sub-tasks per task" help="How many sub-tasks one task may start, over its whole life." hint={hint("subtaskMaxChildren")}>
+                  <Row id={fid("smc")} label="Sub-tasks per task" help="How many sub-tasks one task may start, over its whole life." {...row("subtaskMaxChildren")}>
                     <input
                       id={fid("smc")}
                       type="number"
@@ -910,9 +1048,9 @@ export function SettingsDialog({
                   </Row>
                 </Panel>
               ) : category === "limits" ? (
-                <LimitsPanel s={s} set={set} hint={hint} field={field} fid={fid} sources={current?.sources} resets={resets} />
+                <LimitsPanel s={s} set={set} row={row} field={field} fid={fid} sources={current?.sources} resets={resets} />
               ) : (
-                <CostsPanel s={s} set={set} hint={hint} field={field} fid={fid} />
+                <CostsPanel s={s} set={set} row={row} field={field} fid={fid} />
               )}
             </div>
           ))}
@@ -928,7 +1066,7 @@ export function SettingsDialog({
 function LimitsPanel({
   s,
   set,
-  hint,
+  row,
   field,
   fid,
   sources,
@@ -936,7 +1074,7 @@ function LimitsPanel({
 }: {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: Hint
+  row: RowMeta
   field: FieldCheck
   fid: (k: string) => string
   sources?: Record<keyof Settings, SettingSource>
@@ -967,16 +1105,17 @@ function LimitsPanel({
           <Row
             id={fid("mb")}
             label="Max boxes (safety ceiling)"
-            help="A safety stop, not a budget: the most worker boxes alive at once, however much work waits. What keeps spend in check is the daily cloud limit (Settings › Usage); boxes start when work needs one and are deleted when idle."
-            hint={hint("maxBoxes")}
+            help="A safety stop, not a budget: the most worker boxes alive at once, however much work waits."
+            more={<>What keeps spend in check is the daily cloud limit (<SettingsLink section="costs">Settings › Usage</SettingsLink>); boxes start when work needs one and are deleted when idle.</>}
+            {...row("maxBoxes")}
           >
             <input id={fid("mb")} type="number" min={1} max={100} className={inputClass} {...num("maxBoxes")} data-testid="max-boxes" />
           </Row>
           <Row
             id={fid("bcc")}
             label="Boxes created at once"
-            help="When many tasks wait for a box (say a Captain starts a batch of tasks), Box Yard creates up to this many boxes in parallel, still within Max boxes. Lower it if your box provider rate-limits box creation; Box Yard also backs off by itself when a create fails or is rate-limited."
-            hint={hint("boxCreateConcurrency")}
+            help="When many tasks wait for a box (say a Captain starts a batch of tasks), Box Yard creates up to this many boxes in parallel, still within Max boxes." more="Lower it if your box provider rate-limits box creation; Box Yard also backs off by itself when a create fails or is rate-limited."
+            {...row("boxCreateConcurrency")}
           >
             <input
               id={fid("bcc")}
@@ -990,25 +1129,25 @@ function LimitsPanel({
           </Row>
         </div>
       </details>
-      <Row id={fid("ma")} label="Max tasks running at once" help="A cap on tasks running at once across all boxes. 0 = boxes × tasks running at once per box." hint={hint("maxAgents")}>
+      <Row id={fid("ma")} label="Max tasks running at once" help="A cap on tasks running at once across all boxes. 0 = boxes × tasks running at once per box." {...row("maxAgents")}>
         <input id={fid("ma")} type="number" min={0} max={1000} className={inputClass} {...num("maxAgents")} />
       </Row>
-      <Row id={fid("bid")} label="Idle box deletion" help="Delete an idle worker box after this many minutes, but only when every resident workspace has a fresh archive. 0 keeps boxes." hint={hint("boxIdleDeleteMinutes")}>
+      <Row id={fid("bid")} label="Idle box deletion" help="Delete an idle worker box after this many minutes, but only when every resident workspace has a fresh archive. 0 keeps boxes." {...row("boxIdleDeleteMinutes")}>
         <input id={fid("bid")} type="number" min={0} max={43_200} className={inputClass} {...num("boxIdleDeleteMinutes")} />
       </Row>
       <Row
         id={fid("wrd")}
         label="Workspace retention"
         help="After this many idle days, archived resting task folders are removed from boxes and restored from the archive on the next message. 0 keeps folders."
-        hint={hint("workspaceRetentionDays")}
+        {...row("workspaceRetentionDays")}
       >
         <input id={fid("wrd")} type="number" min={0} max={3650} className={inputClass} {...num("workspaceRetentionDays")} />
       </Row>
       <Row
         id={fid("ard")}
         label="Archive retention"
-        help="After this many days, orphan archives and long-done task archives are pruned. Archives of tasks with an open or unmerged PR are always kept. A done task whose archive was pruned restarts from a recap on its next message. 0 keeps archives."
-        hint={hint("archiveRetentionDays")}
+        help="After this many days, orphan archives and long-done task archives are pruned. 0 keeps archives." more="Archives of tasks with an open or unmerged PR are always kept. A done task whose archive was pruned restarts from a recap on its next message."
+        {...row("archiveRetentionDays")}
       >
         <input id={fid("ard")} type="number" min={0} max={3650} className={inputClass} {...num("archiveRetentionDays")} />
       </Row>
@@ -1016,7 +1155,7 @@ function LimitsPanel({
         id={fid("akt")}
         label="Keep recent archives"
         help="Never prune the archive of a task touched in the last this many days, so recent work resumes with its full session. 0 = only archive retention applies."
-        hint={hint("archiveKeepTouchedDays")}
+        {...row("archiveKeepTouchedDays")}
       >
         <input id={fid("akt")} type="number" min={0} max={3650} className={inputClass} {...num("archiveKeepTouchedDays")} />
       </Row>
@@ -1024,7 +1163,7 @@ function LimitsPanel({
         id={fid("dmf")}
         label="Disk headroom (MB)"
         help="A new workspace only lands on a box with at least this much free disk. A box below it is cleaned up in the background while tasks go to another box."
-        hint={hint("diskMinFreeMb")}
+        {...row("diskMinFreeMb")}
       >
         <input id={fid("dmf")} type="number" min={0} max={1_000_000} step={128} className={inputClass} {...num("diskMinFreeMb")} />
       </Row>
@@ -1032,7 +1171,7 @@ function LimitsPanel({
         id={fid("dcf")}
         label="Clone size factor"
         help="...and at least this many times the repo's last clone size, for big repos (the clone plus the box's shared mirror of it)."
-        hint={hint("diskCloneFactor")}
+        {...row("diskCloneFactor")}
       >
         <input
           id={fid("dcf")}
@@ -1047,19 +1186,20 @@ function LimitsPanel({
       <Row
         id={fid("mup")}
         label="Memory limit (% used)"
-        help="A new agent skips a box with more than this much of its memory in use while other agents run on it, and goes to another box (or waits). Memory is read from the box's cgroup without the reclaimable page cache. 0 = off."
-        hint={hint("memoryMaxUsedPercent")}
+        help="A new agent skips a box with more than this much of its memory in use while other agents run on it, and goes to another box (or waits). 0 = off."
+        more="Memory is read from the box's cgroup without the reclaimable page cache."
+        {...row("memoryMaxUsedPercent")}
       >
         <input id={fid("mup")} type="number" min={0} max={100} step={5} className={inputClass} {...num("memoryMaxUsedPercent")} data-testid="memory-max-used" />
       </Row>
-      <Row id={fid("mmf")} label="Memory headroom (MB)" help="...or with less than this much memory free. 0 = off." hint={hint("memoryMinFreeMb")}>
+      <Row id={fid("mmf")} label="Memory headroom (MB)" help="...or with less than this much memory free. 0 = off." {...row("memoryMinFreeMb")}>
         <input id={fid("mmf")} type="number" min={0} max={1_000_000} step={256} className={inputClass} {...num("memoryMinFreeMb")} />
       </Row>
       <Row
         id={fid("lpc")}
         label="Load limit (per CPU)"
         help="...or with a 1-minute load average above this many times its CPUs (nproc). On Upstash, /proc/loadavg and nproc describe the host the box runs on. 0 = off."
-        hint={hint("loadMaxPerCpu")}
+        {...row("loadMaxPerCpu")}
       >
         <input
           id={fid("lpc")}
@@ -1074,18 +1214,18 @@ function LimitsPanel({
       <Row
         id={fid("bci")}
         label="Build output cleanup (idle minutes)"
-        help="Once a done task has sat idle this long, its git-ignored build output (node_modules, dist, .cache, tmp, perf captures) is removed from its Upstash box (this computer and SSH machines have their own settings below). A task that isn't done keeps it, and so does a folder a process still uses (a dev server, a shell); only low-disk cleanup frees an idle task's build output, and the task's log says what went. Only folders git ignores and doesn't track; uncommitted work is never touched. 0 = off (low-disk cleanup still runs)."
-        hint={hint("buildCleanupIdleMinutes")}
+        help="Once a done task has sat idle this long, its git-ignored build output is removed from its Upstash box. 0 = off." more="Build output is node_modules, dist, .cache, tmp and perf captures; this computer and SSH machines have their own settings below, and low-disk cleanup still runs at 0. A task that isn't done keeps it, and so does a folder a process still uses (a dev server, a shell); only low-disk cleanup frees an idle task's build output, and the task's log says what went. Only folders git ignores and doesn't track; uncommitted work is never touched."
+        {...row("buildCleanupIdleMinutes")}
       >
         <input id={fid("bci")} type="number" min={0} max={43_200} className={inputClass} {...num("buildCleanupIdleMinutes")} />
       </Row>
       <Row
         id={fid("dce")}
         label="Dependency cache (npm)"
-        help="Each box keeps the node_modules its agents installed, one per package-lock.json, next to the task folders. A task with that lockfile and no node_modules (a fresh clone, or one the build output cleanup emptied) gets it hard-linked in before its turn, in under a second, and its prompt says it needn't run npm ci. The shared files are read-only, so a task can't change another's. A project can override it."
-        hint={hint("depCacheEnabled")}
+        help="Each box keeps the node_modules its agents installed, one per package-lock.json, next to the task folders." more="A task with that lockfile and no node_modules (a fresh clone, or one the build output cleanup emptied) gets it hard-linked in before its turn, in under a second, and its prompt says it needn't run npm ci. The shared files are read-only, so a task can't change another's. A project can override it."
+        {...row("depCacheEnabled")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("dce")} type="checkbox" checked={s.depCacheEnabled} onChange={(e) => set("depCacheEnabled", e.target.checked)} data-testid="dep-cache" />
           {s.depCacheEnabled ? "On: node_modules restored from the box cache" : "Off: agents install dependencies"}
         </label>
@@ -1094,17 +1234,18 @@ function LimitsPanel({
         id={fid("dcm")}
         label="Dependency cache size (MB)"
         help="Most work-disk space one box's cache may hold. Over it, the least recently used lockfiles no task links go first. Low-disk cleanup also removes entries no task links."
-        hint={hint("depCacheMaxMb")}
+        {...row("depCacheMaxMb")}
       >
         <input id={fid("dcm")} type="number" min={100} max={1_000_000} step={256} className={inputClass} disabled={!s.depCacheEnabled} {...num("depCacheMaxMb")} data-testid="dep-cache-max" />
       </Row>
       <Row
         id={fid("gpc")}
         label="Partial clone mirrors"
-        help="Each box keeps one mirror per repo, and task checkouts borrow its objects instead of copying them. With this on, mirrors skip old file versions (git clone --filter=blob:none); git fetches one from GitHub when log -p, blame or a checkout needs it. A project can override it."
-        hint={hint("gitPartialClone")}
+        help="Each box keeps one mirror per repo, and task checkouts borrow its objects instead of copying them."
+        more="With this on, mirrors skip old file versions (git clone --filter=blob:none); git fetches one from GitHub when log -p, blame or a checkout needs it. A project can override it."
+        {...row("gitPartialClone")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("gpc")} type="checkbox" checked={s.gitPartialClone} onChange={(e) => set("gitPartialClone", e.target.checked)} data-testid="git-partial-clone" />
           {s.gitPartialClone ? "On: blob:none mirrors" : "Off: full mirrors"}
         </label>
@@ -1112,10 +1253,10 @@ function LimitsPanel({
       <Row
         id={fid("gpt")}
         label="Push at turn end"
-        help="After every agent turn in a repo project, Box Yard pushes the task's branch and saves uncommitted work (untracked files too) to a hidden ref on origin, refs/boxyard/wip/<task>, without committing in the task's repo. Archives then carry only what git can't, so a box can go at any time without losing code. Without write access it quietly keeps full archives. A project can override it."
-        hint={hint("gitPushAtTurnEnd")}
+        help="After every agent turn in a repo project, Box Yard pushes the task's branch and saves uncommitted work (untracked files too) to a hidden ref on origin, refs/boxyard/wip/<task>, without committing in the task's repo." more="Archives then carry only what git can't, so a box can go at any time without losing code. Without write access it quietly keeps full archives. A project can override it."
+        {...row("gitPushAtTurnEnd")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("gpt")} type="checkbox" checked={s.gitPushAtTurnEnd} onChange={(e) => set("gitPushAtTurnEnd", e.target.checked)} data-testid="git-push-at-turn-end" />
           {s.gitPushAtTurnEnd ? "On: branch and WIP pushed, small archives" : "Off: full archives"}
         </label>
@@ -1131,8 +1272,8 @@ function LimitsPanel({
       <Row
         id={fid("la")}
         label="Tasks running at once on this computer"
-        help={`Tasks of projects that run on this computer (project settings › Runs on) that may run at once here, every project's together; a project's own Tasks running at once limits only its own tasks within this. They have their own queue: they never take a box slot or count toward Max tasks running at once. Each task works in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"} (BOXYARD_LOCAL_DIR). ${LOCAL_UNSANDBOXED}`}
-        hint={hint("localAgents")}
+        help={`Tasks of projects that run on this computer (project settings › Runs on) that may run at once here, every project's together; a project's own Tasks running at once limits only its own tasks within this. ${LOCAL_UNSANDBOXED}`} more={`They have their own queue: they never take a box slot or count toward Max tasks running at once. Each task works in its own folder in ${server.data?.localDir ?? "~/boxyard-workspaces"} (BOXYARD_LOCAL_DIR).`}
+        {...row("localAgents")}
       >
         <input
           id={fid("la")}
@@ -1147,18 +1288,19 @@ function LimitsPanel({
       <Row
         id={fid("lfk")}
         label="Task folders kept on this computer"
-        help={`Most task folders in ${server.data?.localDir ?? "~/boxyard-workspaces"}, and on each SSH machine. Past it, the oldest done tasks' folders are archived and removed, but only when all their work is pushed. A task that isn't done keeps its folder. 0 = no limit.`}
-        hint={hint("localFoldersKept")}
+        help={`Most task folders in ${server.data?.localDir ?? "~/boxyard-workspaces"}, and on each SSH machine. 0 = no limit.`}
+        more="Past it, the oldest done tasks' folders are archived and removed, but only when all their work is pushed. A task that isn't done keeps its folder."
+        {...row("localFoldersKept")}
       >
         <input id={fid("lfk")} type="number" min={0} max={1000} className={inputClass} {...num("localFoldersKept")} data-testid="local-folders-kept" />
       </Row>
       <Row
         id={fid("lbc")}
         label="Free a finished task's build output"
-        help="Once a task is done and all its work is pushed, remove the dependency and build output git ignores (node_modules, dist, build, .next, caches) from its folder within a couple of minutes. A task that isn't done keeps it (only low-disk cleanup frees it), and so does a folder a process still uses. Scratch folders and captures (tmp, shots, perf, reports) stay. The task's log and the agent's next prompt say what went, so it reinstalls first."
-        hint={hint("localBuildCleanup")}
+        help="Once a task is done and all its work is pushed, remove the dependency and build output git ignores (node_modules, dist, build, .next, caches) from its folder within a couple of minutes." more="A task that isn't done keeps it (only low-disk cleanup frees it), and so does a folder a process still uses. Scratch folders and captures (tmp, shots, perf, reports) stay. The task's log and the agent's next prompt say what went, so it reinstalls first."
+        {...row("localBuildCleanup")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("lbc")} type="checkbox" checked={s.localBuildCleanup} onChange={(e) => set("localBuildCleanup", e.target.checked)} data-testid="local-build-cleanup" />
           {s.localBuildCleanup ? "On: freed once the work is pushed" : "Off: only low-disk cleanup frees it"}
         </label>
@@ -1166,8 +1308,9 @@ function LimitsPanel({
       <Row
         id={fid("ldf")}
         label="Low-disk cleanup (GB free)"
-        help="When the disk holding the task folders has less free space than this, Box Yard frees build output (an idle task's too, unless a process still uses its folder) and then removes the oldest done tasks' folders, until there's this much free again. Each task's log says what went. It checks every couple of minutes. 0 = off."
-        hint={hint("localDiskMinFreeGb")}
+        help="When the disk holding the task folders has less free space than this, Box Yard frees space until there's this much again. 0 = off."
+        more="It frees build output first (an idle task's too, unless a process still uses its folder), then removes the oldest done tasks' folders. Each task's log says what went. It checks every couple of minutes."
+        {...row("localDiskMinFreeGb")}
       >
         <input id={fid("ldf")} type="number" min={0} max={100_000} step={5} className={inputClass} {...num("localDiskMinFreeGb")} data-testid="local-disk-min-free" />
       </Row>
@@ -1195,7 +1338,7 @@ function LimitsPanel({
 function UpstashBoxRows({
   s,
   set,
-  hint,
+  row,
   field,
   fid,
   sources,
@@ -1207,7 +1350,7 @@ function UpstashBoxRows({
 }: {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: Hint
+  row: RowMeta
   field: FieldCheck
   fid: (k: string) => string
   sources?: Record<keyof Settings, SettingSource>
@@ -1238,23 +1381,24 @@ function UpstashBoxRows({
         id={fid("ws")}
         wide
         label="Worker size"
-        help="Upstash Box size for newly created boxes, unless a project sets its own preferred size or auto-sizing (below) picked one from its runs. Existing boxes keep their size until resized from the Boxes page."
-        hint={hint("workerSize")}
+        help="Upstash Box size for newly created boxes."
+        more="A project's own preferred size wins, and so does one auto-sizing (below) picked from its runs. Existing boxes keep their size until resized from the Boxes page."
+        {...row("workerSize")}
       >
         <UpstashSizes value={s.workerSize} onPick={(size) => set("workerSize", size)} />
       </Row>
       <Row
         id={fid("are")}
         label="Size and resize boxes automatically"
-        help="Box Yard sizes each project's new boxes from what its runs used (from 3 runs: the smallest with RAM for 1.25 × the peak of the last 14 days, bigger for disk or busy CPU), unless the project sets its own Box size, and a turn that runs out of memory carries on once on a bigger box. The Coordinator, and Captains for boxes their project uses, may also resize a box with resize_box: up when it keeps running low on disk, down when it sits mostly empty. They never stop running tasks for it, and every resize they make sends you a notice with their reason."
-        hint={hint("autoResizeEnabled")}
+        help="Box Yard sizes each project's new boxes from what its runs used, unless the project sets its own Box size." more="From 3 runs: the smallest size with RAM for 1.25 × the peak of the last 14 days, bigger for disk or busy CPU. A turn that runs out of memory carries on once on a bigger box. The Coordinator, and Captains for boxes their project uses, may also resize a box with resize_box: up when it keeps running low on disk, down when it sits mostly empty. They never stop running tasks for it, and every resize they make sends you a notice with their reason."
+        {...row("autoResizeEnabled")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("are")} type="checkbox" checked={s.autoResizeEnabled} onChange={(e) => set("autoResizeEnabled", e.target.checked)} data-testid="auto-resize" />
-          {s.autoResizeEnabled ? "Allowed" : "Off: new boxes are Worker size, and only you resize boxes"}
+          {s.autoResizeEnabled ? "On: Box Yard sizes and resizes boxes" : "Off: new boxes are Worker size, and only you resize boxes"}
         </label>
       </Row>
-      <Row id={fid("arm")} label="Max size it may choose" help="resize_box refuses anything bigger. You can still pick any size yourself on the Boxes page." hint={hint("autoResizeMaxSize")}>
+      <Row id={fid("arm")} label="Max size it may choose" help="resize_box refuses anything bigger. You can still pick any size yourself on the Boxes page." {...row("autoResizeMaxSize")}>
         <Select
           id={fid("arm")}
           className="w-full disabled:opacity-50"
@@ -1273,10 +1417,11 @@ function UpstashBoxRows({
       <Row
         id={fid("pre")}
         label="Resize an idle box when no big-enough box is free"
-        help="For projects with a box size: when the pool is at Max boxes and no box of that size has room, Box Yard may grow an idle smaller box (no agent running on it) to that size and run the task there. Larger boxes cost more. Off, the task waits for a box of its size; it never runs on a smaller one."
-        hint={hint("placementResizeEnabled")}
+        help="For projects with a box size: when the pool is at Max boxes and no box of that size has room, Box Yard may grow an idle smaller box (no agent running on it) to that size and run the task there."
+        more="Larger boxes cost more. Off, the task waits for a box of its size; it never runs on a smaller one."
+        {...row("placementResizeEnabled")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input
             id={fid("pre")}
             type="checkbox"
@@ -1291,8 +1436,9 @@ function UpstashBoxRows({
       <Row
         id={fid("spb")}
         label="Tasks running at once per box"
-        help={`Tasks that may run at the same time inside one box, every project's together (each task runs its own Claude Code agent). A project's own Tasks running at once (project settings) limits only its own tasks within this. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].slotsPerBox}`).join(", ")}.`}
-        hint={hint("slotsPerBox")}
+        help="Tasks that may run at the same time inside one box, every project's together (each task runs its own Claude Code agent)."
+        more={`A project's own Tasks running at once (project settings) limits only its own tasks within this. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].slotsPerBox}`).join(", ")}.`}
+        {...row("slotsPerBox")}
       >
         <BoxLimitInput id={fid("spb")} max={20} {...limitField("slotsPerBox")} />
       </Row>
@@ -1300,7 +1446,7 @@ function UpstashBoxRows({
         id={fid("mr")}
         label="Task folders kept per box"
         help={`Task folders kept on one box (running or not) before older archived workspaces are parked. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].maxResidentPerBox}`).join(", ")}.`}
-        hint={hint("maxResidentPerBox")}
+        {...row("maxResidentPerBox")}
       >
         <BoxLimitInput id={fid("mr")} max={200} {...limitField("maxResidentPerBox")} />
       </Row>
@@ -1458,13 +1604,13 @@ function OpenUsage() {
 function CostsPanel({
   s,
   set,
-  hint,
+  row,
   field,
   fid,
 }: {
   s: Settings
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void
-  hint: Hint
+  row: RowMeta
   field: FieldCheck
   fid: (k: string) => string
 }) {
@@ -1502,19 +1648,20 @@ function CostsPanel({
       <Row
         id={fid("scm")}
         label="Box spend in the header"
-        help="The Coordinator's header shows the cloud meter: boxes running, what they cost an hour and today's spend against the daily limit. Off, the Boxes page still shows it, and the limit's notices and Raise today's limit work the same."
-        hint={hint("showCloudMeter")}
+        help="The Coordinator's header shows the cloud meter: boxes running, what they cost an hour and today's spend against the daily limit."
+        more="Off, the Boxes page still shows it, and the limit's notices and Raise today's limit work the same."
+        {...row("showCloudMeter")}
       >
-        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input id={fid("scm")} type="checkbox" checked={Boolean(s.showCloudMeter)} onChange={(e) => set("showCloudMeter", e.target.checked)} data-testid="show-cloud-meter" />
-          {s.showCloudMeter ? "Shown in the Coordinator's header" : "Off: only on the Boxes page"}
+          {s.showCloudMeter ? "On: shown in the Coordinator's header" : "Off: only on the Boxes page"}
         </label>
       </Row>
       <Row
         id={fid("daily-budget")}
         label="Daily cloud limit"
-        help="What boxes may cost per day, by the CPU they use (Claude isn't counted). At 80% Box Yard says so; at the limit new boxes wait until midnight while work already running goes on, and the cloud meter (on the Boxes page, and in the Coordinator's header if shown) offers Raise today's limit. 0: no daily limit."
-        hint={hint("budget", ["budget.dailyUsd"])}
+        help="What boxes may cost per day, by the CPU they use (Claude isn't counted). 0: no daily limit." more="At 80% Box Yard says so; at the limit new boxes wait until midnight while work already running goes on, and the cloud meter (on the Boxes page, and in the Coordinator's header if shown) offers Raise today's limit."
+        {...row("budget", ["budget.dailyUsd"])}
       >
         {money("budget.dailyUsd", s.budget.dailyUsd, (n) => set("budget", { ...s.budget, dailyUsd: n }), fid("daily-budget"))}
       </Row>
@@ -1522,14 +1669,14 @@ function CostsPanel({
         id={fid("monthly-budget")}
         label="Monthly cloud limit"
         help="Box spend over the last 30 days. At it, new boxes wait until the spend drops under it or you raise it. 0: no monthly limit."
-        hint={hint("budget", ["budget.monthlyUsd"])}
+        {...row("budget", ["budget.monthlyUsd"])}
       >
         {money("budget.monthlyUsd", s.budget.monthlyUsd, (n) => set("budget", { ...s.budget, monthlyUsd: n }), fid("monthly-budget"))}
       </Row>
       <Row
         label="Active CPU rates"
-        help="Upstash bills the CPU a box uses, per core-hour: a box busy on 2 cores for an hour uses 2. Box Yard measures each box's CPU and prices it at these rates, unless Upstash reports its own charge for the box. Defaults match the public Small / Medium / Large rates."
-        hint={hint("costRates", rates("boxActiveCpuHourlyUsd"))}
+        help="Upstash bills the CPU a box uses, per core-hour: a box busy on 2 cores for an hour uses 2." more="Box Yard measures each box's CPU and prices it at these rates, unless Upstash reports its own charge for the box. Defaults match the public Small / Medium / Large rates."
+        {...row("costRates", rates("boxActiveCpuHourlyUsd"))}
       >
         <div className="grid grid-cols-3 gap-2">
           {BOX_SIZES.map((size) => (
@@ -1545,7 +1692,7 @@ function CostsPanel({
       <Row
         label="Keep-alive rates"
         help="A keep-alive box costs its monthly fee and no CPU charge, prorated by uptime, when the provider reports keep-alive is on."
-        hint={hint("costRates", rates("boxKeepAliveMonthlyUsd"))}
+        {...row("costRates", rates("boxKeepAliveMonthlyUsd"))}
       >
         <div className="grid grid-cols-3 gap-2">
           {BOX_SIZES.map((size) => (
@@ -1558,11 +1705,11 @@ function CostsPanel({
           ))}
         </div>
       </Row>
-      <Row id={fid("storage")} label="Storage rate" help="Storage and snapshot cost per GB-month. Disk use is probed from boxes when available." hint={hint("costRates", ["costRates.boxStorageGbMonthUsd"])}>
+      <Row id={fid("storage")} label="Storage rate" help="Storage and snapshot cost per GB-month. Disk use is probed from boxes when available." {...row("costRates", ["costRates.boxStorageGbMonthUsd"])}>
         {money("costRates.boxStorageGbMonthUsd", s.costRates.boxStorageGbMonthUsd, (n) => set("costRates", { ...s.costRates, boxStorageGbMonthUsd: n }), fid("storage"))}
       </Row>
       <div className="mt-2 rounded-xl border border-zinc-900 bg-zinc-900/40 p-4 text-xs leading-relaxed text-zinc-400">
-        Claude Code costs come from the CLI's result JSON and don't count against the cloud limits. A box's cost is Upstash's own charge when its API reports one, its measured CPU at these rates when that's more, and the time a turn ran (labeled an estimate) while neither is known. RunPod GPU pods, Vast.ai instances and Daytona sandboxes have their own hourly caps (Settings › RunPod GPU, Settings › Vast.ai GPU, Settings › Daytona); Daytona sandboxes also count toward the cloud limits, at Box Yard's estimate of their price.
+        Claude Code costs come from the CLI's result JSON and don't count against the cloud limits. A box's cost is Upstash's own charge when its API reports one, its measured CPU at these rates when that's more, and the time a turn ran (labeled an estimate) while neither is known. RunPod GPU pods, Vast.ai instances and Daytona sandboxes have their own hourly caps (<SettingsLink section="runpod">Settings › RunPod GPU</SettingsLink>, <SettingsLink section="vast">Settings › Vast.ai GPU</SettingsLink>, <SettingsLink section="daytona">Settings › Daytona</SettingsLink>); Daytona sandboxes also count toward the cloud limits, at Box Yard's estimate of their price.
       </div>
     </Panel>
   )
@@ -1588,7 +1735,7 @@ function AboutRow({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function AboutPanel() {
+function AboutPanel({ onReset, resetting }: { onReset: () => void; resetting: boolean }) {
   const health = useHealth()
   const server = useSettings()
   const h = health.data
@@ -1628,6 +1775,14 @@ function AboutPanel() {
         </AboutRow>
       </dl>
       <p className="mt-6 text-xs text-zinc-500">Time zone, upload size, provider and data directory come from env vars on the server (see the README).</p>
+      {/* Not a draft: it happens at once, after its own confirmation. */}
+      <div className="mt-6 border-t border-zinc-900 pt-4">
+        <Row label="Reset all settings" help="Forgets every value marked “saved here”, so env vars and defaults apply again. Credentials, identities, connectors, hooks and projects stay as they are.">
+          <Button type="button" variant="danger" loading={resetting} onClick={onReset} data-testid="reset-settings">
+            Reset all settings…
+          </Button>
+        </Row>
+      </div>
     </Panel>
   )
 }

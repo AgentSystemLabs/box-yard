@@ -5,11 +5,13 @@ import { ShieldAlert } from "lucide-react"
 import { newClientId, useAgentSettings, useCreateProject, useMachines, useSetup } from "../lib/queries"
 import { Modal } from "./Modal"
 import { MachineLabelPicker } from "./MachineSettings"
-import { Button, Field, LineIcon, Select, inputClass, parseEnv } from "./ui"
+import { SAVE_IDLE, StackedField } from "./SettingsBlocks"
+import { Button, LineIcon, Select, inputClass, parseEnv } from "./ui"
 import { LOCAL_UNSANDBOXED, RUNNERS, RUNNER_LABEL, type Runner } from "../../../shared/runner"
 import { AGENT_CLIS, AGENT_CLI_LABEL, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 
-export function NewProjectDialog({ onClose }: { onClose: () => void }) {
+/** `openChat` off leaves its opener in place (Settings › Projects, whose list shows the new project). */
+export function NewProjectDialog({ onClose, openChat = true }: { onClose: () => void; openChat?: boolean }) {
   const [, navigate] = useLocation()
   const create = useCreateProject()
   const [name, setName] = useState("")
@@ -33,11 +35,13 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
+    // Opened from Settings, it's inside Settings' own form in React's tree: the submit ends here, or Settings would save.
+    e.stopPropagation()
     if (!name.trim()) return
     const id = newClientId("prj")
     create.mutate({ id, name: name.trim(), description, repo: repo.trim() || null, baseBranch, env: parseEnv(env), ...(picked && { runner: picked }), ...(runner === "ssh" ? { machineLabel: machineLabel || null } : {}), ...(agentCli && { agentCli }) })
     onClose()
-    navigate(projectChatHref(id))
+    if (openChat) navigate(projectChatHref(id))
   }
 
   const dirty = Boolean(name || description || repo || env || baseBranch !== "main" || picked || machineLabel || agentCli)
@@ -54,34 +58,33 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={!name.trim()}>
+          <Button type="submit" variant="primary" disabled={!name.trim()} className={SAVE_IDLE}>
             Create project
           </Button>
         </>
       }
     >
-      <Field label="Name">
+      <StackedField label="Name">
         <input autoFocus className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="marketing-site" />
-      </Field>
-      <Field label="Description" hint="Agents in this project see this.">
+      </StackedField>
+      <StackedField label="Description" hint="Agents in this project see this.">
         <textarea className={inputClass} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
-      </Field>
-      <div className="flex flex-col gap-4 sm:flex-row sm:gap-3">
-        <div className="min-w-0 flex-1">
-          <Field label="GitHub repo (optional)" hint="owner/name. Leave empty for non-coding work.">
+      </StackedField>
+      {/* Side by side by the dialog's own width, not the window's: at 125% zoom the two would share a sliver. */}
+      <div className="@container">
+        <div className="grid gap-4 @md:grid-cols-[minmax(0,1fr)_9rem] @md:gap-3">
+          <StackedField label="GitHub repo (optional)" hint="owner/name. Leave empty for non-coding work.">
             <input className={inputClass} value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repo" />
-          </Field>
-        </div>
-        <div className="sm:w-36 sm:shrink-0">
-          <Field label="Base branch">
+          </StackedField>
+          <StackedField label="Base branch">
             <input className={inputClass} value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} />
-          </Field>
+          </StackedField>
         </div>
       </div>
       {runner && (
         <div className="space-y-2">
-          <Field label="Runs on" hint="Change it any time in Settings › Projects.">
-            <Select className="w-full sm:w-80" value={runner} onChange={(e) => setPicked(e.target.value as Runner)} data-testid="new-project-runner">
+          <StackedField label="Runs on" hint="You can change it later in the project's settings.">
+            <Select className="w-full" value={runner} onChange={(e) => setPicked(e.target.value as Runner)} data-testid="new-project-runner">
               {RUNNERS.map((r) => (
                 <option key={r} value={r} disabled={(r === "box" && noUpstash) || (r === "gpu" && noRunPod) || (r === "ssh" && noMachines)}>
                   {RUNNER_LABEL[r]}
@@ -103,7 +106,7 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
                 </option>
               ))}
             </Select>
-          </Field>
+          </StackedField>
           {runner === "local" && (
             <p role="note" className="flex items-start gap-2 text-xs leading-relaxed text-amber-200/90">
               <LineIcon icon={ShieldAlert} className="h-3.5 w-3.5 text-amber-300" />
@@ -111,14 +114,14 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
             </p>
           )}
           {runner === "ssh" && (
-            <Field label="Which machines" hint="Agents run as the user Box Yard logs in as there: they're not sandboxed.">
+            <StackedField label="Which machines" hint="Agents run as the user Box Yard logs in as there: they're not sandboxed.">
               <MachineLabelPicker value={machineLabel} onChange={setMachineLabel} />
-            </Field>
+            </StackedField>
           )}
         </div>
       )}
-      <Field label="Agent" hint="Claude Code, Codex, Cursor or OpenCode for its tasks. Change it any time in Settings › Projects.">
-        <Select className="w-full sm:w-80" value={agentCli} onChange={(e) => setAgentCli(e.target.value as AgentCli | "")} data-testid="new-project-agent-cli">
+      <StackedField label="Agent" hint="Claude Code, Codex, Cursor or OpenCode for its tasks.">
+        <Select className="w-full" value={agentCli} onChange={(e) => setAgentCli(e.target.value as AgentCli | "")} data-testid="new-project-agent-cli">
           <option value="">Settings default ({AGENT_CLI_LABEL[defaultAgentCli]})</option>
           {AGENT_CLIS.map((c) => (
             <option key={c} value={c}>
@@ -126,10 +129,10 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
             </option>
           ))}
         </Select>
-      </Field>
-      <Field label="Env vars (optional)" hint="KEY=value, one per line. Every task in the project gets them.">
+      </StackedField>
+      <StackedField label="Env vars (optional)" hint="KEY=value, one per line. Every task in the project gets them.">
         <textarea className={`${inputClass} font-mono text-xs`} rows={3} value={env} onChange={(e) => setEnv(e.target.value)} placeholder="DATABASE_URL=..." />
-      </Field>
+      </StackedField>
     </Modal>
   )
 }

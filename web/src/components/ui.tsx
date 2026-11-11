@@ -1002,8 +1002,9 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
   )
 }
 
+// Focus: the border, plus the app's one solid outline (:focus-visible in styles.css). No ring of its own: that drew two.
 export const inputClass =
-  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
+  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
 
 const SELECT_SIZE = {
   md: "min-h-11 rounded-lg py-2 pr-9 pl-3 text-base sm:min-h-0 sm:text-sm",
@@ -1016,7 +1017,7 @@ export function Select({ size = "md", className, ...props }: Omit<ComponentProps
     <select
       {...props}
       className={cx(
-        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-500 focus:border-yard-500 focus:ring-2 focus:ring-yard-500/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-500 focus:border-yard-500 disabled:cursor-not-allowed disabled:opacity-50",
         SELECT_SIZE[size],
         className,
       )}

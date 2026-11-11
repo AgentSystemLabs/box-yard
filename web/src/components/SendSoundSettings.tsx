@@ -18,11 +18,12 @@ export function SendSoundRow({ fid, value, onChange }: { fid: (k: string) => str
     <Row
       id={fid("ss")}
       label="Sound on send"
-      help="A short, soft two-note sound once a message or new task is accepted, so you know it went. A failed send plays a lower one instead. Under a voice line it plays quieter. On phones that support it, a light tap too."
+      help="A short, soft two-note sound once a message or new task is accepted, so you know it went."
+      more="A failed send plays a lower one instead. Under a voice line it plays quieter. On phones that support it, a light tap too."
     >
       <label className="flex items-center gap-2 text-sm text-zinc-200">
         <input id={fid("ss")} type="checkbox" checked={value.enabled} onChange={(e) => onChange({ ...value, enabled: e.target.checked })} />
-        {value.enabled ? "On" : "Off"}
+        {value.enabled ? "On: a sound when a send goes through" : "Off: sends are silent"}
       </label>
       <Slider
         id={fid("ssv")}
@@ -35,7 +36,7 @@ export function SendSoundRow({ fid, value, onChange }: { fid: (k: string) => str
         onChange={(volume) => onChange({ ...value, volume })}
         format={(v) => `${Math.round(v * 100)}%`}
       />
-      <div className="flex gap-1.5">
+      <div role="group" aria-label="Preview sounds" className="flex gap-1.5">
         <Button type="button" size="sm" variant="ghost" disabled={off} onClick={() => preview("sent")} title="Play the sound for a send that went through">
           <Play className="h-3.5 w-3.5" /> Sent
         </Button>
