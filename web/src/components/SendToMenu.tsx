@@ -2,18 +2,22 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type R
 import { createPortal, flushSync } from "react-dom"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowUpRight, X } from "lucide-react"
-import type { Attachment, Project } from "../../../shared/types"
+import type { Attachment, Project, Task } from "../../../shared/types"
 import { useDraft, writeDraft } from "../lib/composerDraft"
 import { api } from "../lib/api"
 import { fetchTasks, keys, newClientId, QUIET, useSendCaptainMessage, useSendChat, useSendTaskMessage } from "../lib/queries"
 import { sendDestinations, sendToMention, type SendDestination } from "../lib/sendTo"
+import { searchWords } from "../../../shared/runTargetSearch"
 import { pickerKeyDown } from "../lib/pickerKeys"
 import { useAbove } from "../lib/useAbove"
 import { chordLabel, sendToChord } from "../lib/shortcuts"
 import { isMacPlatform } from "../lib/dictation"
-import { AppLink, cx } from "./ui"
+import { AppLink, STATUS, cx } from "./ui"
 import { Loading } from "./Loading"
-import { Modal } from "./Modal"
+import { Marked, PickerSheet, groupTogether } from "./PickerSheet"
+import { CaptainIcon } from "./CaptainIcon"
+import { Helm } from "./ShipIcons"
+import { TaskStatusIcon } from "./TaskIcon"
 import type { ComposerExtra } from "./Composer"
 
 export const sendToHint = () => `Send to… (type > or ${chordLabel(sendToChord, isMacPlatform(navigator.platform))})`
@@ -40,7 +44,11 @@ export function useSendTo({ enabled, draftKey, value, setValue, input, onPick }:
   const projects = useQuery({ queryKey: keys.projects, queryFn: () => api<Project[]>("/api/projects"), enabled: open, ...QUIET })
   const tasks = useQuery({ queryKey: keys.tasks, queryFn: fetchTasks, enabled: open, ...QUIET })
   const search = sheet ? query : mention?.query ?? ""
-  const matches = useMemo(() => sendDestinations(projects.data ?? [], tasks.data ?? [], search), [projects.data, tasks.data, search])
+  // The sheet heads its rows Chats and Tasks: a search keeps each kind together, the best hit's kind first.
+  const matches = useMemo(() => {
+    const found = sendDestinations(projects.data ?? [], tasks.data ?? [], search)
+    return sheet ? groupTogether(found, destinationGroup) : found
+  }, [projects.data, tasks.data, search, sheet])
   const options = matches.slice(0, 100)
   const loading = projects.isPending || tasks.isPending
   const error = projects.isError || tasks.isError
@@ -96,7 +104,7 @@ export function useSendTo({ enabled, draftKey, value, setValue, input, onPick }:
     })
   }
   return {
-    total: matches.length, enabled, chosen, confirmed, open, sheet, query, setQuery, id, options, active, setActive, loading, error,
+    total: matches.length, tasks: tasks.data, enabled, chosen, confirmed, open, sheet, query, setQuery, id, options, active, setActive, loading, error,
     pick, close, openSheet, onCaret, onFocus: (next: boolean) => { if (enabled) { setFocused(next); if (next) onCaret() } }, onKeyDown, send,
     clear: (focus = true) => { choose(null); if (focus) input.current?.focus() },
     retry: () => { void projects.refetch(); void tasks.refetch() },
@@ -109,6 +117,8 @@ export function useSendTo({ enabled, draftKey, value, setValue, input, onPick }:
 }
 
 type Picker = ReturnType<typeof useSendTo>
+
+const destinationGroup = (d: SendDestination) => (d.kind === "task" ? "Tasks" : "Chats")
 
 export function SendToNote({ picker }: { picker: Picker }) {
   const destination = picker.chosen ?? picker.confirmed
@@ -143,17 +153,53 @@ function Choices({ picker, maxHeight }: { picker: Picker; maxHeight?: number }) 
   </>
 }
 
+/** One destination in the sheet: whose chat it is by its icon, a task's project and state under its title. */
+function DestinationRow({ d, task, on, words }: { d: SendDestination; task: Task | undefined; on: boolean; words: string[] }) {
+  const tint = on ? "text-yard-400" : "text-zinc-500"
+  const detail = task ? `${d.detail.split(" · ")[0]} · ${STATUS[task.status].label}${task.status === "done" ? " · sending reopens it" : ""}` : d.detail
+  return <>
+    {d.kind === "coordinator" ? <Helm className={cx("h-4 w-4 shrink-0", tint)} aria-hidden />
+      : d.kind === "captain" ? <CaptainIcon projectId={d.id} className={cx("h-4 w-4 shrink-0", tint)} />
+      : task ? <TaskStatusIcon task={task} size="sm" /> : <ArrowUpRight className={cx("h-4 w-4 shrink-0", tint)} aria-hidden />}
+    <span className="flex min-w-0 flex-1 flex-col">
+      <span className="min-w-0 truncate"><Marked text={d.label} words={words} /></span>
+      <span className="min-w-0 truncate text-xs text-zinc-500"><Marked text={detail} words={words} /></span>
+    </span>
+  </>
+}
+
+/** The Send to… button's and chord's sheet: the shared picker (PickerSheet), searched by a chat's or a task's words. */
+function SendToSheet({ picker, input }: { picker: Picker; input: RefObject<HTMLTextAreaElement | null> }) {
+  const tasks = useMemo(() => new Map(picker.tasks?.map((t) => [t.id, t])), [picker.tasks])
+  const words = useMemo(() => searchWords(picker.query), [picker.query])
+  return <PickerSheet
+    testId="send-to-sheet"
+    trail={["Send to…"]}
+    onClose={picker.close}
+    returnFocus={() => input.current}
+    query={picker.query}
+    onQuery={picker.setQuery}
+    placeholder="Search chats and tasks"
+    searchLabel="Search destinations"
+    listId={picker.id}
+    options={picker.options}
+    active={picker.active}
+    setActive={picker.setActive}
+    keyOf={(d) => d.key}
+    groupOf={destinationGroup}
+    onPick={picker.pick}
+    row={(d, on) => <DestinationRow d={d} task={d.kind === "task" ? tasks.get(d.id) : undefined} on={on} words={words} />}
+    status={picker.loading ? <Loading kind="rows" label="Loading destinations" className="px-3 py-3" />
+      : picker.error ? <div role="status" className="px-4 py-2 text-sm text-amber-300">Couldn't load destinations. <button type="button" onClick={picker.retry} className="min-h-11 underline">Try again</button></div> : undefined}
+    empty={<>No chat or task matches “{picker.query.trim()}”.</>}
+    note="Picks where this draft goes. You stay in this chat."
+    more={picker.total > 100 && <p className="px-4 py-2 text-xs text-zinc-400">Type more to narrow {picker.total} destinations.</p>}
+  />
+}
+
 export function SendToMenu({ picker, anchor, input }: { picker: Picker; anchor: RefObject<HTMLElement | null>; input: RefObject<HTMLTextAreaElement | null> }) {
   const at = useAbove(anchor)
-  if (picker.sheet) return <Modal title="Send to…" description="Choose where this draft goes. Enter in the composer sends it; you stay in this chat." placement="sheet" size="md" onClose={picker.close} returnFocus={() => input.current}>
-    <input autoFocus aria-label="Search destinations" placeholder="Search tasks, Captains or Coordinator…" value={picker.query} onChange={(e) => picker.setQuery(e.target.value)}
-      role="combobox" aria-autocomplete="list" aria-expanded aria-controls={picker.id} aria-activedescendant={picker.options[picker.active] ? `${picker.id}-${picker.active}` : undefined}
-      onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing || e.keyCode === 229) return
-        pickerKeyDown(e as unknown as KeyboardEvent<HTMLTextAreaElement>, { options: picker.options, active: picker.active, setActive: picker.setActive, disabled: () => picker.loading || picker.error, pick: picker.pick, escape: picker.close })
-      }} className="mb-2 min-h-11 w-full rounded-lg border border-control bg-zinc-950 px-3 text-base text-zinc-100 focus:outline-yard-500" />
-    <Choices picker={picker} maxHeight={320} />
-  </Modal>
+  if (picker.sheet) return <SendToSheet picker={picker} input={input} />
   if (!at) return null
   return createPortal(<div data-testid="send-to-menu" style={{ left: at.left, width: at.width, bottom: at.bottom }} onMouseDown={(e) => e.preventDefault()}
     className="fixed z-50 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-xl">

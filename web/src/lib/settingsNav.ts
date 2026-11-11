@@ -17,7 +17,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   {
     key: "orchestrator",
     label: "Coordinator",
-    description: "The agent and model behind the chat that runs the yard and the per-project Captains, the Captains' icon, the model their quick questions run on, the project notes the Captains curate, when they compact their context, how the chat's task cards fold away, and what a merged PR does.",
+    description: "The Coordinator chat and every project's Captain: agent, model, icon, notes, compaction, merges.",
     fields: [
       "orchestratorCli",
       "orchestratorModel",
@@ -42,80 +42,72 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   {
     key: "projects",
     label: "Projects",
-    description: "Project configuration: repository, environment values, identity, runner and limits. Each project opens its own form; changes apply only when you save.",
+    description: "Each project's repo, env vars, identity, runner and limits, in its own form.",
     fields: [],
   },
   {
     key: "agents",
     label: "Box agents",
-    description: "Defaults for the agents (Claude Code, Codex, Cursor or OpenCode) that work on tasks inside boxes.",
+    description: "Defaults for the agents that work on tasks: Claude Code, Codex, Cursor or OpenCode.",
     fields: ["ownerName", "agentCli", "agentModel", "agentCodexModel", "agentCursorModel", "agentOpencodeModel", "agentCodexEffort", "agentEffort", "agentRoutingConfig", "agentAutoCompact", "subtaskMaxDepth", "subtaskMaxChildren"],
   },
   {
     key: "runners",
     label: "Box providers",
-    description:
-      "Where new projects run and at what size, the Default GPU cloud @gpu tasks use, and each provider's own settings. Existing projects keep their own Runs on choice.",
+    description: "Where new projects run, the Default GPU cloud, and each provider's own settings.",
     fields: ["gpuProvider"],
   },
   {
     key: "local",
     label: "This computer",
     parent: "runners",
-    description: "Tools and logins for tasks running directly on this computer. Each task has its own workspace folder.",
+    description: "Tools and logins for tasks running directly on this computer.",
     fields: [],
   },
   {
     key: "upstash",
     label: "Upstash boxes",
     parent: "runners",
-    description:
-      "Isolated cloud boxes, started when a task needs one: the key, the size new boxes get, resizing, and how many tasks each box runs and keeps. The pool's ceiling, headroom and cleanup are in Settings › Boxes & limits.",
+    description: "Isolated cloud boxes: the key, box size, resizing, and tasks per box.",
     fields: ["workerSize", "autoResizeEnabled", "autoResizeMaxSize", "placementResizeEnabled", "slotsPerBox", "maxResidentPerBox"],
   },
   {
     key: "credentials",
     label: "Credentials",
-    description:
-      "The Claude, Codex, Cursor, OpenCode and GitHub credentials Box Yard works with. Provider keys are in Box providers. They're kept on this server and never sent back to the browser. An env var on the server always wins. Saved changes apply from the next turn, no restart needed.",
+    description: "Claude, Codex, Cursor, OpenCode and GitHub logins, kept on this server and never sent back.",
     fields: [],
   },
   {
     key: "identities",
     label: "Identities",
-    description:
-      "Who each project acts as on GitHub: the account its token belongs to, the git author its commits get and the key that signs them, and optionally its own Claude login. Default is Settings › Credentials. Tokens and keys go in and never come back: only fingerprints show.",
+    description: "Who each project acts as on GitHub: account, git author, signing key, Claude login.",
     fields: [],
   },
   {
     key: "connectors",
     label: "Connectors",
-    description:
-      "Other MCP servers the Coordinator, Captains or agents get, like Gmail, Notion or Linear: what they connect to, how they sign in, and who gets them. Tokens and secrets go in and never come back: only fingerprints show. Changes apply from the next session or turn.",
+    description: "Other MCP servers, like Gmail, Notion or Linear, and who gets them.",
     fields: [],
   },
   {
     key: "docker",
     parent: "runners",
     label: "Docker",
-    description:
-      "Isolated containers on this computer for projects whose Runs on is Docker container: one per project, from an image built here, with its own CPU and memory limits. It stops when idle and keeps its workspaces in a volume.",
+    description: "Isolated containers on this computer, one per project, stopped when idle.",
     fields: [],
   },
   {
     key: "daytona",
     parent: "runners",
     label: "Daytona",
-    description:
-      "Managed cloud sandboxes, CPU only or with a GPU: a project on Daytona gets a sandbox of its own when a task needs it, sized here, and it's deleted when idle. Billed per second for the CPU, memory, disk and GPU it has while it runs.",
+    description: "Managed cloud sandboxes, CPU only or with a GPU, billed per second.",
     fields: [],
   },
   {
     key: "machines",
     parent: "runners",
     label: "SSH machines",
-    description:
-      "Your own computers (an old laptop, a GPU tower) that Box Yard reaches over SSH and runs agents on, like this computer but elsewhere. Label them (laptops, gpu) and a project's Runs on, or a task's runs_on, picks a free machine with that label. Agents there aren't sandboxed: they run as the user Box Yard logs in as.",
+    description: "Your own computers, reached over SSH. Agents there aren't sandboxed.",
     fields: [],
   },
   {
@@ -123,8 +115,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
     parent: "runners",
     group: "GPU clouds",
     label: "RunPod GPU",
-    description:
-      "GPU machines for projects that need one (a WebGL game, ML work): a project whose Runs on is RunPod GPU gets a pod of its own that starts when a task needs it and stops when idle.",
+    description: "A GPU pod per project, started when a task needs it and stopped when idle.",
     fields: [],
   },
   {
@@ -132,22 +123,20 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
     parent: "runners",
     group: "GPU clouds",
     label: "Vast.ai GPU",
-    description:
-      "The other GPU cloud: Vast.ai's marketplace has more GPU types and stock, often cheaper. A GPU project on Vast.ai rents an instance of its own when a task needs it and destroys it when idle. Hosts are other people's machines, so reliability and price vary.",
+    description: "Vast.ai's GPU marketplace: more GPU types, often cheaper, hosts vary.",
     fields: [],
   },
   {
     key: "hooks",
     label: "Hooks",
     description:
-      "Global hooks run on every project's task events. Project hooks are on each project's Hooks tab.",
+      "Global hooks: automations the Coordinator runs on every project's task events. Project hooks are on each project's Hooks tab.",
     fields: [],
   },
   {
     key: "limits",
     label: "Boxes & limits",
-    description:
-      "The box pool's ceiling and how many tasks run at once, disk and memory headroom, cleanup retention, the dependency cache, repo mirrors and pushing work to git, and how many tasks run and how many task folders stay on this computer and SSH machines. Upstash box size and resizing are in Box providers › Upstash boxes.",
+    description: "The box pool, tasks at once, disk and memory headroom, cleanup, mirrors and git pushes.",
     fields: [
       "maxBoxes",
       "boxCreateConcurrency",
@@ -175,26 +164,25 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   {
     key: "costs",
     label: "Usage",
-    description: "Open Usage for Claude and Codex subscription allowances, daily cost and tokens over the last 7 to 90 days, by model, box, project and task. Below: daily and monthly box spending limits, the Coordinator's spend meter, and Upstash Box rates.",
+    description: "Open Usage for allowances and costs; below, box spending limits, the spend meter and rates.",
     fields: ["showCloudMeter", "costRates", "budget"],
   },
   {
     key: "notifications",
     label: "Notifications",
-    description: "How this browser tells you a task finished or needs you, and the sound a send makes. Saved in this browser only.",
+    description: "How this browser tells you a task finished or needs you, and the send sound.",
     fields: [],
   },
   {
     key: "voice",
     label: "Voice",
-    description:
-      "Spoken updates when work finishes, in the browser's own voice or an ElevenLabs or OpenAI one, and push-to-talk dictation in message boxes. Most of it is saved in this browser only.",
+    description: "Spoken updates when work finishes, and push-to-talk dictation in message boxes.",
     fields: [],
   },
   {
     key: "appearance",
     label: "Appearance",
-    description: "Light, dark or your device's system appearance. Saved in this browser only after Save.",
+    description: "How Box Yard looks in this browser.",
     fields: [],
   },
   { key: "about", label: "About", description: "What this Box Yard is running on.", fields: [] },

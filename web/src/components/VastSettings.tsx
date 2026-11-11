@@ -12,7 +12,7 @@ import { RUNPOD_STOCK_IMAGE, type RunPodPodInfo } from "../../../shared/runpod"
 import { vastGpuHint, type VastGpuOption, type VastInstanceInfo, type VastSettings, type VastStatus } from "../../../shared/vast"
 import { BoxActionDialog } from "./BoxActionDialog"
 import { CredentialField } from "./Setup"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { GpuDefaultRow } from "./GpuDefault"
 import type { GpuProvider } from "../../../shared/gpu"
 import { Button, NewTabLink, Select, TimeAgo, cx, inputClass } from "./ui"
@@ -109,7 +109,7 @@ export function VastPanel({ fid, active = true, gpuDefault }: { fid: (k: string)
           <Row
             id={fid("vast-image")}
             label="Instance image"
-            help="The Docker image instances start from. Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built (it has the agent tools baked in), else RunPod's stock PyTorch image, which installs them in about a minute each start. It must be public so Vast's hosts can pull it."
+            help="The Docker image instances start from." more={<>Empty: the one <SettingsLink section="runpod">Settings › Box providers › GPU clouds › RunPod GPU</SettingsLink> built (it has the agent tools baked in), else RunPod's stock PyTorch image, which installs them in about a minute each start. It must be public so Vast's hosts can pull it.</>}
           >
             <input
               id={fid("vast-image")}
@@ -128,7 +128,7 @@ export function VastPanel({ fid, active = true, gpuDefault }: { fid: (k: string)
             <VastGpuPicker id={fid("vast-gpus")} value={form.gpuTypes} onChange={(gpuTypes) => set({ gpuTypes })} enabled={s.apiKey} />
           </Row>
           <Row id={fid("vast-verified")} label="Verified hosts only" help="Only rent from hosts Vast.ai has verified. Unverified ones are cheaper and more plentiful but less tested.">
-            <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+            <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
               <input id={fid("vast-verified")} type="checkbox" checked={form.verifiedOnly} onChange={(e) => set({ verifiedOnly: e.target.checked })} />
               {form.verifiedOnly ? "On: verified hosts only" : "Off: any host"}
             </label>

@@ -36,13 +36,35 @@ interface SearchRegistry {
   words: string[]
   fields: Record<string, SearchableSetting>
   update(id: string, field: SearchableSetting | null): void
+  /** Leaves search for a category. */
+  open(section: SettingsSection): void
 }
 const SearchContext = createContext<SearchRegistry | null>(null)
 const CategoryContext = createContext<SettingsSection | null>(null)
 export const useSettingsSearching = () => Boolean(useContext(SearchContext)?.words.length)
+const NO_WORDS: string[] = []
+/** The words being searched for, lower case; none while search is off. */
+export const useSettingsSearchWords = () => useContext(SearchContext)?.words ?? NO_WORDS
 
-export function useSettingsSearch(query: string) {
+/** A category in the search results: how many of its fields match, and `open` to leave search for it. Null while search is off. */
+export function useSettingsSearchResults(section: SettingsSection) {
+  const search = useContext(SearchContext)
+  if (!search?.words.length) return null
+  return {
+    count: Object.values(search.fields).filter((f) => f.category === section && matchesSetting(f, search.words)).length,
+    open: () => search.open(section),
+  }
+}
+
+/** `onOpen` leaves search for a category: a result's category header calls it. */
+export function useSettingsSearch(query: string, onOpen?: (section: SettingsSection) => void) {
   const words = useMemo(() => searchWords(query), [query])
+  // The latest one, behind a callback that never changes, so the registry is new only when the search is.
+  const latestOpen = useRef(onOpen)
+  useEffect(() => {
+    latestOpen.current = onOpen
+  })
+  const open = useCallback((section: SettingsSection) => latestOpen.current?.(section), [])
   const [fields, setFields] = useState<Record<string, SearchableSetting>>({})
   const update = useCallback((id: string, field: SearchableSetting | null) => {
     setFields((prev) => {
@@ -53,7 +75,7 @@ export function useSettingsSearch(query: string) {
       return next
     })
   }, [])
-  const registry = useMemo(() => ({ words, fields, update }), [words, fields, update])
+  const registry = useMemo(() => ({ words, fields, update, open }), [words, fields, update, open])
   const matches = Object.values(fields).filter((field) => matchesSetting(field, words))
   return { registry, matches, searching: words.length > 0 }
 }
@@ -66,12 +88,12 @@ export function SettingsCategory({ section, children }: { section: SettingsSecti
   return <CategoryContext.Provider value={section}><div data-settings-category={section} hidden={hidden}>{children}</div></CategoryContext.Provider>
 }
 
-// Include rendered help and native option labels, never input or textarea values.
+// The text on show: rendered labels and help, never input or textarea values. A closed select's options are indexed apart.
 function textOf(root: HTMLElement): string {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
   const texts: string[] = []
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (!node.parentElement?.closest("textarea, script, style, [data-settings-search-ignore]")) texts.push(node.textContent ?? "")
+    if (!node.parentElement?.closest("textarea, script, style, option, [data-settings-search-ignore]")) texts.push(node.textContent ?? "")
   }
   return texts.join("")
 }
@@ -104,13 +126,16 @@ export function SettingsField({ label, keywords = "", children, className, as: E
   useEffect(() => () => update?.(id, null), [id, update])
   const field = search?.fields[id]
   const hidden = Boolean(search?.words.length && field && !matchesSetting(field, search.words))
-  const options = search?.words.length ? field?.options.filter((option) => search.words.some((w) => option.toLocaleLowerCase().includes(w))) : []
-  const keywordMatches = field && search?.words.filter((w) => field.keywords.toLocaleLowerCase().includes(w) && !`${field.label} ${field.text}`.toLocaleLowerCase().includes(w))
+  // Words the label and help already highlight need no second line: only a match hidden in a closed select gets one.
+  const shown = field ? `${field.label} ${field.text}`.toLocaleLowerCase() : ""
+  const unseen = field ? (search?.words ?? []).filter((w) => !shown.includes(w)) : []
+  const options = unseen.length ? field!.options.filter((option) => unseen.some((w) => option.toLocaleLowerCase().includes(w))) : []
+  const keywordMatches = unseen.filter((w) => field!.keywords.toLocaleLowerCase().includes(w) && !options.some((option) => option.toLocaleLowerCase().includes(w)))
   return (
     <Element ref={ref as never} data-settings-field={category ? id : undefined} data-settings-label={label} hidden={hidden} className={className}>
       {highlightSettingsText(children)}
-      {Boolean(options?.length) && <p data-settings-search-ignore className="mt-2 text-xs text-yard-300">Matching options: <SearchHighlight text={options!.slice(0, 6).join(" · ")} />{options!.length > 6 && ` · +${options!.length - 6} more`}</p>}
-      {Boolean(keywordMatches?.length) && <p data-settings-search-ignore className="mt-2 text-xs text-zinc-400">Keywords: <SearchHighlight text={keywordMatches!.join(" · ")} /></p>}
+      {options.length > 0 && <p data-settings-search-ignore className="mt-2 text-xs text-yard-300">Matching options: <SearchHighlight text={options.slice(0, 6).join(" · ")} />{options.length > 6 && ` · +${options.length - 6} more`}</p>}
+      {keywordMatches.length > 0 && <p data-settings-search-ignore className="mt-2 text-xs text-zinc-400">Keywords: <SearchHighlight text={keywordMatches.join(" · ")} /></p>}
     </Element>
   )
 }
@@ -120,7 +145,10 @@ export function SearchHighlight({ text }: { text: string }) {
   const words = useContext(SearchContext)?.words ?? []
   if (!words.length) return <>{text}</>
   const pattern = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).sort((a, b) => b.length - a.length).join("|")
-  return <>{text.split(new RegExp(`(${pattern})`, "ig")).map((part, i) => words.some((w) => w === part.toLocaleLowerCase()) ? <mark key={i} className="rounded bg-yard-400/25 text-yard-50">{part}</mark> : part)}</>
+  const parts = text.split(new RegExp(`(${pattern})`, "ig"))
+  if (parts.length === 1) return <>{text}</>
+  // One element, so a flex row (a checkbox's label) keeps the sentence together: bare, each piece is an item of its own.
+  return <span className="min-w-0">{parts.map((part, i) => words.some((w) => w === part.toLocaleLowerCase()) ? <mark key={i} className="rounded bg-yard-400/25 text-yard-50">{part}</mark> : part)}</span>
 }
 
 /** Highlight help fragments and intrinsic child labels; custom controls keep their own rendering. */
