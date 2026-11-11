@@ -706,15 +706,15 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
     viewport(width)
     render(`${APP_HOME}?project=${YARD.id}`)
     const chat = document.querySelector<HTMLElement>("[data-testid=captain-chat][data-centre]")!
-    const trigger = button(chat, "Captain menu")
+    const trigger = button(chat, "box-yard Captain menu")
     trigger.focus()
     click(trigger)
     expect(trigger.getAttribute("aria-expanded")).toBe("true")
-    const actions = dialog("Captain actions")!
+    const actions = dialog("box-yard Captain")!
     // A sheet on the body, outside the header whose overflow clipped the old popover.
     expect(chat.contains(actions)).toBe(false)
     click(button(actions, "Project settings"))
-    expect(dialog("Captain actions")).toBeUndefined()
+    expect(dialog("box-yard Captain")).toBeUndefined()
     expect(dialog("box-yard settings")).toBeDefined()
     expect(settingsParam()).toBe(YARD.id)
     esc()
@@ -727,10 +727,10 @@ describe("Project settings from the sidebar and the Captain's ⋯", () => {
     viewport(width)
     render(`${APP_HOME}?captain=${YARD.id}`)
     const captain = document.querySelector<HTMLElement>("[data-testid=captain-chat]:not([data-centre])")!
-    const trigger = button(captain, "Captain menu")
+    const trigger = button(document, "box-yard Captain menu") // In the panel's one header, above the chat.
     trigger.focus()
     click(trigger)
-    click(button(dialog("Captain actions")!, "Project settings"))
+    click(button(dialog("box-yard Captain")!, "Project settings"))
     expect(dialog("box-yard settings")).toBeDefined()
     const params = new URLSearchParams(location.search)
     expect([params.get("captain"), params.get("projectSettings")]).toEqual([YARD.id, YARD.id])

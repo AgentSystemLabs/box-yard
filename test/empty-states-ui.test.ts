@@ -90,7 +90,7 @@ describe("An empty Captain chat", () => {
   it("gives a project with no tasks its first step, and a starter goes in the box without being sent", () => {
     renderCaptain(project({ repo: "acme/demo" }))
     expect(empty().querySelector("h2")!.textContent).toBe("Give demo its first task")
-    expect(empty().textContent).toContain("It starts an agent on its own box")
+    expect(empty().textContent).toContain("It starts a task for each request and reports back here")
     const starter = button("Pick the easiest open issue in acme/demo and fix it in a PR")!
     expect(starter.closest("[role=group]")!.getAttribute("aria-label")).toBe("Start from")
     click(starter)

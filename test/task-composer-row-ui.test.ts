@@ -112,7 +112,7 @@ describe("the task box's row", () => {
     await press(captain)
     expect(byTestId("composer-more-menu")).toBeNull()
     expect(document.activeElement).toBe(textarea())
-    expect(textarea().placeholder).toBe("Message the Captain…")
+    expect(textarea().placeholder).toBe("Message the demo Captain…")
     expect(byTestId("captain-forward-note")).not.toBeNull()
     await press(byTestId("composer-more")!)
     expect(byTestId("more-captain-target")!.getAttribute("aria-pressed")).toBe("true")
