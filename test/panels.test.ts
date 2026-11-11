@@ -441,7 +441,8 @@ describe("navigation", () => {
     expect(dialog.querySelector('button[aria-label="Stop task"]')).toBeNull()
     expect(dialog.querySelector('[data-testid="task-meta"]')).not.toBeNull()
     expect(dialog.textContent).toContain("Transcript message 99")
-    expect(dialog.querySelector('textarea[placeholder*="Delivered when the current turn ends"]')).not.toBeNull()
+    // The task is working, so the reply queues for after its turn.
+    expect(dialog.querySelector('textarea[aria-label="Message this task"]')?.getAttribute("placeholder")).toBe("Queue a message…")
     expect(dialog.textContent).not.toContain("The first transcript message")
     const earlier = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.includes("earlier message"))!
     click(earlier)
@@ -473,13 +474,13 @@ describe("navigation", () => {
   it("sends a follow-up from the full conversation to that task's session", async () => {
     render(taskSessionHref("task_app001"))
     const dialog = document.querySelector('[role="dialog"]')!
-    const draft = dialog.querySelector<HTMLTextAreaElement>('textarea[placeholder*="Delivered when the current turn ends"]')!
+    const draft = dialog.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message this task"][placeholder="Queue a message…"]')!
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!
     await act(async () => {
       setValue.call(draft, "Please check the preview again")
       draft.dispatchEvent(new Event("input", { bubbles: true }))
     })
-    const send = dialog.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!
+    const send = dialog.querySelector<HTMLButtonElement>('button[aria-label="Queue message"]')!
     expect(send.disabled).toBe(false)
     await act(async () => { click(send); await new Promise((r) => setTimeout(r, 0)) })
     const request = vi.mocked(fetch).mock.calls.find(([url]) => url === "/api/tasks/task_app001/messages")
@@ -534,9 +535,10 @@ describe("navigation", () => {
     expect(location.pathname).toBe(APP_HOME)
   })
 
-  it("project configuration stays reachable in Settings without opening the project page", () => {
+  it("project configuration stays reachable in Settings without opening the project page", async () => {
     render("/?settings=projects")
-    const configure = [...document.querySelectorAll("button")].find((b) => b.textContent === "Configure project")!
+    // Settings' Projects list: a row per project opens its settings.
+    const configure = document.querySelector('[data-testid="project-settings-list"] button[title="box-yard settings"]')!
     click(configure)
     expect(location.pathname).toBe(APP_HOME)
     expect(location.search).toContain("projectSettings=prj_demo01")
@@ -553,7 +555,9 @@ describe("navigation", () => {
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false)
     act(() => { setValue.call(name, "box-yard"); name.dispatchEvent(new Event("input", { bubbles: true })) })
     expect(document.querySelector('[data-testid="project-tabs"]')).toBeNull()
+    // Closing waits on the unsaved-changes check (async, even with nothing to discard).
     esc()
+    await act(async () => {})
     expect(location.search).toBe("?settings=projects")
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1)
   })
