@@ -73,6 +73,14 @@ export function parseArgs(argv) {
   return { command: command === "help" ? "start" : command, sub, flags: command === "help" ? { ...flags, help: true } : flags, errors }
 }
 
+/** Where the database lives: --data, else the demo's own folder (never real data), else BOXYARD_DATA_DIR, else ~/.boxyard/data. */
+export function dataDirFor({ flags, demo, env, fileEnv, cwd, L }) {
+  if (flags.data) return path.resolve(cwd, expandHome(flags.data))
+  if (demo) return L.demoData
+  const set = setting("BOXYARD_DATA_DIR", env, fileEnv)
+  return set ? settingPath(set, L.home) : L.data
+}
+
 /** `localhost`, 127.x or ::1. */
 const isLoopback = (h) => /^(localhost|::1|\[::1\]|127\.\d+\.\d+\.\d+)$/i.test(h.trim())
 
@@ -134,8 +142,7 @@ export async function main(argv, { env = process.env, cwd = process.cwd(), io = 
   }
 
   const demo = command === "demo"
-  const dataSetting = setting("BOXYARD_DATA_DIR", env, fileEnv)
-  const dataDir = flags.data ? path.resolve(cwd, expandHome(flags.data)) : dataSetting ? settingPath(dataSetting, home) : demo ? L.demoData : L.data
+  const dataDir = dataDirFor({ flags, demo, env, fileEnv, cwd, L })
   const family = osFamily(process.platform, realProbe().osRelease())
 
   if (command === "service") {
