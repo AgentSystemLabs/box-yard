@@ -184,7 +184,10 @@ describe("the message toolbar", () => {
     click(replyEl().querySelector("p")!)
     expect(bar!.hasAttribute("data-open")).toBe(true)
     expect(other!.hasAttribute("data-open")).toBe(false)
+    // It goes on the tap's click, not its press, so nothing moves under the finger before the tap lands.
     down(other!.parentElement!)
+    expect(bar!.hasAttribute("data-open")).toBe(true)
+    click(other!.parentElement!)
     expect(bar!.hasAttribute("data-open")).toBe(false)
   })
 
@@ -217,7 +220,7 @@ describe("the message toolbar", () => {
     expect(toolbars()).toHaveLength(4)
     const notice = host.querySelector<HTMLElement>("#captain-cap_notice0001")!
     click(notice.querySelector("[data-testid=message-reply]")!)
-    expect(notice.getAttribute("aria-expanded")).toBe("false")
+    expect(notice.querySelector("[aria-expanded]")!.getAttribute("aria-expanded")).toBe("false")
     expect(openThreadId(project.id)).not.toBeNull()
     expect(openThreadId(COORDINATOR_CHAT)).toBeNull()
     // Nothing went to the Captain: the thread sends when Cody writes in it.
@@ -303,8 +306,10 @@ describe("a long message's Reply pill", () => {
     down(block.querySelector("p")!)
     click(block.querySelector("p")!, { clientY: 100 })
     expect(pill(block).style.top).toBe(`${600 - 26}px`)
-    // A press elsewhere hides it.
+    // A tap elsewhere hides it, on its click rather than its press.
     down(document.body)
+    expect(column(block).hasAttribute("data-open")).toBe(true)
+    click(document.body)
     expect(column(block).hasAttribute("data-open")).toBe(false)
     expect(pill(block).style.top).toBe("")
     // Esc hides it, and is used up, so the open thread around it doesn't close too.
