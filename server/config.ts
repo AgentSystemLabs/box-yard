@@ -24,7 +24,8 @@ function loadDotEnv(file: string) {
   }
 }
 
-loadDotEnv(path.resolve(process.cwd(), ".env"))
+// The npx launcher keeps settings in ~/.boxyard/.env and runs the server from its installed copy (launcher/main.mjs).
+loadDotEnv(process.env.BOXYARD_ENV_FILE?.trim() ? homePath(process.env.BOXYARD_ENV_FILE.trim()) : path.resolve(process.cwd(), ".env"))
 
 /** BOXYARD_DEFAULT_RUNNER: "local", "box" or "docker"; anything else (unset, a typo) is "local". */
 export function defaultRunner(value: string | undefined): SetupRunner {

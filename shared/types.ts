@@ -21,6 +21,7 @@ import type { TaskIconName } from "./taskIcons.js"
 import type { TaskPriority } from "./priority.js"
 import type { ProjectGpuMachine, RunPodImageBuild } from "./runpod.js"
 import type { DockerImageBuild, ProjectDocker } from "./docker.js"
+import type { UpdateStatus } from "./selfUpdate.js"
 export type { TaskOutcome } from "./quiet.js"
 export type { BoxCleanup } from "./disk.js"
 export type { BoxResize, ResizePlan, ResizeInitiator, ResizeMode, ResizeStep, DiskFit } from "./boxSizes.js"
@@ -702,6 +703,8 @@ export type UiEvent =
   | { type: "runpod.build"; build: RunPodImageBuild }
   /** Settings › Docker's image build moved on (state and the log's tail; never a secret). */
   | { type: "docker.build"; build: DockerImageBuild }
+  /** The Update button's state moved on: a check, an install step, ready, restarting or failed (shared/selfUpdate.ts). */
+  | { type: "update"; status: UpdateStatus }
   /** Settings › Machines changed: a machine, its last test, its state or tasks (never a key). */
   | { type: "machines"; status: MachinesStatus }
   /** Settings › Identities changed: an identity, its secrets' fingerprints, or which projects use it. */
