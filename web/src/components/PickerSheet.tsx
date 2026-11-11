@@ -9,10 +9,11 @@
 //   (Modal placement "picker").
 // - One highlight: the keys move it and the pointer takes it along, so there is no second, hover-only shade to tell
 //   from it.
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
+import { memo, useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
 import { Search } from "lucide-react"
 import { cx } from "./ui"
 import { DismissButton, Modal, ModalStep } from "./Modal"
+import { matchRanges } from "../../../shared/runTargetSearch"
 
 const coarse = () => typeof matchMedia === "function" && Boolean(matchMedia("(pointer: coarse)")?.matches)
 
@@ -27,6 +28,21 @@ export function groupTogether<T>(items: T[], keyOf: (item: T) => string): T[] {
   }
   return [...groups.values()].flat()
 }
+
+/** `text` with the search's `words` (lowercase) marked where they hit it, so a row shows why it is in the results. */
+export const Marked = memo(function Marked({ text, words }: { text: string; words: string[] }) {
+  const ranges = words.length ? matchRanges(text, words) : []
+  if (!ranges.length) return <>{text}</>
+  const parts: ReactNode[] = []
+  let at = 0
+  for (const [from, to] of ranges) {
+    if (from > at) parts.push(text.slice(at, from))
+    parts.push(<mark key={from} className="bg-transparent font-semibold text-yard-300">{text.slice(from, to)}</mark>)
+    at = to
+  }
+  if (at < text.length) parts.push(text.slice(at))
+  return <>{parts}</>
+})
 
 export interface PickerSheetProps<T> {
   /** The sheet's name, a word a level: ["Harness", "Claude Code"]. */

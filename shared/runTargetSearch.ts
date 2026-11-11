@@ -27,6 +27,35 @@ export function wordTier(text: string, word: string, fuzzy = false): number {
   return best
 }
 
+/**
+ * Where `words` (lowercase) hit `text`, as [start, end) ranges in order, for a row to show why it matched. A word marks
+ * where it starts a word; only when it starts none, where it is inside one (two letters or more, as wordTier counts it).
+ */
+export function matchRanges(text: string, words: string[]): [number, number][] {
+  const t = text.toLowerCase()
+  const found: [number, number][] = []
+  for (const word of new Set(words)) {
+    if (!word) continue
+    const starts: [number, number][] = []
+    const inside: [number, number][] = []
+    for (let i = t.indexOf(word); i >= 0; i = t.indexOf(word, i + word.length)) {
+      ;(i === 0 || BOUNDARY.test(t[i - 1]!) ? starts : inside).push([i, i + word.length])
+    }
+    found.push(...(starts.length ? starts : word.length > 1 ? inside : []))
+  }
+  found.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const merged: [number, number][] = []
+  for (const range of found) {
+    const last = merged.at(-1)
+    if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1])
+    else merged.push([...range])
+  }
+  return merged
+}
+
+/** A search's words, as searchRunTargets and matchRanges take them. */
+export const searchWords = (query: string): string[] => query.toLowerCase().split(/\s+/).filter(Boolean)
+
 /** What a level is called on its own: under a parent, only its own part of the token and its own name. */
 function levelTexts(t: RunTarget, parent: RunTarget | undefined): string[] {
   if (!parent) return [t.token, t.label, ...(t.aliases ?? [])]
@@ -42,7 +71,7 @@ function levelTexts(t: RunTarget, parent: RunTarget | undefined): string[] {
  * An empty query is the level as it is browsed.
  */
 export function searchRunTargets(all: RunTarget[], query: string, parent?: RunTarget): RunTarget[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const words = searchWords(query)
   if (!words.length) return filterRunTargets(all, parent?.token ?? "")
   const byToken = new Map(all.map((t) => [t.token, t]))
   const texts = new Map<RunTarget, string[]>()

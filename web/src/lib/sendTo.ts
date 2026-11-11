@@ -1,5 +1,5 @@
 import type { Project, Task } from "../../../shared/types"
-import { wordTier } from "../../../shared/runTargetSearch"
+import { searchWords, wordTier } from "../../../shared/runTargetSearch"
 import { projectChatHref, taskCardHref } from "./navigation"
 
 export type SendDestination = {
@@ -40,7 +40,7 @@ export function sendDestinations(projects: Project[], tasks: Task[], query: stri
  * puts "Fix uploads" before a task of the Uploads project. Equal hits keep the list's order; no words is the whole list.
  */
 function rankDestinations(all: SendDestination[], query: string): SendDestination[] {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const words = searchWords(query)
   if (!words.length) return all
   const hits: { d: SendDestination; score: number; at: number }[] = []
   all.forEach((d, at) => {

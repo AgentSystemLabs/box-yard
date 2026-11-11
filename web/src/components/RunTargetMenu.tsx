@@ -22,7 +22,7 @@ import { cx } from "./ui"
 import { ComposerMenuItem } from "./ComposerMenu"
 import { Loading } from "./Loading"
 import { DismissButton } from "./Modal"
-import { PickerSheet, groupTogether } from "./PickerSheet"
+import { Marked, PickerSheet, groupTogether } from "./PickerSheet"
 import { useAbove } from "../lib/useAbove"
 import { pickerKeyDown } from "../lib/pickerKeys"
 import { useAgentSettings, useCursorModels, useHarnessTargets, useModelCatalog, useProjectRunDefaults, useProjectTargets, useRefreshPicker, useRunTargets } from "../lib/queries"
@@ -30,7 +30,7 @@ import { CURSOR_FALLBACK_MODELS } from "../../../shared/agentCli"
 import { harnessDefaults } from "../../../shared/harnessDefaults"
 import { harnessModelTargets } from "../../../shared/harnessPicks"
 import { MODEL_GROUP_LABEL } from "../../../shared/models"
-import { searchRunTargets } from "../../../shared/runTargetSearch"
+import { searchRunTargets, searchWords } from "../../../shared/runTargetSearch"
 import {
   advancesInto,
   drillsInto,
@@ -596,7 +596,7 @@ export function RunTargetList({ list, anchor }: { list: ChatPicksState["list"]; 
 }
 
 /** The sheet's search field, by level: an example at the top, the open level's name under it. */
-function searchWords(kind: ListKind, parent: RunTarget | undefined): string {
+function searchPlaceholder(kind: ListKind, parent: RunTarget | undefined): string {
   if (!parent) return kind === "agent" ? "Search, e.g. fable high" : "Search, e.g. box large"
   if (parent.under) return "Search efforts"
   return kind === "agent" ? `Search ${parent.label} models` : `Search ${parent.label}`
@@ -609,9 +609,9 @@ const GROUP_TAG: Record<string, string> = { [MODEL_GROUP_LABEL.alias]: "alias", 
  * One choice in the sheet: its name, then what sets it apart (a model's note or id, a place's specs, why it can't be
  * picked). `model` is the model of an effort the search found: the row is named for the model, with the effort beside it.
  */
-function SheetRow({ t, on, opens, own, model, tagged }: { t: RunTarget; on: boolean; opens: boolean; own: boolean; model?: RunTarget; tagged: boolean }) {
+function SheetRow({ t, on, opens, own, model, words }: { t: RunTarget; on: boolean; opens: boolean; own: boolean; model?: RunTarget; words: string[] }) {
   const Icon = iconOf(t)
-  const tag = tagged && !own && t.group ? GROUP_TAG[t.group] : undefined
+  const tag = words.length && !own && t.group ? GROUP_TAG[t.group] : undefined
   const title = model ? (model.menuLabel ?? model.label) : (t.menuLabel ?? t.label)
   const second = t.disabled ?? (own || t.kind !== "harness" || !t.under ? t.detail : t.effort && !model ? null : (t.hint ?? (t.model && t.model !== title ? t.model : null)))
   return (
@@ -619,8 +619,8 @@ function SheetRow({ t, on, opens, own, model, tagged }: { t: RunTarget; on: bool
       <Icon className={cx("h-4 w-4 shrink-0", on ? "text-yard-400" : "text-zinc-500")} aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 truncate">{title}</span>
-          {model && <span className="shrink-0 rounded-md bg-yard-500/15 px-1.5 py-px text-xs text-yard-200">{t.menuLabel}</span>}
+          <span className="min-w-0 truncate"><Marked text={title} words={words} /></span>
+          {model && <span className="shrink-0 rounded-md bg-yard-500/15 px-1.5 py-px text-xs text-yard-200"><Marked text={t.menuLabel ?? t.label} words={words} /></span>}
         </span>
         {second && <span className={cx("min-w-0 truncate text-xs", t.disabled ? "text-amber-300/80" : "text-zinc-500")}>{second}</span>}
       </span>
@@ -638,7 +638,8 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
   const { list } = picks
   const { id, kind, parent, back, options, groups, active, loading, error, note, opens, pick, setActive, trail, panelQuery, setPanelQuery } = list
   const source = picks.lists[kind]
-  const searching = Boolean(panelQuery.trim())
+  const words = useMemo(() => searchWords(panelQuery), [panelQuery])
+  const searching = words.length > 0
   const current = options[active]
   return (
     <PickerSheet
@@ -650,7 +651,7 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
       returnFocus={returnFocus}
       query={panelQuery}
       onQuery={setPanelQuery}
-      placeholder={searchWords(kind, parent)}
+      placeholder={searchPlaceholder(kind, parent)}
       searchLabel={kind === "agent" ? "Search harnesses, models and efforts" : "Search where tasks run"}
       listId={id}
       options={options}
@@ -663,7 +664,7 @@ export function RunTargetPanel({ picks, returnFocus }: { picks: ChatPicksState; 
       enterWord={(t) => (opens(t) ? "open" : undefined)}
       rowProps={(t) => ({ "data-token": t.token })}
       row={(t, on) => (
-        <SheetRow t={t} on={on} opens={opens(t)} own={t.token === parent?.token} model={searching && t.effort ? source?.find((m) => m.token === t.under) : undefined} tagged={searching} />
+        <SheetRow t={t} on={on} opens={opens(t)} own={t.token === parent?.token} model={searching && t.effort ? source?.find((m) => m.token === t.under) : undefined} words={words} />
       )}
       status={error ? <PickerStatus error /> : loading ? <Loading kind="rows" label="Checking availability" className="px-3 py-3" /> : undefined}
       empty={<>No matches for “{panelQuery.trim()}”.{kind === "agent" && !parent?.under && " Try a model and an effort: fable high."}</>}

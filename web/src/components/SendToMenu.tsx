@@ -7,13 +7,14 @@ import { useDraft, writeDraft } from "../lib/composerDraft"
 import { api } from "../lib/api"
 import { fetchTasks, keys, newClientId, QUIET, useSendCaptainMessage, useSendChat, useSendTaskMessage } from "../lib/queries"
 import { sendDestinations, sendToMention, type SendDestination } from "../lib/sendTo"
+import { searchWords } from "../../../shared/runTargetSearch"
 import { pickerKeyDown } from "../lib/pickerKeys"
 import { useAbove } from "../lib/useAbove"
 import { chordLabel, sendToChord } from "../lib/shortcuts"
 import { isMacPlatform } from "../lib/dictation"
 import { AppLink, STATUS, cx } from "./ui"
 import { Loading } from "./Loading"
-import { PickerSheet, groupTogether } from "./PickerSheet"
+import { Marked, PickerSheet, groupTogether } from "./PickerSheet"
 import { CaptainIcon } from "./CaptainIcon"
 import { Helm } from "./ShipIcons"
 import { TaskStatusIcon } from "./TaskIcon"
@@ -153,15 +154,16 @@ function Choices({ picker, maxHeight }: { picker: Picker; maxHeight?: number }) 
 }
 
 /** One destination in the sheet: whose chat it is by its icon, a task's project and state under its title. */
-function DestinationRow({ d, task, on }: { d: SendDestination; task: Task | undefined; on: boolean }) {
+function DestinationRow({ d, task, on, words }: { d: SendDestination; task: Task | undefined; on: boolean; words: string[] }) {
   const tint = on ? "text-yard-400" : "text-zinc-500"
+  const detail = task ? `${d.detail.split(" · ")[0]} · ${STATUS[task.status].label}${task.status === "done" ? " · sending reopens it" : ""}` : d.detail
   return <>
     {d.kind === "coordinator" ? <Helm className={cx("h-4 w-4 shrink-0", tint)} aria-hidden />
       : d.kind === "captain" ? <CaptainIcon projectId={d.id} className={cx("h-4 w-4 shrink-0", tint)} />
       : task ? <TaskStatusIcon task={task} size="sm" /> : <ArrowUpRight className={cx("h-4 w-4 shrink-0", tint)} aria-hidden />}
     <span className="flex min-w-0 flex-1 flex-col">
-      <span className="min-w-0 truncate">{d.label}</span>
-      <span className="min-w-0 truncate text-xs text-zinc-500">{task ? `${d.detail.split(" · ")[0]} · ${STATUS[task.status].label}${task.status === "done" ? " · sending reopens it" : ""}` : d.detail}</span>
+      <span className="min-w-0 truncate"><Marked text={d.label} words={words} /></span>
+      <span className="min-w-0 truncate text-xs text-zinc-500"><Marked text={detail} words={words} /></span>
     </span>
   </>
 }
@@ -169,6 +171,7 @@ function DestinationRow({ d, task, on }: { d: SendDestination; task: Task | unde
 /** The Send to… button's and chord's sheet: the shared picker (PickerSheet), searched by a chat's or a task's words. */
 function SendToSheet({ picker, input }: { picker: Picker; input: RefObject<HTMLTextAreaElement | null> }) {
   const tasks = useMemo(() => new Map(picker.tasks?.map((t) => [t.id, t])), [picker.tasks])
+  const words = useMemo(() => searchWords(picker.query), [picker.query])
   return <PickerSheet
     testId="send-to-sheet"
     trail={["Send to…"]}
@@ -185,7 +188,7 @@ function SendToSheet({ picker, input }: { picker: Picker; input: RefObject<HTMLT
     keyOf={(d) => d.key}
     groupOf={destinationGroup}
     onPick={picker.pick}
-    row={(d, on) => <DestinationRow d={d} task={d.kind === "task" ? tasks.get(d.id) : undefined} on={on} />}
+    row={(d, on) => <DestinationRow d={d} task={d.kind === "task" ? tasks.get(d.id) : undefined} on={on} words={words} />}
     status={picker.loading ? <Loading kind="rows" label="Loading destinations" className="px-3 py-3" />
       : picker.error ? <div role="status" className="px-4 py-2 text-sm text-amber-300">Couldn't load destinations. <button type="button" onClick={picker.retry} className="min-h-11 underline">Try again</button></div> : undefined}
     empty={<>No chat or task matches “{picker.query.trim()}”.</>}

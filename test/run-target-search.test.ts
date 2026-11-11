@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { searchRunTargets, wordTier } from "../shared/runTargetSearch.js"
+import { matchRanges, searchRunTargets, searchWords, wordTier } from "../shared/runTargetSearch.js"
 import { harnessModelTargets, type HarnessPickSources } from "../shared/harnessPicks.js"
 import { buildHarnessTargets, buildRunTargets, filterRunTargets } from "../shared/runTargets.js"
 
@@ -38,6 +38,37 @@ describe("wordTier", () => {
   it("takes a fuzzy subsequence only when asked", () => {
     expect(wordTier("gpt-6.1-sol", "gpt6")).toBe(0)
     expect(wordTier("gpt-6.1-sol", "gpt6", true)).toBe(0.5)
+  })
+})
+
+describe("matchRanges", () => {
+  const marked = (text: string, query: string) => matchRanges(text, searchWords(query)).map(([from, to]) => text.slice(from, to))
+
+  it("splits a search into lowercase words", () => {
+    expect(searchWords("  Fable   HIGH ")).toEqual(["fable", "high"])
+    expect(searchWords("   ")).toEqual([])
+  })
+
+  it("marks each word where it starts a word, in the text's order", () => {
+    expect(marked("Fable 5.1", "fa")).toEqual(["Fa"])
+    expect(marked("Extra high", "high")).toEqual(["high"])
+    expect(marked("GPT 6.1 Sol High", "high sol")).toEqual(["Sol", "High"])
+    expect(marked("claude-fable-5-1", "fable 5")).toEqual(["fable", "5"])
+    expect(marked("Fable 5.1", "opus")).toEqual([])
+    expect(marked("Fable 5.1", "")).toEqual([])
+  })
+
+  it("marks the inside of a word only when the word starts none, and never for one letter", () => {
+    expect(marked("xhigh", "high")).toEqual(["high"])
+    expect(marked("High and xhigh", "high")).toEqual(["High"])
+    expect(marked("Small", "l")).toEqual([])
+    expect(marked("Large", "l")).toEqual(["L"])
+  })
+
+  it("joins hits that touch or overlap, so nothing is marked twice", () => {
+    expect(matchRanges("fable", ["fa", "fable", "fab"])).toEqual([[0, 5]])
+    expect(matchRanges("aaaa", ["aa"])).toEqual([[0, 2]])
+    expect(matchRanges("box box", ["box", "box"])).toEqual([[0, 3], [4, 7]])
   })
 })
 
