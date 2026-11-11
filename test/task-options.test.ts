@@ -22,7 +22,7 @@ describe("Task options", () => {
       const options = withOwner(TASK_OPTIONS, ownerName)
       for (const text of [withOwner(ORCHESTRATOR_PROMPT, ownerName), captainPrompt(project, ownerName)]) expect(text.split(options)).toHaveLength(2)
     }
-    for (const term of ['"local" = this computer', 'priority "high"', "low = one-command chores", "claude-opus-5-5", '"codex" (OpenAI Codex)', "attachments/"]) expect(TASK_OPTIONS).toContain(term)
+    for (const term of ["A reply's overridesDefault means a runs_on or agent you passed differs from the project's live defaults", '"local" = this computer', 'priority "high"', "low = one-command chores", "claude-opus-5-5", '"codex" (OpenAI Codex)', "attachments/"]) expect(TASK_OPTIONS).toContain(term)
   })
 
   it("are what the task tools' shared parameters point to, for both callers", () => {
