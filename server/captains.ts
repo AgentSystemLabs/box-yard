@@ -12,6 +12,7 @@ import { contextTokens, contextWindowOf, formatTokens, parseContextReport, resul
 import { routingInstructions } from "./routing.js"
 import { updatesBlock } from "./noticeBatch.js"
 import { NAMED_TASKS_HEADING, namedState, type PrLookup } from "./handoff.js"
+import { projectDefaultsLine, type ProjectDefaults } from "./projectDefaults.js"
 import { uploadsDir } from "./uploads.js"
 import { captainPrompt } from "./prompts.js"
 import { DEFAULT_LOOP_GUARD, WakeLoopGuard, type LoopGuardOptions } from "./loopGuard.js"
@@ -22,6 +23,7 @@ import { sessionLineMeta, type ThreadHost } from "./sideThreads.js"
 import { agentCaptainLabel, captainSourceOf, forwardedFromTask } from "../shared/captain.js"
 import { budgetLine, budgetNotes, noteLine, pruneAdvice, shortTokens } from "../shared/notes.js"
 import {
+  RESET_LEAD,
   SUMMARY_PROMPT,
   afterCompactBlock,
   captainCompactionsDir,
@@ -35,6 +37,7 @@ import {
   readCompactionInfo,
   readCompactionRecords,
   recapBlock,
+  resetPrompt,
   summaryBody,
   summaryLooksValid,
   summaryPrompt,
@@ -263,6 +266,8 @@ export class CaptainManager {
   gitAuth: ((projectId: string) => GitAuth) | null = null
   /** The external MCP connectors a session gets (docs/connectors.md › Sessions); app.ts wires them in. */
   connectors: ((ref: SessionRef) => Promise<SessionConnectors>) | null = null
+  /** A project's live defaults for new tasks, for its [Project now] (app.ts: TaskManager.projectDefaults). */
+  projectDefaults: ((projectId: string) => ProjectDefaults | null) | null = null
   /** Read when a Captain is created; tests shorten these. */
   readonly tuning: CaptainTuning = { wakeDebounceMs: 3000, loopGuard: { ...DEFAULT_LOOP_GUARD }, repo: { ...DEFAULT_REPO_TUNING } }
   private sweepTimer: NodeJS.Timeout | null = null
@@ -300,6 +305,7 @@ export class CaptainManager {
         () => this.logins,
         () => this.gitAuth?.(project.id) ?? null,
         () => (this.connectors ? this.connectors({ kind: "captain", projectId: project.id }) : Promise.resolve(NO_SESSION_CONNECTORS)),
+        () => this.projectDefaults?.(project.id) ?? null,
       )
       this.captains.set(project.id, captain)
     }
@@ -655,6 +661,8 @@ class Captain {
     gitAuth: () => GitAuth | null = () => null,
     /** The connectors its sessions get: its project's Captain's (docs/connectors.md › Scope). */
     private readonly connectors: () => Promise<SessionConnectors> = () => Promise.resolve(NO_SESSION_CONNECTORS),
+    /** Its project's live defaults for new tasks (TaskManager.projectDefaults), the last line of [Project now]. */
+    private readonly defaults: () => ProjectDefaults | null = () => null,
   ) {
     this.loopGuard = new WakeLoopGuard(tuning.loopGuard)
     this.mcp = mcp
@@ -1193,8 +1201,9 @@ class Captain {
   }
 
   /**
-   * The project as it stands, at the top of every Captain prompt. The notes (exactly what agents get) are
-   * listed when they changed since this session last saw them; otherwise one line says they're unchanged.
+   * The project as it stands, right before every Captain prompt's messages. The notes (exactly what agents get) are
+   * listed when they changed since this session last saw them; otherwise one line says they're unchanged. It ends
+   * with the live defaults for new tasks: last, next to the messages, so they beat a saved summary read earlier.
    */
   private projectNow(): { text: string; notesHash: string } {
     const tasks = this.store
@@ -1202,13 +1211,17 @@ class Captain {
       .filter((t) => t.status !== "done")
       .map((t) => briefTask(t, this.owner()))
     const notes = this.notesNow()
+    const defaults = this.defaults()
     return {
       text: [
         `[Project now: ${this.project.name}]`,
         this.project.repo ? `Repo: ${this.project.repo} (${this.project.baseBranch})${this.cloneLine()}` : "No repo.",
         notes.text,
         tasks.length ? `Open tasks:\n${tasks.join("\n")}` : "No open tasks.",
-      ].join("\n"),
+        defaults ? projectDefaultsLine(defaults) : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
       notesHash: notes.hash,
     }
   }
@@ -1280,8 +1293,9 @@ class Captain {
         .map((m) => `[${m.role}] ${m.content.slice(0, 800)}`)
         .join("\n")
       const last = recapFile ? { file: recapFile } : lastCompaction(this.compactionsDir)
-      const saved = last ? this.recap(last.file, { lead: "Your session was reset. This is the last summary you wrote" }) : null
-      result = await this.run(`${saved ? `${saved}\n\n` : ""}Earlier Captain conversation (your session was reset):\n${recap}\n\n---\n\n${now.text}\n\n${body}`, fresh, false, "turn", ask)
+      const saved = last ? this.recap(last.file, { lead: RESET_LEAD }) : null
+      // The history first and labelled as such; [Project now] (ending with the live defaults) and the messages last.
+      result = await this.run(resetPrompt(saved, "Earlier Captain conversation", recap, `${now.text}\n\n${body}`), fresh, false, "turn", ask)
     }
     if (result.ok) this.store.setKv(notesSeenKey(this.project.id), now.notesHash)
     if (result.ok && recapFile) this.store.setKv(recapKey(this.project.id), null)
@@ -1360,7 +1374,7 @@ class Captain {
       return null
     }
     const live = liveTaskLines(this.store, mentionedTaskIds([summaryBody(markdown)]), { projectId: this.project.id })
-    return opts.compacted ? afterCompactBlock(file, markdown, live) : recapBlock(file, markdown, live, opts.lead)
+    return opts.compacted ? afterCompactBlock(file, markdown, live, this.owner()) : recapBlock(file, markdown, live, opts.lead, this.owner())
   }
 
   private async doCompact() {

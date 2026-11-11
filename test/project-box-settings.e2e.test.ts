@@ -162,6 +162,7 @@ describe("project box settings: API", () => {
     expect(r.yard.store.getProject(a.id)).toMatchObject({ boxSize: "large", agentsPerBox: 1, tasksPerBox: 5, maxBoxes: 2 })
     const listed = JSON.parse((await coordinator.tool("list_projects")).content[0]!.text) as { id: string; boxSettings: Record<string, string> }[]
     expect(listed.find((p) => p.id === a.id)!.boxSettings).toEqual({
+      runsOn: `${r.yard.store.getProject(a.id)!.runner} (this project): new tasks run there unless runs_on says otherwise`,
       boxSize: "large (this project)",
       agentsPerBox: "1 of its tasks at a time on a box or this computer; other projects unaffected (this project)",
       tasksPerBox: "5 (this project)",
