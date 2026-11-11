@@ -2,7 +2,8 @@
 // Rearranging the sidebar (components/SidebarReorder.tsx): Alt+arrows, the Move menu, a mouse drag and a finger's
 // hold-then-drag all save the same order on the server, the tree stays one tab stop, and a screen reader hears each move.
 // A task's row also goes into a chat as context (lib/taskReference.ts): dropped on a message box, or with "Add to …" in
-// the same menu; a drop in the list still rearranges it.
+// the same menu; a drop in the list still rearranges it. A dragged row's copy goes with the pointer, and the list only
+// takes a drop while the pointer is over the sidebar.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -752,5 +753,123 @@ describe("adding a task to a chat", () => {
     expect(drawer()).toBeNull()
     expect(readDraft("coordinator").text).toBe("Task “Build the API” (task_api001) ")
     expect(document.activeElement).toBe(field())
+  })
+})
+
+describe("carrying a row", () => {
+  beforeEach(fakeLayout)
+  afterEach(() => void delete (document as { elementFromPoint?: unknown }).elementFromPoint)
+
+  const ghost = () => document.querySelector<HTMLElement>("[data-drag-ghost]")!
+  const outline = () => document.querySelector<HTMLElement>("[data-context-drop]")!
+  const box = () => document.querySelector<HTMLElement>('[data-draft-key="coordinator"]')!
+  /** Right of the sidebar (fakeLayout's runs from x 8 to 248): the chat. From x 400 the pointer is over its message box. */
+  const OUT = 600
+  const overBox = () => Object.defineProperty(document, "elementFromPoint", { configurable: true, writable: true, value: (x: number) => (x >= 400 ? box() : null) })
+  const at = (x: number, y: number) => `translate(${x}px, ${y}px)`
+
+  it("a copy of the row, its icon and name, goes with a mouse, in the list and over a chat, and goes when it's let go", async () => {
+    render()
+    overBox()
+    const from = row(API).querySelector<HTMLElement>("[data-open-task]")!
+    pointer("pointerdown", from, middle(row(API)))
+    pointer("pointermove", window, middle(row(API)) + 3)
+    await frame()
+    // A few pixels are still a click: nothing is carried yet.
+    expect(ghost().style.display).not.toBe("block")
+
+    const y = middle(row(TESTS)) + 15
+    pointer("pointermove", window, y)
+    await frame()
+    expect(ghost().style.display).toBe("block")
+    expect(ghost().getAttribute("aria-hidden")).toBe("true")
+    expect(ghost().textContent).toContain("Build the API")
+    expect(ghost().querySelector("svg")).not.toBeNull()
+    // The row's own ids and screen-reader words stay with the row.
+    expect(ghost().querySelector("[id], .sr-only")).toBeNull()
+    // Below and right of the pointer's tip, off the hand.
+    expect(ghost().style.transform).toBe(at(100 + 14, y + 12))
+    expect(line().style.display).toBe("block")
+
+    pointer("pointermove", window, y, "mouse", { clientX: OUT })
+    await frame()
+    expect(ghost().style.display).toBe("block")
+    expect(ghost().style.transform).toBe(at(OUT + 14, y + 12))
+    // Over the box: its words at the top, where the copy, which hangs below the pointer, doesn't cover them.
+    expect([outline().style.display, outline().style.alignItems]).toEqual(["flex", "flex-start"])
+
+    pointer("pointerup", window, y, "mouse", { clientX: OUT })
+    await settle()
+    expect(readDraft("coordinator").text).toBe("Task “Build the API” (task_api001) ")
+    expect(ghost().style.display).toBe("none")
+    expect(ghost().childElementCount).toBe(0)
+  })
+
+  it("a finger's copy hangs above it, out from under the finger", async () => {
+    render()
+    overBox()
+    pointer("pointerdown", row(API), middle(row(API)), "touch")
+    await wait(HOLD_MS + 50)
+    // Held, not moved yet: the hold's menu is still what a release opens, so nothing is carried.
+    expect(ghost().style.display).not.toBe("block")
+    const y = middle(row(TESTS))
+    pointer("pointermove", window, y, "touch", { clientX: OUT })
+    await frame()
+    expect(ghost().style.display).toBe("block")
+    // happy-dom gives the copy no height, so it ends 28px above the finger.
+    expect(ghost().style.transform).toBe(at(OUT - 24, y - 28))
+    expect([outline().style.display, outline().style.alignItems]).toEqual(["flex", "flex-end"])
+    pointer("pointerup", window, y, "touch", { clientX: OUT })
+    await settle()
+    expect(ghost().style.display).toBe("none")
+    expect(readDraft("coordinator").text).toBe("Task “Build the API” (task_api001) ")
+  })
+
+  it("out of the sidebar the list takes no drop: the line goes, and letting go there moves nothing", async () => {
+    render()
+    const y = middle(row(TESTS)) + 15
+    pointer("pointerdown", row(API), middle(row(API)))
+    pointer("pointermove", window, y)
+    await frame()
+    expect(line().style.display).toBe("block")
+    // Out past its right edge, level with the same gap, over no message box.
+    pointer("pointermove", window, y, "mouse", { clientX: OUT })
+    await frame()
+    expect(line().style.display).toBe("none")
+    expect(outline().style.display).not.toBe("flex")
+    // Still carried, so it's plain the drag goes on.
+    expect([ghost().style.display, mark().style.display]).toEqual(["block", "block"])
+    pointer("pointerup", window, y, "mouse", { clientX: OUT })
+    await settle()
+    expect(saves()).toEqual([])
+    expect(under(YARD)).toEqual([ASK.id, API.id, PLAN.id, POST.id, IMAGES.id, VIDEO.id, TESTS.id])
+    expect([ghost().style.display, mark().style.display, line().style.display, document.documentElement.style.cursor]).toEqual(["none", "none", "none", ""])
+    expect(said()).not.toContain("moved")
+
+    // A project too.
+    pointer("pointerdown", head(SITE), middle(head(SITE)))
+    pointer("pointermove", window, middle(head(YARD)) - 5)
+    await frame()
+    expect(line().style.display).toBe("block")
+    pointer("pointermove", window, middle(head(YARD)) - 5, "mouse", { clientX: OUT })
+    await frame()
+    pointer("pointerup", window, middle(head(YARD)) - 5, "mouse", { clientX: OUT })
+    await settle()
+    expect(saves()).toEqual([])
+  })
+
+  it("back over the sidebar it takes the drop again", async () => {
+    render()
+    const y = middle(row(TESTS)) + 15
+    pointer("pointerdown", row(API), middle(row(API)))
+    pointer("pointermove", window, y, "mouse", { clientX: OUT })
+    await frame()
+    expect(line().style.display).not.toBe("block")
+    pointer("pointermove", window, y)
+    await frame()
+    expect(line().style.display).toBe("block")
+    pointer("pointerup", window, y)
+    await settle()
+    expect(saves()).toEqual([[`/api/projects/${YARD.id}/tasks/order`, { parentTaskId: null, ids: [ASK.id, PLAN.id, TESTS.id, API.id] }]])
   })
 })

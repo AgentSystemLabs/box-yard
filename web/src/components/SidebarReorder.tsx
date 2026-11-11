@@ -11,9 +11,10 @@
 // on screen. A drop in the list still rearranges it.
 //
 // It listens on the tree's own element, so the memo'd rows get no new props and render as before, and the tree stays
-// one tab stop (lib/treeView.ts). Nothing moves on its own: a drag shows a still frame on the row it holds and a line
-// where it would land, both placed straight on the DOM, so a drag re-renders nothing until its drop. A screen reader
-// hears every move.
+// one tab stop (lib/treeView.ts). Nothing moves on its own: a drag shows a still frame on the row it holds, a copy of
+// the row at the pointer, so it's plain what's being carried, and a line where it would land, all placed straight on
+// the DOM, so a drag re-renders nothing until its drop. The list only takes a drop while the pointer is over the
+// sidebar: out of it there's no line, and a release there leaves the order as it was. A screen reader hears every move.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { createPortal, flushSync } from "react-dom"
 import { useQueryClient, type QueryClient } from "@tanstack/react-query"
@@ -23,7 +24,7 @@ import { keys } from "../lib/queries"
 import { closeSidebarDrawer, type SidebarGroup } from "../lib/sidebar"
 import { moved, movedText, moveTarget, orderSpot, resetOrder, saveOrder, slotTarget, type OrderMove, type OrderSpot } from "../lib/sidebarOrder"
 import { addTaskReference, openTargets, targetAt, targetName, taskIdOfRowKey, type ContextTarget } from "../lib/taskReference"
-import { treeItems } from "../lib/treeView"
+import { TREE_OPEN, treeItems } from "../lib/treeView"
 import { MessageMenu, type MenuItem } from "./MessageActions"
 
 type Groups = { shown: readonly SidebarGroup[]; others: readonly SidebarGroup[] }
@@ -42,6 +43,12 @@ const EDGE_STEP = 10
 const CLICK_MS = 500
 /** After a keyboard move, how long the focus is given back to its row if redrawing the list took it. */
 const REFOCUS_MS = 600
+/** The copy of a dragged row at the pointer: its width bounds, and where it sits from a mouse's tip (below and right,
+ * off the hand) or a finger (above it, out from under it), in px. */
+const GHOST_MIN = 160
+const GHOST_MAX = 288
+const GHOST_MOUSE = { x: 14, y: 12 }
+const GHOST_TOUCH = { x: -24, y: -28 }
 
 interface Press {
   pointerId: number
@@ -64,6 +71,8 @@ interface Press {
   to: number | null
   /** The message box a drop now would add the task to, out of the list. */
   drop: ContextTarget | null
+  /** The copy of the row at the pointer has been drawn. */
+  ghost: boolean
   stop: () => void
 }
 
@@ -131,8 +140,11 @@ function dragLook(tree: HTMLElement | null, on: boolean) {
   document.documentElement.style.cursor = on ? "grabbing" : ""
 }
 
-/** Over a message box, the box says it takes the task: a still outline over it, and the pointer says it copies. */
-function showDrop(el: HTMLElement | null, to: ContextTarget | null, name: string) {
+/**
+ * Over a message box, the box says it takes the task: a still outline over it, and the pointer says it copies. Its words
+ * sit on the side the row's copy isn't (the copy hangs below a mouse, above a finger), so the copy doesn't cover them.
+ */
+function showDrop(el: HTMLElement | null, to: ContextTarget | null, name: string, touch: boolean) {
   document.documentElement.style.cursor = to ? "copy" : "grabbing"
   if (!el) return
   if (!to) return hide(el)
@@ -140,7 +152,40 @@ function showDrop(el: HTMLElement | null, to: ContextTarget | null, name: string
   const text = `Add “${name}” here as context`
   const label = el.firstElementChild
   if (label && label.textContent !== text) label.textContent = text
-  Object.assign(el.style, { display: "flex", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` })
+  Object.assign(el.style, { display: "flex", alignItems: touch ? "flex-end" : "flex-start", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` })
+}
+
+/**
+ * The copy of a dragged row that goes with the pointer: its icon and name as the row draws them (its open button's
+ * insides), without the ids and screen-reader words, which belong to the row. Drawn once, when the drag starts.
+ */
+function fillGhost(el: HTMLElement, item: HTMLElement) {
+  const source = item.querySelector<HTMLElement>(`[${TREE_OPEN}]`) ?? item
+  const copy = document.createElement("div")
+  copy.className = source.className
+  copy.append(...[...source.childNodes].map((n) => n.cloneNode(true)))
+  for (const n of copy.querySelectorAll(".sr-only")) n.remove()
+  for (const n of copy.querySelectorAll("[id]")) n.removeAttribute("id")
+  // Its own box, not the row's indent or width: as wide as its name, which a narrow sidebar may have cut, up to a bound.
+  Object.assign(copy.style, { width: "100%", paddingLeft: "0.5rem", paddingRight: "0.75rem" })
+  el.replaceChildren(copy)
+  Object.assign(el.style, { display: "block", width: "max-content", minWidth: `${GHOST_MIN}px`, maxWidth: `min(${GHOST_MAX}px, calc(100vw - 8px))` })
+}
+
+/** Put the row's copy by the pointer at `x`, `y`, kept on screen. */
+function placeGhost(el: HTMLElement, x: number, y: number, touch: boolean) {
+  const at = touch ? GHOST_TOUCH : GHOST_MOUSE
+  const w = el.offsetWidth
+  const h = el.offsetHeight
+  const left = Math.max(4, Math.min(x + at.x, innerWidth - w - 4))
+  const top = Math.max(4, Math.min(touch ? y + at.y - h : y + at.y, innerHeight - h - 4))
+  el.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+}
+
+/** Whether a point is over the sidebar: its whole panel (`nav`), header and footer too, not just the list. */
+function overPanel(tree: HTMLElement, x: number, y: number) {
+  const { top, bottom, left, right } = (tree.closest("nav") ?? tree).getBoundingClientRect()
+  return x >= left && x <= right && y >= top && y <= bottom
 }
 
 const taskOf = (qc: QueryClient, id: string | null) => (id ? qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === id) : undefined)
@@ -177,6 +222,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
   const mark = useRef<HTMLDivElement | null>(null)
   const line = useRef<HTMLDivElement | null>(null)
   const dropZone = useRef<HTMLDivElement | null>(null)
+  const ghost = useRef<HTMLDivElement | null>(null)
   /** A click to drop: the one a drag's or a hold's release makes. */
   const dropClick = useRef(0)
   const refocus = useRef<{ key: string; until: number } | null>(null)
@@ -263,8 +309,9 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
   )
 
   /**
-   * Draw the drag where it is now: the frame on its row, and the line where it would land, or, out of the list over a
-   * message box, the box's outline. Scrolls the list with the pointer at its top or bottom edge.
+   * Draw the drag where it is now: the frame on its row, its copy at the pointer, and the line where it would land, or,
+   * out of the sidebar over a message box, the box's outline. Scrolls the list with the pointer at its top or bottom
+   * edge. Out of the sidebar the list takes no drop: no line, no scrolling, and a release leaves the order alone.
    */
   const draw = useCallback(() => {
     const p = press.current
@@ -274,15 +321,23 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
     p.to = null
     const items = new Map(treeItems(tree).map((i) => [i.getAttribute("data-tree-key"), i]))
     const item = items.get(p.key)
-    if (!item) return void (hide(mark.current), hide(line.current), hide(dropZone.current), (p.drop = null))
+    if (!item) return void (hide(mark.current), hide(line.current), hide(dropZone.current), hide(ghost.current), (p.drop = null))
     const view = scrollerOf(blockOf(item), tree)
     const clip = (view ?? tree).getBoundingClientRect()
-    if (p.phase === "dragging") {
-      p.drop = p.taskId ? targetAt(p.x, p.y, p.taskId) : null
-      showDrop(dropZone.current, p.drop, p.name)
+    const dragging = p.phase === "dragging"
+    const inside = dragging && overPanel(tree, p.x, p.y)
+    if (dragging) {
+      p.drop = p.taskId && !inside ? targetAt(p.x, p.y, p.taskId) : null
+      showDrop(dropZone.current, p.drop, p.name, p.touch)
+      const el = ghost.current
+      if (el) {
+        if (!p.ghost) fillGhost(el, item)
+        p.ghost = true
+        placeGhost(el, p.x, p.y, p.touch)
+      }
     }
-    // Only beside the list: a message box at the bottom of the chat is no edge of it.
-    if (p.phase === "dragging" && view && !p.drop && p.x >= clip.left && p.x <= clip.right) {
+    // Only over the list itself: a message box at the bottom of the chat is no edge of it.
+    if (inside && view && p.x >= clip.left && p.x <= clip.right) {
       const by = p.y < clip.top + EDGE ? -EDGE_STEP : p.y > clip.bottom - EDGE ? EDGE_STEP : 0
       const before = view.scrollTop
       if (by) view.scrollTop = before + by
@@ -290,7 +345,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
       if (view.scrollTop !== before) p.frame = requestAnimationFrame(draw)
     }
     const { left, width } = showMark(mark.current, item, clip)
-    const spot = p.phase === "dragging" && !p.drop ? orderSpot(latest.current, p.key) : null
+    const spot = inside ? orderSpot(latest.current, p.key) : null
     const blocks = spot && spot.list.ids.length > 1 ? spot.list.keys.map((k) => items.get(k)).map((i) => (i ? blockOf(i) : null)) : []
     if (!spot || !blocks.length || blocks.includes(null)) return hide(line.current)
     const rects = blocks.map((b) => b!.getBoundingClientRect())
@@ -311,6 +366,8 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
     hide(mark.current)
     hide(line.current)
     hide(dropZone.current)
+    hide(ghost.current)
+    ghost.current?.replaceChildren()
   }, [])
   useEffect(() => end, [end])
 
@@ -326,7 +383,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
       if (!row) return
       const touch = e.pointerType !== "mouse"
       const name = (row.spot ? row.spot.list.names[row.spot.index] : taskOf(qc, row.taskId)?.title) ?? ""
-      const p: Press = { pointerId: e.pointerId, touch, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, key: row.key, taskId: row.taskId, name, phase: "pressed", timer: null, frame: null, to: null, drop: null, stop: () => {} }
+      const p: Press = { pointerId: e.pointerId, touch, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, key: row.key, taskId: row.taskId, name, phase: "pressed", timer: null, frame: null, to: null, drop: null, ghost: false, stop: () => {} }
       const schedule = () => {
         if (p.frame === null) p.frame = requestAnimationFrame(draw)
       }
@@ -489,17 +546,18 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, 
 
   return {
     tree: { ...tree, ref, onKeyDown, onPointerDown, onClickCapture, onContextMenu },
-    layer: <ReorderLayer store={layer} mark={mark} line={line} drop={dropZone} spotOf={spotOf} onMove={run} onReset={reset} onAdd={addTo} />,
+    layer: <ReorderLayer store={layer} mark={mark} line={line} drop={dropZone} ghost={ghost} spotOf={spotOf} onMove={run} onReset={reset} onAdd={addTo} />,
   }
 }
 
 const OVERLAY = "pointer-events-none fixed z-60 hidden"
 
-function ReorderLayer({ store, mark, line, drop, spotOf, onMove, onReset, onAdd }: {
+function ReorderLayer({ store, mark, line, drop, ghost, spotOf, onMove, onReset, onAdd }: {
   store: ReturnType<typeof layerStore>
   mark: { current: HTMLDivElement | null }
   line: { current: HTMLDivElement | null }
   drop: { current: HTMLDivElement | null }
+  ghost: { current: HTMLDivElement | null }
   spotOf: (key: string) => OrderSpot | null
   onMove: (key: string, to: OrderMove) => void
   onReset: (key: string) => void
@@ -549,9 +607,11 @@ function ReorderLayer({ store, mark, line, drop, spotOf, onMove, onReset, onAdd 
           <div ref={mark} aria-hidden data-reorder-mark className={`${OVERLAY} rounded-lg border border-yard-400/80 bg-yard-400/10`} />
           <div ref={line} aria-hidden data-reorder-line className={`${OVERLAY} h-0.5 rounded-full bg-yard-400`} />
           {/* Over the message box a dragged task would go into: solid ink on a dimmed box, so it reads in both themes. */}
-          <div ref={drop} aria-hidden data-context-drop className={`${OVERLAY} items-center justify-center rounded-xl border-2 border-dashed border-yard-400 bg-zinc-950/85 px-3 text-sm font-medium text-yard-300`}>
+          <div ref={drop} aria-hidden data-context-drop className={`${OVERLAY} items-center justify-center rounded-xl border-2 border-dashed border-yard-400 bg-zinc-950/85 px-3 py-2 text-sm font-medium text-yard-300`}>
             <span className="min-w-0 truncate" />
           </div>
+          {/* The dragged row, with the pointer: a lifted card in the sidebar's own colours, so it reads in both themes. */}
+          <div ref={ghost} aria-hidden data-drag-ghost className={`${OVERLAY} top-0 left-0 overflow-hidden rounded-lg border border-yard-400/70 bg-zinc-900 text-zinc-200 opacity-95 shadow-lg shadow-black/30`} />
         </>,
         document.body,
       )}
