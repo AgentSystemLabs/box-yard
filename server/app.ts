@@ -732,8 +732,10 @@ export function createBoxYard(
   captains.gitAuth = (projectId) => tasks.localGitAuth(projectId)
   orchestrator.prs = tasks.prs
   captains.prs = tasks.prs
-  // Each project's live defaults for new tasks (Runs on, agent, model, effort): a Captain's [Project now] ends with them.
+  // Each project's live defaults for new tasks (Runs on, agent, model, effort): a Captain's [Project now] ends with them,
+  // and the Coordinator sees them under a project its message names.
   captains.projectDefaults = (projectId) => tasks.projectDefaults(projectId)
+  orchestrator.projectDefaults = (projectId) => tasks.projectDefaults(projectId)
   orchestrator.logins = logins
   captains.logins = logins
   threads.logins = logins
