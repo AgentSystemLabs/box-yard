@@ -1298,6 +1298,12 @@ export function createBoxYard(
     if (!store.getProject(id)) throw new BadRequestError("No such project")
     res.json(captains.state(id))
   })
+  // The Captain's cost breakdown (the $ in its header, shared/spendBreakdown.ts).
+  api.get("/projects/:id/captain/usage", (req, res) => {
+    const id = req.params.id!
+    if (!store.getProject(id)) throw new BadRequestError("No such project")
+    res.json(store.captainSpend(id))
+  })
   // Every Captain's chat as it opens, for the web app's prefetch after its first paint (server/captainRecent.ts).
   api.get("/captains/recent", async (req, res) => {
     const recent = recentCaptains(
@@ -1376,6 +1382,12 @@ export function createBoxYard(
     const task = store.getTask(req.params.id!)
     if (!task) return void res.status(404).json({ error: "Task not found" })
     res.json(task)
+  })
+  // The task's cost breakdown (the $ in its header, shared/spendBreakdown.ts): its own runs, its subtasks' apart.
+  api.get("/tasks/:id/usage", (req, res) => {
+    const spend = store.taskSpend(req.params.id!)
+    if (!spend) return void res.status(404).json({ error: "Task not found" })
+    res.json(spend)
   })
   api.get("/tasks/:id/messages", (req, res) => {
     res.json(store.listTaskMessages(req.params.id!, 1000))
