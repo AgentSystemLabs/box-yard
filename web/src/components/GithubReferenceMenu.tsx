@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react"
 import { createPortal, flushSync } from "react-dom"
 import { useQuery } from "@tanstack/react-query"
-import { CircleDot, GitPullRequest } from "lucide-react"
+import { CircleCheck, CircleDot } from "lucide-react"
 import type { GithubReference, GithubReferenceAnswer } from "../../../shared/githubReferences"
 import type { Project } from "../../../shared/types"
 import { api } from "../lib/api"
@@ -10,7 +10,7 @@ import { keys } from "../lib/queries"
 import { pickerKeyDown } from "../lib/pickerKeys"
 import { useAbove } from "../lib/useAbove"
 import { Loading } from "./Loading"
-import { cx } from "./ui"
+import { cx, PR_STYLE, TAP_AREA } from "./ui"
 
 export function useGithubReferences({ projectId, draftKey, value, setValue, input, blocked }: {
   projectId: string | null
@@ -55,7 +55,7 @@ export function useGithubReferences({ projectId, draftKey, value, setValue, inpu
   const items = data?.items ?? []
   const loading = Boolean(projectId && (settled !== request || query.isPending))
   const problem = !projectId ? "Choose a project with % in the Coordinator chat to look up its GitHub issues and pull requests."
-    : query.error ? "Couldn't load GitHub references. Try again."
+    : query.error ? "Couldn't load GitHub references."
     : data?.problem ?? null
   useEffect(() => setActive(0), [request, projectScope, data])
   useEffect(() => {
@@ -110,24 +110,31 @@ export function GithubReferenceMenu({ picker, anchor }: { picker: ReturnType<typ
       onMouseDown={(e) => e.preventDefault()}>
       <div className="min-h-11 border-b border-zinc-800/80 px-3 py-2 text-xs text-zinc-300">
         GitHub issues and pull requests
-        <span className="block truncate text-[11px] text-zinc-500">{repo ?? "Current project's repository"} · #number or #title · ↑↓ choose · Enter/Tab insert · Esc close</span>
+        <span className="block truncate text-[11px] text-zinc-500">
+          {repo ?? "Current project's repository"} · type a number or title
+          {/* The keys are for a keyboard: a phone taps a row. */}
+          <span className="pointer-coarse:hidden"> · ↑↓ choose · Enter/Tab insert · Esc close</span>
+        </span>
       </div>
       {loading && <Loading kind="rows" label="Searching GitHub" />}
-      {!loading && problem && <div role="status" className="px-3 py-2 text-xs text-amber-300">{problem}
-        {picker.retryable && <button type="button" className="ml-2 underline" onClick={picker.retry}>Try again</button>}
+      {!loading && problem && <div role="status" className="flex items-center gap-3 px-3 py-2 text-xs text-amber-300 pointer-coarse:min-h-11">
+        <span className="min-w-0 flex-1">{problem}</span>
+        {picker.retryable && <button type="button" className={cx(TAP_AREA, "shrink-0 rounded-sm underline underline-offset-2 hover:text-amber-200")} onClick={picker.retry}>Try again</button>}
       </div>}
       {!loading && !problem && !items.length && <div role="status" className="px-3 py-2 text-xs text-zinc-500">No matching issues or pull requests.</div>}
       <ul id={id} role="listbox" aria-label="GitHub issues and pull requests" aria-busy={loading || undefined}
         style={{ maxHeight: at.maxHeight - 64 }} className="scroll-thin overflow-y-auto overscroll-contain py-1">
         {items.map((item, i) => {
-          const Icon = item.kind === "pull" ? GitPullRequest : CircleDot
+          // GitHub's own glyphs and colours (PrChip's): open green, merged purple, closed red; an issue closes purple.
+          const Icon = item.kind === "pull" ? PR_STYLE[item.state].icon : item.state === "open" ? CircleDot : CircleCheck
+          const tone = PR_STYLE[item.kind === "issue" && item.state === "closed" ? "merged" : item.state].link
           return <li key={item.number} id={`${id}-${i}`} role="option" aria-selected={i === active} title={item.url}
             onClick={() => picker.pick(item)} onMouseMove={() => i !== active && picker.setActive(i)}
             className={cx("mx-1 flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm", i === active && "bg-zinc-800")}>
-            <Icon className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+            <Icon className={cx("h-4 w-4 shrink-0", tone)} aria-hidden />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="min-w-0 truncate text-zinc-100">#{item.number} {item.title}</span>
-              <span className="truncate text-xs text-zinc-500">{item.kind === "pull" ? "Pull request" : "Issue"} · {item.state} · {repo}</span>
+              <span className="line-clamp-2 min-w-0 wrap-anywhere text-zinc-100"><span className="text-zinc-400 tabular-nums">#{item.number}</span> {item.title}</span>
+              <span className="truncate text-xs text-zinc-500">{item.kind === "pull" ? "Pull request" : "Issue"} · {item.state}</span>
             </span>
           </li>
         })}

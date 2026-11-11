@@ -2,11 +2,12 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every half rem from 8 to 36. */
+/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every quarter rem from 8 to 36
+   (and the chips' labels, sr-only). */
 @source inline("@{min,max}-[{8..36}rem]/composer:hidden");
-@source inline("@{min,max}-[{8..35}.5rem]/composer:hidden");
+@source inline("@{min,max}-[{8..35}.{25,5,75}rem]/composer:hidden");
 @source inline("@max-[{8..36}rem]/composer:sr-only");
-@source inline("@max-[{8..35}.5rem]/composer:sr-only");
+@source inline("@max-[{8..35}.{25,5,75}rem]/composer:sr-only");
 
 /*
  * Type: Inter sets the whole UI (@fontsource-variable/inter, imported in main.tsx; index.html preloads its latin file,
@@ -165,6 +166,11 @@ body {
 :where(button, a, input, textarea, select, [tabindex]):focus-visible {
   outline: 2px solid var(--focus-ink);
   outline-offset: 2px;
+}
+
+/* The composer's indicator lies over its 1px border: one ring, not a gold line around a gray one. */
+[data-composer-box]:has(> div > [data-chat-composer]:focus) {
+  outline-offset: -1px;
 }
 
 /* The box supplies the textarea's indicator. Other composer controls keep their own outlines. */
