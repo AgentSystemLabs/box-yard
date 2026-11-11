@@ -117,8 +117,8 @@ describe("SpendDetail", () => {
     show(createElement(SpendDetail, { data: taskSpend() }))
     const stats = section("Totals")!
     expect([...stats.querySelectorAll("div > span:first-child")].map(text).slice(0, 3)).toEqual(["This task", "Subtasks (2)", "Together"])
-    // Own: $1.20 + $0.10 + $0.25 (estimated); subtasks: one Codex run with no cost; together the same dollars.
-    expect(all("spend-total").map(text)).toEqual(["$1.55", "Unknown", "$1.55"])
+    // Own: $1.20 + $0.10 + $0.25 (estimated); subtasks: one Codex run with no cost; together the same dollars, and that run.
+    expect(all("spend-total").map(text)).toEqual(["$1.55", "Unknown", "$1.55 +1 unknown"])
     expect(text(stats)).toContain("3 runs · 100k tokens")
     // The task's own tokens by kind, each with its label.
     const tokens = stats.querySelector('dl[aria-label="This task\'s tokens"]')!
@@ -211,7 +211,7 @@ describe("SpendButton", () => {
     const dialog = document.querySelector('[role="dialog"]')!
     expect(text(dialog)).toContain("Cost breakdown")
     expect(text(dialog)).toContain("Example parent task")
-    expect(all("spend-total").map(text)).toEqual(["$1.55", "Unknown", "$1.55"])
+    expect(all("spend-total").map(text)).toEqual(["$1.55", "Unknown", "$1.55 +1 unknown"])
 
     // A second click closes it.
     await act(async () => void button.click())

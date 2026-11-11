@@ -12,7 +12,7 @@ import { taskSessionHref } from "../lib/navigation"
 import { Modal } from "./Modal"
 import { Loading } from "./Loading"
 import { formatTokens } from "./ContextMeter"
-import { AppLink, cx } from "./ui"
+import { AppLink, cx, TAP_AREA } from "./ui"
 import { AGENT_CLI_LABEL, type AgentCli } from "../../../shared/agentCli"
 import { formatMs } from "../../../shared/turnTimings"
 import { addSpend, emptySpend, spendTokens, type SpendBreakdown, type SpendModel, type SpendRun, type SpendTotals } from "../../../shared/spendBreakdown"
@@ -87,10 +87,11 @@ export function SpendDetail({ data, onLeave }: { data: SpendBreakdown; onLeave?:
     <div data-testid="spend-detail" className="flex flex-col gap-5 text-xs text-zinc-400">
       <section aria-label="Totals" className="flex flex-col gap-3">
         {sub ? (
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-2">
+          // Narrow, the two parts side by side and Together under them.
+          <div className="grid grid-cols-2 gap-2 @min-[30rem]/spend:grid-cols-3">
             <Stat label="This task" totals={data.total} />
             <Stat label={`Subtasks (${sub.tasks.length})`} totals={sub.total} />
-            <Stat label="Together" totals={addSpend(addSpend(emptySpend(), data.total), sub.total)} strong />
+            <Stat label="Together" totals={addSpend(addSpend(emptySpend(), data.total), sub.total)} strong className="col-span-2 @min-[30rem]/spend:col-span-1" />
           </div>
         ) : (
           <Stat label={data.scope === "task" ? "This task" : "This Captain"} totals={data.total} strong />
@@ -111,7 +112,7 @@ export function SpendDetail({ data, onLeave }: { data: SpendBreakdown; onLeave?:
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   {/* The sheet steps aside as the subtask opens. */}
                   <span className="min-w-0 basis-full @min-[26rem]/spend:flex-1 @min-[26rem]/spend:basis-0" onClickCapture={onLeave}>
-                    <AppLink href={taskSessionHref(t.taskId)} className="inline-flex max-w-full items-center font-medium wrap-anywhere text-yard-300 hover:text-yard-200 hover:underline pointer-coarse:min-h-11">
+                    <AppLink href={taskSessionHref(t.taskId)} className={cx(TAP_AREA, "inline-block max-w-full font-medium wrap-anywhere text-yard-300 hover:text-yard-200 hover:underline")}>
                       {t.title}
                     </AppLink>
                   </span>
@@ -161,15 +162,20 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
   )
 }
 
-function Stat({ label, totals, strong = false }: { label: string; totals: SpendTotals; strong?: boolean }) {
+/** A total, with how many of its runs have no cost (the dollars leave them out). */
+function Stat({ label, totals, strong = false, className }: { label: string; totals: SpendTotals; strong?: boolean; className?: string }) {
+  const unknown = allUnknown(totals)
   return (
-    <div className={cx("flex min-w-0 flex-col rounded-lg border px-3 py-2", strong ? "border-zinc-700 bg-zinc-900/70" : "border-zinc-800 bg-zinc-900/30")}>
+    <div className={cx("flex min-w-0 flex-col rounded-lg border px-3 py-2", strong ? "border-zinc-700 bg-zinc-900/70" : "border-zinc-800 bg-zinc-900/30", className)}>
       <span className="text-zinc-500">{label}</span>
-      <span data-testid="spend-total" className={cx("tabular-nums", strong ? "text-xl font-semibold text-zinc-50" : "text-base font-medium text-zinc-200")}>
-        {allUnknown(totals) ? "Unknown" : money(totals.costUsd)}
+      <span data-testid="spend-total" className="flex flex-wrap items-baseline gap-x-1.5 tabular-nums">
+        <span className={strong ? "text-xl font-semibold text-zinc-50" : "text-base font-medium text-zinc-200"}>{unknown ? "Unknown" : money(totals.costUsd)}</span>
+        {!unknown && totals.unpricedRuns > 0 && <span className="text-amber-300/90">+{plural(totals.unpricedRuns, "unknown", "unknown")}</span>}
       </span>
-      <span className="text-zinc-500 tabular-nums">
-        {plural(totals.runs, "run")} · {formatTokens(spendTokens(totals))} tokens
+      {/* Wraps between its two figures, never inside one. */}
+      <span className="flex flex-wrap gap-x-1 text-zinc-500 tabular-nums">
+        <span className="whitespace-nowrap">{plural(totals.runs, "run")} ·</span>
+        <span className="whitespace-nowrap">{formatTokens(spendTokens(totals))} tokens</span>
       </span>
     </div>
   )
@@ -215,7 +221,7 @@ function CostText({ totals }: { totals: SpendTotals }) {
     <span className="tabular-nums">
       <span className="text-zinc-100">{money(totals.costUsd)}</span>
       {totals.estimatedUsd > 0 && <span className="text-zinc-500"> (≈{money(totals.estimatedUsd)} est.)</span>}
-      {totals.unpricedRuns > 0 && <span className="text-amber-300/90"> +{plural(totals.unpricedRuns, "unknown")}</span>}
+      {totals.unpricedRuns > 0 && <span className="text-amber-300/90"> +{plural(totals.unpricedRuns, "unknown", "unknown")}</span>}
     </span>
   )
 }
