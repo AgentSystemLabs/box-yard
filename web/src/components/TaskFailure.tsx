@@ -60,7 +60,8 @@ function FailureBanner({ task, error, identityId, className }: { task: FailedTas
             {f.title}
           </p>
           <p className="mt-0.5 wrap-anywhere text-red-200/80" data-testid="failure-detail">
-            {f.detail}
+            {/* Under "The last turn failed", an error's own "Turn failed: " says it twice. */}
+            {f.kind === "unknown" ? f.detail.replace(/^Turn failed:\s*/i, "") || f.detail : f.detail}
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
             {f.fixFirst && settings}

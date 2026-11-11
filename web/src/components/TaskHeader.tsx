@@ -22,7 +22,7 @@ import { ContinueTask } from "./ContinueTask"
 import { api } from "../lib/api"
 import { primaryAction, readyForReview } from "../lib/taskActions"
 import { toast } from "../lib/toast"
-import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, StatusDot, TimeAgo, cx, timeAgo } from "./ui"
+import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, TimeAgo, cx, timeAgo } from "./ui"
 import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
 import { TaskStatusIcon } from "./TaskIcon"
 import { FilesChip } from "./TaskFiles"
@@ -104,8 +104,8 @@ export function TaskHeader({
     <div data-testid="task-chips" className="flex items-center gap-0.5 @min-[36rem]/head:gap-1.5">
       <TaskStateMore task={task} />
       {task.prUrl && <PrStatusChip task={task} />}
-      {task.previews.map((p) => <PreviewChip key={p.port} preview={p} port={task.previews.length > 1} />)}
       {files.length > 0 && <FilesChip taskId={task.id} projectId={task.projectId} files={files} quiet fold />}
+      {task.previews.map((p) => <PreviewChip key={p.port} preview={p} port={task.previews.length > 1} />)}
     </div>
   )
   const menu = <TaskMenu task={task} project={project} schedule={schedule} open={details} setOpen={setDetails} />
@@ -136,17 +136,20 @@ export function TaskHeader({
   const crumbs = Boolean(onBack && tree)
   const meta = (
     <div data-testid="task-meta" className="flex min-w-0 flex-wrap items-center gap-x-0.5 text-xs text-zinc-500 @min-[36rem]/head:gap-x-1.5">
-      {/* Back and the title keep 9rem (about 12 characters of title) beside the icons; any less and the icons wrap to a second row. */}
-      <div className="flex min-w-[min(100%,9rem)] flex-1 basis-0 items-center">
+      {/* The title keeps 12rem (about 16 characters) after Back and the crumbs; any less and the chips wrap to a second
+          row. So this group's least width is its content's (no min-w-0), where the title counts as its 12rem alone
+          (contain-inline-size), and the crumbs give way first once the header itself is narrower than that. */}
+      <div className="flex max-w-full flex-1 basis-0 items-center">
         {onBack && <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-2 pointer-coarse:-ml-3", backClassName)} />}
         {/* The Captain's crumb reaches into the gap before it, where Back shows (a sheet over the chat) its own. */}
         {crumbs && <TaskCrumbs task={task} project={project} className={backClassName ? "@max-[35.5rem]/coord:ml-2" : "ml-2"} />}
-        <Heading className={cx("flex min-w-0 flex-1", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
+        <Heading className={cx("flex min-w-48 flex-1 contain-inline-size", task.status === "idle" ? "text-zinc-400" : "text-zinc-50")}>
           <TitleButton task={task} open={details} onOpen={() => setDetails(true)} />
         </Heading>
       </div>
-      {/* Chips and ⓘ wrap together, so ⓘ stays last. */}
-      <div className="ml-auto flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5">
+      {/* Chips and ⓘ wrap together, so ⓘ stays last. On a row of their own they keep 4px off the title's row and the
+          header's edge (a touch screen's 44px ⓘ already does). */}
+      <div className="my-1 ml-auto flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5 pointer-coarse:my-0">
         {chips}
         {ready && <MarkDoneButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
         {task.status === "done" && <ReopenButton task={task} crowded={Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0} />}
@@ -291,15 +294,23 @@ function TaskStateMore({ task }: { task: Task }) {
   )
 }
 
-/** The state in words, for the details: the dot and its label, then what's queued and compacting. */
+/**
+ * The state in words, for the details: the task's icon, which draws the state here as everywhere, and its label, then
+ * what's queued and compacting.
+ */
 function TaskState({ task, onReveal }: { task: Task; onReveal: () => void }) {
   return (
-    <StatusDot status={task.status} title={`Active ${timeAgo(task.updatedAt)}`} className={cx("min-w-0 flex-wrap", task.status !== "idle" && "text-zinc-200")}>
+    <span title={`Active ${timeAgo(task.updatedAt)}`} data-status={task.status} className={cx("inline-flex min-w-0 flex-wrap items-center gap-1.5 text-xs font-medium whitespace-nowrap", task.status === "idle" ? "text-zinc-400" : "text-zinc-200")}>
+      {/* The label beside it says the state. */}
+      <span aria-hidden className="inline-flex">
+        <TaskStatusIcon task={task} size="sm" muted={task.status === "idle"} />
+      </span>
+      {STATUS[task.status].label}
       {/* The queue opens in the transcript, so the sheet steps aside first. */}
       {task.pendingCount > 0 && <span className="font-normal text-zinc-500" onClickCapture={onReveal}>· <QueuedLink taskId={task.id} count={task.pendingCount} /></span>}
       {(task.compacting || task.compactPending) && <span className="font-normal text-zinc-500">· {task.compacting ? "Compacting…" : "Compact queued"}</span>}
       <PriorityPill task={task} />
-    </StatusDot>
+    </span>
   )
 }
 
@@ -351,8 +362,8 @@ function Breadcrumb({ task, project }: { task: Task; project: Project | undefine
 
 /**
  * A preview the agent registered (report_preview) or Cody opened: the header's most prominent action, in a new tab.
- * The port only shows when there are several to tell apart; the tooltip always has the label and port. A narrow
- * header folds it to the globe.
+ * With several, each shows its port in place of the word, to tell them apart and leave the title its room; the tooltip
+ * always has the label and port. A narrow header folds it to the globe.
  */
 function PreviewChip({ preview, port }: { preview: PreviewLink; port: boolean }) {
   return (
@@ -364,8 +375,8 @@ function PreviewChip({ preview, port }: { preview: PreviewLink; port: boolean })
       data-testid="preview-chip"
       className={cx(HEADER_CHIP, "border border-sky-400/50 bg-sky-500/20 font-semibold text-sky-50 hover:bg-sky-500/30", HEADER_FOLD.chip)}
     >
-      <Globe className={cx("h-3.5 w-3.5 text-sky-300", HEADER_FOLD.icon)} aria-hidden /> <span className={HEADER_FOLD.label}>Preview</span>
-      {port && <span className="font-normal text-sky-200/80">:{preview.port}</span>}
+      <Globe className={cx("h-3.5 w-3.5 text-sky-300", HEADER_FOLD.icon)} aria-hidden /> <span className={port ? "sr-only" : HEADER_FOLD.label}>Preview</span>
+      {port && <span className="tabular-nums">:{preview.port}</span>}
     </NewTabLink>
   )
 }
@@ -417,8 +428,9 @@ const dangerItem = cx(menuItemBase, "text-red-300 hover:bg-red-500/10 hover:text
 
 /**
  * ⓘ and the details sheet it opens (the title opens it too, so the header holds `open`). An info icon, not ⋯: the sheet
- * is the task's details first (its state, branch, where it runs), with its less common actions under them, as a
- * phone's ⓘ beside a conversation's name opens its details with Delete at the bottom; ⋯ promises a short menu.
+ * is about the task (its state, branch, where it runs), as a phone's ⓘ beside a conversation's name opens its details;
+ * ⋯ promises a short menu. Its less common actions come first, Stop and Delete last among them, so none sits a screen
+ * of details away.
  */
 function TaskMenu({
   task,
@@ -474,91 +486,8 @@ function TaskMenu({
           )}
         >
           <p className="mb-4 leading-snug font-medium wrap-anywhere text-zinc-100">{task.title}</p>
-          <div className="grid items-start gap-x-6 gap-y-5 text-xs text-zinc-400 @min-[34rem]/details:grid-cols-2">
-            <DetailGroup title="Task">
-              <Detail label="Status">
-                <TaskState task={task} onReveal={() => setOpen(false)} />
-              </Detail>
-              <Detail label="ID">
-                <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300">{task.id}</span>
-                <CopyButton text={task.id} label="Copy task id" />
-              </Detail>
-              <Detail label="Link">
-                <span className="min-w-0 flex-1 truncate text-zinc-300">Open this task</span>
-                <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link" />
-              </Detail>
-              {task.branch && (
-                <Detail label="Branch">
-                  <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300" title={task.branch}>
-                    {task.branch}
-                  </span>
-                  <CopyButton text={task.branch} label="Copy branch name" />
-                </Detail>
-              )}
-              {task.pushState && <PushDetail push={task.pushState} />}
-              <Detail label="Active">
-                <span className="text-zinc-300">
-                  <TimeAgo ts={task.updatedAt} />
-                </span>
-                <span>
-                  · {task.turnCount} turn{task.turnCount === 1 ? "" : "s"}
-                </span>
-              </Detail>
-              <Detail label="Created">
-                <span className="text-zinc-300">
-                  <TimeAgo ts={task.createdAt} />
-                </span>
-              </Detail>
-              {task.scheduleId && (
-                <Detail label="Schedule">
-                  <span className="min-w-0 wrap-anywhere text-zinc-300">
-                    {schedule ? schedule.name : "a deleted schedule"}
-                  </span>
-                </Detail>
-              )}
-            </DetailGroup>
-            <div className="min-w-0 space-y-5">
-              <DetailGroup title="Agent">
-                <Detail label="Agent">
-                  <span className="min-w-0 wrap-anywhere text-zinc-300" data-testid="task-agent-cli">
-                    {AGENT_CLI_LABEL[task.agentCli ?? "claude"]}
-                  </span>
-                </Detail>
-                {(task.model || task.effort) && (
-                  <Detail label="Model">
-                    <span className="min-w-0 wrap-anywhere text-zinc-300">{[task.model, task.effort ? `${task.effort} effort` : ""].filter(Boolean).join(" · ")}</span>
-                  </Detail>
-                )}
-                {project && <IdentityDetail identityId={project.identityId} onOpen={() => setOpen(false)} />}
-                {(task.routingRule || task.routingReason) && (
-                  <Detail label="Route" top>
-                    <span className="min-w-0 py-0.5 leading-snug wrap-anywhere">
-                      {task.routingRule && <span className="text-zinc-300">{task.routingRule}</span>}
-                      {task.routingRule && task.routingReason && " · "}
-                      {task.routingReason}
-                    </span>
-                  </Detail>
-                )}
-              </DetailGroup>
-              {/* Where it runs: the header leaves it out, so this is the only place it shows. */}
-              <section aria-label="Where this task runs" data-testid="task-details-placement" className="border-t border-zinc-800/80 pt-3">
-                <h3 className="mb-2 text-sm font-medium text-zinc-100">Runner</h3>
-                {task.runsOn && (
-                  <dl className="mb-3 grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-2">
-                    <Detail label="Runs on">
-                      <span className={cx("min-w-0 wrap-anywhere", task.runsOn === "local" ? "text-amber-200" : "text-zinc-300")} data-testid="task-runs-on">
-                        {task.runsOn === "gpu" && task.gpu ? gpuPickLabel(task.gpu.provider, task.gpu.type) : RUNNER_LABEL[task.runsOn]}
-                        {task.runsOn === "box" && task.boxSize ? ` · ${task.boxSize} or larger` : task.runsOn === "gpu" && task.gpu?.size ? ` · ${daytonaSize(task.gpu.size)?.label ?? task.gpu.size}` : task.runsOn === "ssh" && task.machineLabel ? ` · ${task.machineLabel}` : ""} · this task only
-                      </span>
-                    </Detail>
-                  </dl>
-                )}
-                <PlacementDetails task={task} project={project} />
-              </section>
-            </div>
-          </div>
-
-          <section aria-label="Task actions" className="mt-5 border-t border-zinc-800/80 pt-3">
+          {/* Before the details, which run long: on a phone every action is in reach as the sheet opens. */}
+          <section aria-label="Task actions" className="mb-5 border-t border-zinc-800/80 pt-3">
             <h3 className="mb-2 text-sm font-medium text-zinc-100">Actions</h3>
             <button
               type="button"
@@ -649,6 +578,89 @@ function TaskMenu({
               </button>
             </div>
           </section>
+          <div className="grid items-start gap-x-6 gap-y-5 text-xs text-zinc-400 @min-[34rem]/details:grid-cols-2">
+            <DetailGroup title="Task">
+              <Detail label="Status">
+                <TaskState task={task} onReveal={() => setOpen(false)} />
+              </Detail>
+              <Detail label="ID">
+                <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300">{task.id}</span>
+                <CopyButton text={task.id} label="Copy task id" />
+              </Detail>
+              <Detail label="Link">
+                <span className="min-w-0 flex-1 truncate text-zinc-300">Open this task</span>
+                <CopyButton text={`${window.location.origin}${taskSessionHref(task.id)}`} label="Copy task link" />
+              </Detail>
+              {task.branch && (
+                <Detail label="Branch">
+                  <span className="min-w-0 flex-1 wrap-anywhere font-mono text-[11px] text-zinc-300" title={task.branch}>
+                    {task.branch}
+                  </span>
+                  <CopyButton text={task.branch} label="Copy branch name" />
+                </Detail>
+              )}
+              {task.pushState && <PushDetail push={task.pushState} />}
+              <Detail label="Active">
+                <span className="text-zinc-300">
+                  <TimeAgo ts={task.updatedAt} />
+                </span>
+                <span>
+                  · {task.turnCount} turn{task.turnCount === 1 ? "" : "s"}
+                </span>
+              </Detail>
+              <Detail label="Created">
+                <span className="text-zinc-300">
+                  <TimeAgo ts={task.createdAt} />
+                </span>
+              </Detail>
+              {task.scheduleId && (
+                <Detail label="Schedule">
+                  <span className="min-w-0 wrap-anywhere text-zinc-300">
+                    {schedule ? schedule.name : "a deleted schedule"}
+                  </span>
+                </Detail>
+              )}
+            </DetailGroup>
+            <div className="min-w-0 space-y-5">
+              <DetailGroup title="Agent">
+                <Detail label="Agent">
+                  <span className="min-w-0 wrap-anywhere text-zinc-300" data-testid="task-agent-cli">
+                    {AGENT_CLI_LABEL[task.agentCli ?? "claude"]}
+                  </span>
+                </Detail>
+                {(task.model || task.effort) && (
+                  <Detail label="Model">
+                    <span className="min-w-0 wrap-anywhere text-zinc-300">{[task.model, task.effort ? `${task.effort} effort` : ""].filter(Boolean).join(" · ")}</span>
+                  </Detail>
+                )}
+                {project && <IdentityDetail identityId={project.identityId} onOpen={() => setOpen(false)} />}
+                {(task.routingRule || task.routingReason) && (
+                  <Detail label="Route" top>
+                    <span className="min-w-0 py-0.5 leading-snug wrap-anywhere">
+                      {task.routingRule && <span className="text-zinc-300">{task.routingRule}</span>}
+                      {task.routingRule && task.routingReason && " · "}
+                      {task.routingReason}
+                    </span>
+                  </Detail>
+                )}
+              </DetailGroup>
+              {/* Where it runs: the header leaves it out, so this is the only place it shows. */}
+              <section aria-label="Where this task runs" data-testid="task-details-placement" className="border-t border-zinc-800/80 pt-3">
+                <h3 className="mb-2 text-sm font-medium text-zinc-100">Runner</h3>
+                {task.runsOn && (
+                  <dl className="mb-3 grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-x-2">
+                    <Detail label="Runs on">
+                      <span className={cx("min-w-0 wrap-anywhere", task.runsOn === "local" ? "text-amber-200" : "text-zinc-300")} data-testid="task-runs-on">
+                        {task.runsOn === "gpu" && task.gpu ? gpuPickLabel(task.gpu.provider, task.gpu.type) : RUNNER_LABEL[task.runsOn]}
+                        {task.runsOn === "box" && task.boxSize ? ` · ${task.boxSize} or larger` : task.runsOn === "gpu" && task.gpu?.size ? ` · ${daytonaSize(task.gpu.size)?.label ?? task.gpu.size}` : task.runsOn === "ssh" && task.machineLabel ? ` · ${task.machineLabel}` : ""} · this task only
+                      </span>
+                    </Detail>
+                  </dl>
+                )}
+                <PlacementDetails task={task} project={project} />
+              </section>
+            </div>
+          </div>
         </Modal>
       )}
     </div>

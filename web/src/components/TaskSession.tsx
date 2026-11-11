@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { useArtifacts, useProjects, useSchedules, useSendChat, useSendTaskMessage, useTask, newClientId } from "../lib/queries"
 import { projectContext, taskContext } from "../lib/selectionTask"
 import { Button, InRepo, cx } from "./ui"
-import { TaskThread } from "./TaskView"
+import { TaskThread, workingLabel } from "./TaskView"
 import { CHAT_COLUMN, TaskHeader } from "./TaskHeader"
 import { TaskComposer, type TaskAskTarget } from "./CaptainForward"
 import { TaskAsk } from "./TaskAsk"
@@ -107,8 +107,9 @@ export function TaskSession({ id, onClose, backLabel, scrollKey }: { id: string;
             <div className="flex min-h-0 flex-1 flex-col">
               {asking ? <TaskAsk taskId={id} handle={askHandle} onAsk={askStarter} /> : (
                 <TaskThread handle={handle} id={id} bare scrollKey={scrollKey}
-                  working={onTurn(task) ? "Task is working…" : null}
+                  working={onTurn(task) ? workingLabel(task.status) : null}
                   workingSince={onTurn(task) ? runningSince(task) : null}
+                  asking={task.status === "needs_input"}
                   selectionSource={project ? { kind: "task", project: projectContext(project)!, task: taskContext(task)! } : null}
                   onStartFromSelection={selection} onFollowUp={followUp}
                 />

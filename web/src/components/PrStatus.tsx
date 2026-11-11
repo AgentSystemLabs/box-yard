@@ -1,6 +1,6 @@
 // The task header's PR chip and the PR sheet it opens. The chip carries the one thing to know before opening it
 // (lib/prDetails.ts prSignal: conflicts, failing checks, checks running, all passing...) as a glyph beside "PR #76",
-// or on the PR glyph's corner when the header folds to icons. A tap opens the sheet: checks (failing ones link to
+// or on the PR glyph's corner when the header folds to its glyph and number ("#76"). A tap opens the sheet: checks (failing ones link to
 // their logs), whether it merges cleanly, the review and files changed, the tasks that worked on it, with Open on
 // GitHub and Merge PR.
 import { useState, type ReactNode } from "react"
@@ -35,7 +35,11 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
   const signal = live ? prSignal(query.data?.details) : null
   const SignalIcon = signal ? signalIcon(signal) : null
   const activity = merge.state === "hidden" || merge.state === "ready" ? null : merge.state
-  const title = [activity && PENDING_TITLE[activity], signal && `${prLabel(task)}: ${signal.label}`, prTooltip(task), "Checks, review, files and Merge PR"].filter(Boolean).join("\n")
+  const label = prLabel(task) ?? ""
+  const number = prNumber(task.prUrl)
+  // "PR #76" is its word and its number: a folded chip keeps the number.
+  const word = number && label.endsWith(`#${number}`) ? label.slice(0, -`#${number}`.length) : null
+  const title = [activity && PENDING_TITLE[activity], signal && `${label}: ${signal.label}`, prTooltip(task), "Checks, review, files and Merge PR"].filter(Boolean).join("\n")
   return (
     <>
       <button
@@ -57,7 +61,14 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
             </span>
           )}
         </span>
-        <span className={HEADER_FOLD.label}>{prLabel(task)}</span>
+        {word === null ? (
+          <span className={HEADER_FOLD.label}>{label}</span>
+        ) : (
+          // Folded, "#76" stays beside the glyph (clear of the signal on its corner): which PR, not just that there is one.
+          <span className="tabular-nums @max-[36rem]/head:ml-0.5">
+            <span className={HEADER_FOLD.label}>{word}</span>#{number}
+          </span>
+        )}
         {activity ? (
           <span className={cx("font-normal", HEADER_FOLD.label)}>· {MERGE_CHIP_LABEL[activity]}</span>
         ) : (

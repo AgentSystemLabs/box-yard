@@ -14,7 +14,7 @@ export function ContinueTask({ task, className }: { task: Pick<Task, "id" | "age
   if (!["failed", "idle", "pr_ready"].includes(task.status)) return null
   const reset = agent === "default" || agent !== task.agentCli
   return <>
-    <Button size="sm" variant="subtle" className={className} onClick={() => { setAgent(task.agentCli); setOpen(true) }}>Continue with…</Button>
+    <Button size="sm" variant="subtle" className={className} onClick={() => { setAgent(task.agentCli); setOpen(true) }}>Continue with another agent…</Button>
     {open && <Modal
       title="Continue this task"
       size="sm"

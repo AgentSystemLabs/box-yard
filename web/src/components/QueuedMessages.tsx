@@ -3,8 +3,9 @@
 // the Captain tab show them as their usual bubbles under the live turn (QueuedChatMessage). Each can be edited
 // in place or cancelled until a turn takes it; the server refuses changes after that ("already delivered"), so an
 // edit or cancel never races the delivery. Cancel takes the message back: its text and files go back in the
-// chat's message box to fix and send again (lib/takeBack.ts), and Undo queues it again. On the task page, Steer
-// requests delivery of the whole queue into a running Claude/Codex turn; Stop is a separate action.
+// chat's message box to fix and send again (lib/takeBack.ts), and Undo queues it again. On the task page, one line
+// under the rows says when they go out, with Steer: it requests delivery of the whole queue into a running
+// Claude/Codex turn; Stop is a separate action.
 // Codex acceptance/uncertainty stays visible until the turn settles. Cursor waits for the turn's end.
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
@@ -21,13 +22,18 @@ import { toast } from "../lib/toast"
 import { AttachmentList } from "./Attachments"
 import { Button, LineIcon, TimeAgo, cx } from "./ui"
 
-/** Square icon buttons: 44px touch targets on phones, 24px from sm. */
+/** Square icon buttons: 24px, 44px on a touch screen (their row takes the extra back with ICON_BUTTONS). */
 const ICON_BUTTON =
-  "grid h-11 w-11 shrink-0 place-items-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none sm:h-6 sm:w-6"
+  "grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:w-11"
+/** A row's group of ICON_BUTTONs: the row keeps its height on a touch screen too. */
+const ICON_BUTTONS = "-my-0.5 flex shrink-0 pointer-coarse:-my-2.5"
 
-/** Steer, with its name: 44px tall on phones, 24px from sm. */
+/** Steer, with its name: 24px tall, 44px on a touch screen. */
 const STEER_BUTTON =
-  "flex h-11 shrink-0 items-center gap-1 rounded-md px-2.5 text-[11px] font-semibold text-yard-300 transition hover:bg-zinc-800 hover:text-yard-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none disabled:opacity-50 sm:h-6 sm:px-1.5"
+  "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold text-yard-300 transition hover:bg-zinc-800 hover:text-yard-200 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none disabled:opacity-50 pointer-coarse:h-11 pointer-coarse:px-2.5"
+
+/** A turn is taking the row, or has: it can't be edited, cancelled or steered any more. */
+const isLocked = (m: QueuedMessage) => m.status === "delivering" || m.status === "steering" || m.status === "accepted" || m.status === "uncertain"
 
 const CANCEL_TITLE = "Cancel: it goes back in the message box to edit"
 const STEER_TITLE = "Steer: request delivery of the queued messages into the running turn"
@@ -119,32 +125,39 @@ export const TaskQueue = memo(function TaskQueue({ taskId }: { taskId: string })
     steer.mutate()
   }, [steer.mutate])
 
+  // Rows still waiting for a turn. Steer takes them all, so it shows once, with the line that says when they go out.
+  const waiting = list.filter((m) => !isLocked(m))
+  // An optimistic row (just sent) has no server id yet.
+  const canSteer = turn === "steerable" && waiting.some((m) => !m.id.startsWith("tmp-"))
+
   if (!rows.length) return null
   return (
-    <div ref={root} id="task-queue" role="list" aria-label="Queued messages" className="scroll-mt-4 space-y-1.5 pt-1">
-      {rows.map(({ m, deleted }) =>
-        deleted ? (
-          <DeletedRow key={m.id} m={m} onUndo={onUndo} onExpire={dropUndo} />
-        ) : (
-          <QueuedRow
-            key={m.id}
-            m={m}
-            editing={editing === m.id}
-            onEdit={setEditing}
-            onSave={onSave}
-            onDelete={onDelete}
-            turn={turn}
-            noSteer={noSteer}
-            steering={steer.isPending}
-            onSteer={onSteer}
-          />
-        ),
+    <div ref={root} id="task-queue" className="scroll-mt-4 pt-1">
+      <div role="list" aria-label="Queued messages" className="space-y-1.5">
+        {rows.map(({ m, deleted }) =>
+          deleted ? (
+            <DeletedRow key={m.id} m={m} onUndo={onUndo} onExpire={dropUndo} />
+          ) : (
+            <QueuedRow key={m.id} m={m} editing={editing === m.id} onEdit={setEditing} onSave={onSave} onDelete={onDelete} />
+          ),
+        )}
+      </div>
+      {waiting.length > 0 && (
+        <div data-testid="queue-delivery" className="flex min-h-6 items-center gap-2 pt-1 pr-1 pl-3 text-[11px] text-zinc-500 pointer-coarse:min-h-11">
+          <span className="min-w-0 flex-1">{WAITS[turn](noSteer ?? "this agent")}</span>
+          {canSteer && (
+            <button type="button" className={STEER_BUTTON} title={STEER_TITLE} aria-label="Steer the queued messages into the running turn" disabled={steer.isPending} onClick={onSteer}>
+              <Navigation2 className="h-3.5 w-3.5 rotate-90" />
+              Steer
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
 })
 
-/** The turn a queued row waits on: none running, one Steer can reach, a /compact, or a Cursor turn (no steering). */
+/** The turn the queued rows wait on: none running, one Steer can reach, a /compact, or a Cursor turn (no steering). */
 type QueuedTurn = "none" | "steerable" | "compacting" | "unsteerable"
 
 const WAITS: Record<QueuedTurn, (cli: string) => string> = {
@@ -160,26 +173,16 @@ const QueuedRow = memo(function QueuedRow({
   onEdit,
   onSave,
   onDelete,
-  turn,
-  noSteer,
-  steering,
-  onSteer,
 }: {
   m: QueuedMessage
   editing: boolean
   onEdit: (id: string | null) => void
   onSave: (m: QueuedMessage, text: string) => void
   onDelete: (m: QueuedMessage) => void
-  turn: QueuedTurn
-  /** The CLI's name when it can't take a message mid-turn (Cursor). */
-  noSteer: string | null
-  /** A Steer is on its way to the server. */
-  steering: boolean
-  onSteer: () => void
 }) {
   const ownerName = useOwnerName()
   const steered = m.status === "steering"
-  const locked = m.status === "delivering" || steered || m.status === "accepted" || m.status === "uncertain"
+  const locked = isLocked(m)
   // An optimistic row (just sent) has no server id yet.
   const settled = !m.id.startsWith("tmp-")
   return (
@@ -197,19 +200,13 @@ const QueuedRow = memo(function QueuedRow({
         <span className={cx("font-semibold", steered ? "text-yard-300" : "text-zinc-400")}>{m.status === "uncertain" ? "Delivery uncertain" : m.status === "accepted" ? "Accepted by Codex" : steered ? "Steering" : locked ? "Delivering" : "Queued"}</span>
         <span aria-hidden>·</span>
         <span className="min-w-0 truncate">{m.sender || ownerName}</span>
-        {/* Too narrow for the time next to Steer and two 44px buttons (a 320px phone): it goes, so nothing overflows. */}
-        <span className="hidden shrink-0 text-[10px] text-zinc-600 @min-[19rem]:inline">
+        {/* Too narrow for the time next to two 44px buttons (a 320px phone at 125% zoom): it goes, so nothing overflows. */}
+        <span className="hidden shrink-0 text-[10px] text-zinc-600 @min-[15rem]:inline">
           <TimeAgo ts={m.createdAt} />
         </span>
         {m.status === "uncertain" && <button type="button" className={ICON_BUTTON + " ml-auto"} title="Remove hold after reviewing the transcript; this does not undo delivery" aria-label="Remove delivery hold" onClick={() => onDelete(m)}><X className="h-3.5 w-3.5" /></button>}
         {!locked && settled && !editing && (
-          <span className="-my-2.5 ml-auto flex shrink-0 sm:-my-0.5">
-            {turn === "steerable" && (
-              <button type="button" className={STEER_BUTTON} title={STEER_TITLE} aria-label="Steer the queued messages into the running turn" disabled={steering} onClick={onSteer}>
-                <Navigation2 className="h-3.5 w-3.5 rotate-90" />
-                Steer
-              </button>
-            )}
+          <span className={cx(ICON_BUTTONS, "ml-auto")}>
             <button type="button" className={ICON_BUTTON} title="Edit" aria-label="Edit queued message" onClick={() => onEdit(m.id)}>
               <Pencil className="h-3.5 w-3.5" />
             </button>
@@ -227,9 +224,7 @@ const QueuedRow = memo(function QueuedRow({
       <AttachmentList files={m.attachments.length ? m.attachments : undefined} />
       {m.status === "accepted" && <div className="mt-1 text-[11px] text-zinc-500">Codex accepted this input. This does not confirm that the model processed it.</div>}
       {m.status === "uncertain" && <div className="mt-1 text-[11px] text-zinc-500">It may already have reached Codex. Automatic retry is paused. Review the transcript, then remove this hold before resuming.</div>}
-      {(steered || !locked) && (
-        <div className="mt-1 text-[11px] text-zinc-500">{steered ? "Delivery requested; waiting for the runner to acknowledge it." : WAITS[turn](noSteer ?? "this agent")}</div>
-      )}
+      {steered && <div className="mt-1 text-[11px] text-zinc-500">Delivery requested; waiting for the runner to acknowledge it.</div>}
     </div>
   )
 })
@@ -324,7 +319,7 @@ function DeletedRow({ m, onUndo, onExpire }: { m: QueuedMessage; onUndo: (m: Que
     <div role="listitem" data-testid="queued-deleted" className="flex min-h-6 items-center gap-1.5 rounded-lg px-3 text-[11px] text-zinc-500">
       <LineIcon icon={X} className="h-3 w-3" />
       <span className="min-w-0 truncate">Cancelled · back in the message box</span>
-      <button type="button" onClick={() => onUndo(m)} className="-my-2.5 ml-auto min-h-11 shrink-0 rounded-md px-2 font-semibold text-yard-400 hover:bg-zinc-800 sm:my-0 sm:min-h-6">
+      <button type="button" onClick={() => onUndo(m)} className="ml-auto min-h-6 shrink-0 rounded-md px-2 font-semibold text-yard-400 hover:bg-zinc-800 pointer-coarse:-my-2.5 pointer-coarse:min-h-11">
         Undo
       </button>
     </div>
@@ -402,7 +397,7 @@ export function QueuedChatMessage({ m, projectId, who, children }: { m: ChatMess
       <div className="flex min-h-6 items-center gap-1">
         <QueuedLabel who={who} />
         {settled && !editing && (
-          <span className="-my-2.5 -mr-3.5 flex shrink-0 sm:-my-0.5 sm:-mr-1">
+          <span className={cx(ICON_BUTTONS, "-mr-1 pointer-coarse:-mr-3.5")}>
             <button type="button" className={ICON_BUTTON} title="Edit" aria-label="Edit queued message" onClick={() => setEditing(true)}>
               <Pencil className="h-3.5 w-3.5" />
             </button>
