@@ -263,6 +263,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
               chat={COORDINATOR_TARGET}
               onSubmit={submit}
               placeholder={talking ? "Queue another message…" : "Ask the Coordinator…"}
+              label="Message the Coordinator"
               textareaRef={box}
               handleRef={composer}
               panelRef={panel}

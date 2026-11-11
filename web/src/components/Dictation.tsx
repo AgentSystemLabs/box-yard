@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import { Mic, X } from "lucide-react"
 import { keyLabel, type DictationError, type DictationMachine } from "../lib/dictation"
 import { dictationSupported, isMac, useDictationSettings, useDictationState } from "../lib/useDictation"
@@ -77,29 +77,56 @@ export function DictationStatus({ machine }: { machine: DictationMachine }) {
   )
 }
 
-/** The words heard so far. Longer than the line, they keep their newest end in view, after a leading "…". */
+/**
+ * The words heard so far. Longer than the line, they lose their oldest words, whole ones, and start with "…": the
+ * newest stay in view.
+ */
 function Interim({ text }: { text: string }) {
   const line = useRef<HTMLSpanElement>(null)
-  const words = useRef<HTMLSpanElement>(null)
-  const [clipped, setClipped] = useState(false)
-  // Measured whenever the words or the line change width: new words, a resized panel, a font that just loaded.
-  useLayoutEffect(() => {
-    const outer = line.current
-    const inner = words.current
-    if (!outer || !inner) return
-    const measure = () => setClipped(inner.getBoundingClientRect().width > outer.getBoundingClientRect().width + 0.5)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(outer)
-    ro.observe(inner)
-    return () => ro.disconnect()
+  const dots = useRef<HTMLSpanElement>(null)
+  const all = useRef<HTMLSpanElement>(null)
+  // Where the shown words start in `text`: 0 while they all fit.
+  const [from, setFrom] = useState(0)
+  const measure = useCallback(() => {
+    const words = all.current?.firstChild
+    const room = line.current?.getBoundingClientRect().width ?? 0
+    const width = all.current?.getBoundingClientRect().width ?? 0
+    if (!(words instanceof Text) || width <= room + 0.5) return setFrom(0)
+    // The first word that fits with every word after it, behind the "…".
+    const need = width + (dots.current?.getBoundingClientRect().width ?? 0) - room
+    const range = document.createRange()
+    range.setStart(words, 0)
+    const starts = Array.from(words.data.matchAll(/\s+(?=\S)/g), (m) => m.index + m[0].length)
+    let lo = 0
+    let hi = starts.length - 1
+    // One word wider than the line: it's shown from its start, cut at its end.
+    let fits = starts.at(-1) ?? 0
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1
+      range.setEnd(words, starts[mid]!)
+      if (range.getBoundingClientRect().width >= need - 0.5) {
+        fits = starts[mid]!
+        hi = mid - 1
+      } else lo = mid + 1
+    }
+    setFrom(fits)
   }, [])
+  // Measured on new words, and whenever the line changes width (a resized panel) or the words do (a font that just loaded).
+  useLayoutEffect(measure, [measure, text])
+  useLayoutEffect(() => {
+    const ro = new ResizeObserver(measure)
+    if (line.current) ro.observe(line.current)
+    if (all.current) ro.observe(all.current)
+    return () => ro.disconnect()
+  }, [measure])
   return (
-    <span aria-hidden className="flex min-w-0 items-baseline text-zinc-500 italic">
-      {clipped && <span className="shrink-0">…</span>}
-      <span ref={line} className="flex min-w-0 justify-end overflow-hidden whitespace-nowrap" data-testid="interim">
-        <span ref={words} className="shrink-0">{text}</span>
+    <span ref={line} aria-hidden className="relative min-w-0 flex-1 overflow-hidden whitespace-nowrap text-zinc-500 italic">
+      {/* Never seen: the "…" and every word at their full width, to measure against the line. */}
+      <span className="invisible absolute top-0 left-0">
+        <span ref={dots}>…</span>
+        <span ref={all}>{text}</span>
       </span>
+      <span data-testid="interim">{from > 0 && from < text.length ? `…${text.slice(from)}` : text}</span>
     </span>
   )
 }

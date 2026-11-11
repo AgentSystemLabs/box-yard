@@ -133,7 +133,7 @@ export function GithubReferenceMenu({ picker, anchor }: { picker: ReturnType<typ
             className={cx("mx-1 flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm", i === active && "bg-zinc-800")}>
             <Icon className={cx("h-4 w-4 shrink-0", tone)} aria-hidden />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="line-clamp-2 min-w-0 wrap-anywhere text-zinc-100">#{item.number} {item.title}</span>
+              <span className="line-clamp-2 min-w-0 wrap-anywhere text-zinc-100"><span className="text-zinc-400 tabular-nums">#{item.number}</span> {item.title}</span>
               <span className="truncate text-xs text-zinc-500">{item.kind === "pull" ? "Pull request" : "Issue"} · {item.state}</span>
             </span>
           </li>

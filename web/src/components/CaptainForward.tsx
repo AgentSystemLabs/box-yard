@@ -4,7 +4,7 @@ import { memo, useCallback, useMemo, useRef, useState, type ComponentProps, type
 import { flushSync } from "react-dom"
 import { MessageCircleQuestion, X } from "lucide-react"
 import { COMPOSER_FOOTER, Composer, type ComposerHandle } from "./Composer"
-import { ComposerMenuItem, useCloseMore } from "./ComposerMenu"
+import { ComposerMenuItem, useCloseMore, useToolFold } from "./ComposerMenu"
 import { ComposerIcon, TaskComposerIcon } from "./ChatIcons"
 import { CaptainIcon, captainIconFor } from "./CaptainIcon"
 import { projectColorStyle } from "./TaskIcon"
@@ -16,7 +16,7 @@ import { AppLink, LineIcon, Markdown, TimeAgo, cx } from "./ui"
 import { useForwardToCaptain, useOwnerName, useStopTask } from "../lib/queries"
 import { looksLikeTaskManagement, suggestsCaptain } from "../lib/captainForward"
 import { useComposerFocus } from "../lib/chatSwitch"
-import { labelFrom, rowWidth } from "../lib/composerRow"
+import { inMenu, labelFrom, onRow, rowWidth } from "../lib/composerRow"
 import type { Attachment, Project, Task, TaskMessage } from "../../../shared/types"
 
 /**
@@ -84,9 +84,11 @@ export const TaskComposer = memo(function TaskComposer({
   const { mutate: stopTask } = useStopTask()
   const stop = useMemo(() => (running && !asking ? { label: "Stop the agent's turn", onStop: () => stopTask(task.id) } : null), [running, asking, stopTask, task.id])
   const showCaptain = !asking
-  // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts). Their labels show
-  // only where the whole row fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
-  const chips = (ask ? 1 : 0) + (showCaptain ? 1 : 0)
+  // The chips fold into the box's More menu when the row is too narrow for them (lib/composerRow.ts), one at a time:
+  // Captain first, then Side question. A slot each, in the row's order. Their labels show only where the whole row
+  // fits them: Mic, Send, Stop, Attach, Expand (kept for when the text grows) and the chips.
+  const chips = [...(ask ? [1] : []), ...(showCaptain ? [1] : [])]
+  const captainAt = ask ? 1 : 0
   const labels = labelFrom(
     rowWidth(4 + (stop ? 1 : 0) + (asking ? 0 : 1) + (ask ? LABELLED.ask : 0) + (showCaptain ? (toCaptain ? LABELLED.toCaptain : LABELLED.captain) : 0)),
   )
@@ -181,8 +183,8 @@ export const TaskComposer = memo(function TaskComposer({
       tools={
         <>
           {ask && (
-            <button
-              type="button"
+            <RowChip
+              tool={0}
               data-testid="task-ask-toggle"
               aria-pressed={asking}
               onClick={pressAsk}
@@ -199,11 +201,11 @@ export const TaskComposer = memo(function TaskComposer({
                   className={cx("absolute top-1 right-1 h-1.5 w-1.5 rounded-full pointer-coarse:top-2.5 pointer-coarse:right-1.5", ask.busy ? "animate-pulse bg-sky-400" : "bg-yard-400")}
                 />
               )}
-            </button>
+            </RowChip>
           )}
           {showCaptain && (
-            <button
-              type="button"
+            <RowChip
+              tool={captainAt}
               data-testid="captain-target"
               aria-pressed={toCaptain}
               onClick={toggleCaptain}
@@ -216,15 +218,16 @@ export const TaskComposer = memo(function TaskComposer({
             >
               <CaptainIcon projectId={task.projectId} style={projectColorStyle(color)} className={cx("h-3.5 w-3.5", color ? "text-(--pc)" : "text-zinc-300")} />
               <span className={labels}>{toCaptain ? "To Captain" : "Captain"}</span>
-            </button>
+            </RowChip>
           )}
         </>
       }
       toolsMenu={
-        chips ? (
+        chips.length ? (
           <>
             {ask && (
               <ChipLine
+                tool={0}
                 data-testid="more-task-ask"
                 icon={MessageCircleQuestion}
                 label="Side question"
@@ -236,6 +239,7 @@ export const TaskComposer = memo(function TaskComposer({
             )}
             {showCaptain && (
               <ChipLine
+                tool={captainAt}
                 data-testid="more-captain-target"
                 icon={captainIconFor(task.projectId)}
                 label={toCaptain ? "To Captain" : "Captain"}
@@ -258,19 +262,27 @@ export const TaskComposer = memo(function TaskComposer({
           : task.status === "needs_input"
             ? "Answer the agent…"
             : running
-              ? "Delivered when the current turn ends…"
+              ? "Queue a message for the agent…"
               : "Send feedback or a follow-up…"
       }
+      label={asking ? "Side question about this task" : toCaptain ? "Message the Captain" : "Message this task"}
     />
   )
 })
 
+/** A chip on the box's row (`tool`: which one, in the row's order), gone below the width where its ChipLine takes over. */
+function RowChip({ tool, className, ...button }: ComponentProps<"button"> & { tool: number }) {
+  return <button type="button" {...button} className={cx(className, onRow(useToolFold(tool)))} />
+}
+
 /** A chip's line in the box's More menu, where it goes when the row is too narrow: it toggles, then closes the menu. */
-function ChipLine({ onToggle, box, ...line }: Omit<ComponentProps<typeof ComposerMenuItem>, "onClick"> & { onToggle: () => void; box: RefObject<HTMLTextAreaElement | null> }) {
+function ChipLine({ tool, onToggle, box, ...line }: Omit<ComponentProps<typeof ComposerMenuItem>, "onClick"> & { tool: number; onToggle: () => void; box: RefObject<HTMLTextAreaElement | null> }) {
   const close = useCloseMore()
+  const fold = useToolFold(tool)
   return (
     <ComposerMenuItem
       {...line}
+      className={inMenu(fold)}
       onClick={() => {
         onToggle()
         close()

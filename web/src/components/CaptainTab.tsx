@@ -257,6 +257,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
               chat={target}
               onSubmit={submit}
               placeholder={busy ? "Queue another message for the Captain…" : `Message the ${project.name} Captain…`}
+              label={`Message the ${project.name} Captain`}
               textareaRef={box}
               handleRef={handle}
               panelRef={panel}
@@ -270,6 +271,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side }: { project: Pro
             <Composer
               onSubmit={submit}
               placeholder={busy ? "Queue another message…" : "Message the Captain…"}
+              label={`Message the ${project.name} Captain`}
               textareaRef={box}
               handleRef={handle}
               panelRef={panel}

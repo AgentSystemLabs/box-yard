@@ -118,7 +118,7 @@ export function shortcutGroups({ mac, dictation }: { mac: boolean; dictation: Di
     {
       title: "Composer",
       rows: [
-        { id: "send", label: "Send", keys: [["Enter"]] },
+        { id: "send", label: "Send; on a touch screen, Enter adds a line", keys: [["Enter"], [caps.mod, "Enter"]] },
         { id: "send-to", label: "Choose a task, Captain or Coordinator to send this draft to", keys: [[">"], sendToChord(mac)] },
         { id: "newline", label: "New line", keys: [[caps.shift, "Enter"]] },
         { id: "sidebar", label: "Return focus to the current sidebar row, keeping the draft", keys: [["Esc"]] },

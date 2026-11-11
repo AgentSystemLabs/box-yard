@@ -14,7 +14,7 @@ import { browseStep, readHistory, rememberPrompt, type Browse } from "../lib/pro
 import { attachFiles, draftAttachments, EMPTY_DRAFT, prependDraft, readDraft, releaseFiles, removeFile, retryFile, setDraftFiles, setDraftText, useDraft, useDraftKey, writeDraft } from "../lib/composerDraft"
 import { registerTakeBack, type TakeBackBox } from "../lib/takeBack"
 import { PickButtons, PickConflict, PickMenuItems, PickScope, RunTargetList, RunTargetPanel, useChatPicks, type ChatPicks } from "./RunTargetMenu"
-import { ComposerMenuItem, MoreButton, MoreMenu, useMoreMenu, type MoreDot } from "./ComposerMenu"
+import { ComposerMenuItem, MoreButton, MoreMenu, ToolFolds, useMoreMenu, type MoreDot } from "./ComposerMenu"
 import { foldPlan, inMenu, onRow } from "../lib/composerRow"
 import type { Attachment } from "../../../shared/types"
 import { connectionState, useConnectionLive } from "../lib/connection"
@@ -111,6 +111,7 @@ export function Composer({
   onDestinationPick?: () => void
   onSubmit: (text: string, attachments: Attachment[], extra?: ComposerExtra) => void | Promise<unknown>
   placeholder: string
+  /** The text field's name to a screen reader: whom it messages. The placeholder changes with the chat's state, so it's no name. */
   label?: string
   className?: string
   textareaRef?: Ref<HTMLTextAreaElement>
@@ -134,9 +135,13 @@ export function Composer({
    * narrow for them (lib/composerRow.ts); without it, they always stay on the row.
    */
   toolsMenu?: ReactNode
-  /** How many 44px buttons wide the tools are on a narrow box (default 1 when there are tools). */
-  toolSlots?: number
-  /** A tool's dot (a side question's new answer), on the More button while the tools are folded into it. */
+  /**
+   * How many 44px buttons wide the tools are on a narrow box (default 1 when there are tools). A list, one width per
+   * tool in the row's order, folds them one at a time, the last first: each tool's button and menu line then hide
+   * themselves at their own width (ComposerMenu.tsx's `useToolFold`).
+   */
+  toolSlots?: number | readonly number[]
+  /** The first tool's dot (a side question's new answer), on the More button while that tool is folded into it. */
   toolsDot?: MoreDot | null
   /** Accessible target icon/control, inset beside the text; callers supply its label. */
   target?: ReactNode
@@ -194,15 +199,19 @@ export function Composer({
   const more = useMoreMenu()
   // Which buttons fold into More below which box width, from the ones this box has now (lib/composerRow.ts).
   const showExpand = overflowing || expanded
-  const toolWidth = tools ? (toolSlots ?? 1) : 0
+  const toolWidths = tools ? (toolSlots ?? 1) : 0
   const fold = foldPlan({
-    fixed: 2 + (stop ? 1 : 0) + (toolsMenu ? 0 : toolWidth),
+    fixed: 2 + (stop ? 1 : 0) + (toolsMenu ? 0 : typeof toolWidths === "number" ? toolWidths : toolWidths.reduce((n, w) => n + w, 0)),
     picks: runTargets ? picks.kinds.length : 0,
     expand: showExpand ? 1 : 0,
-    tools: toolsMenu ? toolWidth : 0,
+    tools: toolsMenu ? toolWidths : 0,
     sendTo: sendTo.enabled ? 1 : 0,
     attach: allowFiles ? 1 : 0,
   }, { stop: Boolean(stop) })
+  // The same list until a width changes: the tools that read it don't render again on every key.
+  const toolFolds = useMemo(() => fold.tool, [fold.tool.join()])
+  // The tool beside the mic is the last one to fold.
+  const firstTool = toolFolds[0] ?? null
 
   // Uploads run in the draft store, so they finish (or fail, with Retry) while the box is away.
   const add = (picked: File[]) => attachFiles(key, picked, maxMb)
@@ -639,7 +648,7 @@ export function Composer({
               </Button>
             )}
             {sendTo.enabled && <Button type="button" variant="ghost" size="sm" className={cx(TOOL, onRow(fold.sendTo))} title={sendToHint()} aria-label="Send to…" onClick={() => { more.close(); sendTo.openSheet() }}><ArrowUpRight className="h-4 w-4" aria-hidden /></Button>}
-            {fold.more !== null && <MoreButton more={more} className={cx(TOOL, inMenu(fold.more))} dot={toolsMenu && toolsDot ? { label: toolsDot.label, className: cx(toolsDot.className, inMenu(fold.tools)) } : null} />}
+            {fold.more !== null && <MoreButton more={more} className={cx(TOOL, inMenu(fold.more))} dot={toolsMenu && toolsDot ? { label: toolsDot.label, className: cx(toolsDot.className, inMenu(firstTool)) } : null} />}
             {runTargets && (
               <span className={cx("flex shrink-0 items-center", TOOL_GAP, onRow(fold.picks))}>
                 <PickButtons picks={picks} className={TOOL} />
@@ -647,7 +656,11 @@ export function Composer({
             )}
             <MicButton machine={dictation} />
             {/* A mouse's chips are drawn smaller than their slot, so they keep their gap. */}
-            {tools && <span className={cx("flex shrink-0 items-center gap-1 pointer-coarse:gap-0 empty:hidden", toolsMenu ? onRow(fold.tools) : null)}>{tools}</span>}
+            {tools && (
+              <span className={cx("flex shrink-0 items-center gap-1 pointer-coarse:gap-0 empty:hidden", toolsMenu ? onRow(firstTool) : null)}>
+                <ToolFolds.Provider value={toolFolds}>{tools}</ToolFolds.Provider>
+              </span>
+            )}
           </div>
           {/* Stop stands apart from Send, so a thumb doesn't take one for the other. */}
           <div className={cx("ml-auto flex shrink-0 items-center", stop ? "gap-2" : "gap-1")}>
@@ -670,10 +683,12 @@ export function Composer({
             )}
             {stop && (
               <Button type="button" variant="subtle" size="sm" className={TOOL} title={stop.label} aria-label={stop.label} onClick={stop.onStop}>
-                <Square className="h-3.5 w-3.5 fill-current" aria-hidden />
+                {/* Red, so it doesn't read as one more tool beside Send. */}
+                <Square className="h-3.5 w-3.5 fill-current text-red-300" aria-hidden />
               </Button>
             )}
-            <Button type="submit" variant="primary" size="sm" className={TOOL} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
+            {/* With nothing to send it's a plain gray button, not a dimmed gold one; it turns gold once there is. */}
+            <Button type="submit" variant="primary" size="sm" className={cx(TOOL, "disabled:bg-zinc-800! disabled:text-zinc-500! disabled:opacity-100!")} disabled={!canSend} title={sendLabel} aria-label={sendLabel}>
               {held ? <Clock className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
             </Button>
           </div>
@@ -706,7 +721,11 @@ export function Composer({
             />
           )}
           {runTargets && <PickMenuItems picks={picks} className={inMenu(fold.picks)} onDone={more.close} />}
-          {toolsMenu && <div className={cx("flex flex-col", inMenu(fold.tools))}>{toolsMenu}</div>}
+          {toolsMenu && (
+            <div className={cx("flex flex-col", inMenu(fold.tools))}>
+              <ToolFolds.Provider value={toolFolds}>{toolsMenu}</ToolFolds.Provider>
+            </div>
+          )}
           {showExpand && (
             <ComposerMenuItem
               data-testid="more-expand"
