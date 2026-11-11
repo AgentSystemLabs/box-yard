@@ -47,6 +47,8 @@ import { AGENT_CAPTAIN_LIMIT, AGENT_CAPTAIN_WAIT_MAX_SECONDS, AGENT_CAPTAIN_WIND
 import type { AgentCaptainMessage } from "./captains.js"
 import { formatTokens, sessionUsageOf } from "./usage.js"
 import { errorMessage, failedStep, isRateLimited } from "./util/retry.js"
+import { ensureClaudeCliKnows } from "./claudeCli.js"
+import { claudeCliTooOld, minClaudeCliFor, unrecognizedModelError } from "../shared/claudeCli.js"
 import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
 import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
@@ -6153,6 +6155,8 @@ export class TaskManager {
       // The connectors its scope reaches here (docs/connectors.md › Sessions), OAuth tokens refreshed to last 45 minutes.
       const connectors = await this.turnConnectors(row, project.id, boxId)
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
+      const { route, ...agent } = this.agentSettings(row, project)
+      if (taskJson.agent === "claude") await this.ensureClaudeCli(boxId, agent.model, taskId)
       if (taskJson.agent === "cursor") await this.ensureCursor(boxId)
       if (taskJson.agent === "opencode") await this.ensureOpenCode(boxId)
       if (taskJson.agent === "codex") {
@@ -6167,7 +6171,6 @@ export class TaskManager {
       }
       credsWaiting = isMachineBox(boxId)
       await this.provider.writeFile(boxId, `${dir}/task.json`, JSON.stringify(taskJson, null, 2))
-      const { route, ...agent } = this.agentSettings(row, project)
       await this.provider.writeFile(
         boxId,
         `${dir}/turn.json`,
@@ -6484,6 +6487,65 @@ export class TaskManager {
     const foreign = (m: string | null | undefined) => isOpenAiModel(m) || isCursorOnlyModel(m) || isOpenCodeModel(m)
     const model = codex ? codexModel(route.model, s.agentCodexModel) : foreign(route.model) ? (foreign(s.agentModel) ? DEFAULT_MODEL : s.agentModel) : route.model
     return { model, effort: route.effort, autocompact: autocompactFlag(s.agentAutoCompact, row.context_window), route }
+  }
+
+  /** What `claude --version` said on each runner this server run (null: it didn't say), so a turn asks once. */
+  private readonly claudeCliSeen = new Map<string, string | null>()
+  /** Runners where a turn's CLI said it doesn't recognize its model (finishTurn): updated before their next turn. */
+  private readonly claudeCliStale = new Set<string>()
+  /** One check per runner at a time: two turns starting together mustn't both run npm there. */
+  private readonly claudeCliChecks = new Map<string, Promise<void>>()
+
+  /**
+   * Claude Code on the runner knows the turn's model, or the turn doesn't start (shared/claudeCli.ts): a snapshot or an
+   * image keeps the CLI it was made with, boxes run with its auto-updater off, and an older CLI runs a model it doesn't
+   * know in a 200k-token window. Box Yard updates it in its own sandboxes. This computer and SSH machines are the
+   * owner's to update, so there the turn is refused with what to do (never cached: the next turn asks again).
+   */
+  private async ensureClaudeCli(boxId: string, model: string | null | undefined, taskId: string) {
+    if (!model) return
+    const settled = () => !this.claudeCliStale.has(boxId) && (!minClaudeCliFor(model) || (this.claudeCliSeen.has(boxId) && !claudeCliTooOld(this.claudeCliSeen.get(boxId) ?? null, model)))
+    if (settled()) return
+    const check = (this.claudeCliChecks.get(boxId) ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        if (settled()) return
+        const provider = providerOf(this.provider, boxId)
+        const local = provider.name === "local"
+        const machine = provider.name === "ssh"
+        const where = machine ? `SSH machine ${this.machineName(boxId)}` : local ? "this computer" : "the box"
+        const runner = { exec: (command: string) => this.provider.exec(boxId, command), claudeBin: local ? this.c.claudeBin : provider.claudeBin, managed: !local && !machine && !this.c.mock, where }
+        const cli = await ensureClaudeCliKnows(model, runner, { stale: this.claudeCliStale.has(boxId) })
+        this.claudeCliStale.delete(boxId)
+        this.claudeCliSeen.set(boxId, cli.version)
+        if (cli.updatedFrom !== undefined) this.addEvent(taskId, `Updated Claude Code on ${where} from ${cli.updatedFrom ?? "an unknown version"} to ${cli.version}, so it knows ${model}.`)
+      })
+    this.claudeCliChecks.set(boxId, check)
+    try {
+      await check
+    } finally {
+      if (this.claudeCliChecks.get(boxId) === check) this.claudeCliChecks.delete(boxId)
+    }
+  }
+
+  /**
+   * What a turn says when the runner stopped it because its Claude Code doesn't recognize the model (box-runner.mjs
+   * runClaude), or null for any other end. The runner is marked, so a sandbox's CLI is updated before its next turn.
+   */
+  private unknownModelError(row: TaskRow, ev: WorkerEvent): string | null {
+    const said = ev.unrecognizedModel as { model?: unknown; cliVersion?: unknown } | null | undefined
+    if (ev.ok || !row.box_id || !said || typeof said.model !== "string") return null
+    const provider = providerOf(this.provider, row.box_id)
+    const local = provider.name === "local"
+    const machine = provider.name === "ssh"
+    this.claudeCliStale.add(row.box_id)
+    this.claudeCliSeen.delete(row.box_id)
+    return unrecognizedModelError({
+      model: said.model,
+      cliVersion: typeof said.cliVersion === "string" ? said.cliVersion : null,
+      where: machine ? `SSH machine ${this.machineName(row.box_id)}` : local ? "this computer" : "the box",
+      managed: !local && !machine && !this.c.mock,
+    })
   }
 
   /** Boxes this server run found Codex on (or installed it on). */
@@ -7517,6 +7579,7 @@ export class TaskManager {
     // Auto-sizing: what the turn used on its box, and whether it ran out of memory there.
     const measured = this.recordTurnPeak(row.current_turn_id, ev, !ev.ok && !ev.stopped && !this.stopRequested.has(row.id))
     const timing = this.recordTurnTiming(row, ev)
+    const unknownModel = this.unknownModelError(row, ev)
     if (row.compacting) return this.finishCompact(row, ev)
     const flags = this.store.turnFlags(row)
     const uncertain = this.store.hasUncertainCodexInput(row.id)
@@ -7553,7 +7616,7 @@ export class TaskManager {
     } else if (stopped) status = row.status === "done" ? "done" : openPr && !this.store.hasInputs(row.id) ? "pr_ready" : "idle"
     else if (!ev.ok) {
       status = "failed"
-      error = String(ev.error ?? "The agent exited with an error.")
+      error = unknownModel ?? String(ev.error ?? "The agent exited with an error.")
       if (oom && "why" in oom) error = `It ran out of memory on its ${measured!.boxSize} box, and isn't retried on a bigger one: ${oom.why}. ${error}`
     } else if (flags.asked) status = "needs_input"
     // Only Cody marks a task done. An agent that called finish rests like any finished turn, ready for review (idle,

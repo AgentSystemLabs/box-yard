@@ -9,9 +9,11 @@ RUN npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim
 WORKDIR /app
+# Claude Code's floor is MIN_CLAUDE_CLI (shared/claudeCli.ts), the oldest that knows every model Box Yard offers:
+# raising it rebuilds this layer, which would otherwise keep the version it was first built with.
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl tini \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g @anthropic-ai/claude-code @openai/codex --no-audit --no-fund
+  && npm install -g "@anthropic-ai/claude-code@>=2.1.321" @openai/codex --no-audit --no-fund
 COPY --from=build /app /app
 # A fresh install here runs agents in Upstash boxes: "this computer" would be the server's own container.
 ENV NODE_ENV=production \

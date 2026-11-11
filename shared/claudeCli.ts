@@ -49,8 +49,8 @@ export function claudeCliTooOld(version: string | null, model: string | null | u
 
 const UPDATE = `npm install -g ${CLAUDE_CODE_PACKAGE}@latest`
 
-/** The update, with sudo where the first try isn't allowed, for a sandbox Box Yard manages. */
-export const CLAUDE_CLI_UPDATE_SCRIPT = `${UPDATE} --no-audit --no-fund >/dev/null 2>&1 || sudo -n ${UPDATE} --no-audit --no-fund >/dev/null 2>&1`
+/** The update for a sandbox Box Yard manages, with sudo where the first try isn't allowed; npm's last words go to stderr when both fail. */
+export const CLAUDE_CLI_UPDATE_SCRIPT = `out=$(${UPDATE} --no-audit --no-fund 2>&1) || sudo -n ${UPDATE} --no-audit --no-fund >/dev/null 2>&1 || printf '%s\\n' "$out" | tail -n 5 >&2`
 
 /**
  * Shell for a box's setup: install Claude Code when it is missing or older than `min` (a snapshot keeps the CLI it was
@@ -84,6 +84,11 @@ const ownerFix = `Update it there (claude update, or ${UPDATE}), or pick a model
 /** Before a turn, where Box Yard doesn't install: the turn is refused, with why and what to do. */
 export function claudeCliRefusal(o: Omit<OldClaudeCli, "managed">): string {
   return `${cliLine(o)} It would run it in a ${UNKNOWN_MODEL_WINDOW}-token window and thrash on auto-compact, so the turn wasn't started. ${ownerFix}`
+}
+
+/** Before a turn, in a sandbox: the CLI is too old and the update didn't take (`why`: npm's last words, or what it still is). */
+export function claudeCliUpdateFailed(o: Omit<OldClaudeCli, "managed"> & { why: string }): string {
+  return `${cliLine(o)} Updating it there failed (${UPDATE}): ${o.why}. Retry, or pick a model it knows.`
 }
 
 /** A turn the runner stopped because its CLI said it doesn't recognize the model. */

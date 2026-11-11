@@ -20,8 +20,10 @@ RUN apt-get update -qq \
   && apt-get update -qq && apt-get install -y -qq gh >/dev/null \
   && rm -rf /var/lib/apt/lists/*
 
-# The agent CLIs: Claude Code, and Codex for projects whose agents run on it (docs/codex.md).
-RUN npm install -g @anthropic-ai/claude-code @openai/codex >/dev/null && npm cache clean --force >/dev/null
+# The agent CLIs: Claude Code, and Codex for projects whose agents run on it (docs/codex.md). The floor is the oldest
+# Claude Code that knows every model Box Yard offers (MIN_CLAUDE_CLI in shared/claudeCli.ts): raising it rebuilds this
+# layer, which would otherwise keep the version it was first built with.
+RUN npm install -g "@anthropic-ai/claude-code@>=2.1.321" @openai/codex >/dev/null && npm cache clean --force >/dev/null
 
 # The agent: node's uid 1000, renamed. Passwordless sudo works inside the container only (no host mounts, no Docker
 # socket), so agents can apt-get what a task needs.

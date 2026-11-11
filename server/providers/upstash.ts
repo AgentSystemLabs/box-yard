@@ -7,6 +7,7 @@ import type { CredentialStore } from "../credentials.js"
 import { UPSTASH_MAX_UPLOAD_BYTES } from "../upload.js"
 import { q, type BoxHealth, type BoxProvider, type BoxSnapshotInfo, type BoxUsageProbe, type ExecResult } from "./types.js"
 import { GITHUB_HELPER } from "../gitShare.js"
+import { claudeCliFloorScript } from "../../shared/claudeCli.js"
 
 const ROOT = "/workspace/home"
 const READ_CHUNK = 8 * 1024 * 1024 // server limit for one ranged read
@@ -38,7 +39,8 @@ export function workerSetupScript() {
     "set -e",
     `mkdir -p ${ROOT}/.boxyard ${ROOT}/tasks`,
     "command -v git >/dev/null || (apt-get update -qq && apt-get install -y -qq git >/dev/null)",
-    "command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code >/dev/null 2>&1",
+    // A snapshot keeps the Claude Code it was made with: one older than the newest model needs is replaced.
+    claudeCliFloorScript(),
     "git config --global init.defaultBranch main",
     BOX_GIT_CREDENTIAL_SCRIPT,
     "claude --version",
