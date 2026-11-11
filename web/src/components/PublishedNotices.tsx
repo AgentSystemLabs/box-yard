@@ -27,29 +27,35 @@ const extOf = (f: PublishedFileRef) => {
 // a thumbnail, a titled chip at the width it never goes under (basis-28), the toggle with each label, and the gap.
 const GAP = 6
 const IMAGE = 58
+/** A thumbnail in a card under 18rem: 48px, so two and the toggle fit a 320px phone's row. */
+const IMAGE_TINY = 50
 const CHIP_FLOOR = 112
 const MORE = 82
 const MORE_WIDE = 90
 const NAMES = 104
 const NAMES_SHORT = 76
-/** The narrowest card of each narrow tier: a 320px phone's, and where the next tier starts (18rem). */
+/**
+ * The narrowest card of each narrow tier, as measured: a 320px phone's in the Coordinator's chat (the narrowest
+ * anywhere) and in the Captain tab (13.25rem, where the tier over it starts), and where the next one starts (18rem).
+ */
+const MICRO_ROOM = 150
 const TINY_ROOM = 212
 const SMALL_ROOM = 288
 
-const stripWidth = (f: PublishedFileRef) => (kindOf(f) === "image" ? IMAGE : Math.min(CHIP_FLOOR, 30 + 7 * f.title.length))
+const stripWidth = (f: PublishedFileRef, image: number) => (kindOf(f) === "image" ? image : Math.min(CHIP_FLOOR, 30 + 7 * f.title.length))
 
 /**
  * How many files a narrow card's strip shows: the first ones that fit `room` in one row with the toggle, at least one.
  * A titled chip that would have to go under its floor is left to "+N more" instead, with every file after it.
- * `names`: the toggle's width when the strip holds nothing back.
+ * `names`: the toggle's width when the strip holds nothing back. `image`: a thumbnail's.
  */
-function fit(files: readonly PublishedFileRef[], room: number, names: number): number {
+function fit(files: readonly PublishedFileRef[], room: number, names: number, image = IMAGE): number {
   let used = 0
   let n = 0
   for (const f of files.slice(0, STRIP_MAX)) {
     const hidden = files.length - n - 1
     const toggle = hidden === 0 ? names : hidden < 10 ? MORE : MORE_WIDE
-    const width = stripWidth(f) + GAP
+    const width = stripWidth(f, image) + GAP
     if (n > 0 && used + width + toggle > room) break
     used += width
     n++
@@ -76,12 +82,13 @@ function Thumb({ f, gallery, solo, className }: { f: PublishedFileRef; gallery: 
       aria-label={titled ? undefined : f.title}
       className={cx(
         "inline-flex h-7 max-w-full shrink-0 items-center overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-xs text-zinc-300 hover:border-zinc-600 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:h-11",
-        // From its floor (or its own width, when that is less) up to its whole title, never under.
-        titled && !solo && "@max-md:max-w-max @max-md:grow @max-md:basis-28",
+        // From its floor (or its own width, when that is less) up to its whole title, never under: but for the
+        // narrowest card, where the one chip it shows gives way to the toggle.
+        titled && !solo && "@max-md:max-w-max @max-md:grow @max-md:basis-28 @max-[13.25rem]:shrink",
         className,
       )}
     >
-      {image && <Thumbnail url={f.url} width={320} className="h-full w-10 shrink-0 object-cover object-top pointer-coarse:w-14" />}
+      {image && <Thumbnail url={f.url} width={320} className="h-full w-10 shrink-0 object-cover object-top pointer-coarse:w-14 @max-[18rem]:pointer-coarse:w-12" />}
       {titled && (
         <span className="inline-flex min-w-0 items-center gap-1 px-1.5">
           {!image && <KindIcon kind={kind} className="h-3 w-3" />}
@@ -105,17 +112,23 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
   const files = useMemo(() => drawerOrder(group.files), [group.files])
   const gallery = useMemo(() => previewGallery(files), [files])
   const getGallery = () => gallery
-  // The strip by the card's width (a phone's, a 320px phone's): each shows what fits one row with the toggle.
-  // The narrowest says just "Names" when it holds nothing back, so two thumbnails and the toggle still fit its row.
+  // The strip by the card's width (a phone's, a 320px phone's, that phone's Coordinator chat): each shows what fits
+  // one row with the toggle. The narrow two say just "Names" when they hold nothing back, so two thumbnails and the
+  // toggle still fit their row.
   const small = fit(files, SMALL_ROOM, NAMES)
-  const tiny = fit(files, TINY_ROOM, NAMES_SHORT)
+  const tiny = fit(files, TINY_ROOM, NAMES_SHORT, IMAGE_TINY)
+  const micro = fit(files, MICRO_ROOM, NAMES_SHORT, IMAGE_TINY)
   /** What the toggle says while closed: how many files the strip holds back, or what the list adds to it. */
   const more = (shown: number, names = "Show names") => (files.length > shown ? `+${files.length - shown} more` : names)
   // The list opens downwards, and a chat that follows its newest row would push this card's top out of view: the chat
-  // lets go of its bottom, and scrolls only as far as shows the card.
+  // lets go of its bottom, and scrolls only as far as shows the card. A card taller than the chat shows from its top,
+  // where its title and "Hide" are.
   const card = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
-    if (open && card.current) scrollIntoList(card.current, { block: "nearest", behavior: "instant" })
+    const el = card.current
+    if (!open || !el) return
+    const list = el.closest<HTMLElement>("[data-scroller]")
+    scrollIntoList(el, { block: list && el.offsetHeight > list.clientHeight ? "start" : "nearest", behavior: "instant" })
   }, [open])
   return (
     <div ref={card} data-testid="published-group" data-count={files.length}>
@@ -138,9 +151,9 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
       >
         <div data-testid="published-files" className="mt-1 flow-root">
           {/* Open, it holds only the toggle, floated so the list's first row sits beside it: no row of its own. */}
-          <div data-testid="published-files-header" className={open ? "float-right ml-2" : "flex min-w-0 flex-wrap items-center gap-1.5"}>
+          <div data-testid="published-files-header" className={open ? "float-right ml-2" : "flex min-w-0 flex-wrap items-center gap-1.5 @max-[13.25rem]:flex-nowrap"}>
             {open ? null : (
-              files.slice(0, STRIP_MAX).map((f, i) => <Thumb key={f.id} f={f} gallery={getGallery} solo={files.length === 1} className={cx(i >= small && "@max-md:hidden", i >= tiny && "@max-[18rem]:hidden")} />)
+              files.slice(0, STRIP_MAX).map((f, i) => <Thumb key={f.id} f={f} gallery={getGallery} solo={files.length === 1} className={cx(i >= small && "@max-md:hidden", i >= tiny && "@max-[18rem]:hidden", i >= micro && "@max-[13.25rem]:hidden")} />)
             )}
             {files.length > 1 && (
               <button
@@ -156,7 +169,8 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
                 ) : (
                   <>
                     {/* A narrower card shows fewer files, so it has more to add. */}
-                    <span className="@[18rem]:hidden">{more(tiny, "Names")}</span>
+                    <span className="@[13.25rem]:hidden">{more(micro, "Names")}</span>
+                    <span className="@max-[13.25rem]:hidden @[18rem]:hidden">{more(tiny, "Names")}</span>
                     <span className="@max-[18rem]:hidden @md:hidden">{more(small)}</span>
                     <span className="@max-md:hidden">{more(STRIP_MAX)}</span>
                   </>
