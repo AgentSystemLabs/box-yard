@@ -1,28 +1,31 @@
 // The file preview modal: images in a lightbox, markdown rendered, HTML and PDF in iframes, text and code with line
 // numbers (JSON pretty-printed, CSV as a table), video and audio in native players. Mounted once as <FilePreviewHost>;
 // links open it through <FileLink> and lib/preview.ts.
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { useSearchParams } from "wouter"
-import { Check, ChevronLeft, ChevronRight, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, WrapText, ZoomIn, ZoomOut } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, RotateCw, WrapText, ZoomIn, ZoomOut } from "lucide-react"
 import { useArtifacts } from "../lib/queries"
 import {
   CSV_ROW_LIMIT,
+  LINE_ROWS_MAX,
   TEXT_PREVIEW_MAX,
   fileNameOf,
   isTextKind,
+  lineCount,
   lineNumbers,
   parseCsv,
   parsePreviewKey,
   prettyJson,
   previewKey,
   previewKind,
+  splitLines,
   type PreviewItem,
   type PreviewKind,
 } from "../lib/filePreview"
 import { PREVIEW_PARAM, closePreview, stepPreview, usePreviewState } from "../lib/preview"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
-import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, maxScale, pinchView, swipeAction, zoomAt, zoomStep, type Point, type Tap, type View } from "../lib/imageGestures"
+import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, isStrip, maxScale, pinchView, swipeAction, zoomAt, zoomStep, type Point, type Size, type Tap, type View } from "../lib/imageGestures"
 import { DismissButton, Modal, type ModalSize } from "./Modal"
 import { Loading } from "./Loading"
 import { MessageMenu, type MenuItem } from "./MessageActions"
@@ -92,6 +95,12 @@ const TALL: PreviewKind[] = ["image", "html", "pdf"]
 /** Wrap long lines of text or code: on, off, or (null) only where the frame is narrow, until the button says otherwise. */
 type Wrap = boolean | null
 
+/**
+ * A text file's contents once they load, for Copy contents. `long`: with more lines than get a row each
+ * (LINE_ROWS_MAX), so it doesn't wrap unless asked to. "failed": there is no text, so nothing to wrap or copy.
+ */
+type TextFile = { text: string; long: boolean } | "loading" | "failed"
+
 /** What Copy link or Copy contents came to, shown for a moment. */
 type Flash = { what: "link" | "contents"; ok: boolean }
 const FLASH_TEXT = { link: ["Link copied", "Couldn't copy the link"], contents: ["Copied", "Couldn't copy the file"] } as const
@@ -116,7 +125,11 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const toggleZoom = useRef<(() => void) | null>(null)
   // Kept from file to file, unlike Raw: someone reading logs wants every one of them wrapped.
   const [wrap, setWrap] = useState<Wrap>(null)
-  const [text, setText] = useState<string | null>(null)
+  const [file, setFile] = useState<TextFile>("loading")
+  const text = typeof file === "object" ? file.text : null
+  const failed = file === "failed"
+  // An image's own size once it loads, with its URL: the last image's must never show under the next one's name.
+  const [pixels, setPixels] = useState<(Size & { url: string }) | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
   useEffect(() => {
     setRaw(false)
@@ -152,20 +165,24 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   }
   const copied = (what: Flash["what"]) => !!flash?.ok && flash.what === what
 
-  const details = [heading !== name ? name : null, item.size ? formatSize(item.size) : null].filter(Boolean).join(" · ")
-  const hasRaw = kind === "markdown" || kind === "json" || kind === "csv"
+  const details = [heading !== name ? name : null, item.size ? formatSize(item.size) : null, pixels?.url === item.url ? `${pixels.width}×${pixels.height}` : null]
+    .filter(Boolean)
+    .join(" · ")
+  // A file that didn't load has no other view, and no lines to wrap.
+  const hasRaw = !failed && (kind === "markdown" || kind === "json" || kind === "csv")
   /** Lines of monospace text are showing (CodeView), so Wrap lines applies. */
-  const code = kind === "text" || kind === "json" || (raw && hasRaw)
-  // With no choice made yet, lines wrap where the frame is narrow: each layout's own control says so.
+  const code = !failed && (kind === "text" || kind === "json" || (raw && hasRaw))
+  // With no choice made yet, lines wrap where the frame is narrow (unless the file is long): each layout's own
+  // control says so.
   const wrapWide = wrap ?? false
-  const wrapNarrow = wrap ?? true
+  const wrapNarrow = wrap ?? !(typeof file === "object" && file.long)
 
-  /** Switches the view, so it names the one it goes to. `words`: with the name beside the icon, where there's room. */
-  const rawToggle = (words: boolean) =>
+  /** Switches the view, so it names the one it goes to. `bar`: the narrow bar's, which keeps the word only while it fits. */
+  const rawToggle = (bar: boolean) =>
     hasRaw && (
       <ToolButton label={raw ? (kind === "csv" ? "Show table" : kind === "json" ? "Show formatted" : "Show rendered") : "Show raw"} onClick={() => setRaw((r) => !r)}>
         {raw ? <Eye className="h-4 w-4" /> : <Code className="h-4 w-4" />}
-        {words && (raw ? (kind === "csv" ? "Table" : kind === "json" ? "Formatted" : "Rendered") : "Raw")}
+        <span className={cx(bar && "@max-[23rem]/preview:hidden")}>{raw ? (kind === "csv" ? "Table" : kind === "json" ? "Formatted" : "Rendered") : "Raw"}</span>
       </ToolButton>
     )
   const zoom = image && (
@@ -206,16 +223,19 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2 @max-[30rem]/preview:hidden">
-          {rawToggle(true)}
+          {rawToggle(false)}
+          {/* Worded where there's room: beside Copy link, two bare copy icons would be a guess. */}
           {code && (
             <ToolButton label="Wrap lines" title={wrapWide ? "Don't wrap lines" : "Wrap lines"} active={wrapWide} onClick={() => setWrap(!wrapWide)}>
               <WrapText className="h-4 w-4" />
+              <span className="@max-2xl/preview:hidden">Wrap</span>
             </ToolButton>
           )}
           {zoom}
-          {isTextKind(kind) && (
+          {isTextKind(kind) && !failed && (
             <ToolButton label={copied("contents") ? "Copied" : "Copy contents"} disabled={text === null} onClick={() => void copy("contents")}>
               {copied("contents") ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+              <span className="@max-2xl/preview:hidden">Copy</span>
             </ToolButton>
           )}
           <NewTabLink href={item.url} mark={false} className={TOOL} title="Open in new tab" aria-label="Open in new tab">
@@ -238,7 +258,8 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
         gallery={!!position}
         toggleZoom={toggleZoom}
         onZoom={setZoomed}
-        onText={setText}
+        onPixels={setPixels}
+        onText={setFile}
         onStep={position ? stepPreview : undefined}
       />
       {/* Seen and announced either way, just over the bar: a toast would sit under this dialog. */}
@@ -266,7 +287,7 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
           </nav>
         )}
         <div className="ml-auto flex items-center gap-1 @[30rem]/preview:hidden">
-          {rawToggle(false)}
+          {rawToggle(true)}
           {zoom}
           {download}
           <MoreActions items={more} />
@@ -349,15 +370,39 @@ function FileLoading({ stage = false }: { stage?: boolean }) {
   )
 }
 
-function Problem({ message, url }: { message: string; url?: string }) {
+const PROBLEM_ACTION =
+  "inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:min-h-11"
+
+/**
+ * A file that can't be shown, said to a screen reader as it appears, with what can still be done.
+ * `onRetry`: loading it failed, so loading it again may work. `url`: the browser may still open it.
+ */
+function Problem({ message, url, onRetry }: { message: string; url?: string; onRetry?: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center text-sm text-zinc-400">
+    <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center text-sm text-zinc-400">
       <FileWarning className="h-8 w-8 text-zinc-600" />
       <p>{message}</p>
-      {url && (
-        <NewTabLink href={url} mark={false} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700">
-          <ExternalLink className="h-3.5 w-3.5" /> Open in new tab
-        </NewTabLink>
+      {(onRetry || url) && (
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {onRetry && (
+            <button
+              type="button"
+              onClick={(e) => {
+                // The button goes away with the problem: the dialog keeps the focus, not the page behind it.
+                e.currentTarget.closest<HTMLElement>('[role="dialog"]')?.focus({ preventScroll: true })
+                onRetry()
+              }}
+              className={PROBLEM_ACTION}
+            >
+              <RotateCw className="h-3.5 w-3.5" /> Try again
+            </button>
+          )}
+          {url && (
+            <NewTabLink href={url} mark={false} className={PROBLEM_ACTION}>
+              <ExternalLink className="h-3.5 w-3.5" /> Open in new tab
+            </NewTabLink>
+          )}
+        </div>
       )}
     </div>
   )
@@ -372,6 +417,7 @@ function PreviewBody({
   gallery,
   toggleZoom,
   onZoom,
+  onPixels,
   onText,
   onStep,
 }: {
@@ -385,14 +431,16 @@ function PreviewBody({
   /** Where the image puts its zoom toggle, for the header's button and Z. */
   toggleZoom: ZoomToggle
   onZoom: (z: boolean) => void
-  /** Told a text file's contents once they load (null until then), for Copy contents. */
-  onText: (text: string | null) => void
+  /** Told an image's own size once it loads, for the header. */
+  onPixels: (size: Size & { url: string }) => void
+  /** Told how a text file's loading went, and its contents. */
+  onText: (file: TextFile) => void
   /** Steps through the gallery, when there is one. */
   onStep?: (delta: number) => void
 }) {
   switch (kind) {
     case "image":
-      return <ImageView url={item.url} name={name} toggleRef={toggleZoom} onZoom={onZoom} onStep={onStep} onClose={closePreview} />
+      return <ImageView url={item.url} name={name} toggleRef={toggleZoom} onZoom={onZoom} onPixels={onPixels} onStep={onStep} onClose={closePreview} />
     case "html":
       // No allow-same-origin: the page runs its scripts but can't reach Box Yard's cookies or API.
       return <FrameView url={item.url} name={name} sandbox="allow-scripts" />
@@ -434,12 +482,14 @@ const DOUBLE_CLICK_MS = 500
  * right steps through the gallery (`onStep`) and a swipe down closes. The image follows the finger, with no animation.
  * The view here is the only zoom state: the header asks for a toggle through `toggleRef` and hears the outcome through
  * `onZoom`, never the other way round (two copies kept in step by effects chased each other after a double click).
+ * While zoomed, a pill over the stage's bottom edge says how far and how to get back.
  */
 function ImageView({
   url,
   name,
   toggleRef,
   onZoom,
+  onPixels,
   onStep,
   onClose,
 }: {
@@ -448,10 +498,13 @@ function ImageView({
   toggleRef: ZoomToggle
   /** Told when the image crosses fit size, for the header button's pressed state. */
   onZoom: (z: boolean) => void
+  onPixels: (size: Size & { url: string }) => void
   onStep?: (delta: number) => void
   onClose: () => void
 }) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading")
+  /** Counts Try again: a new <img> loads the URL again. */
+  const [attempt, setAttempt] = useState(0)
   const [view, setView] = useState<View>(FIT)
   const viewRef = useRef(view)
   viewRef.current = view
@@ -478,12 +531,13 @@ function ImageView({
   }
   type Measured = NonNullable<ReturnType<typeof measure>>
   const clamped = (v: View, m: Measured) => clampView(v, m.fit, m.stage, maxScale(m.natural, m.fit))
-  /** Zoomed: back to fit. At fit: in, about `client` (a click or tap) or the centre. */
+  /** Zoomed: back to fit. At fit: in, about `client` (a click or tap), else the centre, or the top of a tall strip. */
   const toggleZoom = (client?: Point) => {
     const m = measure()
     if (!m) return
     if (viewRef.current.scale > 1) return setView(FIT)
-    setView(clamped(zoomAt(FIT, zoomStep(m.natural, m.fit), client ? m.at(client) : { x: 0, y: 0 }), m))
+    const about = client ? m.at(client) : { x: 0, y: isStrip(m.natural, m.fit, m.stage) ? -m.fit.height / 2 : 0 }
+    setView(clamped(zoomAt(FIT, zoomStep(m.natural, m.fit, m.stage), about), m))
   }
 
   const isZoomed = view.scale > 1
@@ -529,6 +583,8 @@ function ImageView({
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === "mouse" && e.button !== 0) return
+    // A failed image's buttons take their own presses: captured by the stage, their click would never arrive.
+    if ((e.target as Element).closest("a, button")) return
     e.currentTarget.setPointerCapture?.(e.pointerId)
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (pointers.current.size === 2) return startPinch()
@@ -632,19 +688,44 @@ function ImageView({
         <FileLoading stage />
       )}
       {status === "error" ? (
-        <Problem message="Couldn't load this image." url={url} />
+        <Problem
+          message="Couldn't load this image."
+          url={url}
+          onRetry={() => {
+            setStatus("loading")
+            setAttempt((a) => a + 1)
+          }}
+        />
       ) : (
         <img
+          key={attempt}
           ref={img}
           src={url}
           alt={name}
           draggable={false}
-          onLoad={() => setStatus("ready")}
+          onLoad={(e) => {
+            setStatus("ready")
+            const { naturalWidth: width, naturalHeight: height } = e.currentTarget
+            if (width && height) onPixels({ url, width, height })
+          }}
           onError={() => setStatus("error")}
           style={view === FIT ? undefined : { transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
           className={cx("max-h-full max-w-full object-contain select-none", !isZoomed && "cursor-zoom-in", status !== "ready" && "invisible")}
         />
       )}
+      {/* Always here, so a screen reader hears it change; shown only while zoomed. */}
+      <p
+        role="status"
+        data-testid="zoom-status"
+        className={isZoomed ? "pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-zinc-950/80 px-2.5 py-1 text-xs whitespace-nowrap text-zinc-200 tabular-nums" : "sr-only"}
+      >
+        {isZoomed && (
+          <>
+            {Math.round(view.scale * 100)}% · <span className="pointer-coarse:hidden">click</span>
+            <span className="hidden pointer-coarse:inline">double-tap</span> to fit
+          </>
+        )}
+      </p>
     </div>
   )
 }
@@ -668,7 +749,7 @@ function FrameView({ url, name, sandbox }: { url: string; name: string; sandbox?
 /** `fill`: in a gallery's fixed frame the video takes the whole stage, so its controls never fall below the pager. */
 function MediaView({ url, kind, fill }: { url: string; kind: "video" | "audio"; fill: boolean }) {
   const [error, setError] = useState(false)
-  if (error) return <Problem message={`Couldn't play this ${kind === "video" ? "video" : "audio file"}.`} url={url} />
+  if (error) return <Problem message={`Couldn't play this ${kind === "video" ? "video" : "audio file"}.`} url={url} onRetry={() => setError(false)} />
   return kind === "video" ? (
     <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
       <video src={url} controls autoPlay className={fill ? "absolute inset-0 h-full w-full" : "max-h-[75vh] max-w-full"} onError={() => setError(true)} />
@@ -682,18 +763,19 @@ function MediaView({ url, kind, fill }: { url: string; kind: "video" | "audio"; 
 
 // ------------------------------------------------------------------ text
 
-type TextState = { status: "loading" } | { status: "ready"; text: string } | { status: "error"; message: string } | { status: "too-large"; size: number }
+type TextState = { status: "loading" } | { status: "ready"; text: string } | { status: "error"; message: string; gone?: boolean } | { status: "too-large"; size: number }
 
-/** The file as text, unless it's over TEXT_PREVIEW_MAX. */
-function useFileText(url: string, size?: number): TextState {
+/** The file as text, unless it's over TEXT_PREVIEW_MAX, and a way to fetch it again after an error. */
+function useFileText(url: string, size?: number): [TextState, () => void] {
   const [state, setState] = useState<TextState>(() => (size && size > TEXT_PREVIEW_MAX ? { status: "too-large", size } : { status: "loading" }))
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     if (size && size > TEXT_PREVIEW_MAX) return
     const ctl = new AbortController()
     setState({ status: "loading" })
     fetch(url, { signal: ctl.signal })
       .then(async (res) => {
-        if (!res.ok) return setState({ status: "error", message: res.status === 404 ? "This file doesn't exist anymore." : `Couldn't load this file (${res.status}).` })
+        if (!res.ok) return setState(res.status === 404 ? { status: "error", message: "This file doesn't exist anymore.", gone: true } : { status: "error", message: `Couldn't load this file (${res.status}).` })
         const length = Number(res.headers.get("content-length"))
         if (length > TEXT_PREVIEW_MAX) {
           ctl.abort()
@@ -706,22 +788,28 @@ function useFileText(url: string, size?: number): TextState {
         if (!ctl.signal.aborted) setState({ status: "error", message: `Couldn't load this file${err instanceof Error ? ` (${err.message})` : ""}.` })
       })
     return () => ctl.abort()
-  }, [url, size])
-  return state
+  }, [url, size, attempt])
+  return [state, () => setAttempt((a) => a + 1)]
 }
 
-function TextPreview({ item, kind, raw, wrap, onText }: { item: PreviewItem; kind: "markdown" | "json" | "csv" | "text"; raw: boolean; wrap: Wrap; onText: (text: string | null) => void }) {
-  const file = useFileText(item.url, item.size)
-  const loaded = file.status === "ready" ? file.text : null
+function TextPreview({ item, kind, raw, wrap, onText }: { item: PreviewItem; kind: "markdown" | "json" | "csv" | "text"; raw: boolean; wrap: Wrap; onText: (file: TextFile) => void }) {
+  const [file, retry] = useFileText(item.url, item.size)
+  const text = file.status === "ready" ? file.text : null
+  const pretty = useMemo(() => (text !== null && kind === "json" && !raw ? prettyJson(text) : null), [text, kind, raw])
+  /** What CodeView shows, when it is what shows. */
+  const lines = pretty ?? text
+  const long = useMemo(() => lines !== null && lineCount(lines) > LINE_ROWS_MAX, [lines])
+  const status = file.status
   useEffect(() => {
-    onText(loaded)
-    return () => onText(null)
-  }, [loaded, onText])
+    onText(text !== null ? { text, long } : status === "loading" ? "loading" : "failed")
+    return () => onText("loading")
+  }, [text, long, status, onText])
   if (file.status === "loading") return <FileLoading />
-  if (file.status === "error") return <Problem message={file.message} url={item.url} />
+  // A file that is gone stays gone; any other failure may have been the network.
+  if (file.status === "error") return <Problem message={file.message} url={item.url} onRetry={file.gone ? undefined : retry} />
   if (file.status === "too-large")
     return <Problem message={`This file is ${formatSize(file.size)}, too big to preview here (the limit is ${formatSize(TEXT_PREVIEW_MAX)}).`} url={item.url} />
-  const { text } = file
+  if (text === null) return null
   if (!raw && kind === "markdown")
     return (
       <div className="prose-doc scroll-thin min-h-0 flex-1 overflow-auto px-4 py-5 text-sm text-zinc-200 @[30rem]/preview:px-6">
@@ -733,49 +821,63 @@ function TextPreview({ item, kind, raw, wrap, onText }: { item: PreviewItem; kin
     )
   if (!raw && kind === "csv") return <CsvTable text={text} tsv={/\.tsv$/i.test(item.name || item.url)} />
   if (!raw && kind === "json") {
-    const pretty = prettyJson(text)
     if (pretty !== null) return <CodeView text={pretty} wrap={wrap} />
     return <CodeView text={text} wrap={wrap} note="This isn't valid JSON, so it's shown as is." />
   }
   return <CodeView text={text} wrap={wrap} />
 }
 
+// CodeView's classes by Wrap: on, off, and (null) on only where the frame is narrow.
+const CODE = "font-mono text-xs leading-5 @3xl/preview:text-[13px]"
+const CODE_WIDTH = { on: "w-full", off: "w-max min-w-full", auto: "w-full @[30rem]/preview:w-max @[30rem]/preview:min-w-full" }
+const CODE_LINE = {
+  on: "pr-4 wrap-anywhere whitespace-pre-wrap",
+  off: "pr-6 whitespace-pre",
+  auto: "pr-4 wrap-anywhere whitespace-pre-wrap @[30rem]/preview:pr-6 @[30rem]/preview:wrap-normal @[30rem]/preview:whitespace-pre",
+}
+const CODE_NUMBER = "sticky left-0 border-r border-zinc-900 bg-zinc-950 pr-2 pl-3 text-right text-zinc-600 select-none @[30rem]/preview:pr-3 @[30rem]/preview:pl-4"
+
 /**
- * Monospace text with a line-number gutter. Two text nodes, so even a 2 MB log renders quickly. Wrapped, long lines
- * fold instead of scrolling sideways, without the gutter (its numbers would no longer line up). `wrap` null: wrapped
- * only where the frame is narrow.
+ * Monospace text with a line-number gutter. One row per line (its number, its text), so a long line that wraps keeps
+ * its number beside its first row and the rows under it are plainly its own. Over LINE_ROWS_MAX lines it is two text
+ * nodes instead, so even a 2 MB log renders quickly: those don't wrap unless asked to, and then without the gutter (its
+ * numbers would no longer line up). `wrap` null: wrapped only where the frame is narrow.
  */
-function CodeView({ text, note, wrap }: { text: string; note?: string; wrap: Wrap }) {
+const CodeView = memo(function CodeView({ text, note, wrap }: { text: string; note?: string; wrap: Wrap }) {
+  const rows = useMemo(() => (lineCount(text) > LINE_ROWS_MAX ? null : splitLines(text)), [text])
+  const mode = wrap === null ? "auto" : wrap ? "on" : "off"
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-auto bg-zinc-950">
       {note && <div className="border-b border-zinc-900 px-4 py-2 text-xs text-amber-300/80">{note}</div>}
-      <div
-        className={cx(
-          "flex font-mono text-xs leading-5 @3xl/preview:text-[13px]",
-          wrap === true ? "w-full" : wrap === false ? "w-max min-w-full" : "w-full @[30rem]/preview:w-max @[30rem]/preview:min-w-full",
-        )}
-      >
-        {wrap !== true && (
-          <pre aria-hidden className={cx("sticky left-0 shrink-0 border-r border-zinc-900 bg-zinc-950 py-3 pr-3 pl-4 text-right text-zinc-600 select-none", wrap === null && "@max-[30rem]/preview:hidden")}>
+      {rows ? (
+        <pre className={cx("grid grid-cols-[auto_minmax(0,1fr)]", CODE, CODE_WIDTH[mode])}>
+          {rows.map((line, i) => {
+            // The block's padding, on its first and last rows, so the gutter's edge runs its whole height.
+            const pad = cx(i === 0 && "pt-3", i === rows.length - 1 && "pb-3")
+            return (
+              <Fragment key={i}>
+                <span aria-hidden className={cx(CODE_NUMBER, pad)}>
+                  {i + 1}
+                </span>
+                {/* Its newline is the text's own: what a selection copies, and an empty line's height. */}
+                <span className={cx("pl-3 text-zinc-200 @[30rem]/preview:pl-4", CODE_LINE[mode], pad)}>{line + "\n"}</span>
+              </Fragment>
+            )
+          })}
+        </pre>
+      ) : wrap ? (
+        <pre className={cx("w-full px-4 py-3 wrap-anywhere whitespace-pre-wrap text-zinc-200", CODE)}>{text}</pre>
+      ) : (
+        <div className={cx("flex w-max min-w-full", CODE)}>
+          <pre aria-hidden className="sticky left-0 shrink-0 border-r border-zinc-900 bg-zinc-950 py-3 pr-3 pl-4 text-right text-zinc-600 select-none">
             {lineNumbers(text)}
           </pre>
-        )}
-        <pre
-          className={cx(
-            "py-3 pl-4 text-zinc-200",
-            wrap === true
-              ? "min-w-0 flex-1 pr-4 wrap-anywhere whitespace-pre-wrap"
-              : wrap === false
-                ? "pr-6"
-                : "pr-6 @max-[30rem]/preview:min-w-0 @max-[30rem]/preview:flex-1 @max-[30rem]/preview:pr-4 @max-[30rem]/preview:wrap-anywhere @max-[30rem]/preview:whitespace-pre-wrap",
-          )}
-        >
-          {text}
-        </pre>
-      </div>
+          <pre className="py-3 pr-6 pl-4 text-zinc-200">{text}</pre>
+        </div>
+      )}
     </div>
   )
-}
+})
 
 function CsvTable({ text, tsv }: { text: string; tsv: boolean }) {
   const rows = parseCsv(text, tsv ? "\t" : ",")

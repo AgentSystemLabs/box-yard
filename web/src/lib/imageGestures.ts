@@ -33,8 +33,20 @@ export function maxScale(natural: Size, fit: Size): number {
   return Math.max(4, 2 * pixelRatio(natural, fit))
 }
 
-/** Where a double tap, a click, Z or the zoom button goes: the image's own pixels, but at least 2× and at most 4×. */
-export function zoomStep(natural: Size, fit: Size): number {
+/**
+ * A tall image (a whole-page capture) shrunk to the stage's height, which leaves it a strip: under 60% of the stage's
+ * width. Zooming one fills the width, as its own pixels at 2–4× would often still be a strip.
+ */
+export function isStrip(natural: Size, fit: Size, stage: Size): boolean {
+  return fit.width > 0 && natural.width > fit.width && fit.width < stage.width * 0.6
+}
+
+/**
+ * Where a double tap, a click, Z or the zoom button goes: the image's own pixels, but at least 2× and at most 4×.
+ * With the `stage`, a strip goes to the stage's width instead, as far as maxScale lets it.
+ */
+export function zoomStep(natural: Size, fit: Size, stage?: Size): number {
+  if (stage && isStrip(natural, fit, stage)) return Math.min(stage.width / fit.width, maxScale(natural, fit))
   return clamp(pixelRatio(natural, fit), 2, 4)
 }
 

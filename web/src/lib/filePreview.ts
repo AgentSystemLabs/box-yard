@@ -151,12 +151,30 @@ export function parseCsv(text: string, delimiter = ","): string[][] {
   return rows
 }
 
-/** "1\n2\n3" for a text's line-number gutter. */
-export function lineNumbers(text: string): string {
+/**
+ * Up to this many lines, text shows as one row per line, so a wrapped line keeps its number beside its first row.
+ * A longer file stays two text nodes (fast, however long) and doesn't wrap unless asked to.
+ */
+export const LINE_ROWS_MAX = 5000
+
+/** How many lines a text has: a final newline ends the last line, it doesn't start another. */
+export function lineCount(text: string): number {
   let n = 1
   for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++
   if (text.endsWith("\n")) n--
-  return Array.from({ length: Math.max(1, n) }, (_, i) => i + 1).join("\n")
+  return Math.max(1, n)
+}
+
+/** The text's lines, as many as lineCount says. */
+export function splitLines(text: string): string[] {
+  const lines = text.split("\n")
+  if (lines.length > 1 && lines.at(-1) === "") lines.pop()
+  return lines
+}
+
+/** "1\n2\n3" for a text's line-number gutter. */
+export function lineNumbers(text: string): string {
+  return Array.from({ length: lineCount(text) }, (_, i) => i + 1).join("\n")
 }
 
 /** The next item when stepping through a gallery with ←/→, wrapping around. */
