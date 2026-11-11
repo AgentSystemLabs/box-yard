@@ -31,7 +31,7 @@ import { chatRef, isPinned, keepPinsShown, setChatShowing, setRails, settleColum
 import { panelsAt, usePanels } from "./lib/panelStack"
 import { toast } from "./lib/toast"
 import { useChatHistory } from "./lib/treeNav"
-import { Sidebar, useStrayTreeClicks } from "./components/Sidebar"
+import { RevealOpenedTask, Sidebar, useStrayTreeClicks } from "./components/Sidebar"
 import { SidebarPane } from "./components/SidebarPane"
 import { Modal, isDialogOpen } from "./components/Modal"
 import { SIDEBAR_INLINE, SIDEBAR_WIDE, closeSidebarDrawer, openSidebarDrawer, setSidebarCollapsed, useMinWidth, useSidebarCollapsed, useSidebarDrawer } from "./lib/sidebar"
@@ -162,6 +162,8 @@ export function App() {
           <Sidebar drawer />
         </Modal>
       )}
+      {/* A task opened from anywhere but its sidebar row brings its row into view, in the column or the drawer. */}
+      <RevealOpenedTask />
       <Toasts quiet />
       <CommandPalette />
       <ShortcutsHost />

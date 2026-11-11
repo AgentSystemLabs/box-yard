@@ -47,14 +47,14 @@ export function buildSelectionTaskPrompt(input: { source: SelectionTaskSource; s
 
 /**
  * The same selection as a prompt for an agent, not a chat to route it: the instructions first, then where the text
- * came from and the full quote. The New task dialog ("More options") starts the task with it directly.
+ * came from and the full quote. The New task dialog ("Start it myself…") starts the task with it directly.
  */
 export function buildSelectionTaskBrief(input: { source: SelectionTaskSource; selectedText: string; instructions: string }): string {
   const instructions = input.instructions.trim() || "Follow up on this Box Yard output."
   return [instructions, "", "## Context", ...contextLines(input.source), "", "## Selected output", quote(truncate(input.selectedText.trim(), MAX_SELECTED_CHARS))].join("\n")
 }
 
-/** Where the selection's prompt goes, for the toast after sending it. */
+/** Where the selection's prompt goes, for the popover's "Send to …" button and the toast after sending it. */
 export function selectionTarget(source: SelectionTaskSource): string {
   return source.kind === "captain" ? `${source.project.name}'s Captain` : "the Coordinator"
 }

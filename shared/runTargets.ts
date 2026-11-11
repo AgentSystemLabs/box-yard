@@ -66,6 +66,10 @@ export interface RunTarget {
   /** An explicit model/effort on a harness pick. Omitted fields follow that harness's Settings. */
   model?: string
   effort?: Effort
+  /** The click-opened picker's heading for it while a level is browsed: a model's "Latest", "Aliases", "Older". */
+  group?: string
+  /** What sets it apart from its neighbours there, in a few words: a model's note ("The latest Fable"). */
+  hint?: string
 }
 
 /** A sent message's pick (meta.runsOn, meta.agent): enough to show its chip without the list. */

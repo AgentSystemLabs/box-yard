@@ -26,7 +26,7 @@ const TOUCH = "min-h-11! min-w-11!"
 export function PullRequestsButton({ projectId }: { projectId?: string }) {
   const [open, setOpen] = useState(false)
   const count = useOpenPullRequests(projectId)
-  const label = count ? `Pull requests, ${count} open` : "Pull requests"
+  const label = count ? `Pull requests: ${count} open` : "Pull requests"
   return (
     <>
       <Button size="sm" variant="ghost" className="h-11 min-w-11! shrink-0 gap-1.5 px-2.5! text-zinc-400 hover:text-zinc-100 pointer-fine:@min-[32rem]/composer:h-8 pointer-fine:@min-[32rem]/composer:min-w-8! pointer-fine:@min-[32rem]/composer:px-2!" aria-label={label} title={label} data-testid="pull-requests-button" onClick={(e) => { e.currentTarget.focus(); setOpen(true) }}>

@@ -78,6 +78,7 @@ import { useOpenSettings } from "./SettingsHost"
 import { EmptyCaptain } from "./EmptyCaptain"
 import { focusComposer, useComposerFocus } from "../lib/chatSwitch"
 import { Loading } from "./Loading"
+import { SpendButton } from "./SpendBreakdown"
 import type { Attachment, CaptainCompaction, CaptainMessage, CaptainSource, CaptainState, Project } from "../../../shared/types"
 
 const NO_MESSAGES: CaptainMessage[] = []
@@ -285,6 +286,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
               chat={target}
               onSubmit={submit}
               placeholder={busy ? "Queue another message for the Captain…" : `Message the ${project.name} Captain…`}
+              label={`Message the ${project.name} Captain`}
               textareaRef={box}
               handleRef={handle}
               panelRef={panel}
@@ -300,6 +302,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
               className={cx(COMPOSER_FOOTER, "chat-column overflow-hidden")}
               onSubmit={submit}
               placeholder={busy ? "Queue another message for the Captain…" : `Message the ${project.name} Captain…`}
+              label={`Message the ${project.name} Captain`}
               textareaRef={box}
               handleRef={handle}
               panelRef={panel}
@@ -744,6 +747,7 @@ function CentreCaptainHeader({ project, state, lastActive }: { project: Project;
           {/* Context readings stay out of the header, as in the Coordinator's: the meter is in ⋯, which shows the percentage when it's nearly full. */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
             {!sidebarInline && <SearchButton />}
+            <SpendButton scope={{ kind: "captain", projectId: project.id, name: project.name, version: String(lastActive ?? "") }} />
             <CaptainMenu project={project} meter={meter} model={model} lastActive={lastActive} />
             <ChatControls name={`the ${project.name} Captain`} />
           </div>
@@ -778,6 +782,7 @@ function PanelCaptainHeader({ project, state, lastActive, onClose, backLabel }: 
           </ChatSwitcher>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          <SpendButton scope={{ kind: "captain", projectId: project.id, name: project.name, version: String(lastActive ?? "") }} />
           <CaptainMenu project={project} meter={meter} model={model} lastActive={lastActive} />
           <PanelControls name={`${project.name} Captain`} />
         </div>

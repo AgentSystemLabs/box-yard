@@ -2104,6 +2104,7 @@ const TOOLS = [
       "Start sub-agents: each sub-task is a task of its own (its own session and transcript, shown nested under yours) that works on its prompt and reports back to you when it finishes. " +
       "Use it when the work splits into independent parts, or when asked to use N sub-agents (start exactly N, in one call). Returns each sub-task's id and link. " +
       "Then call wait_for_subtasks, or end your turn: their reports arrive as your next message. Sub-tasks can start their own, down to the depth limit. Every descendant must stay in the original physical environment type; the server rejects other types. " +
+      "Each runs on your agent, model and effort unless it names its own (agent, model, effort: e.g. reviewers on claude-sonnet-5-5 at high effort); they stay its own for its later turns. " +
       "Subtasks are not supported on RunPod or Vast.ai GPU boxes. If asked to use sub-agents there, explain this limitation and do the work yourself.",
     inputSchema: {
       type: "object",
@@ -2122,6 +2123,20 @@ const TOOLS = [
                 enum: ["same", "box", "local", "docker", "gpu", "ssh"],
                 default: "same",
                 description: '"same" (default): where you run, in your slot. Or a runner: an Upstash box, this computer, the project\'s Docker container, GPU pod or SSH machines.',
+              },
+              agent: {
+                type: "string",
+                enum: ["claude", "codex", "cursor", "opencode"],
+                description: "The harness it runs on; omit it to use yours. On another harness than yours, what it leaves out of model and effort follows that harness's defaults.",
+              },
+              model: {
+                type: "string",
+                description: "A model id its harness runs (claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5, opus; gpt-6.1-sol on Codex; a Cursor id such as composer-2.5 or claude-opus-5-5-high; provider/model#variant on OpenCode); omit it to use yours.",
+              },
+              effort: {
+                type: "string",
+                enum: ["low", "medium", "high", "xhigh", "max", "ultra"],
+                description: "Its reasoning effort (ultra on Codex only); omit it to use yours. Cursor ids carry their effort and OpenCode uses #variant, so omit it there.",
               },
             },
             required: ["title", "prompt"],
@@ -2361,13 +2376,14 @@ const subtaskId = () => `task_${randomUUID().replace(/-/g, "").slice(0, 12)}`
 
 async function spawnSubtasks(args) {
   const list = Array.isArray(args.tasks) ? args.tasks : args.title ? [args] : []
-  if (!list.length) return text("tasks is required: [{ title, prompt, runs_on? }]", true)
+  if (!list.length) return text("tasks is required: [{ title, prompt, runs_on?, agent?, model?, effort? }]", true)
   const tasks = []
   for (const [i, t] of list.entries()) {
     const title = String(t?.title ?? "").trim()
     const prompt = String(t?.prompt ?? "").trim()
     if (!title || !prompt) return text(`Sub-task ${i + 1} needs a title and a prompt.`, true)
-    tasks.push({ id: subtaskId(), title, prompt, runsOn: t.runs_on ? String(t.runs_on) : "same" })
+    // agent, model and effort go as given: the server checks them (server/subtasks.ts parseSpawn, subtaskPins).
+    tasks.push({ id: subtaskId(), title, prompt, runsOn: t.runs_on ? String(t.runs_on) : "same", agent: t.agent, model: t.model, effort: t.effort })
   }
   const id = `sub_${randomUUID().replace(/-/g, "").slice(0, 12)}`
   await emit({ t: "spawn_subtasks", id, tasks })
@@ -2380,7 +2396,7 @@ async function spawnSubtasks(args) {
         fs.rmSync(file, { force: true })
       } catch {}
       if (answer.status !== "ok") return text(`Not started: ${answer.text ?? "Box Yard refused them."}`, true)
-      const lines = (answer.tasks ?? []).map((t) => `- [${t.title}](${t.url}) (${t.id}, runs on ${t.runsOn})`)
+      const lines = (answer.tasks ?? []).map((t) => `- [${t.title}](${t.url}) (${t.id}, runs on ${t.runsOn}${t.runsWith ? `, ${t.runsWith}` : ""})`)
       return text(
         `Started ${lines.length} sub-task${lines.length === 1 ? "" : "s"}:\n${lines.join("\n")}\n\nThey report back to you when they finish. Call wait_for_subtasks to wait for the reports, or end your turn: they arrive as your next message. Link them in your answer.`,
       )

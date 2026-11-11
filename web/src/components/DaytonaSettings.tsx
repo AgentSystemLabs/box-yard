@@ -25,7 +25,7 @@ import {
 } from "../../../shared/daytona"
 import { BoxActionDialog } from "./BoxActionDialog"
 import { CredentialField } from "./Setup"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { GpuDefaultRow } from "./GpuDefault"
 import type { GpuProvider } from "../../../shared/gpu"
 import { SizeCards } from "./SizeCards"
@@ -204,7 +204,8 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
           <Row
             id={fid("daytona-gpus")}
             label="GPU types"
-            help="Daytona gives a sandbox any free GPU of these types, so its price is counted at the dearest. CPU only makes plain Linux sandboxes with no GPU, at Daytona's CPU and memory rates. A project can pick its own (Project › Settings › Boxes)."
+            help="Daytona gives a sandbox any free GPU of these types, so its price is counted at the dearest."
+            more="CPU only makes plain Linux sandboxes with no GPU, at Daytona's CPU and memory rates. A project can pick its own (Project › Settings › Boxes)."
           >
             <DaytonaGpuPicker id={fid("daytona-gpus")} value={form.gpuTypes} onChange={(gpuTypes) => set({ gpuTypes })} />
             {price && <p className="mt-1.5 text-xs text-zinc-500">{price}</p>}
@@ -215,7 +216,7 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
               label="Spot GPUs"
               help="Cheaper GPUs (Daytona's Tier 2 and up) that Daytona may take back at any moment, with the sandbox and its work. The workspace comes back from Box Yard's last archive."
             >
-              <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+              <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
                 <input id={fid("daytona-spot")} type="checkbox" checked={form.spot} onChange={(e) => set({ spot: e.target.checked })} />
                 {form.spot ? "On: spot GPUs" : "Off: on-demand GPUs"}
               </label>
@@ -224,7 +225,7 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
           <Row
             id={fid("daytona-image")}
             label="GPU sandbox image"
-            help="The image GPU sandboxes are built from. Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built, else RunPod's stock CUDA image. Box Yard adds its agent tools on top when Daytona builds the sandbox (or installs them on start when that build fails)."
+            help="The image GPU sandboxes are built from." more={<>Empty: the one <SettingsLink section="runpod">Settings › Box providers › GPU clouds › RunPod GPU</SettingsLink> built, else RunPod's stock CUDA image. Box Yard adds its agent tools on top when Daytona builds the sandbox (or installs them on start when that build fails).</>}
           >
             <input
               id={fid("daytona-image")}
@@ -330,7 +331,7 @@ function SandboxesRow({ status }: { status: DaytonaStatus }) {
   return (
     <Row
       label="Sandboxes"
-      help={`Running now, at about ${usd(total)}/hr together (Box Yard's estimate; Daytona's billing page has the real figure). A project gets up to its Max boxes sandboxes, within the caps. Each is deleted after ${status.settings.idleMinutes} idle minutes; Keep warm holds it up between follow-ups. Terminate runs the delete safety check and archives every workspace first; it asks before stopping a running agent.`}
+      help={`Running now, at about ${usd(total)}/hr together (Box Yard's estimate; Daytona's billing page has the real figure).`} more={`A project gets up to its Max boxes sandboxes, within the caps. Each is deleted after ${status.settings.idleMinutes} idle minutes; Keep warm holds it up between follow-ups. Terminate runs the delete safety check and archives every workspace first; it asks before stopping a running agent.`}
     >
       {!status.sandboxes.length ? (
         <p className="text-xs text-zinc-500">No sandboxes running.</p>

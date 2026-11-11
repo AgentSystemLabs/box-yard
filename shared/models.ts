@@ -28,6 +28,10 @@ export interface ModelCatalog {
   error?: string
 }
 
+/** A model name a task may ask for on any harness (an id, alias or provider/model#variant): create_task, spawn_subtasks. */
+export const MODEL_NAME = /^[A-Za-z0-9._:#\[\]/-]+$/
+export const MAX_MODEL_NAME = 100
+
 export const MODEL_GROUP_LABEL: Record<ModelGroup, string> = { latest: "Latest", alias: "Aliases", older: "Older" }
 export const EFFORT_LABEL: Record<Effort, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra" }
 
