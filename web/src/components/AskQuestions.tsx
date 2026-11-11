@@ -283,15 +283,18 @@ function Choice({
       )}
     >
       <input type="radio" name={name} value={value} checked={checked} onChange={onPick} aria-controls={controls} className="h-4 w-4 shrink-0 accent-amber-400 focus-visible:outline-none" />
-      <span className="min-w-0 flex-1 wrap-anywhere">
+      {/* The badge flows after the text, so a narrow row wraps it whole rather than breaking the answer mid-word. */}
+      <span className="min-w-0 flex-1 wrap-break-word">
         {children}
-        {badge && <span className="sr-only"> ({badge.toLowerCase()})</span>}
+        {badge && (
+          <>
+            <span className="sr-only"> ({badge.toLowerCase()})</span>
+            <span aria-hidden className="ml-2 inline-block rounded border border-amber-500/40 px-1.5 align-middle text-[11px] leading-4 font-medium whitespace-nowrap text-amber-300">
+              {badge}
+            </span>
+          </>
+        )}
       </span>
-      {badge && (
-        <span aria-hidden className="shrink-0 rounded border border-amber-500/40 px-1.5 text-[11px] font-medium text-amber-300">
-          {badge}
-        </span>
-      )}
       {n <= 9 && (
         <kbd aria-hidden className="shrink-0 font-sans text-[11px] text-zinc-500 tabular-nums pointer-coarse:hidden">
           {n}

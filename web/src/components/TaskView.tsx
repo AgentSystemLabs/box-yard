@@ -405,7 +405,8 @@ function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
   const url = typeof m.meta?.url === "string" ? m.meta.url : null
   const timing = timingOf(m.meta)
   return (
-    <div data-chat-id={m.id} className="pl-6 text-xs wrap-anywhere text-zinc-400">
+    // A question keeps its lines: several questions (ask_user's `questions`) are one per line.
+    <div data-chat-id={m.id} className={cx("pl-6 text-xs wrap-anywhere text-zinc-400", m.meta?.kind === "question" && "whitespace-pre-line")}>
       {url ? (
         <AppLink href={url} className="hover:text-zinc-300 hover:underline">
           {m.content}
