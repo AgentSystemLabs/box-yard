@@ -315,6 +315,12 @@ export function ThreadView({
     el.focus({ preventScroll: true })
     el.setSelectionRange(el.value.length, el.value.length)
   }, [focus])
+  // Moving between threads inside the panel (up to the one this was asked in, down to one asked from here) replaces
+  // this view, and the control that was pressed with it. The focus stays in the panel, so Esc and Tab go on from here.
+  useLayoutEffect(() => {
+    const at = document.activeElement
+    if (!at || at === document.body || !at.isConnected) pane.current?.focus({ preventScroll: true })
+  }, [])
 
   // Cody's messages an answer (or an error) came after: a message from before routing has only that.
   const answered = useMemo(() => {
@@ -366,7 +372,7 @@ export function ThreadView({
   ]
 
   return (
-    <div ref={pane} className="relative flex h-full min-h-0 flex-col">
+    <div ref={pane} tabIndex={-1} className="relative flex h-full min-h-0 flex-col outline-none">
       <PanelHeader
         open={open}
         sheet={sheet}

@@ -248,8 +248,11 @@ describe("nested threads", () => {
     expect(up.textContent).toContain("“never backs off”")
     // A sheet's Back goes up a level too, and says so.
     expect(pane().querySelector("[data-dismiss=back]")!.getAttribute("aria-label")).toBe("Back to the thread this was asked in")
+    // Pressed with the keyboard: the row goes with the thread it was in, and the focus stays in the panel (Esc works on).
+    act(() => up.focus())
     click(up)
     expect(openThreadId(COORDINATOR_CHAT)).toBe("thr_abc123")
+    expect(pane().contains(document.activeElement)).toBe(true)
     expect(pane().querySelector("[data-testid=side-thread-parent]")).toBeNull()
     expect(pane().querySelector("[data-dismiss=back]")!.getAttribute("aria-label")).toBe("Back to the chat")
     // The parent lists what was asked from inside it; the chip opens it again.
@@ -288,7 +291,7 @@ describe("nested threads", () => {
     typeAndSend(box, "Add a backoff")
     await flush()
     const content: string = JSON.parse((posts("/api/chat")[0]![1] as RequestInit).body as string).content
-    expect(content).toContain("## Ada's request\nAdd a backoff")
+    expect(content).toContain("## The request\nAdd a backoff")
     expect(content).toContain("- In a side thread (thr_abc123) about: “never backs off”")
     expect(content).toContain("## Highlighted text\n> retries at once")
     // The thread stays open, and no question was asked.
