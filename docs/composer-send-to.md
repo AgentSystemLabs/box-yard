@@ -5,8 +5,9 @@ Use Up/Down to choose, then Enter or Tab to select. Only the `>search` part disa
 attachments stay. Escape closes the list and leaves the text intact. Escape also lets you keep a literal Markdown
 blockquote. Escaped `\>` and triggers inside code do not open the picker.
 
-Cmd+Shift+Enter on macOS, or Ctrl+Shift+Enter, opens the same search in a dialog. On a touch screen use **Send to…**
-(the arrow button, or its line in **More**). Picking a destination does not send anything. The selected destination,
+Cmd+Shift+Enter on macOS, or Ctrl+Shift+Enter, opens the same search in a sheet. On a touch screen use **Send to…**
+(the arrow button, or its line in **More**). The sheet lists chats, then tasks; type words in any order ("docs
+gallery") and the best match is highlighted for Enter. Esc clears the search, then closes. Picking a destination does not send anything. The selected destination,
 a link to it, and **Clear destination** appear above the controls. Enter then sends the draft there. Clear returns
 the draft to the current chat. Selecting a done task warns that sending will reopen it.
 
