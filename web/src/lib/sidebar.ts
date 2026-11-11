@@ -35,9 +35,19 @@ export interface SidebarGroup {
   needs: number
   /** Tasks that failed. */
   failed: number
-  /** Turns running or being set up. */
+  /**
+   * Its tasks running right now, sub-tasks at any depth (folded trees too): working, or starting (a turn being set
+   * up), the ones whose icon wears the blue working dot (TaskIcon iconCue). A queued task is waiting for a slot and a
+   * waiting one for another agent's reply, so neither runs; nor does one asking, failed or resting. The project row's
+   * blue count (Sidebar RunningBadge).
+   */
   running: number
 }
+
+/** A running count as its badge draws it: up to 9, then "9+", so the badge stays a circle beside the name. */
+export const runningFigure = (count: number) => (count > 9 ? "9+" : String(count))
+/** A running count in words, for its tooltip and a screen reader: "1 task running", "12 tasks running". */
+export const runningLabel = (count: number) => `${count} ${count === 1 ? "task" : "tasks"} running`
 
 // Needs Cody first, then what broke, then what's moving, then what's waiting on review; resting ones last.
 const ORDER: Record<TaskStatus, number> = { needs_input: 0, failed: 1, working: 2, starting: 2, waiting: 3, queued: 4, pr_ready: 5, idle: 6, done: 7 }

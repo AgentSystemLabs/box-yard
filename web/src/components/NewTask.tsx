@@ -7,8 +7,8 @@ import { createPortal } from "react-dom"
 import { useLocation } from "wouter"
 import { AlertTriangle, ChevronDown, ChevronUp, FileText, KeyRound, Laptop, Loader2, Paperclip, Plus, ShieldAlert, SlidersHorizontal, X } from "lucide-react"
 import { newClientId, useAgentSettings, useCreateTask, useModels, useProjects, useSettings } from "../lib/queries"
-import { clearNewTaskDraft, draftScope, loadDraft, newTaskDraftKey, saveDraft } from "../lib/newTask"
-import { attachFiles, draftAttachments, filesHold, removeFile, retryFile, useDraft, useDraftKey } from "../lib/composerDraft"
+import { clearNewTaskDraft, draftScope, newTaskDraftKey, saveDraft } from "../lib/newTask"
+import { attachFiles, draftAttachments, filesHold, readDraft, removeFile, retryFile, setDraftText, useDraft, useDraftKey } from "../lib/composerDraft"
 import { primeSendSound } from "../lib/sendSound"
 import { startTaskChord } from "../lib/shortcuts"
 import { isMac } from "../lib/useDictation"
@@ -173,10 +173,11 @@ export function NewTaskPopover({
 }) {
   const narrow = useNarrow()
   const scope = scopeProp ?? draftScope(projectId)
-  const [text, setText] = useState(() => loadDraft(scope))
-  // Files attached in the full dialog stay with the draft (shown here, and sent with the task).
+  // The text is the draft's, so a task added from the sidebar as context (lib/taskReference.ts) shows here. Files
+  // attached in the full dialog stay with the draft (shown here, and sent with the task).
   const key = newTaskDraftKey(scope)
-  const files = useDraft(key).files
+  const { text, files } = useDraft(key)
+  const setText = (next: string) => setDraftText(key, next)
   const held = filesHold(files)
   const projects = useProjects().data ?? []
   const [picked, setPicked] = useState<string | null>(null)
@@ -191,20 +192,37 @@ export function NewTaskPopover({
   closeRef.current = onClose
   const labelId = `${id}-label`
 
-  useEffect(() => saveDraft(scope, text), [scope, text])
+  // Blank text isn't kept as a draft.
+  useEffect(() => () => saveDraft(scope, readDraft(key).text), [scope, key])
 
   useAutoGrow(input, text, narrow)
 
   // A press anywhere outside closes it (the trigger toggles it itself). The sheet's backdrop does this on phones.
+  // A press on a sidebar row may be a task dragged here as context (SidebarReorder.tsx): that one closes it on release,
+  // unless it lets go over it.
   useEffect(() => {
     if (narrow) return
+    let row = false
     const down = (e: Event) => {
       const t = e.target as Node
       if (panel.current?.contains(t) || trigger.current?.contains(t)) return
+      if (t instanceof Element && t.closest("[role=tree] [role=treeitem]")) return void (row = true)
       closeRef.current(false)
     }
+    const up = (e: PointerEvent) => {
+      if (!row) return
+      row = false
+      const at = document.elementFromPoint?.(e.clientX, e.clientY)
+      if (!at || !panel.current?.contains(at)) closeRef.current(false)
+    }
     document.addEventListener("pointerdown", down, true)
-    return () => document.removeEventListener("pointerdown", down, true)
+    window.addEventListener("pointerup", up, true)
+    window.addEventListener("pointercancel", up, true)
+    return () => {
+      document.removeEventListener("pointerdown", down, true)
+      window.removeEventListener("pointerup", up, true)
+      window.removeEventListener("pointercancel", up, true)
+    }
   }, [narrow, trigger])
 
   const pos = useAnchor(trigger, panel, !narrow, align)
@@ -236,6 +254,8 @@ export function NewTaskPopover({
 
   const form = (
     <form
+      // A sidebar task dropped here (or its menu's "Add to New task") goes into the text: lib/taskReference.ts.
+      data-draft-key={key}
       className="flex flex-col gap-2"
       onSubmit={(e) => {
         e.preventDefault()

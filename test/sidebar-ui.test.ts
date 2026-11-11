@@ -71,6 +71,7 @@ function render(path = APP_HOME, tasks: Task[] = [ASK, RUN, PR, OLD]) {
   qc.setQueryData(keys.captain(YARD.id), { projectId: YARD.id, busy: true, usage: { tokens: null, window: null, updatedAt: null } })
   for (const k of [keys.artifacts, keys.schedules, keys.boxes, keys.notifications]) qc.setQueryData(k, [])
   act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(App))))
+  return qc
 }
 
 const nav = () => document.querySelector<HTMLElement>("nav[aria-label='Projects and tasks']")
@@ -143,9 +144,9 @@ describe("the sidebar", () => {
     expect([...yard.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") ?? spoken(b))).toEqual([
       // The fold, the row that is the Captain, settings, the pin, then its tasks: asking first. No Captain row of its
       // own among the tasks. Screen readers hear each status (the task's icon names it, after its title; no state word
-      // follows it), and that the Captain is working.
+      // follows it), that the Captain is working, and how many of its tasks run (the blue count).
       "Hide box-yard tasks",
-      "Working… box-yard, Captain",
+      "Working… box-yard, Captain, 1 task running",
       "box-yard project settings",
       "Pin box-yard",
       "Check SSH into the bench Needs you",
@@ -188,7 +189,8 @@ describe("the sidebar", () => {
     expect(current()).toBe("Coordinator")
     expect(section("box-yard")!.textContent).not.toContain("Three-pane layout")
     // Folded, the row says how many tasks it holds, with an amber dot because one asks.
-    expect(projectRow("box-yard").textContent).toBe("box-yard, Captain2 tasks, 1 asking you")
+    // The blue running count stays, after it.
+    expect(projectRow("box-yard").textContent).toBe("box-yard, Captain2 tasks, 1 asking you1, 1 task running")
     expect(projectRow("box-yard").querySelector(ASKS_AMBER)).not.toBeNull()
     expect(JSON.parse(localStorage.getItem("box-yard:sidebar-folds")!)).toEqual({ [YARD.id]: true })
     click(fold)
@@ -198,7 +200,7 @@ describe("the sidebar", () => {
   it("exactly one row looks selected: an open task takes it; a pinned chat beside it gets only a mark, a hidden one none", () => {
     render()
     click(projectRow("box-yard"))
-    expect(selected()).toEqual([["page", "Working… box-yard, Captain"]])
+    expect(selected()).toEqual([["page", "Working… box-yard, Captain, 1 task running"]])
     click(button(section("box-yard")!, "Three-pane layout"))
     expect(new URLSearchParams(location.search).get("session")).toBe(RUN.id)
     expect(selected()).toEqual([["page", "Three-pane layout Working"]])
@@ -333,7 +335,7 @@ describe("the sidebar", () => {
     expect(title()).toBe("box-yard Captain")
     expect(new URLSearchParams(location.search).get("session")).toBeNull()
     expect(inline()!.dataset.rail).toBeUndefined()
-    expect(current()).toBe("box-yard, Captain")
+    expect(current()).toBe("box-yard, Captain1, 1 task running")
   })
 
   it("the folded rail's Waiting on you shows its count and widens the sidebar on that section, unfolded and scrolled into view", () => {
@@ -559,7 +561,7 @@ describe("the Coordinator or a Captain picked in the sidebar takes the whole wid
     expect(panel(RUN)).toBeNull()
     expect(document.querySelector("[data-testid=side-thread]")).toBeNull()
     expect(title()).toBe("box-yard Captain")
-    expect(current()).toBe("box-yard, Captain")
+    expect(current()).toBe("box-yard, Captain1, 1 task running")
     // A step in history of its own: Back brings the task back beside its Captain, and Forward closes it again.
     act(() => history.back())
     await settle()
@@ -764,7 +766,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
 
   it("a single click opens the Captain and leaves the rail folded; the tooltip says what a double click does", () => {
     folded()
-    expect(railIcon("box-yard").title).toBe("box-yard Captain, Working…, 1 asking you (double-click to expand)")
+    expect(railIcon("box-yard").title).toBe("box-yard Captain, Working…, 1 task running, 1 asking you (double-click to expand)")
     clickAt(railIcon("box-yard"), 1000)
     expect(title()).toBe("box-yard Captain")
     expect(inline()!.dataset.rail).toBe("true")
@@ -788,7 +790,7 @@ describe("a double click on a project's rail icon also expands the sidebar on it
     expect(inline()!.dataset.rail).toBeUndefined()
     expect(localStorage.getItem("box-yard:sidebar-collapsed")).toBe("false")
     expect(title()).toBe("box-yard Captain")
-    expect(current()).toBe("box-yard, Captain")
+    expect(current()).toBe("box-yard, Captain1, 1 task running")
     expect(chevron("box-yard").getAttribute("aria-expanded")).toBe("true")
     expect(section("box-yard")!.textContent).toContain("Three-pane layout")
     // Scrolled just enough to show the whole group.
@@ -841,6 +843,95 @@ describe("a double click on a project's rail icon also expands the sidebar on it
     // A click after that is a click.
     clickAt(button(nav()!, "Coordinator"), 2000)
     expect(title()).toContain("Coordinator")
+  })
+})
+
+describe("a project's blue running count", () => {
+  /** The count on a project's row in the list (its More projects row, unpinned), or on its rail tile. */
+  const badge = (within: ParentNode | null | undefined) => within?.querySelector<HTMLElement>("[data-testid=project-running]") ?? null
+  const figure = (b: HTMLElement | null) => b?.querySelector("[aria-hidden]")?.textContent
+  const WORKING_BLUE = CUE_DOT.working.split(" ").map((c) => `.${CSS.escape(c)}`).join("")
+  /** A task update as the stream applies it, and React Query's notify timer after it. */
+  const live = (update: () => void) =>
+    act(async () => {
+      update()
+      await new Promise((r) => setTimeout(r, 20))
+    })
+
+  it("counts the project's running tasks, sub-tasks at any depth, live from the tasks it already has; gone at 0", async () => {
+    const qc = render()
+    // box-yard: RUN works (ASK asks: not running); marketing-site has only a PR ready, so no badge.
+    const yard = badge(section("box-yard"))!
+    expect(figure(yard)).toBe("1")
+    expect(yard.title).toBe("1 task running")
+    expect(spoken(yard)).toBe(", 1 task running")
+    // In the working dot's blue, and still: the working icon's pulse is the only motion.
+    expect(yard.matches(WORKING_BLUE)).toBe(true)
+    expect(yard.outerHTML).not.toContain("animate")
+    // On the project's one line, after its name, which truncates first.
+    expect(yard.parentElement!.matches("[data-open-captain]")).toBe(true)
+    expect(yard.classList.contains("shrink-0")).toBe(true)
+    expect(yard.parentElement!.querySelector(".truncate")!.textContent).toBe("box-yard")
+    expect(badge(section("marketing-site"))).toBeNull()
+
+    // A sub-task starts under RUN and a grandchild works under it: both count, as does a task starting elsewhere.
+    const kid = task("task_kid001", YARD.id, "Split the layout", "starting", { parentTaskId: RUN.id })
+    const grandkid = task("task_grand1", YARD.id, "Measure the panes", "working", { parentTaskId: kid.id })
+    const queued = task("task_queue1", YARD.id, "Waiting for a slot", "queued")
+    const site = task("task_site02", SITE.id, "Compress the images", "working")
+    // React Query tells its observers on a timer, so wait for it.
+    await live(() => qc.setQueryData(keys.tasks, [ASK, RUN, PR, OLD, kid, grandkid, queued, site]))
+    expect(figure(badge(section("box-yard")))).toBe("3")
+    expect(badge(section("box-yard"))!.title).toBe("3 tasks running")
+    expect(figure(badge(section("marketing-site")))).toBe("1")
+
+    // Folded, the row still says it, beside its task count.
+    click(section("box-yard")!.querySelector<HTMLButtonElement>("button[aria-expanded]")!)
+    expect(section("box-yard")!.textContent).not.toContain("Split the layout")
+    expect(figure(badge(section("box-yard")))).toBe("3")
+
+    // Everything rests: no badge anywhere.
+    const rest = (t: Task) => ({ ...t, status: t.status === "done" ? "done" : "idle" }) as Task
+    await live(() => qc.setQueryData(keys.tasks, [ASK, RUN, PR, OLD, kid, grandkid, queued, site].map(rest)))
+    expect(nav()!.querySelector("[data-testid=project-running]")).toBeNull()
+  })
+
+  it("past 9 it says 9+, and its tooltip the whole count", () => {
+    const many = Array.from({ length: 12 }, (_, i) => task(`task_many${String(i).padStart(2, "0")}`, YARD.id, `Run ${i}`, i % 3 ? "working" : "starting"))
+    render(APP_HOME, many)
+    const yard = badge(section("box-yard"))!
+    expect(figure(yard)).toBe("9+")
+    expect(yard.title).toBe("12 tasks running")
+    expect(spoken(yard)).toBe(", 12 tasks running")
+  })
+
+  it("an unpinned project says it on its More projects row", () => {
+    render()
+    // Busy, it shows unpinned; pinned and then unpinned, it moves to More projects however busy.
+    click(button(section("box-yard")!, "Pin box-yard"))
+    click(button(section("box-yard")!, "Unpin box-yard"))
+    expect(section("box-yard")).toBeNull()
+    click(button(section("More projects")!, "More projects"))
+    const row = [...section("More projects")!.querySelectorAll<HTMLElement>("[data-open-captain]")].find((b) => b.dataset.openCaptain === YARD.id)!
+    expect(figure(badge(row))).toBe("1")
+    expect(badge(row)!.title).toBe("1 task running")
+  })
+
+  it("on the rail, in its tile's top right corner, and in its name; the asks dot moves to the left", () => {
+    render()
+    click(button(nav()!, "Fold the sidebar"))
+    expect(inline()!.dataset.rail).toBe("true")
+    const icon = inline()!.querySelector<HTMLButtonElement>("button[aria-label^='box-yard Captain']")!
+    expect(icon.getAttribute("aria-label")).toBe("box-yard Captain, Working…, 1 task running, 1 asking you")
+    const yard = badge(icon)!
+    expect(figure(yard)).toBe("1")
+    expect(yard.className).toContain("top-0 right-0")
+    const cue = icon.querySelector<HTMLElement>("[data-testid=rail-project-cue]")!
+    expect(cue.dataset.cue).toBe("asks")
+    expect(cue.classList.contains("left-1")).toBe(true)
+    // Nothing running: no count, and the dot keeps its corner.
+    const site = inline()!.querySelector<HTMLButtonElement>("button[aria-label^='marketing-site Captain']")!
+    expect(badge(site)).toBeNull()
   })
 })
 
@@ -934,7 +1025,7 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     expect(document.querySelector('header [data-delete-task]')).not.toBeNull()
   })
 
-  it("a tree's ✓ closes the whole tree, which leaves together; while a sub-task runs or asks, the tree has none", () => {
+  it("a tree's ✓ closes the whole tree, which leaves together; while a sub-task asks, the tree has none", () => {
     render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2)])
     const site = () => section("marketing-site")
     click(checks(site()!)[0]!)
@@ -943,11 +1034,37 @@ describe("Mark done from the sidebar: a ✓ on every row ready for review", () =
     act(() => currentToasts()[0]!.action!.onClick())
     expect(site()!.textContent).toContain("Logo designer 2")
 
-    for (const status of ["working", "needs_input"] as const) {
-      act(() => root.unmount())
-      root = createRoot(host)
-      render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2, status)])
-      expect(labels(site()!), status).toEqual(["Mark Logo designer 1 done"])
-    }
+    act(() => root.unmount())
+    root = createRoot(host)
+    render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2, "needs_input")])
+    expect(labels(site()!)).toEqual(["Mark Logo designer 1 done"])
+  })
+
+  it("a tree with a sub-task running keeps its ✓, which asks before it stops it: Cancel leaves the tree as it was", async () => {
+    render(APP_HOME, [ASK, RUN, LOGO, kid(1), kid(2, "working")])
+    const site = () => section("marketing-site")
+    expect(labels(site()!)).toEqual(["Mark Design the logo and its 2 sub-tasks done", "Mark Logo designer 1 done"])
+    const dialog = () => document.querySelector<HTMLElement>("[role=dialog]")
+
+    click(checks(site()!)[0]!)
+    expect(dialog()!.textContent).toContain("Stop its running sub-task?")
+    expect(dialog()!.querySelector("[data-testid=confirm-tasks]")!.textContent).toBe("Logo designer 2")
+    // Cancel has the focus: Enter, or a slip, keeps the work going.
+    expect(document.activeElement?.textContent).toBe("Cancel")
+    await act(async () => void button(dialog()!, "Cancel").click())
+    expect(dialog()).toBeNull()
+    expect(site()!.textContent).toContain("Design the logo")
+    expect(currentToasts()).toEqual([])
+    expect(posts()).toEqual([])
+
+    click(checks(site()!)[0]!)
+    await act(async () => void button(dialog()!, "Stop and mark done").click())
+    expect(dialog()).toBeNull()
+    expect(site()?.textContent ?? "").not.toMatch(/Design the logo|Logo designer/)
+    expect(currentToasts().map((t) => [t.title, t.action?.label])).toEqual([["Marked done", "Undo"]])
+    // Nothing is sent in the undo window: Undo still stops nothing.
+    expect(posts()).toEqual([])
+    act(() => currentToasts()[0]!.action!.onClick())
+    expect(site()!.textContent).toContain("Logo designer 2")
   })
 })

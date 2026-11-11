@@ -6,16 +6,23 @@
 //   to top, Move to bottom, and Back to automatic order for tasks someone placed;
 // - Alt+↑/↓ move the focused row one place, with Shift to the top or bottom.
 //
+// A task's row (a sub-task's, one in Waiting on you) can also go into a chat as context (lib/taskReference.ts): dragged
+// out of the list onto a message box, which says it will take it, or with "Add to …" in the same menu, one line per box
+// on screen. A drop in the list still rearranges it.
+//
 // It listens on the tree's own element, so the memo'd rows get no new props and render as before, and the tree stays
 // one tab stop (lib/treeView.ts). Nothing moves on its own: a drag shows a still frame on the row it holds and a line
 // where it would land, both placed straight on the DOM, so a drag re-renders nothing until its drop. A screen reader
 // hears every move.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { createPortal } from "react-dom"
-import { useQueryClient } from "@tanstack/react-query"
-import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpToLine, ListRestart } from "lucide-react"
-import type { SidebarGroup } from "../lib/sidebar"
+import { createPortal, flushSync } from "react-dom"
+import { useQueryClient, type QueryClient } from "@tanstack/react-query"
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpToLine, ListRestart, MessageSquareQuote } from "lucide-react"
+import type { Project, Task } from "../../../shared/types"
+import { keys } from "../lib/queries"
+import { closeSidebarDrawer, type SidebarGroup } from "../lib/sidebar"
 import { moved, movedText, moveTarget, orderSpot, resetOrder, saveOrder, slotTarget, type OrderMove, type OrderSpot } from "../lib/sidebarOrder"
+import { addTaskReference, openTargets, targetAt, targetName, taskIdOfRowKey, type ContextTarget } from "../lib/taskReference"
 import { treeItems } from "../lib/treeView"
 import { MessageMenu, type MenuItem } from "./MessageActions"
 
@@ -45,17 +52,27 @@ interface Press {
   x: number
   y: number
   key: string
+  /** A task's row: it can be dropped on a message box, as context. */
+  taskId: string | null
+  /** Its name, for the message box's "Add … here". */
+  name: string
   /** pressed: nothing yet; held: a finger picked the row up; dragging: it's moving. */
   phase: "pressed" | "held" | "dragging"
   timer: ReturnType<typeof setTimeout> | null
   frame: number | null
   /** Where a drop now would put the row: its new index, or null where it would stay. */
   to: number | null
+  /** The message box a drop now would add the task to, out of the list. */
+  drop: ContextTarget | null
   stop: () => void
 }
 
+/** A message box the menu offers, with its name there. */
+type NamedTarget = ContextTarget & { name: string }
+
 interface Layer {
-  menu: { key: string; item: HTMLElement } | null
+  /** `name`: the row's; `taskId` and `targets`: a task's, and the boxes it can be added to. */
+  menu: { key: string; item: HTMLElement; name: string; taskId: string | null; targets: NamedTarget[] } | null
   said: { text: string; n: number }
 }
 
@@ -114,6 +131,32 @@ function dragLook(tree: HTMLElement | null, on: boolean) {
   document.documentElement.style.cursor = on ? "grabbing" : ""
 }
 
+/** Over a message box, the box says it takes the task: a still outline over it, and the pointer says it copies. */
+function showDrop(el: HTMLElement | null, to: ContextTarget | null, name: string) {
+  document.documentElement.style.cursor = to ? "copy" : "grabbing"
+  if (!el) return
+  if (!to) return hide(el)
+  const { top, left, width, height } = to.zone.getBoundingClientRect()
+  const text = `Add “${name}” here as context`
+  const label = el.firstElementChild
+  if (label && label.textContent !== text) label.textContent = text
+  Object.assign(el.style, { display: "flex", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` })
+}
+
+const taskOf = (qc: QueryClient, id: string | null) => (id ? qc.getQueryData<Task[]>(keys.tasks)?.find((t) => t.id === id) : undefined)
+
+/** The boxes a task can be added to, named for the menu; a name two boxes share gets a number. */
+function namedTargets(qc: QueryClient, taskId: string): NamedTarget[] {
+  const data = { tasks: qc.getQueryData<Task[]>(keys.tasks), projects: qc.getQueryData<Project[]>(keys.projects) }
+  const count = new Map<string, number>()
+  return openTargets(taskId).map((t) => {
+    const name = targetName(t.key, data)
+    const n = (count.get(name) ?? 0) + 1
+    count.set(name, n)
+    return { ...t, name: n > 1 ? `${name} (${n})` : name }
+  })
+}
+
 interface TreeProps {
   ref: (el: HTMLDivElement | null) => (() => void) | undefined
   onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void
@@ -122,9 +165,10 @@ interface TreeProps {
 /**
  * Rearranging for the sidebar's tree. `tree`: useTreeView's props, which come back with the pointer, menu and Alt+arrow
  * handlers added (spread them onto the role="tree" element in its place). `layer`: the drop line, the menu and the
- * announcements, to draw once anywhere in the sidebar.
+ * announcements, to draw once anywhere in the sidebar. `drawer`: the sidebar is the phone's drawer, which closes when
+ * a task is added to a chat, so the chat shows.
  */
-export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) {
+export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups, { drawer = false }: { drawer?: boolean } = {}) {
   const qc = useQueryClient()
   const root = useRef<HTMLDivElement | null>(null)
   const latest = useRef(groups)
@@ -132,6 +176,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
   const press = useRef<Press | null>(null)
   const mark = useRef<HTMLDivElement | null>(null)
   const line = useRef<HTMLDivElement | null>(null)
+  const dropZone = useRef<HTMLDivElement | null>(null)
   /** A click to drop: the one a drag's or a hold's release makes. */
   const dropClick = useRef(0)
   const refocus = useRef<{ key: string; until: number } | null>(null)
@@ -170,47 +215,85 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
     item.scrollIntoView?.({ block: "nearest" })
   })
 
+  /**
+   * The row a press, a right click or a key is on that has something to do: a place to move to, or a task to add to a
+   * chat. `spot` only when it can move, with somewhere to move to.
+   */
+  const grab = useCallback((target: EventTarget | null): { key: string; spot: OrderSpot | null; taskId: string | null } | null => {
+    const item = target instanceof Element ? target.closest<HTMLElement>("[role=treeitem]") : null
+    const key = item && root.current?.contains(item) ? item.getAttribute("data-tree-key") : null
+    const found = orderSpot(latest.current, key)
+    const spot = found && found.list.ids.length > 1 ? found : null
+    const taskId = taskIdOfRowKey(key)
+    return key && (spot || taskId) ? { key, spot, taskId } : null
+  }, [])
+  /** The row a press or key is on that can move, with somewhere to move to. */
+  const movable = useCallback((target: EventTarget | null) => {
+    const row = grab(target)
+    return row?.spot ? { key: row.key, spot: row.spot } : null
+  }, [grab])
+
+  /** Open the row's menu, if it has anything in it: its moves, and for a task the chats it can be added to. */
   const openMenu = useCallback(
     (key: string) => {
       const item = itemOf(key)
-      if (item) layer.set({ menu: { key, item } })
+      const spot = orderSpot(latest.current, key)
+      const taskId = taskIdOfRowKey(key)
+      const targets = taskId ? namedTargets(qc, taskId) : []
+      if (!item || (!targets.length && !(spot && spot.list.ids.length > 1))) return false
+      const name = (spot ? spot.list.names[spot.index] : taskOf(qc, taskId)?.title) ?? ""
+      layer.set({ menu: { key, item, name, taskId, targets } })
+      return true
     },
-    [itemOf, layer],
+    [itemOf, layer, qc],
   )
 
-  /** The row a press or key is on that can move, with somewhere to move to. */
-  const movable = useCallback((target: EventTarget | null): { key: string; spot: OrderSpot } | null => {
-    const item = target instanceof Element ? target.closest<HTMLElement>("[role=treeitem]") : null
-    const key = item && root.current?.contains(item) ? item.getAttribute("data-tree-key") : null
-    const spot = orderSpot(latest.current, key)
-    return key && spot && spot.list.ids.length > 1 ? { key, spot } : null
-  }, [])
+  /** Add the task to the message box `to`, at its caret; the phone's drawer closes so the chat shows. */
+  const addTo = useCallback(
+    (to: ContextTarget, taskId: string) => {
+      const task = taskOf(qc, taskId)
+      if (!task) return
+      const projects = qc.getQueryData<Project[]>(keys.projects) ?? []
+      // At once, so the drawer gives the focus back before the box takes it.
+      if (drawer) flushSync(closeSidebarDrawer)
+      addTaskReference(to, task, projects)
+      say(`${task.title} added to ${targetName(to.key, { tasks: qc.getQueryData<Task[]>(keys.tasks), projects })}`)
+    },
+    [qc, say, drawer],
+  )
 
-  /** Draw the drag where it is now: the frame on its row, the line where it would land. Scrolls the list at an edge. */
+  /**
+   * Draw the drag where it is now: the frame on its row, and the line where it would land, or, out of the list over a
+   * message box, the box's outline. Scrolls the list with the pointer at its top or bottom edge.
+   */
   const draw = useCallback(() => {
     const p = press.current
     const tree = root.current
     if (!p || !tree) return
     p.frame = null
     p.to = null
-    const spot = orderSpot(latest.current, p.key)
     const items = new Map(treeItems(tree).map((i) => [i.getAttribute("data-tree-key"), i]))
-    const blocks = spot?.list.keys.map((k) => items.get(k)).map((i) => (i ? blockOf(i) : null)) ?? []
-    const own = spot ? blocks[spot.index] : null
-    const item = spot && items.get(spot.list.keys[spot.index]!)
-    if (!spot || !own || !item || blocks.includes(null)) return void (hide(mark.current), hide(line.current))
-    const view = scrollerOf(own, tree)
+    const item = items.get(p.key)
+    if (!item) return void (hide(mark.current), hide(line.current), hide(dropZone.current), (p.drop = null))
+    const view = scrollerOf(blockOf(item), tree)
     const clip = (view ?? tree).getBoundingClientRect()
-    if (p.phase === "dragging" && view) {
+    if (p.phase === "dragging") {
+      p.drop = p.taskId ? targetAt(p.x, p.y, p.taskId) : null
+      showDrop(dropZone.current, p.drop, p.name)
+    }
+    // Only beside the list: a message box at the bottom of the chat is no edge of it.
+    if (p.phase === "dragging" && view && !p.drop && p.x >= clip.left && p.x <= clip.right) {
       const by = p.y < clip.top + EDGE ? -EDGE_STEP : p.y > clip.bottom - EDGE ? EDGE_STEP : 0
       const before = view.scrollTop
       if (by) view.scrollTop = before + by
       // Still at the edge with the pointer at rest: keep going.
       if (view.scrollTop !== before) p.frame = requestAnimationFrame(draw)
     }
-    const rects = blocks.map((b) => b!.getBoundingClientRect())
     const { left, width } = showMark(mark.current, item, clip)
-    if (p.phase !== "dragging") return hide(line.current)
+    const spot = p.phase === "dragging" && !p.drop ? orderSpot(latest.current, p.key) : null
+    const blocks = spot && spot.list.ids.length > 1 ? spot.list.keys.map((k) => items.get(k)).map((i) => (i ? blockOf(i) : null)) : []
+    if (!spot || !blocks.length || blocks.includes(null)) return hide(line.current)
+    const rects = blocks.map((b) => b!.getBoundingClientRect())
     const slot = rects.filter((r) => (r.top + r.bottom) / 2 < p.y).length
     p.to = slotTarget(spot.index, slot)
     const y = slot === 0 ? rects[0]!.top : slot === rects.length ? rects.at(-1)!.bottom : (rects[slot - 1]!.bottom + rects[slot]!.top) / 2
@@ -227,6 +310,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
     if (p.phase === "dragging") dragLook(root.current, false)
     hide(mark.current)
     hide(line.current)
+    hide(dropZone.current)
   }, [])
   useEffect(() => end, [end])
 
@@ -238,10 +322,11 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
       const target = e.target as Element
       // A link keeps its own drag and long press (a PR's number); a mouse drags with its main button only.
       if (!e.isPrimary || e.button !== 0 || e.ctrlKey || target.closest("a[href], input, textarea, select")) return
-      const row = movable(target)
+      const row = grab(target)
       if (!row) return
       const touch = e.pointerType !== "mouse"
-      const p: Press = { pointerId: e.pointerId, touch, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, key: row.key, phase: "pressed", timer: null, frame: null, to: null, stop: () => {} }
+      const name = (row.spot ? row.spot.list.names[row.spot.index] : taskOf(qc, row.taskId)?.title) ?? ""
+      const p: Press = { pointerId: e.pointerId, touch, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, key: row.key, taskId: row.taskId, name, phase: "pressed", timer: null, frame: null, to: null, drop: null, stop: () => {} }
       const schedule = () => {
         if (p.frame === null) p.frame = requestAnimationFrame(draw)
       }
@@ -264,17 +349,18 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
       }
       const onUp = (ev: PointerEvent) => {
         if (ev.pointerId !== p.pointerId) return
-        const { phase, key } = p
+        const { phase, key, taskId } = p
         if (phase === "dragging") {
           p.x = ev.clientX
           p.y = ev.clientY
           draw()
         }
-        const to = p.to
+        const { to, drop } = p
         end()
         if (phase === "pressed") return
         dropClick.current = performance.now() + CLICK_MS
         if (phase === "held") openMenu(key)
+        else if (drop && taskId) addTo(drop, taskId)
         else if (to !== null) move(key, to, false)
       }
       const onCancel = (ev: PointerEvent) => {
@@ -322,7 +408,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
         }, HOLD_MS)
       press.current = p
     },
-    [draw, end, itemOf, layer, movable, move, openMenu],
+    [addTo, draw, end, grab, itemOf, layer, move, openMenu, qc],
   )
 
   // The click a release makes, on the row the drag started on, would open it.
@@ -340,13 +426,13 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
       // A finger's long press: the hold above is the menu's way in, so the browser's own stays away.
       if (press.current?.touch) return e.preventDefault()
       if ((e.target as Element).closest("a[href]")) return
-      const row = movable(e.target)
+      const row = grab(e.target)
       if (!row) return
-      e.preventDefault()
       end()
-      openMenu(row.key)
+      // A row with nothing in its menu (a lone task with no chat open) keeps the browser's own.
+      if (openMenu(row.key)) e.preventDefault()
     },
-    [end, movable, openMenu],
+    [end, grab, openMenu],
   )
 
   const treeKeyDown = tree.onKeyDown
@@ -356,17 +442,16 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
       if (onItem && !e.defaultPrevented && !e.ctrlKey && !e.metaKey) {
         const arrow = e.key === "ArrowUp" || e.key === "ArrowDown"
         const menu = !e.altKey && (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))
-        const row = (e.altKey && arrow) || menu ? movable(e.target) : null
-        if (row) {
+        const row = e.altKey && arrow ? movable(e.target) : menu ? grab(e.target) : null
+        if (row && (!menu || openMenu(row.key))) {
           e.preventDefault()
-          if (menu) openMenu(row.key)
-          else move(row.key, e.key === "ArrowUp" ? (e.shiftKey ? "top" : "up") : e.shiftKey ? "bottom" : "down", true)
+          if (!menu) move(row.key, e.key === "ArrowUp" ? (e.shiftKey ? "top" : "up") : e.shiftKey ? "bottom" : "down", true)
           return
         }
       }
       treeKeyDown(e)
     },
-    [treeKeyDown, movable, move, openMenu],
+    [treeKeyDown, grab, movable, move, openMenu],
   )
 
   // React's touchmove is passive, and Safari only lets a listener that was there when the touch began stop the scroll.
@@ -404,19 +489,21 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
 
   return {
     tree: { ...tree, ref, onKeyDown, onPointerDown, onClickCapture, onContextMenu },
-    layer: <ReorderLayer store={layer} mark={mark} line={line} spotOf={spotOf} onMove={run} onReset={reset} />,
+    layer: <ReorderLayer store={layer} mark={mark} line={line} drop={dropZone} spotOf={spotOf} onMove={run} onReset={reset} onAdd={addTo} />,
   }
 }
 
 const OVERLAY = "pointer-events-none fixed z-60 hidden"
 
-function ReorderLayer({ store, mark, line, spotOf, onMove, onReset }: {
+function ReorderLayer({ store, mark, line, drop, spotOf, onMove, onReset, onAdd }: {
   store: ReturnType<typeof layerStore>
   mark: { current: HTMLDivElement | null }
   line: { current: HTMLDivElement | null }
+  drop: { current: HTMLDivElement | null }
   spotOf: (key: string) => OrderSpot | null
   onMove: (key: string, to: OrderMove) => void
   onReset: (key: string) => void
+  onAdd: (to: ContextTarget, taskId: string) => void
 }): ReactNode {
   const { menu, said } = useSyncExternalStore(store.subscribe, store.get, store.get)
   const trigger = useRef<HTMLElement | null>(null)
@@ -440,6 +527,8 @@ function ReorderLayer({ store, mark, line, spotOf, onMove, onReset }: {
   }, [item, mark])
   const spot = menu ? spotOf(menu.key) : null
   const items: MenuItem[] = []
+  // A task's chats first: what a long press on a phone, where it can't be dragged to one, is most likely for.
+  for (const to of menu?.taskId ? menu.targets : []) items.push({ icon: MessageSquareQuote, label: `Add to ${to.name}`, run: () => onAdd(to, menu!.taskId!) })
   if (menu && spot) {
     const { list, index } = spot
     const last = list.ids.length - 1
@@ -459,11 +548,15 @@ function ReorderLayer({ store, mark, line, spotOf, onMove, onReset }: {
         <>
           <div ref={mark} aria-hidden data-reorder-mark className={`${OVERLAY} rounded-lg border border-yard-400/80 bg-yard-400/10`} />
           <div ref={line} aria-hidden data-reorder-line className={`${OVERLAY} h-0.5 rounded-full bg-yard-400`} />
+          {/* Over the message box a dragged task would go into: solid ink on a dimmed box, so it reads in both themes. */}
+          <div ref={drop} aria-hidden data-context-drop className={`${OVERLAY} items-center justify-center rounded-xl border-2 border-dashed border-yard-400 bg-zinc-950/85 px-3 text-sm font-medium text-yard-300`}>
+            <span className="min-w-0 truncate" />
+          </div>
         </>,
         document.body,
       )}
       {menu && items.length > 0 && (
-        <MessageMenu trigger={trigger} items={items} onClose={() => store.set({ menu: null })} label={`Move ${spot!.list.names[spot!.index]}`} className="z-60!" />
+        <MessageMenu trigger={trigger} items={items} onClose={() => store.set({ menu: null })} label={menu.targets.length ? `Actions for ${menu.name}` : `Move ${menu.name}`} className="z-60!" />
       )}
     </>
   )

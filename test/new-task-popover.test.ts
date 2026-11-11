@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { NewTaskButton } from "../web/src/components/NewTask.js"
 import { keys } from "../web/src/lib/queries.js"
 import { loadDraft, newTaskDraftKey } from "../web/src/lib/newTask.js"
-import { readDraft, resetDrafts } from "../web/src/lib/composerDraft.js"
+import { readDraft, resetDrafts, setDraftText } from "../web/src/lib/composerDraft.js"
 import { stubUploads } from "./fakeUpload.js"
 import type { Project, SettingsInfo } from "../shared/types"
 
@@ -362,5 +362,59 @@ describe("New task popover", () => {
     press(textarea(), "Escape")
     expect(popover()).toBeNull()
     expect(loadDraft("prj_alpha1")).toBe("on the go")
+  })
+})
+
+describe("a task added from the sidebar as context", () => {
+  afterEach(() => void delete (document as { elementFromPoint?: unknown }).elementFromPoint)
+
+  /** A sidebar row, outside the popover (SidebarReorder.tsx: a press on one may be a task dragged here). */
+  const sidebarRow = () => {
+    const tree = document.createElement("div")
+    tree.setAttribute("role", "tree")
+    tree.innerHTML = '<div role="treeitem" tabindex="-1">Build the API</div>'
+    document.body.append(tree)
+    return tree.firstElementChild!
+  }
+  const pointer = (type: string, target: EventTarget, x = 10, y = 10) =>
+    act(() => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, clientX: x, clientY: y })))
+  /** Where a release lands: the popover's text field from y 500 down, elsewhere above. */
+  const landing = () =>
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, writable: true, value: (_x: number, y: number) => (y >= 500 ? textarea() : document.body) })
+
+  it("is a drop target: its text is the draft, so a reference put in the draft shows at once", () => {
+    render()
+    open()
+    type(textarea(), "Follow up on ")
+    const form = popover()!.querySelector("form")!
+    expect(form.getAttribute("data-draft-key")).toBe(newTaskDraftKey("prj_alpha1"))
+    act(() => setDraftText(newTaskDraftKey("prj_alpha1"), "Follow up on Task “Build the API” (task_api001) "))
+    expect(textarea().value).toBe("Follow up on Task “Build the API” (task_api001) ")
+    press(textarea(), "Escape")
+    expect(loadDraft("prj_alpha1")).toBe("Follow up on Task “Build the API” (task_api001) ")
+  })
+
+  it("a press on a sidebar row closes it only on release, and not when it lets go over it", () => {
+    render()
+    open()
+    landing()
+    const row = sidebarRow()
+    pointer("pointerdown", row)
+    expect(popover()).not.toBeNull()
+    pointer("pointermove", document.body, 10, 600)
+    pointer("pointerup", document.body, 10, 600)
+    expect(popover()).not.toBeNull()
+    // Let go anywhere else: it closes, as an outside press does.
+    pointer("pointerdown", row)
+    pointer("pointerup", document.body, 10, 20)
+    expect(popover()).toBeNull()
+  })
+
+  it("a release that didn't start on a sidebar row doesn't close it", () => {
+    render()
+    open()
+    landing()
+    pointer("pointerup", document.body, 10, 20)
+    expect(popover()).not.toBeNull()
   })
 })

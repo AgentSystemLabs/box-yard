@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 // Rearranging the sidebar (components/SidebarReorder.tsx): Alt+arrows, the Move menu, a mouse drag and a finger's
 // hold-then-drag all save the same order on the server, the tree stays one tab stop, and a screen reader hears each move.
+// A task's row also goes into a chat as context (lib/taskReference.ts): dropped on a message box, or with "Add to …" in
+// the same menu; a drop in the list still rearranges it.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -17,7 +19,7 @@ import { currentToasts, dismiss } from "../web/src/lib/toast.js"
 import type { Project, Task, TaskStatus } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
 import { treeItems } from "./sidebarTree.js"
-import { resetDrafts } from "../web/src/lib/composerDraft.js"
+import { readDraft, resetDrafts, setDraftText } from "../web/src/lib/composerDraft.js"
 
 beforeAll(() => warmLazyParts())
 
@@ -150,6 +152,9 @@ const pointer = (type: string, target: EventTarget, y: number, pointerType: "mou
 const mark = () => document.querySelector<HTMLElement>("[data-reorder-mark]")!
 const line = () => document.querySelector<HTMLElement>("[data-reorder-line]")!
 const frame = () => act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())))
+/** The Coordinator's message box, on screen in the centre: the first line of every task row's menu adds to it. */
+const ADD = "Add to Coordinator chat"
+const MOVES = ["Move up", "Move down", "Move to top", "Move to bottom"]
 const wait = (ms: number) => act(async () => new Promise((r) => setTimeout(r, ms)))
 
 beforeEach(() => {
@@ -293,9 +298,9 @@ describe("the Move menu", () => {
     render()
     const e = rightClick(row(API).querySelector("button")!)
     expect(e.defaultPrevented).toBe(true)
-    expect(menu()!.getAttribute("aria-label")).toBe("Move Build the API")
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
-    expect(document.activeElement?.textContent).toBe("Move up")
+    expect(menu()!.getAttribute("aria-label")).toBe("Actions for Build the API")
+    expect(menuItems()).toEqual([ADD, ...MOVES])
+    expect(document.activeElement?.textContent).toBe(ADD)
 
     await choose("Move to bottom")
     expect(menu()).toBeNull()
@@ -308,11 +313,13 @@ describe("the Move menu", () => {
   it("offers only the moves there are: none up for the first row, none down for the last", () => {
     render()
     rightClick(row(ASK))
-    expect(menuItems()).toEqual(["Move down", "Move to bottom"])
+    expect(menuItems()).toEqual([ADD, "Move down", "Move to bottom"])
     rightClick(row(VIDEO))
-    expect(menu()!.getAttribute("aria-label")).toBe("Move Cut the video")
-    expect(menuItems()).toEqual(["Move up", "Move to top"])
+    expect(menu()!.getAttribute("aria-label")).toBe("Actions for Cut the video")
+    expect(menuItems()).toEqual([ADD, "Move up", "Move to top"])
+    // A project only moves.
     rightClick(head(SITE))
+    expect(menu()!.getAttribute("aria-label")).toBe("Move marketing-site")
     expect(menuItems()).toEqual(["Move up", "Move to top"])
   })
 
@@ -321,7 +328,7 @@ describe("the Move menu", () => {
     focus(row(PLAN))
     const e = await press("F10", { shiftKey: true })
     expect(e.defaultPrevented).toBe(true)
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
+    expect(menuItems()).toEqual([ADD, ...MOVES])
     await press("Escape")
     expect(menu()).toBeNull()
     expect(focusedKey()).toBe(taskKey(PLAN.id, "project"))
@@ -337,7 +344,7 @@ describe("the Move menu", () => {
     render(TASKS.map((t) => (t.id === ASK.id ? { ...t, sortOrder: 0 } : t)))
     expect(under(YARD).filter((id) => ![POST.id, IMAGES.id, VIDEO.id].includes(id))).toEqual([API.id, PLAN.id, TESTS.id, ASK.id])
     rightClick(row(PLAN))
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom", "Back to automatic order"])
+    expect(menuItems()).toEqual([ADD, ...MOVES, "Back to automatic order"])
     await choose("Back to automatic order")
     expect(saves()).toEqual([[`/api/projects/${YARD.id}/tasks/order`, { parentTaskId: null, ids: [API.id, PLAN.id, TESTS.id, ASK.id], auto: true }]])
     expect(under(YARD).filter((id) => ![POST.id, IMAGES.id, VIDEO.id].includes(id))).toEqual([ASK.id, API.id, PLAN.id, TESTS.id])
@@ -345,20 +352,28 @@ describe("the Move menu", () => {
     expect(focusedKey()).toBe(taskKey(PLAN.id, "project"))
     // With no places left there is nothing to go back to, and sub-tasks nobody placed never had any.
     rightClick(row(PLAN))
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
+    expect(menuItems()).toEqual([ADD, ...MOVES])
     rightClick(row(IMAGES))
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
+    expect(menuItems()).toEqual([ADD, ...MOVES])
   })
 
-  it("rows that don't move keep the browser's own menu: the Coordinator, Waiting on you, a list of one, a PR's link", () => {
+  it("rows with nothing to do keep the browser's own menu: the Coordinator, a fold's head, a PR's link", () => {
     render()
-    for (const el of [at(coordinatorKey), row(ASK, "waiting"), row(PR), at("group:more")]) {
+    for (const el of [at(coordinatorKey), at("group:more"), row(PR).querySelector("a[href]")!]) {
       expect(rightClick(el).defaultPrevented).toBe(false)
       expect(menu()).toBeNull()
     }
     click(at("group:more").querySelector("button")!)
     expect(rightClick(head(PHOTO)).defaultPrevented).toBe(true)
     expect(menuItems()).toEqual(["Move down", "Move to bottom"])
+  })
+
+  it("a task's row that can't move (Waiting on you, a list of one) still opens it, to add the task to a chat", () => {
+    render()
+    for (const el of [row(ASK, "waiting"), row(PR)]) {
+      expect(rightClick(el).defaultPrevented).toBe(true)
+      expect(menuItems()).toEqual([ADD])
+    }
   })
 
   it("in the phone's drawer, Escape closes the menu and leaves the drawer open", async () => {
@@ -368,7 +383,7 @@ describe("the Move menu", () => {
     const drawer = () => document.querySelector<HTMLElement>("[role=dialog][aria-label='Projects and tasks']")
     const inDrawer = (key: string) => drawer()!.querySelector<HTMLElement>(`[data-tree-key="${key}"]`)!
     rightClick(inDrawer(taskKey(API.id, "project")))
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
+    expect(menuItems()).toEqual([ADD, ...MOVES])
     await press("Escape")
     expect(menu()).toBeNull()
     expect(drawer()).not.toBeNull()
@@ -477,7 +492,7 @@ describe("dragging", () => {
 
   it("the right button, a PR's link and rows that don't move start no drag", async () => {
     render()
-    const tries: [Element, PointerEventInit][] = [[row(API), { button: 2 }], [row(PR).querySelector("a[href]")!, {}], [row(ASK, "waiting"), {}], [at(coordinatorKey), {}]]
+    const tries: [Element, PointerEventInit][] = [[row(API), { button: 2 }], [row(PR).querySelector("a[href]")!, {}], [at(coordinatorKey), {}]]
     for (const [el, extra] of tries) {
       pointer("pointerdown", el, 20, "mouse", extra)
       pointer("pointermove", window, 300)
@@ -487,6 +502,19 @@ describe("dragging", () => {
     }
     await settle()
     expect(saves()).toEqual([])
+  })
+
+  it("a task's row that can't move picks up, for a chat, but a drop in the list rearranges nothing", async () => {
+    render()
+    pointer("pointerdown", row(ASK, "waiting"), middle(row(ASK, "waiting")))
+    pointer("pointermove", window, middle(row(TESTS)))
+    await frame()
+    expect(mark().style.display).toBe("block")
+    expect(line().style.display).not.toBe("block")
+    pointer("pointerup", window, middle(row(TESTS)))
+    await settle()
+    expect(saves()).toEqual([])
+    expect(readDraft("coordinator").text).toBe("")
   })
 })
 
@@ -544,7 +572,7 @@ describe("a finger", () => {
     pointer("pointerup", window, middle(row(API)), "touch")
     expect(click(button).defaultPrevented).toBe(true)
     expect(session()).toBeNull()
-    expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
+    expect(menuItems()).toEqual([ADD, ...MOVES])
     // The row keeps its frame while its menu is open, so it's plain which one moves.
     expect([mark().style.display, mark().style.top]).toEqual(["block", `${row(API).getBoundingClientRect().top}px`])
     await choose("Move up")
@@ -562,5 +590,167 @@ describe("a finger", () => {
     expect(session()).toBe(API.id)
     expect(mark().style.display).not.toBe("block")
     expect(menu()).toBeNull()
+  })
+})
+
+describe("adding a task to a chat", () => {
+  beforeEach(fakeLayout)
+  afterEach(() => void delete (document as { elementFromPoint?: unknown }).elementFromPoint)
+
+  /** A chat's message box, by its draft key, and its text field. */
+  const box = (key = "coordinator") => document.querySelector<HTMLElement>(`[data-draft-key="${key}"]`)!
+  const field = (key = "coordinator") => box(key).querySelector("textarea")!
+  const outline = () => document.querySelector<HTMLElement>("[data-context-drop]")!
+  /** Out of the list, below it: happy-dom lays nothing out, so here the point is over the box `at` names. */
+  const BELOW = 2000
+  const over = (at: () => Element) =>
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, writable: true, value: (_x: number, y: number) => (y >= BELOW ? at() : null) })
+  const caretAt = (n: number) => act(() => field().setSelectionRange(n, n))
+
+  it("a task dropped on a message box goes in at its caret as a reference; the list stays as it was", async () => {
+    render()
+    over(() => field())
+    act(() => setDraftText("coordinator", "Ask  what's left"))
+    caretAt(4)
+    const from = row(API).querySelector<HTMLElement>("[data-open-task]")!
+    pointer("pointerdown", from, middle(row(API)))
+    pointer("pointermove", window, BELOW + 40)
+    await frame()
+    // The box says it takes it; no line in the list, and the pointer says it copies.
+    expect(outline().style.display).toBe("flex")
+    expect(outline().textContent).toBe("Add “Build the API” here as context")
+    expect(line().style.display).not.toBe("block")
+    expect(mark().style.display).toBe("block")
+    expect(document.documentElement.style.cursor).toBe("copy")
+
+    pointer("pointerup", window, BELOW + 40)
+    await settle()
+    const ref = "Task “Build the API” (task_api001)"
+    expect(readDraft("coordinator").text).toBe(`Ask ${ref} what's left`)
+    expect(field().value).toBe(`Ask ${ref} what's left`)
+    // The box has the focus, the caret just past the reference.
+    expect(document.activeElement).toBe(field())
+    expect([field().selectionStart, field().selectionEnd]).toEqual([`Ask ${ref}`.length, `Ask ${ref}`.length])
+    expect(saves()).toEqual([])
+    expect(under(YARD)).toEqual([ASK.id, API.id, PLAN.id, POST.id, IMAGES.id, VIDEO.id, TESTS.id])
+    expect([outline().style.display, mark().style.display, document.documentElement.style.cursor]).toEqual(["none", "none", ""])
+    expect(said()).toBe("Build the API added to Coordinator chat")
+    expect(session()).toBeNull()
+  })
+
+  it("back over the list a drop rearranges again; Escape over a box adds nothing", async () => {
+    render()
+    over(() => box())
+    pointer("pointerdown", row(API), middle(row(API)))
+    pointer("pointermove", window, BELOW + 40)
+    await frame()
+    expect(outline().style.display).toBe("flex")
+    pointer("pointermove", window, middle(row(TESTS)) + 15)
+    await frame()
+    expect(outline().style.display).toBe("none")
+    expect(line().style.display).toBe("block")
+    expect(document.documentElement.style.cursor).toBe("grabbing")
+    pointer("pointerup", window, middle(row(TESTS)) + 15)
+    await settle()
+    expect(saves()).toEqual([[`/api/projects/${YARD.id}/tasks/order`, { parentTaskId: null, ids: [ASK.id, PLAN.id, TESTS.id, API.id] }]])
+    expect(readDraft("coordinator").text).toBe("")
+
+    pointer("pointerdown", row(PLAN), middle(row(PLAN)))
+    pointer("pointermove", window, BELOW + 40)
+    await frame()
+    expect(outline().style.display).toBe("flex")
+    await press("Escape", {}, document.body)
+    expect(outline().style.display).toBe("none")
+    pointer("pointerup", window, BELOW + 40)
+    await settle()
+    expect(readDraft("coordinator").text).toBe("")
+    expect(saves()).toHaveLength(1)
+  })
+
+  it("a sub-task, and a task in Waiting on you, drop the same way; each one goes in after the last", async () => {
+    render()
+    over(() => box())
+    for (const el of [row(VIDEO), row(ASK, "waiting")]) {
+      pointer("pointerdown", el, middle(el))
+      pointer("pointermove", window, BELOW + 40)
+      await frame()
+      pointer("pointerup", window, BELOW + 40)
+      await settle()
+    }
+    expect(readDraft("coordinator").text).toBe("Task “Cut the video” (task_vid001) Task “Check the bench” (task_ask001) ")
+    expect(saves()).toEqual([])
+  })
+
+  it("a finger holds a row, then drags it onto a box", async () => {
+    render()
+    over(() => box())
+    pointer("pointerdown", row(API), middle(row(API)), "touch")
+    await wait(HOLD_MS + 50)
+    pointer("pointermove", window, BELOW + 40, "touch")
+    await frame()
+    expect(outline().style.display).toBe("flex")
+    pointer("pointerup", window, BELOW + 40, "touch")
+    await settle()
+    expect(readDraft("coordinator").text).toBe("Task “Build the API” (task_api001) ")
+    expect(menu()).toBeNull()
+    expect(saves()).toEqual([])
+  })
+
+  it("Add to … in the row's menu puts it in at the box's caret, and the box takes the focus", async () => {
+    render()
+    act(() => setDraftText("coordinator", "Follow up on"))
+    caretAt("Follow up on".length)
+    focus(row(PLAN))
+    await press("F10", { shiftKey: true })
+    await choose(ADD)
+    expect(readDraft("coordinator").text).toBe("Follow up on Task “Plan the launch” (task_plan01) ")
+    expect(document.activeElement).toBe(field())
+    expect(field().selectionStart).toBe(readDraft("coordinator").text.length)
+    expect(saves()).toEqual([])
+  })
+
+  it("a Captain gets a short reference to its own project's task, and what another project's task is at", async () => {
+    render(TASKS.map((t) => (t.id === PR.id ? { ...t, summary: "Swapped the hero image\n\nand fixed the footer links." } : t)))
+    click(head(YARD).querySelector<HTMLElement>("[data-open-captain]")!)
+    await settle()
+    const captain = captainKey(YARD.id)
+    expect(box(captain)).not.toBeNull()
+    rightClick(row(API))
+    expect(menuItems()).toContain("Add to box-yard Captain")
+    await choose("Add to box-yard Captain")
+    rightClick(row(PR))
+    await choose("Add to box-yard Captain")
+    expect(readDraft(captain).text).toBe(
+      "Task “Build the API” (task_api001)\n" +
+        "Task “Refresh the portfolio” (task_pr0001, project marketing-site, PR open, https://github.com/acme/site/pull/19)\n" +
+        "> Latest reply: Swapped the hero image and fixed the footer links.\n\n",
+    )
+  })
+
+  it("a task's own chat isn't offered for it; another task's chat gets what the task is at", async () => {
+    render()
+    click(row(API).querySelector<HTMLElement>("[data-open-task]")!)
+    await settle()
+    expect(session()).toBe(API.id)
+    expect(box(`task:${API.id}`)).not.toBeNull()
+    rightClick(row(API))
+    expect(menuItems().filter((l) => l?.startsWith("Add to"))).toEqual([ADD])
+    rightClick(row(PLAN))
+    expect(menuItems()).toContain("Add to task “Build the API”")
+    await choose("Add to task “Build the API”")
+    // With nothing it said yet, what it's at fits on one line.
+    expect(readDraft(`task:${API.id}`).text).toBe("Task “Plan the launch” (task_plan01, project box-yard, working) ")
+  })
+
+  it("in the phone's drawer, Add to … closes the drawer so the chat shows, its box focused", async () => {
+    viewport(400)
+    render()
+    act(() => openSidebarDrawer())
+    const drawer = () => document.querySelector<HTMLElement>("[role=dialog][aria-label='Projects and tasks']")
+    rightClick(drawer()!.querySelector<HTMLElement>(`[data-tree-key="${taskKey(API.id, "project")}"]`)!)
+    await choose(ADD)
+    expect(drawer()).toBeNull()
+    expect(readDraft("coordinator").text).toBe("Task “Build the API” (task_api001) ")
+    expect(document.activeElement).toBe(field())
   })
 })

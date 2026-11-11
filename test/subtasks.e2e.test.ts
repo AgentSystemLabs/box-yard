@@ -258,4 +258,40 @@ describe("sub-tasks", () => {
     await waitFor(() => [parent, tree.middle, tree.side, tree.deep].every((t) => r.yard.store.getTaskRow(t.id)?.status === "done"), "the whole tree to close")
     expect(transcript(r, tree.deep.id).some((m) => m.content === "Closed with its parent task, Middle.")).toBe(true)
   }, 120_000)
+
+  it("Mark done on a parent whose sub-tasks are mid-turn stops them through Stop's path, and the whole tree stays done", async () => {
+    const r = await start()
+    const project = await call<Project>(r, "POST", "/api/projects", { name: "kitchen" })
+    const parent = await call<Task>(r, "POST", "/api/tasks", {
+      projectId: project.id,
+      title: "Long research",
+      prompt: "spawn subtasks: Middle > Deep {hang} | Side {hang}",
+    })
+    const tree = await waitFor(() => {
+      const [middle, side] = kids(r, parent.id)
+      const deep = middle && kids(r, middle.id)[0]
+      const row = (t: Task | undefined) => (t ? r.yard.store.getTaskRow(t.id) : null)
+      return row(deep)?.status === "working" && row(side)?.status === "working" && row(middle)?.status === "waiting" && r.yard.store.getTaskRow(parent.id)?.status === "waiting"
+        ? { middle: middle!, side: side!, deep: deep! }
+        : null
+    }, "the tree to be under way", 60_000)
+    const all = [parent, tree.middle, tree.side, tree.deep]
+
+    // No Stop first: Mark done itself stops the turns under it, at any depth.
+    const closed = await call<Task>(r, "POST", `/api/tasks/${parent.id}/close`)
+    expect(closed.status).toBe("done")
+    expect(all.map((t) => r.yard.store.getTaskRow(t.id)!.status)).toEqual(["done", "done", "done", "done"])
+    // The killed turns end, and their end keeps them done (finishTurn).
+    await waitFor(() => all.every((t) => !r.yard.store.getTaskRow(t.id)!.current_turn_id) || null, "the stopped turns to end", 60_000)
+    await new Promise((res) => setTimeout(res, 1000))
+    expect(all.map((t) => r.yard.store.getTaskRow(t.id)!.status)).toEqual(["done", "done", "done", "done"])
+    for (const k of [tree.side, tree.deep]) {
+      const events = transcript(r, k.id).map((m) => m.content)
+      expect(events).toContain(`Stopped with its parent task, ${k.id === tree.deep.id ? "Middle" : "Long research"}.`)
+      expect(events).toContain(`Closed with its parent task, ${k.id === tree.deep.id ? "Middle" : "Long research"}.`)
+    }
+    // Stopped turns don't report, so nothing wakes the done parent.
+    expect(reports(r, parent.id)).toHaveLength(0)
+    expect(r.yard.store.getTaskRow(parent.id)!.turn_count).toBe(1)
+  }, 120_000)
 })

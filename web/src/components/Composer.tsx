@@ -529,6 +529,8 @@ export function Composer({
       <div
         ref={boxRef}
         data-composer-box
+        // Where a sidebar task dropped (or its menu's "Add to …") puts its reference: lib/taskReference.ts.
+        data-draft-key={key}
         className="@container/composer rounded-xl border border-control bg-zinc-900"
         onMouseDown={(e) => {
           // A press on the box's empty space (around the text, between the buttons) puts the caret in the text.

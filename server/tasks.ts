@@ -1783,24 +1783,49 @@ export class TaskManager {
    * Finish a task: stop it, archive it, free its box folder. It's done (and broadcast) at once: stopping a running
    * turn (a box call or two) and the archive go on after, so the task leaves every list without waiting on its box.
    * The stopped turn's end keeps it done (finishTurn).
+   *
+   * Its sub-tasks close with it, at any depth (closeSubtasks): Mark done in the app, POST /api/tasks/:id/close and
+   * Cody's "close task_…" in a chat all come here. One already done stays as it was: closing it again changes nothing
+   * but the open sub-tasks under it, so a second close (or one racing a merge that moved it to done) is harmless.
+   * `by`: closed with its parent (`parent`); `root`, the task Mark done was on, when that parent was done already.
    */
-  async closeTask(taskId: string, by?: { parent: TaskRow }): Promise<Task> {
+  async closeTask(taskId: string, by?: { parent: TaskRow; root?: TaskRow }): Promise<Task> {
     const row = this.requireRow(taskId)
-    // stopTask settles a queued or starting task before its first await; only a working turn's kill is left running.
-    const stopping = row.current_turn_id ? this.stopTask(taskId, by) : null
-    void stopping?.catch((err) => console.warn(`[box-yard] stopping ${taskId} as it closed: ${errorMessage(err)}`))
-    this.dropQueuedMessages(row.id)
-    // What it was, for Reopen (a done task closed again keeps the first: closing it again changes nothing).
-    const doneFrom = row.status === "done" ? undefined : { status: row.status, question: row.question, parent: by?.parent.id ?? null }
-    this.store.updateTask(row.id, { status: "done", question: null, doneFrom }, { quiet: true })
-    this.addEvent(row.id, isLocalRunnerBox(row.box_id) ? "Closed. Its folder stays on this computer until the task is deleted or this computer's cleanup archives it (Settings › Boxes & limits › This computer and SSH machines)." : "Closed. Its workspace was archived and its box slot freed.")
-    if (by) this.addEvent(row.id, `Closed with its parent task, ${by.parent.title}.`, { kind: "subtasks" })
-    this.emitTask(row.id)
-    void this.evictWhenSettled(row.id)
-    this.publishDirectory()
+    if (row.status !== "done") {
+      // stopTask settles a queued or starting task before its first await; only a working turn's kill is left running.
+      const stopping = row.current_turn_id ? this.stopTask(taskId, by && { parent: by.parent }) : null
+      void stopping?.catch((err) => console.warn(`[box-yard] stopping ${taskId} as it closed: ${errorMessage(err)}`))
+      this.dropQueuedMessages(row.id)
+      // What it was, for Reopen.
+      const doneFrom = { status: row.status, question: row.question, parent: by?.parent.id ?? null }
+      this.store.updateTask(row.id, { status: "done", question: null, doneFrom }, { quiet: true })
+      this.addEvent(row.id, isLocalRunnerBox(row.box_id) ? "Closed. Its folder stays on this computer until the task is deleted or this computer's cleanup archives it (Settings › Boxes & limits › This computer and SSH machines)." : "Closed. Its workspace was archived and its box slot freed.")
+      if (by) this.addEvent(row.id, by.root ? `Closed with ${by.root.title}, a task above it (its parent task, ${by.parent.title}, was done already).` : `Closed with its parent task, ${by.parent.title}.`, { kind: "subtasks" })
+      this.emitTask(row.id)
+      void this.evictWhenSettled(row.id)
+      this.publishDirectory()
+    }
     // Its sub-tasks close with it: nobody is left to read their reports.
-    await this.cascadeSubtasks(row, (kid) => (kid.status === "done" ? Promise.resolve() : this.closeTask(kid.id, { parent: row })))
+    await this.closeSubtasks(row, by?.root ?? row, new Set([row.id]))
     return this.store.getTask(row.id)!
+  }
+
+  /**
+   * Close the open sub-tasks under `row`, at any depth, for Mark done on `root`. Each is read again as it comes up, so
+   * one that finished (or was deleted) while the ones before it closed is taken as it is now. An open one closes as
+   * its parent did (closeTask: its running turn stopped, its queue dropped, archived) and closes its own in turn; a
+   * done one is left as it was, but the open ones under it (reopened on their own) still close.
+   */
+  private async closeSubtasks(row: TaskRow, root: TaskRow, seen: Set<string>, wasDone = false) {
+    await this.cascadeSubtasks(row, async (kid) => {
+      if (seen.has(kid.id)) return
+      seen.add(kid.id)
+      const now = this.store.getTaskRow(kid.id)
+      if (!now) return
+      if (now.status === "done") return this.closeSubtasks(now, root, seen, true)
+      // It closes with its own parent (Reopen on that one brings it back), naming `root` when that parent was done already.
+      return this.closeTask(now.id, { parent: row, ...(wasDone ? { root } : {}) })
+    })
   }
 
   /**
