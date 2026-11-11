@@ -353,12 +353,12 @@ export const closeSidebarDrawer = () => drawer.set(false)
 /** Where Cody last picked a task row from: of a task's two rows, the clicked one is drawn selected. */
 const picked = store<{ taskId: string; spot: RowSpot } | null>(() => null)
 export const usePickedRow = picked.use
+/** The task a click on its row just opened, until the next task opened takes it (takeRowClick). */
+let clicked: string | null = null
 export function setPickedRow(taskId: string, spot: RowSpot) {
   clicked = taskId
   picked.set({ taskId, spot })
 }
-/** The task a click on its row just opened, until the next task opened takes it (takeRowClick). */
-let clicked: string | null = null
 /** The task a row click opened last, once: a task opened from its own row is in view already, so nothing scrolls to it. */
 export function takeRowClick() {
   const id = clicked
