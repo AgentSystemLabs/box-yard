@@ -221,8 +221,17 @@ describe("the Hooks panel", () => {
     expect(rows[0]!.textContent).toContain("Add dark mode")
     expect(rows[1]!.textContent).toContain("Task finished → Create a task")
     expect(rows[1]!.textContent).toContain("Hasn't fired yet")
-    expect(host.querySelector('[data-testid="hook-template"]')!.textContent).toContain("Added · on")
-    // Tabs and filters rather than one long list.
+    // An added template is just its row: no card repeating it.
+    expect(host.querySelector('[data-testid="hook-template"]')).toBeNull()
+    // A short list has no filter.
+    expect(button(/^Off/)).toBeUndefined()
+  })
+
+  it("filters a longer list by on and off", () => {
+    const more = ["c", "d", "e"].map((k) => hook({ id: `hook_${k}`, name: `Hook ${k}`, template: null }))
+    seed([hook(), hook({ id: "hook_b", name: "Docs", enabled: false, template: null }), ...more])
+    render(createElement(HooksPanel, { projectId: "prj_demo01" }))
+    expect(host.querySelectorAll('[data-testid="hook-row"]')).toHaveLength(5)
     click(button(/^Off/))
     expect(host.querySelectorAll('[data-testid="hook-row"]')).toHaveLength(1)
   })
@@ -241,7 +250,7 @@ describe("the Hooks panel", () => {
   it("adds the merge template in one click, off", async () => {
     seed([])
     render(createElement(HooksPanel, { projectId: "prj_demo01" }))
-    click(button(/Add \(starts off\)/))
+    click(button(/Add template/))
     await settle()
     expect(requests.find((r) => r.url === "/api/hooks/from-template")).toMatchObject({ method: "POST", body: { projectId: "prj_demo01", template: "pr_merge" } })
     // Its editor opens so it can be reviewed and switched on.
@@ -254,6 +263,9 @@ describe("the Hooks panel", () => {
     click(button("New hook"))
     const editor = document.querySelector('[data-testid="hook-editor"]')!
     click(button("On PR ready → merge", editor))
+    // Preview sits in a disclosure that starts closed on a narrow editor.
+    expect(button(/^Preview and limits/, editor)!.getAttribute("aria-expanded")).toBe("false")
+    click(button(/^Preview and limits/, editor))
     const preview = () => document.querySelector('[data-testid="hook-preview"]')!.textContent ?? ""
     // Sample values first, then a real task's.
     expect(preview()).toContain("Merge your pull request #42.")
@@ -284,7 +296,7 @@ describe("the Hooks panel", () => {
     render(createElement(HooksPanel, { projectId: "prj_demo01" }))
     click(button("On finish"))
     const editor = document.querySelector('[data-testid="hook-editor"]')!
-    expect(editor.textContent).toContain("draft PRs and agent wakes skipped unless included")
+    expect(editor.textContent).toContain("skips draft PRs and turns other agents woke")
     click(button(/^Filters/, editor))
     const box = [...editor.querySelectorAll("label")].find((l) => l.textContent?.includes("Include turns another agent woke"))!.querySelector("input")!
     expect(box.checked).toBe(false)

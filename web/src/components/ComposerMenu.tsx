@@ -60,6 +60,16 @@ export function useMoreMenu(): MoreMenuState {
 const CloseMore = createContext<() => void>(() => {})
 export const useCloseMore = () => useContext(CloseMore)
 
+/**
+ * Per tool the caller passed in (Composer `toolSlots` as a list), the box width it folds into the menu below
+ * (lib/composerRow.ts): a tool's button takes `onRow` of its own, and its menu line `inMenu`. Outside a box, or for
+ * tools that fold together, there's none (null), which leaves a button on the row. `label` is the width below which
+ * a tool's text label goes first (`labelFrom`; null: it stays).
+ */
+export const ToolFolds = createContext<{ tool: readonly (number | null)[]; label: readonly (number | null)[] }>({ tool: [], label: [] })
+export const useToolFold = (tool: number) => useContext(ToolFolds).tool[tool] ?? null
+export const useToolLabel = (tool: number) => useContext(ToolFolds).label[tool] ?? null
+
 function firstShown(menu: HTMLElement | null): HTMLElement | undefined {
   const lines = Array.from(menu?.querySelectorAll<HTMLElement>("button") ?? [])
   return lines.find((b) => (typeof b.checkVisibility === "function" ? b.checkVisibility() : true))
@@ -84,8 +94,8 @@ export function MoreButton({ more, className, dot }: { more: MoreMenuState; clas
       size="sm"
       data-testid="composer-more"
       className={cx("relative", className, more.open && "bg-zinc-800 text-zinc-100")}
-      aria-label={dot ? `More (${dot.label})` : "More"}
-      title="More: the buttons that don't fit"
+      aria-label={dot ? `More actions (${dot.label})` : "More actions"}
+      title="More actions"
       aria-expanded={more.open}
       aria-controls={more.open ? more.id : undefined}
       // The caret stays in the text, where a picked @ ! % goes.
@@ -115,7 +125,7 @@ export function MoreMenu({ more, anchor, children }: { more: MoreMenuState; anch
         ref={more.menu}
         id={more.id}
         role="group"
-        aria-label="More"
+        aria-label="More actions"
         data-testid="composer-more-menu"
         style={{ maxHeight: at.maxHeight }}
         className="scroll-thin pointer-events-auto flex w-72 max-w-full flex-col overflow-y-auto overscroll-contain rounded-xl border border-zinc-800 bg-zinc-900 p-1 shadow-xl shadow-black/40"
@@ -157,7 +167,7 @@ export function ComposerMenuItem({
       <Icon className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{label}</span>
-        {detail && <span className="truncate text-xs text-zinc-500">{detail}</span>}
+        {detail && <span className="line-clamp-2 text-xs text-zinc-500">{detail}</span>}
       </span>
       {keyHint && (
         <kbd aria-hidden className="shrink-0 rounded border border-zinc-700 px-1.5 font-mono text-xs text-zinc-400">

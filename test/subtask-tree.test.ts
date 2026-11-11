@@ -223,7 +223,9 @@ describe("the sidebar's sub-task tree", () => {
     render()
     const list = document.getElementById(`sidebar-tasks-${YARD.id}`)!
     // The project's tasks: 20px in, beside a 1px guide in the border colour under the Captain's tile. It never moves.
-    expect(list.className).toContain("[--nest:1.25rem]")
+    // Less a trim (`--nest-trim`) that a zoomed phone's narrow drawer sets, so titles keep their room there.
+    expect(list.className).toContain("[--nest:calc(1.25rem_-_var(--nest-trim))]")
+    expect(list.className).toContain("[--nest-trim:0rem]")
     expect(list.className).toContain("before:left-[calc(1.5rem+var(--nest)-0.625rem-0.5px)]")
     expect(list.className).toContain("before:w-px")
     expect(list.className).toContain("before:bg-zinc-800")
@@ -247,9 +249,9 @@ describe("the sidebar's sub-task tree", () => {
     expect(plain.className).toContain("pointer-coarse:pl-[calc(2.75rem+var(--nest,0rem))]")
     for (const button of [open(OMELETTE), open(FRENCH)]) {
       // The one-line flex row owns the shared indent for the title and its separate PR link.
-      expect(button.parentElement!.className).toContain("pl-[2.75rem]")
-      expect(button.parentElement!.className).toContain("pointer-coarse:pl-[4rem]")
-      expect(button.closest<HTMLElement>("[role=treeitem]")!.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
+      expect(button.parentElement!.className).toContain("pl-[calc(2.75rem-var(--nest-trim,0rem))]")
+      expect(button.parentElement!.className).toContain("pointer-coarse:pl-[calc(4rem-var(--nest-trim,0rem))]")
+      expect(button.closest<HTMLElement>("[role=treeitem]")!.className).toContain("ml-[calc(var(--nest)-1.25rem+var(--nest-trim,0rem))]")
       expect(button.closest<HTMLElement>("[role=treeitem]")!.style.paddingLeft).toBe("")
       expect(button.closest<HTMLElement>("[role=treeitem]")!.style.marginLeft).toBe("")
     }
@@ -262,12 +264,13 @@ describe("the sidebar's sub-task tree", () => {
     }
     expect(open(FRENCH).querySelector(".col-start-2.row-start-1")!.className).toContain("truncate")
     // A chevron sits on its parent's guide, the guide broken behind it; it and the rows keep 44px to a finger.
-    expect(chevron(OMELETTE).className).toContain("left-[17px]")
-    expect(chevron(CLASSIC).className).toContain("left-[17px]")
+    expect(chevron(OMELETTE).className).toContain("left-[calc(17px-var(--nest-trim,0rem))]")
+    expect(chevron(CLASSIC).className).toContain("left-[calc(17px-var(--nest-trim,0rem))]")
     expect(chevron(CLASSIC).firstElementChild!.className).toContain("bg-zinc-950")
     expect(chevron(CLASSIC).className).toContain("z-2")
     expect(chevron(OMELETTE).className).toContain("pointer-coarse:w-11")
-    expect(chevron(OMELETTE).className).toContain("pointer-coarse:h-11")
+    // As tall as its row (inset-y-0), which is 44px to a finger.
+    expect(chevron(OMELETTE).className).toContain("inset-y-0")
     expect(open(FRENCH).parentElement!.className).toContain("pointer-coarse:min-h-11")
   })
 
@@ -318,9 +321,12 @@ describe("a sub-task tree five and more levels deep", () => {
   const LEVELS = [L1, L2, L3, L4, L5, L6]
   /** A row's `--nest`: a top task's is its project's list's 20px (a class), a sub-task's its group's, set per level. */
   const nest = (t: Task) => (t === L1 ? "1.25rem" : node(t)!.parentElement!.style.getPropertyValue("--nest"))
-  /** A `--nest` in px, given the steps the sidebar's width sets: the first `full` levels 20px each, deeper ones `deep`px. */
+  /**
+   * A `--nest` in px, given the steps the sidebar's width sets: the first `full` levels 20px each, deeper ones `deep`px.
+   * No `--nest-trim`: that's only a zoomed phone's narrow drawer.
+   */
   const px = (css: string, full: number, deep: number) =>
-    Function(`return ${css.replace(/var\(--tree-full\)/g, String(full)).replace(/var\(--tree-deep\)/g, String(deep)).replace(/100cqw/g, "1024").replace(/calc\(/g, "(").replace(/\b(min|max)\(/g, "Math.$1(").replace(/([\d.]+)rem/g, "($1 * 16)")}`)() as number
+    Function(`return ${css.replace(/var\(--nest-trim, 0rem\)/g, "0rem").replace(/var\(--tree-full\)/g, String(full)).replace(/var\(--tree-deep\)/g, String(deep)).replace(/100cqw/g, "1024").replace(/calc\(/g, "(").replace(/\b(min|max)\(/g, "Math.$1(").replace(/([\d.]+)rem/g, "($1 * 16)")}`)() as number
   const steps = (full: number, deep: number) => LEVELS.map((t) => px(nest(t), full, deep))
 
   it("nests each level one step in from its parent by its true depth, beside its own guide, deep steps shorter in a narrow sidebar", () => {
@@ -335,12 +341,13 @@ describe("a sub-task tree five and more levels deep", () => {
         expect(group.className).toContain("before:left-[calc(1.5rem+var(--nest)-0.625rem-0.5px)]")
         expect(group.className).toContain("before:-top-3")
       }
-      // The row's box, so its fill and selected bar, starts one step left of its icon; the title has the rest.
-      expect(item(t).className).toContain("ml-[calc(var(--nest)-1.25rem)]")
+      // The row's box, so its fill and selected bar, starts one step left of its icon (the trim given back, as the step
+      // is a whole one); the title has the rest.
+      expect(item(t).className).toContain("ml-[calc(var(--nest)-1.25rem+var(--nest-trim,0rem))]")
       expect(open(t).className).toContain("min-w-0")
       expect(open(t).querySelector(".col-start-2.row-start-1")!.className).toContain("truncate")
       // A chevron on its parent's guide for every row with sub-tasks, at every level.
-      if (t !== L6) expect(chevron(t).className).toContain("left-[17px]")
+      if (t !== L6) expect(chevron(t).className).toContain("left-[calc(17px-var(--nest-trim,0rem))]")
     })
     expect(chevron(L6)).toBeNull()
     expect(node(L3B)!.parentElement).toBe(node(L3)!.parentElement)
@@ -396,7 +403,7 @@ describe("a sub-task tree five and more levels deep", () => {
     // The fill and the bar are on the row's box, which starts at its level (its group's `--nest`).
     const box = item(L5)
     expect(box.className).toContain("shadow-[inset_3px_0_0_var(--color-yard-400)]")
-    expect(box.className).toContain("ml-[calc(var(--nest)-1.25rem)]")
+    expect(box.className).toContain("ml-[calc(var(--nest)-1.25rem+var(--nest-trim,0rem))]")
     expect(nest(L5)).toBe(nestAt(5))
     click(chevron(L3))
     expect(item(L3).className).toContain("color-mix(in_oklab,var(--color-yard-400)_40%")

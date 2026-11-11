@@ -249,7 +249,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
                   )}
                   {/* The Coordinator's replies span projects: "#12" links only where a paragraph is about one repo. Notices and chips set their task's. */}
                   <InRepo mentions>
-                    <CoordinatorTranscript rows={tail.visible} onFollowUp={followUp} />
+                    <CoordinatorTranscript rows={tail.visible} onFollowUp={followUp} moved={talking || queued.length > 0 || !!tail.later || history.moreAfter} />
                     <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={scroller} />
                     {!history.browsing && <StreamingReply busy={talking} />}
                     {queued.length > 0 && <ChatLines messages={queued} onFollowUp={followUp} />}
@@ -263,6 +263,7 @@ export const ChatPanel = memo(function ChatPanel({ conversation }: { conversatio
               chat={COORDINATOR_TARGET}
               onSubmit={submit}
               placeholder={talking ? "Queue another message…" : "Ask the Coordinator…"}
+              label="Message the Coordinator"
               textareaRef={box}
               handleRef={composer}
               panelRef={panel}
@@ -291,18 +292,20 @@ const ChatLines = memo(function ChatLines({ messages, onFollowUp }: { messages: 
 /** The reply being streamed. Only this re-renders per streamed chunk, not the thread above it. */
 function StreamingReply({ busy }: { busy: boolean }) {
   const stream = useChatStream()
-  if (stream.data)
-    return (
-      <div className="rounded-xl bg-zinc-900/60 px-3 py-2 text-sm text-zinc-200">
-        <Markdown live>{stream.data}</Markdown>
-      </div>
-    )
-  if (!busy) return null
   return (
-    <div className="flex gap-1 px-1 py-2">
-      {[0, 1, 2].map((i) => (
-        <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" style={{ animationDelay: `${i * 120}ms` }} />
-      ))}
-    </div>
+    <>
+      {/* Drawn as the finished reply will be, so nothing moves or changes colour when the turn ends. */}
+      {stream.data && (
+        <div className="text-sm text-zinc-200">
+          <Markdown live>{stream.data}</Markdown>
+        </div>
+      )}
+      {/* It stays under the text for as long as the turn runs: text that stops coming isn't a finished reply. */}
+      {busy && (
+        <p role="status" className="py-2 text-xs text-zinc-400">
+          Coordinator is working…
+        </p>
+      )}
+    </>
   )
 }

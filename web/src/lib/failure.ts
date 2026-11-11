@@ -15,6 +15,7 @@ export type FailureKind =
   | "memory"
   | "api_down"
   | "start_timeout"
+  | "old_cli"
   | "interrupted"
   | "not_started"
   | "start_failed"
@@ -61,6 +62,21 @@ export function explainFailure(error: string, ctx: FailureContext = {}): Failure
 
   if (/Starting the agent timed out/i.test(text))
     return { kind: "start_timeout", title: "The agent took too long to start", detail: "Where it runs may have been slow or busy. Retry to start it again." }
+
+  // An older Claude Code runs a model it doesn't know in a 200k-token window, where the turn thrashes on auto-compact:
+  // Box Yard refuses or stops the turn instead (shared/claudeCli.ts words the error).
+  const old = /Claude Code(?: (\d+\.\d+\.\d+))? on (.+?) doesn't know the model (\S+?)(?:, which needs Claude Code (\d+\.\d+\.\d+) or later)?\.(?:\s|$)/.exec(text)
+  if (old) {
+    const [, version, where, model, min] = old
+    const has = version && min ? `It has ${version}, and ${model} needs ${min} or later.` : version ? `It has ${version}.` : min ? `${model} needs ${min} or later.` : ""
+    const update = /Updating it there failed \([^)]*\): (.+)\. Retry, or pick a model it knows\./s.exec(text)
+    const next = update
+      ? `Box Yard couldn't update it: ${period(firstLine(update[1]!))} Retry, or pick another model.`
+      : /Box Yard updates Claude Code there before its next turn/.test(text)
+        ? "Box Yard stopped the turn before it could thrash on auto-compact, and updates Claude Code there before the next one: retry."
+        : `Update Claude Code there (claude update, or npm install -g @anthropic-ai/claude-code@latest) or pick another model, then retry.${/the model name is wrong/.test(text) ? " If it's already the latest, the model name is wrong." : ""}`
+    return { kind: "old_cli", title: min ? `Claude Code on ${where} is too old for ${model}` : `Claude Code on ${where} doesn't know ${model}`, detail: [has, next].filter(Boolean).join(" ") }
+  }
 
   if (/usage limit|hit your (usage )?limit|(5-hour|weekly|session|daily|opus|sonnet) limit|limit will reset|out of extra usage/i.test(text) && !/rate_limit_error/i.test(text)) {
     const reset = resetOf(text)

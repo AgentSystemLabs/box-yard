@@ -164,7 +164,7 @@ describe("Reply quoting selection", () => {
     expect(document.activeElement).not.toBe(box)
   })
 
-  it("isn't offered where the chat has no side threads: Start new task is", () => {
+  it("isn't offered where the chat has no side threads: New task from selection is", () => {
     act(() =>
       root.render(
         createElement(
@@ -178,7 +178,7 @@ describe("Reply quoting selection", () => {
     range.selectNodeContents(host.querySelector("p")!)
     window.getSelection()!.addRange(range)
     act(() => void document.dispatchEvent(new Event("selectionchange")))
-    expect(document.querySelector("button[data-selection-task-action]")!.textContent).toContain("Start new task")
+    expect(document.querySelector("button[data-selection-task-action]")!.textContent).toContain("New task from selection")
     expect(replyQuoting()).toBeNull()
   })
 })
@@ -255,10 +255,10 @@ describe("threaded replies", () => {
     expect(openThreadId(COORDINATOR_CHAT)).toBe(body.id)
     // Nothing went to the Coordinator's own chat.
     expect(fetchMock.mock.calls.some(([u]) => String(u).startsWith("/api/chat"))).toBe(false)
-    // The chat shows the count under the message, not the reply; the panel says Claude is working.
+    // The chat shows the count under the message, not the reply; the panel says it is working on the thread.
     expect(host.querySelector("[data-testid=thread-replies]")!.textContent).toContain("1 reply")
     expect(host.querySelector("[data-chat-id]")!.textContent).not.toContain("Can it back off?")
-    expect(document.querySelector("[data-testid=side-thread-working]")!.textContent).toContain("Claude is working")
+    expect(document.querySelector("[data-testid=side-thread-working]")!.textContent).toContain("Working on this thread…")
   })
 
   it("Reply on a message that has replies opens its thread; questions on highlights stay chips", () => {

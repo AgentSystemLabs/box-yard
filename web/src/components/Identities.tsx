@@ -461,7 +461,7 @@ function IdentityForm({ fid, identity: i, edit, onEdit, problems }: { problems: 
       <FormField id={fid("runners")} label="Runs on" hint="Where its projects may run. A key only this computer's SSH agent holds signs only here.">
         <IdentityControl fid={fid} field="runners">{(check) => <div {...check} role="group" aria-label="Runs on" tabIndex={-1} className="flex flex-wrap gap-x-4 gap-y-1">
           {RUNNERS.map((r) => (
-            <label key={r} className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+            <label key={r} className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
               <input
                 type="checkbox"
                 checked={ticked(r)}
@@ -502,7 +502,7 @@ function IdentityForm({ fid, identity: i, edit, onEdit, problems }: { problems: 
       )}
       <SigningField fid={fid} identity={i} edit={edit} set={set} />
       {signs && (
-        <SettingsField label="Require signed commits" keywords="gpg signing signature"><label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
+        <SettingsField label="Require signed commits" keywords="gpg signing signature"><label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
           <input type="checkbox" checked={edit.requireSigned ?? i?.signing?.requireSigned ?? false} onChange={(e) => set("requireSigned", e.target.checked)} data-testid="identity-require-signed" />
           Stop a push when one of its commits isn't signed by this key
         </label></SettingsField>
@@ -637,7 +637,7 @@ function SigningField({ fid, identity: i, edit, set }: { fid: (k: string) => str
         <>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-300">
             {(["file", "agent", "gpg"] as const).map((m) => (
-              <label key={m} className="flex min-h-11 items-center gap-2 sm:min-h-0">
+              <label key={m} className="flex min-h-11 items-center gap-2">
                 <input
                   type="radio"
                   name={fid("signing-mode")}
@@ -770,7 +770,7 @@ function ImportFromComputer({ fid, identities, projects }: { fid: (k: string) =>
         Reads the accounts gh is signed in to, your git authors (global and each includeIf folder), their signing keys and ~/.ssh/config, and proposes an identity per account with the projects it fits. Nothing changes until you tick one and save; Box Yard reads the token and key itself, so they
         never pass through this page.
       </p>
-      <label className="mt-2 flex min-h-11 items-center gap-2 text-xs text-zinc-400 sm:min-h-0">
+      <label className="mt-2 flex min-h-11 items-center gap-2 text-xs text-zinc-400">
         <input type="checkbox" checked={online} onChange={(e) => setOnline(e.target.checked)} />
         Ask GitHub too (each account's orgs, verified emails, keys and push access, with its own token)
       </label>
@@ -821,7 +821,7 @@ function Detection({
         const existing = identities.find((i) => (p.existing ? i.id === p.existing.id : !i.isDefault && i.githubLogin?.toLowerCase() === p.login.toLowerCase()))
         return (
           <div key={p.login} className={cx("@container rounded-lg border p-3", on ? "border-amber-500/40 bg-amber-500/5" : "border-zinc-800")} data-proposal={p.login}>
-            <label className="flex min-h-11 items-center gap-2 sm:min-h-0">
+            <label className="flex min-h-11 items-center gap-2">
               <input type="checkbox" checked={on} onChange={(e) => toggle(p, e.target.checked)} data-testid={`import-${p.login}`} />
               <span className="font-mono text-sm text-zinc-100">{p.login}</span>
               {existing ? <span className="text-zinc-400">updates the {existing.name} identity</span> : <span className="text-zinc-400">a new identity</span>}
@@ -844,7 +844,7 @@ function Detection({
               <Fact label="Projects">
                 {p.projects.length ? (
                   p.projects.map((x) => (
-                    <label key={x.id} className="flex min-h-11 items-start gap-2 sm:min-h-0">
+                    <label key={x.id} className="flex min-h-11 items-start gap-2">
                       <input type="checkbox" className="mt-0.5" disabled={!on} checked={on && (picked[p.login] ?? []).includes(x.id)} onChange={(e) => toggleProject(p.login, x.id, e.target.checked)} />
                       <span>
                         <span className="text-zinc-200">{projects.get(x.id)?.name ?? x.name}</span> <Muted>· {x.why}</Muted>

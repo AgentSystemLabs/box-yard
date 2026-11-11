@@ -1,6 +1,7 @@
-// A task's published files as the header's "📎 N files" drawer shows them: newest first, grouped when titles
+// A task's published files as the header's "N files" drawer shows them: newest first, grouped when titles
 // share a stem ("Captain tab before (mobile)" / "Captain tab after: menu" → "Captain tab"), filtered by a search
-// box, plus the "new since you last looked" count. Pure, so it is unit tested; the UI is components/TaskFiles.tsx.
+// box, plus the "new since you last looked" count (none before the first look). Pure, so it is unit tested; the UI is
+// components/TaskFiles.tsx.
 import { previewKind, type PreviewItem, type PreviewKind } from "./filePreview"
 import type { Artifact } from "../../../shared/types"
 
@@ -108,9 +109,12 @@ export const previewItemOf = (f: TaskFile): PreviewItem => ({ url: f.url, name: 
 /** The ←/→ gallery: the shown files the preview can open, in display order. */
 export const galleryOf = (ordered: readonly TaskFile[]): PreviewItem[] => ordered.filter((f) => fileKind(f)).map(previewItemOf)
 
-/** Files published after `seenAt` (the newest createdAt when the list was last opened; null: never). */
+/** A file published after `seenAt`, the newest createdAt when the list was last opened. Null (never opened): none is, as every file would be new, which says nothing. */
+export const isUnseen = (f: TaskFile, seenAt: number | null): boolean => seenAt !== null && f.createdAt > seenAt
+
+/** How many files are new since the list was last opened: the chip's dot and the drawer's marks count the same ones. */
 export function unseenCount(files: readonly TaskFile[], seenAt: number | null): number {
-  return files.filter((f) => seenAt === null || f.createdAt > seenAt).length
+  return files.filter((f) => isUnseen(f, seenAt)).length
 }
 
 /** The value to remember on open: the newest file's time, so server/client clock skew can't hide a file. */

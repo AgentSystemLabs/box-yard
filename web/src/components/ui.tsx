@@ -1002,8 +1002,9 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
   )
 }
 
+// Focus: the border, plus the app's one solid outline (:focus-visible in styles.css). No ring of its own: that drew two.
 export const inputClass =
-  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 focus:outline-none focus:ring-2 focus:ring-yard-500/20 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
+  "w-full min-h-11 rounded-lg border border-control bg-zinc-900 px-3 py-2 text-base text-zinc-100 placeholder:text-zinc-600 focus:border-yard-500 aria-invalid:border-red-500 sm:min-h-0 sm:text-sm"
 
 const SELECT_SIZE = {
   md: "min-h-11 rounded-lg py-2 pr-9 pl-3 text-base sm:min-h-0 sm:text-sm",
@@ -1016,7 +1017,7 @@ export function Select({ size = "md", className, ...props }: Omit<ComponentProps
     <select
       {...props}
       className={cx(
-        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-500 focus:border-yard-500 focus:ring-2 focus:ring-yard-500/20 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+        "select-chevron cursor-pointer border border-control bg-zinc-900 text-zinc-100 hover:border-zinc-500 focus:border-yard-500 disabled:cursor-not-allowed disabled:opacity-50",
         SELECT_SIZE[size],
         className,
       )}
@@ -1031,6 +1032,75 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
       {children}
       {hint && <span className="block text-xs text-zinc-500">{hint}</span>}
     </label>
+  )
+}
+
+/**
+ * A labelled set of buttons or chips. Field is a `<label>`, so a tap on its caption clicks the first control inside:
+ * right for one input, wrong for a row of choices. This is a named group instead.
+ */
+export function FieldGroup({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  const id = useId()
+  return (
+    <div role="group" aria-labelledby={id} className="space-y-1.5">
+      <span id={id} className="block text-xs font-medium tracking-wide whitespace-nowrap text-zinc-400 uppercase">
+        {label}
+      </span>
+      {children}
+      {hint && <span className="block text-xs text-zinc-500">{hint}</span>}
+    </div>
+  )
+}
+
+/** One choice in a FieldGroup. 44px tall; compact only for a mouse in a wide `@container`. */
+export function Chip({ on, onClick, children, ...props }: { on: boolean; onClick: () => void; children: ReactNode } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "type">) {
+  return (
+    <button
+      {...props}
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={cx(
+        "inline-flex min-h-11 items-center gap-1.5 rounded-md px-2.5 text-xs whitespace-nowrap pointer-fine:@lg:min-h-0 pointer-fine:@lg:py-1",
+        on ? "bg-yard-500/20 text-yard-300" : "bg-zinc-800 text-zinc-400 hover:text-zinc-200",
+        props.className,
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * Button, Select and inputClass go compact from `sm`, which a tablet or a phone on its side also is. On a surface that
+ * a finger must work at any width, add this to them: 44px again wherever the pointer is coarse.
+ */
+export const TOUCH_SIZE = "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+
+/**
+ * TOUCH_SIZE for something typed in or picked from (an input, a textarea, a Select): its text is 16px too wherever the
+ * pointer is coarse. iOS zooms the page into a focused field whose text is smaller, and they go smaller from `sm`.
+ */
+export const TOUCH_FIELD = "pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:text-base"
+
+/**
+ * A form dialog's footer line: why its button is off (role=status) and why a save failed (role=alert). Put it last in
+ * the Modal's `footer`: on a phone it sits just above the primary button, and from `sm` (the footer's own breakpoint)
+ * left of Cancel. `quiet` is a form nobody has touched yet: the reason reads as a hint, not a warning.
+ */
+export function FormNote({ id, reason, failure, quiet }: { id?: string; reason?: string | null; failure?: string | null; quiet?: boolean }) {
+  return (
+    // The status line stays mounted, so screen readers hear it change; with nothing to say it takes no room.
+    <div className={cx("min-w-0 space-y-1 text-xs sm:order-first sm:mr-auto sm:flex-1", !reason && !failure && "sr-only")}>
+      {failure && (
+        <p role="alert" className="wrap-anywhere text-red-300">
+          {failure}
+        </p>
+      )}
+      <p id={id} role="status" className={quiet ? "text-zinc-500" : "text-amber-300"}>
+        {reason}
+      </p>
+    </div>
   )
 }
 

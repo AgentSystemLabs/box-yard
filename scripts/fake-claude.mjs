@@ -51,7 +51,8 @@
 // a task done). [noop] calls finish with outcome "noop" (a quiet schedule run), even alongside [ask] or [fail].
 // [pr] ends the turn without finish, like an agent that opened a PR and waits for review.
 // Sub-tasks (server/subtasks.ts): "spawn subtasks: A | B > B1, B2 | C" starts A, B and C with spawn_subtasks (B's
-// prompt starts B1 and B2 of its own; "C {hang}" gives C's prompt the [hang] marker); "use N sub agents" (as Cody would say it) starts N on angles of the topic, the
+// prompt starts B1 and B2 of its own; "C {hang}" gives C's prompt the [hang] marker; "D {model=claude-sonnet-5-5} {effort=high}"
+// asks for D's own model and effort, and {agent=codex} its own harness); "use N sub agents" (as Cody would say it) starts N on angles of the topic, the
 // first of them splitting in two when N is 3 or more. [wait] waits for their reports in the same turn
 // (wait_for_subtasks); [cancel] cancels them all at once (cancel_subtasks) and finishes without their reports;
 // otherwise the turn ends and the reports start the next one. A turn that carries the last report
@@ -64,6 +65,10 @@
 // The Merge PR button's standard message ("Merge your pull request #N") stands in for `gh pr merge` when
 // FAKE_GH_STATE names a file: the worker writes {"state":"MERGED"} there for a test's fake GitHub to read.
 // FAKE_CLAUDE_COMPACT_FAIL=1 makes /compact fail (after the summary was written), FAKE_CLAUDE_BAD_SUMMARY=1 the summary.
+// An old CLI: FAKE_CLAUDE_VERSION=<x.y.z> makes --version answer "<x.y.z> (Claude Code)" like a real one (without it
+// Box Yard can't tell the version and checks nothing). FAKE_CLAUDE_UNKNOWN_MODELS=<id,id> names --model values this
+// CLI doesn't know: like the real one it says so on stderr at its first request, runs on in the small window it
+// assumes, and after FAKE_CLAUDE_THRASH_MS (default 3000) ends in "Autocompact is thrashing", unless it is stopped first.
 // Usage, like the real CLI's result: `usage` counts the main loop's calls of that result only, while modelUsage and
 // total_cost_usd are the session's running totals (saved with it, so a resumed or forked session goes on from them)
 // and also count compaction calls. [autocompact] in a prompt compacts the context at the turn's start (a
@@ -88,7 +93,7 @@ const flag = (name) => {
 }
 
 if (args.includes("--version")) {
-  console.log("0.0.0 (fake claude for Box Yard)")
+  console.log(process.env.FAKE_CLAUDE_VERSION ? `${process.env.FAKE_CLAUDE_VERSION} (Claude Code)` : "0.0.0 (fake claude for Box Yard)")
   process.exit(0)
 }
 
@@ -730,9 +735,11 @@ function subtaskAsks(prompt) {
       const [own, nested] = item.split(">").map((x) => x.trim())
       // "{hang}" in an item is a marker for that sub-task's own prompt ([hang]), so the parent doesn't act on it.
       const marks = [...own.matchAll(/\{([\w:-]+)\}/g)].map((m) => ` [${m[1]}]`).join("")
-      const title = own.replace(/\s*\{[\w:-]+\}/g, "").trim()
+      // "{model=…}", "{effort=…}" and "{agent=…}" are spawn_subtasks options for that sub-task, not prompt markers.
+      const pins = Object.fromEntries([...own.matchAll(/\{(agent|model|effort)=([^}\s]+)\}/g)].map((m) => [m[1], m[2]]))
+      const title = own.replace(/\s*\{[\w:-]+\}/g, "").replace(/\s*\{(?:agent|model|effort)=[^}\s]+\}/g, "").trim()
       const kids = nested ? nested.split(",").map((x) => x.trim()).filter(Boolean) : []
-      return { title, prompt: `Research this part: ${title}.${marks}${kids.length ? `\nspawn subtasks: ${kids.join(" | ")}` : ""}${/\[wait\]/i.test(prompt) ? " [wait]" : ""}` }
+      return { title, prompt: `Research this part: ${title}.${marks}${kids.length ? `\nspawn subtasks: ${kids.join(" | ")}` : ""}${/\[wait\]/i.test(prompt) ? " [wait]" : ""}`, ...pins }
     })
   }
   const n = Number(prompt.match(/\b(?:use|with|using|spin up|start)\s+(\d+|two|three|four|five|six)\s+sub[- ]?(?:agents?|tasks?)/i)?.[1]?.replace(/^two$/i, "2").replace(/^three$/i, "3").replace(/^four$/i, "4").replace(/^five$/i, "5").replace(/^six$/i, "6"))
@@ -883,6 +890,13 @@ async function turn(prompt, started) {
   if (loginError) {
     out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: "fake" })
     out({ type: "result", subtype: "success", is_error: true, result: loginError, session_id: session.id })
+    process.exit(1)
+  }
+  if ((process.env.FAKE_CLAUDE_UNKNOWN_MODELS ?? "").split(",").includes(flag("--model") ?? "")) {
+    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: flag("--model") })
+    console.error(`[claude-code:unrecognized_model] ${JSON.stringify({ model: flag("--model"), query_source: "sdk" })}`)
+    await sleep(Number(process.env.FAKE_CLAUDE_THRASH_MS) || 3000)
+    out({ type: "result", subtype: "success", is_error: true, result: "Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window.", session_id: session.id })
     process.exit(1)
   }
   // Like the real CLI, a session exists from its first turn's start: a turn killed halfway can be resumed. Its turns

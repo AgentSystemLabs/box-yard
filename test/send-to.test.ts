@@ -25,4 +25,24 @@ describe("Send to query", () => {
     expect(sendDestinations(p, t, "task_example")[0]?.detail).toContain("Sending reopens this task")
     expect(sendDestinations(p, t, "hidden")).toEqual([])
   })
+  it("ranks a name over a detail, a word's start over its inside, and needs every word", () => {
+    const p = [{ id: "prj_example", name: "Example", repo: "acme/site" }, { id: "prj_docs", name: "Docs", repo: "acme/docs" }] as Project[]
+    const t = [
+      { id: "task_a", projectId: "prj_example", title: "Tidy the sidebar", status: "working" },
+      { id: "task_b", projectId: "prj_docs", title: "Example gallery", status: "done" },
+      { id: "task_c", projectId: "prj_docs", title: "Counterexample page", status: "idle" },
+    ] as Task[]
+    const find = (q: string) => sendDestinations(p, t, q).map((d) => d.id)
+    // "Example" names a Captain and a task; it is only the project of task_a, and inside a word of task_c.
+    expect(find("example")).toEqual(["prj_example", "task_b", "task_a", "task_c"])
+    expect(find("ex")).toEqual(["prj_example", "task_b", "task_a", "task_c"])
+    // A whole word before a word that only starts with it.
+    expect(find("doc")).toEqual(["prj_docs", "task_b", "task_c"])
+    expect(find("docs gallery")).toEqual(["task_b"])
+    expect(find("gallery   DOCS ")).toEqual(["task_b"])
+    expect(find("docs sidebar")).toEqual([])
+    // Equal hits keep the list's order: the Coordinator, the Captains, then tasks.
+    expect(find("c")[0]).toBe("coordinator")
+    expect(find("")).toEqual(["coordinator", "prj_example", "prj_docs", "task_a", "task_b", "task_c"])
+  })
 })

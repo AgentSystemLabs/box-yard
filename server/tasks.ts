@@ -47,9 +47,11 @@ import { AGENT_CAPTAIN_LIMIT, AGENT_CAPTAIN_WAIT_MAX_SECONDS, AGENT_CAPTAIN_WIND
 import type { AgentCaptainMessage } from "./captains.js"
 import { formatTokens, sessionUsageOf } from "./usage.js"
 import { errorMessage, failedStep, isRateLimited } from "./util/retry.js"
+import { ensureClaudeCliKnows } from "./claudeCli.js"
+import { claudeCliTooOld, minClaudeCliFor, unrecognizedModelError, windowSetByHand } from "../shared/claudeCli.js"
 import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
-import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, reportText, spawnProblem, type SubtaskLimits, type SubtaskReport, type SubtasksFile } from "./subtasks.js"
+import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
 import { AUTO_DONE_FROM, PrTracker, prNumber, restingStatus, type PrChange } from "./prs.js"
 import { PrDetailsSource } from "./prDetails.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
@@ -85,7 +87,7 @@ import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sess
 import type { SessionRef } from "./connectors/connectors.js"
 import { claudeLoginRef, codexLoginRef, limitsOf, recordLimits, type LoginRef } from "./loginLimits.js"
 import { authorEnv, chooseAuthor, fallbackWarning, GithubAuthors, hostGitScript, parseHostGit, readHostGit, recordAuthorSource, type HostGit, type TurnAuthor } from "./gitAuthor.js"
-import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, type AgentCli } from "../shared/agentCli.js"
+import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, pinProblem, type AgentCli } from "../shared/agentCli.js"
 import { CursorModels } from "./cursor.js"
 import type { Identities, TurnSigning } from "./identity/identities.js"
 import type { AgentLogins, PickedLogin } from "./agentLogins.js"
@@ -2001,13 +2003,8 @@ export class TaskManager {
     available(before)
     const project = this.store.getProject(before.project_id)!
     const agent = options.agent === "default" ? project.agentCli ?? this.settings.get().agentCli : options.agent ?? taskAgentCli(before)
-    const modelCli = cliForModel(options.model)
-    if (options.model && modelCli && agent !== "cursor" && modelCli !== agent) throw new BadRequestError(`Model ${options.model} cannot run on ${AGENT_CLI_LABEL[agent]}. Choose a compatible model or use its defaults.`)
-    if (options.model && agent === "cursor" && !cursorModel(options.model, "", (id) => this.cursorModels.has(id))) throw new BadRequestError(`Model ${options.model} is not a Cursor model in its catalog. Choose a Cursor model or use its defaults.`)
-    if (options.effort === "ultra" && agent !== "codex") throw new BadRequestError("Ultra effort is only available on Codex.")
-    if (agent === "opencode" && options.model && !isOpenCodeModel(options.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant.")
-    if (agent === "opencode" && options.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
-    if (agent === "cursor" && options.effort) throw new BadRequestError("Cursor's effort is part of its model id; omit effort.")
+    const pins = pinProblem(agent, options.model, options.effort, (id) => this.cursorModels.has(id))
+    if (pins) throw new BadRequestError(pins)
     const runner = this.store.taskRunner(before)
     await this.requireRunner(runner, before.project_id, this.store.taskEnv(taskId), { agentCli: agent, machineLabel: before.machine_label, gpu: taskGpuPick(before) })
     // Credential/capability checks can yield while another request sends a message or starts a turn.
@@ -6158,6 +6155,9 @@ export class TaskManager {
       // The connectors its scope reaches here (docs/connectors.md › Sessions), OAuth tokens refreshed to last 45 minutes.
       const connectors = await this.turnConnectors(row, project.id, boxId)
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
+      const { route, ...agent } = this.agentSettings(row, project)
+      // A window the project sets by hand is the owner's answer to a CLI that doesn't know the model: that turn starts as it is.
+      if (taskJson.agent === "claude" && !windowSetByHand(taskJson.env)) await this.ensureClaudeCli(boxId, agent.model, taskId)
       if (taskJson.agent === "cursor") await this.ensureCursor(boxId)
       if (taskJson.agent === "opencode") await this.ensureOpenCode(boxId)
       if (taskJson.agent === "codex") {
@@ -6172,7 +6172,6 @@ export class TaskManager {
       }
       credsWaiting = isMachineBox(boxId)
       await this.provider.writeFile(boxId, `${dir}/task.json`, JSON.stringify(taskJson, null, 2))
-      const { route, ...agent } = this.agentSettings(row, project)
       await this.provider.writeFile(
         boxId,
         `${dir}/turn.json`,
@@ -6489,6 +6488,65 @@ export class TaskManager {
     const foreign = (m: string | null | undefined) => isOpenAiModel(m) || isCursorOnlyModel(m) || isOpenCodeModel(m)
     const model = codex ? codexModel(route.model, s.agentCodexModel) : foreign(route.model) ? (foreign(s.agentModel) ? DEFAULT_MODEL : s.agentModel) : route.model
     return { model, effort: route.effort, autocompact: autocompactFlag(s.agentAutoCompact, row.context_window), route }
+  }
+
+  /** What `claude --version` said on each runner this server run (null: it didn't say), so a turn asks once. */
+  private readonly claudeCliSeen = new Map<string, string | null>()
+  /** Runners where a turn's CLI said it doesn't recognize its model (finishTurn): updated before their next turn. */
+  private readonly claudeCliStale = new Set<string>()
+  /** One check per runner at a time: two turns starting together mustn't both run npm there. */
+  private readonly claudeCliChecks = new Map<string, Promise<void>>()
+
+  /**
+   * Claude Code on the runner knows the turn's model, or the turn doesn't start (shared/claudeCli.ts): a snapshot or an
+   * image keeps the CLI it was made with, boxes run with its auto-updater off, and an older CLI runs a model it doesn't
+   * know in a 200k-token window. Box Yard updates it in its own sandboxes. This computer and SSH machines are the
+   * owner's to update, so there the turn is refused with what to do (never cached: the next turn asks again).
+   */
+  private async ensureClaudeCli(boxId: string, model: string | null | undefined, taskId: string) {
+    if (!model) return
+    const settled = () => !this.claudeCliStale.has(boxId) && (!minClaudeCliFor(model) || (this.claudeCliSeen.has(boxId) && !claudeCliTooOld(this.claudeCliSeen.get(boxId) ?? null, model)))
+    if (settled()) return
+    const check = (this.claudeCliChecks.get(boxId) ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        if (settled()) return
+        const provider = providerOf(this.provider, boxId)
+        const local = provider.name === "local"
+        const machine = provider.name === "ssh"
+        const where = machine ? `SSH machine ${this.machineName(boxId)}` : local ? "this computer" : "the box"
+        const runner = { exec: (command: string) => this.provider.exec(boxId, command), claudeBin: local ? this.c.claudeBin : provider.claudeBin, managed: !local && !machine && !this.c.mock, where }
+        const cli = await ensureClaudeCliKnows(model, runner, { stale: this.claudeCliStale.has(boxId) })
+        this.claudeCliStale.delete(boxId)
+        this.claudeCliSeen.set(boxId, cli.version)
+        if (cli.updatedFrom !== undefined) this.addEvent(taskId, `Updated Claude Code on ${where} from ${cli.updatedFrom ?? "an unknown version"} to ${cli.version}, so it knows ${model}.`)
+      })
+    this.claudeCliChecks.set(boxId, check)
+    try {
+      await check
+    } finally {
+      if (this.claudeCliChecks.get(boxId) === check) this.claudeCliChecks.delete(boxId)
+    }
+  }
+
+  /**
+   * What a turn says when the runner stopped it because its Claude Code doesn't recognize the model (box-runner.mjs
+   * runClaude), or null for any other end. The runner is marked, so a sandbox's CLI is updated before its next turn.
+   */
+  private unknownModelError(row: TaskRow, ev: WorkerEvent): string | null {
+    const said = ev.unrecognizedModel as { model?: unknown; cliVersion?: unknown } | null | undefined
+    if (ev.ok || !row.box_id || !said || typeof said.model !== "string") return null
+    const provider = providerOf(this.provider, row.box_id)
+    const local = provider.name === "local"
+    const machine = provider.name === "ssh"
+    this.claudeCliStale.add(row.box_id)
+    this.claudeCliSeen.delete(row.box_id)
+    return unrecognizedModelError({
+      model: said.model,
+      cliVersion: typeof said.cliVersion === "string" ? said.cliVersion : null,
+      where: machine ? `SSH machine ${this.machineName(row.box_id)}` : local ? "this computer" : "the box",
+      managed: !local && !machine && !this.c.mock,
+    })
   }
 
   /** Boxes this server run found Codex on (or installed it on). */
@@ -7522,6 +7580,7 @@ export class TaskManager {
     // Auto-sizing: what the turn used on its box, and whether it ran out of memory there.
     const measured = this.recordTurnPeak(row.current_turn_id, ev, !ev.ok && !ev.stopped && !this.stopRequested.has(row.id))
     const timing = this.recordTurnTiming(row, ev)
+    const unknownModel = this.unknownModelError(row, ev)
     if (row.compacting) return this.finishCompact(row, ev)
     const flags = this.store.turnFlags(row)
     const uncertain = this.store.hasUncertainCodexInput(row.id)
@@ -7558,7 +7617,7 @@ export class TaskManager {
     } else if (stopped) status = row.status === "done" ? "done" : openPr && !this.store.hasInputs(row.id) ? "pr_ready" : "idle"
     else if (!ev.ok) {
       status = "failed"
-      error = String(ev.error ?? "The agent exited with an error.")
+      error = unknownModel ?? String(ev.error ?? "The agent exited with an error.")
       if (oom && "why" in oom) error = `It ran out of memory on its ${measured!.boxSize} box, and isn't retried on a bigger one: ${oom.why}. ${error}`
     } else if (flags.asked) status = "needs_input"
     // Only Cody marks a task done. An agent that called finish rests like any finished turn, ready for review (idle,
@@ -7991,8 +8050,9 @@ export class TaskManager {
 
   /**
    * spawn_subtasks: start the agent's sub-tasks as tasks of their own, under it and in its project, and hand its
-   * runner their ids and links (subtasks-reply-<id>.json). All or none: a cap, or a runner that can't run, refuses
-   * the whole call. runs_on "same" runs one where its parent runs and shares its parent's slot (place).
+   * runner their ids and links (subtasks-reply-<id>.json). All or none: a cap, a bad agent, model or effort pin, or a
+   * runner that can't run refuses the whole call. runs_on "same" runs one where its parent runs and shares its
+   * parent's slot (place). Each keeps the agent, model and effort it asked for, else its parent's (subtaskPins).
    */
   private async spawnSubtasks(parent: TaskRow, ev: WorkerEvent) {
     const reqId = String(ev.id ?? "")
@@ -8007,14 +8067,26 @@ export class TaskManager {
     const { asks } = parsed
     const problem = spawnProblem({ depth: parent.subtask_depth ?? 0, started: this.store.subtaskRows(parent.id).length, asked: asks.length, limits: this.subtaskLimits() })
     if (problem) return refuse(problem)
-    const env = this.store.taskEnv(parent.id)
     const agentCli = taskAgentCli(parent)
+    const env = this.store.taskEnv(parent.id)
     let type: ReturnType<TaskEnvironment["forChild"]>
+    let pins: SubtaskPins[]
     try {
       type = this.environment.forChild(this.requireRow(parent.id))
       for (const ask of asks) if (ask.runsOn !== "same") this.environment.runner(type, ask.runsOn, environmentGpu(type) ?? this.gpuCloudFor(parent))
-      for (const runner of new Set(asks.map((a) => a.runsOn).filter((r): r is Runner => r !== "same"))) {
-        await this.requireRunner(runner, parent.project_id, env, { agentCli, model: parent.model, ...(runner === "gpu" ? { gpu: { provider: environmentGpu(type)!, type: null } } : {}) })
+      // After the environment: where no sub-task may start (RunPod, Vast.ai), that's the answer, not a pin to fix.
+      const resolved = subtaskPins(asks, { agent: agentCli, model: parent.model, effort: parent.effort }, (id) => this.cursorModels.has(id))
+      if ("problem" in resolved) return refuse(resolved.problem)
+      pins = resolved.pins
+      // Each runner asked for, once per harness. "same" is its parent's runner, which already runs its parent's harness.
+      const checks = new Map<string, { runsOn: SubtaskRunsOn; agentCli: AgentCli }>()
+      asks.forEach((a, i) => {
+        if (a.runsOn !== "same" || pins[i]!.agent !== agentCli) checks.set(`${a.runsOn} ${pins[i]!.agent}`, { runsOn: a.runsOn, agentCli: pins[i]!.agent })
+      })
+      for (const c of checks.values()) {
+        const runner = c.runsOn === "same" ? this.store.taskRunner(parent) : c.runsOn
+        const where = c.runsOn === "same" ? { machineLabel: parent.machine_label, gpu: taskGpuPick(parent) } : runner === "gpu" ? { gpu: { provider: environmentGpu(type)!, type: null } } : {}
+        await this.requireRunner(runner, parent.project_id, env, { agentCli: c.agentCli, ...where })
       }
     } catch (err) {
       return refuse(errorMessage(err))
@@ -8023,16 +8095,16 @@ export class TaskManager {
     let created: Task[]
     try {
       created = this.createTasks(
-        asks.map((a) => ({
+        asks.map((a, i) => ({
           id: a.id && !this.store.getTaskRow(a.id) ? a.id : undefined,
           projectId: parent.project_id,
           title: a.title,
           prompt: a.prompt,
           env,
           source: `agent:${parent.id}` as const,
-          agentCli,
-          model: parent.model,
-          effort: parent.effort,
+          agentCli: pins[i]!.agent,
+          model: pins[i]!.model,
+          effort: pins[i]!.effort,
           runsOn: a.runsOn === "same" ? null : a.runsOn,
           machineLabel: a.runsOn === "same" ? parent.machine_label : null,
           gpu: a.runsOn === "same" && taskGpuPick(parent)?.provider === environmentGpu(type) ? taskGpuPick(parent) : null,
@@ -8046,7 +8118,9 @@ export class TaskManager {
     const n = created.length
     this.addEvent(parent.id, `Started ${n} sub-task${n === 1 ? "" : "s"}.`, { kind: "subtasks", subtasks: created.map((t) => ({ id: t.id, title: t.title })) })
     this.emitTask(parent.id)
-    await reply({ status: "ok", tasks: created.map((t, i) => ({ id: t.id, title: t.title, url: this.absoluteUrl(`/tasks/${t.id}`), runsOn: asks[i]!.runsOn })) })
+    // One that asked for its own agent, model or effort says what it got, so the agent can check it.
+    const asked = (a: SubtaskAsk) => Boolean(a.agent || a.model || a.effort)
+    await reply({ status: "ok", tasks: created.map((t, i) => ({ id: t.id, title: t.title, url: this.absoluteUrl(`/tasks/${t.id}`), runsOn: asks[i]!.runsOn, ...(asked(asks[i]!) ? { runsWith: pinsLabel(pins[i]!) } : {}) })) })
     this.syncSubtasks(parent.id)
   }
 
@@ -8805,6 +8879,7 @@ export class TaskManager {
       resumed: ev.resumed === true,
       costScope: taskAgentCli(row) === "opencode" ? "run" : "session",
       loginId: (turnId ? this.store.getTaskTurn(turnId)?.login_id : null) ?? null,
+      harness: taskAgentCli(row),
     })
     return hasCost ? cost : null
   }

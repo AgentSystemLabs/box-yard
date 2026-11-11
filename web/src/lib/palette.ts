@@ -11,7 +11,7 @@ import type { BarPins } from "./projectBar"
 export type PaletteKind = "action" | "page" | "setting" | "task" | "pr" | "project" | "schedule" | "artifact" | "box"
 
 /** Dialogs the palette opens itself instead of navigating, and what it does in place (a project's pin in the sidebar). */
-export type PaletteCommand = "settings" | "new-project" | "coordinator" | "shortcuts" | "pin-project" | "unpin-project"
+export type PaletteCommand = "settings" | "new-task" | "new-project" | "coordinator" | "shortcuts" | "pin-project" | "unpin-project"
 
 export interface PaletteItem {
   /** Unique across kinds: `<kind>:<id>`. */
@@ -47,7 +47,11 @@ export interface PaletteItem {
   project?: string
   /** The key that does the same from anywhere, shown on the row ("?" for the shortcuts sheet). */
   shortcut?: string
-  /** A task's pill: its status, or "merged" when it is done because its PR merged. */
+  /** What a "new-task" command's dialog starts with: the text typed when nothing matched. */
+  prompt?: string
+  /** A task's and its PR's row: the task itself, which draws its icon and state (TaskStatusIcon) or its PR's glyph. */
+  task?: Task
+  /** A task's state in words, for its icon's name and the PR ordering: its status, or "merged" when it is done because its PR merged. */
   status?: BadgeStatus
   /** A task's raw status, for the empty-query sections and the active boost. */
   taskStatus?: TaskStatus
@@ -81,11 +85,19 @@ export interface PaletteData {
   boxes?: BoxInfo[]
   /** The sidebar's pins (lib/projectBar.ts), so each project has its Pin or its Unpin. */
   pins?: BarPins
+  /** What "New task…" says under its title. */
+  newTask?: NewTaskContext
+}
+
+/** Where "New task…" starts: the project its dialog opens on (its name: the one in view, else the first), and the text it kept from last time. */
+export interface NewTaskContext {
+  project?: string | null
+  draft?: string
 }
 
 export const PAGES: PaletteItem[] = [
   { key: "page:coordinator", kind: "page", title: "Coordinator", subtitle: "Tasks and chat", command: "coordinator", chat: COORDINATOR_CHAT, aliases: ["home"] },
-  { key: "page:settings", kind: "page", title: "Settings", subtitle: "Credentials, identities, machines, voice and limits", command: "settings", aliases: ["preferences"] },
+  { key: "page:settings", kind: "page", title: "Settings", subtitle: "Credentials, identities, machines, voice and limits", command: "settings", aliases: ["preferences", "open settings"] },
 ]
 
 /** Every Settings section, so "voice" or "identities" opens it without going through Settings first. */
@@ -140,7 +152,7 @@ export function buildItems(data: PaletteData): PaletteItem[] {
     items.push(...cached(a, project, () => [artifactItem(a, project)]))
   }
 
-  items.push(...buildActions(projects, data.pins), ...SETTINGS_ITEMS)
+  items.push(...buildActions(projects, data.pins, data.newTask), ...SETTINGS_ITEMS)
   return items
 }
 
@@ -158,6 +170,7 @@ function taskItems(t: Task, project: string | undefined, place: Place | undefine
       keywords: [project ?? "", ...STATUS_WORDS[t.status].split(" "), ...(t.prUrl ? [`pr ${t.prState ?? "open"}`] : [])],
       href: taskSessionHref(t.id),
       chat: t.id,
+      task: t,
       status: badgeStatus(t),
       taskStatus: t.status,
       at: t.updatedAt,
@@ -177,6 +190,7 @@ function taskItems(t: Task, project: string | undefined, place: Place | undefine
       href: taskSessionHref(t.id),
       chat: t.id,
       externalUrl: t.prUrl,
+      task: t,
       status: badgeStatus(t),
       taskStatus: t.status,
       at: t.updatedAt,
@@ -215,10 +229,37 @@ function artifactItem(a: Artifact, project: string | undefined): PaletteItem {
   }
 }
 
-export function buildActions(projects: Project[], pins: BarPins = {}): PaletteItem[] {
+/** Opens the New task dialog (components/NewTask.tsx) on the project in view, with its project picker. N does the same. */
+export const NEW_TASK: PaletteItem = { key: "action:new-task", kind: "action", title: "New task…", aliases: ["create task", "add task", "start task"], command: "new-task", shortcut: "N" }
+
+/** A draft on one line, short enough to sit under a title. */
+function clip(text: string, max = 60) {
+  const flat = text.replace(/\s+/g, " ").trim()
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
+}
+
+/** The kept draft as a row's subtitle, or nothing without one. */
+const draftLine = (lead: string, draft?: string) => (draft && clip(draft) ? `${lead}: “${clip(draft)}”` : undefined)
+
+/** "New task…" where the palette opened: the draft its dialog opens with, else the project it opens on. */
+export const newTaskItem = ({ project, draft }: NewTaskContext = {}): PaletteItem => ({
+  ...NEW_TASK,
+  subtitle: draftLine("Continues your draft", draft) ?? (project ? `In ${project} · you can change it next` : undefined),
+})
+
+/** The row that starts a task from the typed text (nothing matches it, or it reads like a prompt): the dialog opens with it. */
+export const newTaskFrom = (text: string, ctx: NewTaskContext = {}): PaletteItem => ({
+  ...NEW_TASK,
+  title: `Start a new task: “${text}”`,
+  subtitle: draftLine("Adds to your draft", ctx.draft) ?? "Opens with this as the description",
+  shortcut: undefined,
+  prompt: text,
+})
+
+export function buildActions(projects: Project[], pins: BarPins = {}, newTask: NewTaskContext = {}): PaletteItem[] {
   return [
+    newTaskItem(newTask),
     { key: "action:new-project", kind: "action", title: "New project…", command: "new-project" },
-    { key: "action:settings", kind: "action", title: "Open settings", command: "settings" },
     { key: "action:shortcuts", kind: "action", title: "Keyboard shortcuts", aliases: ["hotkeys", "keybindings", "keys", "help"], command: "shortcuts", shortcut: "?" },
     ...projects.map((p) => pinAction(p, pins[p.id] === "pinned")),
   ]

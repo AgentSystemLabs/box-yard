@@ -1,9 +1,12 @@
 // Pure helpers for the Hooks UI (components/Hooks.tsx): the editor's draft and its checks, the live preview's
 // variables, and the list and run filters. The matching rules themselves are in shared/hooks.ts.
 import {
+  ACTION_INFO,
   HOOK_VARIABLES,
   PR_TRIGGERS,
   SAMPLE_HOOK_VARS,
+  TRIGGER_INFO,
+  VARIABLE_INFO,
   hookProblems,
   sourceLabel,
   normalizeFilters,
@@ -19,9 +22,58 @@ import {
   type HookTemplate,
   type HookTemplateView,
   type HookTrigger,
+  type HookVariable,
   type HookVars,
 } from "../../../shared/hooks"
 import type { Task } from "../../../shared/types"
+
+/**
+ * The form's own wording for a trigger, an action and a template. The shared text is also what the agents' tools say,
+ * so it stays as it is; a reader of the form gets these shorter lines. Anything not listed shows the shared text.
+ */
+export const TRIGGER_HINT: Partial<Record<HookTrigger, string>> = {
+  "task.finished":
+    "The agent finished a turn and stopped: idle, PR ready or done. Turns that only another agent's message started, and that changed nothing, are skipped unless you include them in Filters.",
+  "task.pr_ready": "A turn ended with an open PR. Fires once per commit; merged and closed PRs are skipped.",
+  "task.needs_input": "The agent asked you a question and is waiting for your answer.",
+  "schedule.run_finished": "A project schedule's run ended. Runs with nothing to do are skipped unless you include them in Filters.",
+}
+export const ACTION_HINT: Partial<Record<HookAction, string>> = {
+  send_to_task: "Send the prompt to the same task. Its agent picks up where it left off.",
+}
+export const TEMPLATE_HINT: Partial<Record<HookTemplate, string>> = {
+  pr_merge: "Asks the agent to merge its PR once a turn ends with one open. Skips drafts and PRs labelled no-automerge.",
+}
+
+export const triggerHint = (t: HookTrigger) => TRIGGER_HINT[t] ?? TRIGGER_INFO[t].description
+export const actionHint = (a: HookAction) => ACTION_HINT[a] ?? ACTION_INFO[a].description
+export const templateHint = (t: Pick<HookTemplateView, "key" | "description">) => TEMPLATE_HINT[t.key] ?? t.description
+
+/** "{pr_url}: pull request URL": what a variable chip stands for, under the chips. */
+export function variableHint(v: HookVariable): string {
+  const info = VARIABLE_INFO[v]
+  return `{${v}}: ${info.charAt(0).toLowerCase()}${info.slice(1)}`
+}
+
+/**
+ * The closed Filters row in a line: "every task · skips draft PRs and turns other agents woke". A skip the draft
+ * includes again drops out of the sentence.
+ */
+export function filtersSummary(d: Pick<HookDraft, "trigger" | "includeDrafts" | "includeQuiet" | "includeAgentWakes">, filterCount: number): string {
+  const skips: string[] = []
+  if (!d.includeDrafts) skips.push("draft PRs")
+  if (d.trigger === "task.finished" && !d.includeAgentWakes) skips.push("turns other agents woke")
+  if (d.trigger === "schedule.run_finished" && !d.includeQuiet) skips.push("runs with nothing to do")
+  const scope = filterCount ? `${filterCount} set` : "every task"
+  return skips.length ? `${scope} · skips ${skips.join(" and ")}` : scope
+}
+
+/** The closed "Preview and limits" row in a line: "at most 3 fires per task · fires on its own turns too". */
+export function limitsSummary(d: Pick<HookDraft, "maxFiresPerTask" | "allowSelfTrigger">): string {
+  const max = d.maxFiresPerTask.trim()
+  const fires = max === "1" ? "at most 1 fire per task" : `at most ${max || "…"} fires per task`
+  return d.allowSelfTrigger ? `${fires} · fires on its own turns too` : fires
+}
 
 /** What POST /api/hooks takes (always with filters, from the editor). */
 export type HookInput = HookFields & { filters: HookFilters }

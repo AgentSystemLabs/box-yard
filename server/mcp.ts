@@ -44,6 +44,7 @@ import { NO_PICKS, type RunTargetPick, type TurnPicks } from "../shared/runTarge
 import { KEY_REF_HELP, labelPhrase, MACHINE_LIMITS, resolveRunsOn, THIS_COMPUTER, type MachineKeyRef, type MachineStatus } from "../shared/machines.js"
 import type { MachineActions } from "./machines/actions.js"
 import { AGENT_CLI_LABEL, AGENT_CLIS, cliForModel, type AgentCli } from "../shared/agentCli.js"
+import { MAX_MODEL_NAME, MODEL_NAME } from "../shared/models.js"
 import type { TaskContinuation } from "../shared/taskContinuation.js"
 import { TASK_PRIORITIES, byQueueOrder, type TaskPriority } from "../shared/priority.js"
 import fs from "node:fs"
@@ -176,8 +177,8 @@ const modelBase = z
   .string()
   .trim()
   .min(1)
-  .max(100)
-  .regex(/^[A-Za-z0-9._:#\[\]/-]+$/, "Model names have no spaces")
+  .max(MAX_MODEL_NAME)
+  .regex(MODEL_NAME, "Model names have no spaces")
   .optional()
 const modelSchema = modelBase.describe("A harness model id; omit it for the harness defaults (Task options)")
 const routingRuleBase = z.string().trim().min(1).max(120).optional()

@@ -130,11 +130,11 @@ function ImageRow({ fid, status, form, set }: { fid: (k: string) => string; stat
     <Row
       id={fid("runpod-image")}
       label="Pod image"
-      help={
+      help="Pods start from RunPod's stock PyTorch image and install the agent tools (Node, Claude Code, gh, Chrome) in about a minute each time."
+      more={
         <>
-          Pods start from RunPod's stock PyTorch image and install the agent tools (Node, Claude Code, gh, Chrome) in about a minute each time. Build Box Yard's own image once and pods are ready
-          in seconds: it's built from this repo's <code className="font-mono">runpod/</code> folder with Docker on this computer and pushed to a registry repository of yours, which must be
-          public so RunPod can pull it. It holds only public tools, never a key. Log in first with <code className="font-mono">docker login</code>.
+          Build Box Yard's own image once and pods are ready in seconds: it's built from this repo's <code className="font-mono">runpod/</code> folder with Docker on this computer and pushed to a
+          registry repository of yours, which must be public so RunPod can pull it. It holds only public tools, never a key. Log in first with <code className="font-mono">docker login</code>.
         </>
       }
     >
@@ -192,7 +192,7 @@ function GpuRow({ fid, status, form, set }: { fid: (k: string) => string; status
       <Row
         id={fid("runpod-gpus")}
         label="GPU types"
-        help="Tried in this order when a pod starts; the first one in stock within the caps wins. A project can pick its own (Project › Settings › Boxes). For browser and WebGL game testing an RTX A4000, RTX 4000 Ada or (Community) RTX 3070 is plenty. The datacenter is picked for the best stock of these, unless you name one (a project's volume pins its pod #1 to the volume's datacenter)."
+        help="Tried in this order when a pod starts; the first one in stock within the caps wins." more="A project can pick its own (Project › Settings › Boxes). For browser and WebGL game testing an RTX A4000, RTX 4000 Ada or (Community) RTX 3070 is plenty. The datacenter is picked for the best stock of these, unless you name one (a project's volume pins its pod #1 to the volume's datacenter)."
       >
         <GpuTypePicker id={fid("runpod-gpus")} value={form.gpuTypes} onChange={(gpuTypes) => set({ gpuTypes })} cloud={form.cloud} enabled={status.apiKey} />
         <input
@@ -251,7 +251,7 @@ function PodsRow({ status }: { status: RunPodStatus }) {
   return (
     <Row
       label="Pods"
-      help={`Running now, at ${usd(total)}/hr together. A project gets up to its Max boxes pods, within the caps; only its pod #1 mounts its network volume. Each pod stops after ${status.settings.idleMinutes} idle minutes; Keep warm holds it up between follow-ups. Terminate runs the delete safety check, archives every workspace first and keeps the network volume; it asks before stopping a running agent.`}
+      help={`Running now, at ${usd(total)}/hr together.`} more={`A project gets up to its Max boxes pods, within the caps; only its pod #1 mounts its network volume. Each pod stops after ${status.settings.idleMinutes} idle minutes; Keep warm holds it up between follow-ups. Terminate runs the delete safety check, archives every workspace first and keeps the network volume; it asks before stopping a running agent.`}
     >
       {!status.pods.length ? (
         <p className="text-xs text-zinc-500">No pods running.</p>

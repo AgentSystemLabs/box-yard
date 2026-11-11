@@ -2,11 +2,12 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every half rem from 8 to 36. */
+/* The composer row's fold widths: lib/composerRow.ts builds these class names at run time, every quarter rem from 8 to 36
+   (and the chips' labels, sr-only). */
 @source inline("@{min,max}-[{8..36}rem]/composer:hidden");
-@source inline("@{min,max}-[{8..35}.5rem]/composer:hidden");
+@source inline("@{min,max}-[{8..35}.{25,5,75}rem]/composer:hidden");
 @source inline("@max-[{8..36}rem]/composer:sr-only");
-@source inline("@max-[{8..35}.5rem]/composer:sr-only");
+@source inline("@max-[{8..35}.{25,5,75}rem]/composer:sr-only");
 
 /*
  * Type: Inter sets the whole UI (@fontsource-variable/inter, imported in main.tsx; index.html preloads its latin file,
@@ -165,6 +166,11 @@ body {
 :where(button, a, input, textarea, select, [tabindex]):focus-visible {
   outline: 2px solid var(--focus-ink);
   outline-offset: 2px;
+}
+
+/* The composer's indicator lies over its 1px border: one ring, not a gold line around a gray one. */
+[data-composer-box]:has(> div > [data-chat-composer]:focus) {
+  outline-offset: -1px;
 }
 
 /* The box supplies the textarea's indicator. Other composer controls keep their own outlines. */
@@ -353,15 +359,16 @@ body.resizing iframe {
 .settings-body input, .settings-body select, .settings-body textarea { max-width: 100%; }
 .settings-body [data-settings-category], .settings-body [data-settings-field] { min-width: 0; }
 .settings-searching [data-settings-category] { margin-bottom: 2rem; }
-.settings-searching [data-settings-context] { display: none; }
+.settings-searching [data-settings-context], .settings-searching [data-settings-description] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .settings-body *, .settings-body *::before, .settings-body *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+/* One footer row at any width: the draft's status takes what Discard (or Close) and Save leave, so they never move.
+   Only a save error gets a line of its own, above them. */
 .settings-dialog > footer { flex-flow: row wrap; align-items: center; }
 .settings-dialog > footer > button { width: auto; min-height: 44px; }
-.settings-dialog > footer > div { display: flex; width: auto; flex: 1 1 auto; flex-flow: row wrap; justify-content: flex-end; align-items: center; }
-.settings-dialog > footer > div > button { min-height: 44px; }
-.settings-dialog > footer [role=status], .settings-dialog > footer [role=alert] { flex: 1 0 100%; text-align: right; }
+.settings-dialog > footer > div { width: auto; min-width: 0; flex: 1 1 0; }
+.settings-dialog > footer > [role=alert] { flex: 1 0 100%; }
 
 .settings-dialog > header button { min-height: 44px; min-width: 44px; }
 
@@ -391,6 +398,7 @@ body.resizing iframe {
 .task-title-failed { color: var(--color-red-400); }
 :root:not(.dark) .task-title-failed { color: var(--color-red-500); }
 
-/* Match bars and legend swatches, including the selected day's tinted surface. */
+/* Match bars and legend swatches, including the selected day's tinted surface. On the light surface a series is its
+   own light colour where it has one (the token kinds), else a shade darker. */
 .usage-fill { background: var(--series-color); }
-:root:not(.dark) .usage-fill { background: color-mix(in srgb, var(--series-color) 85%, #18181b); }
+:root:not(.dark) .usage-fill { background: var(--series-light, color-mix(in srgb, var(--series-color) 85%, #18181b)); }

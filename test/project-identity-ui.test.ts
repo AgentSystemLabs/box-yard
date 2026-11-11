@@ -99,6 +99,13 @@ const submit = async () => {
   act(() => void save().closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })))
   await settle()
 }
+/** Save stays on with a field to fix, but sends nothing: it shows the Identity field instead. */
+const saveWaits = async () => {
+  expect($("project-settings-problem")).not.toBeNull()
+  await submit()
+  expect(requests.some((r) => r.method === "PATCH")).toBe(false)
+  expect(document.activeElement).toBe($("project-identity"))
+}
 
 describe("Project › Settings › Identity", () => {
   it("lists every identity with its account, and sends identityId only when it changed", async () => {
@@ -125,21 +132,21 @@ describe("Project › Settings › Identity", () => {
     expect(requests.find((r) => r.method === "PATCH")!.body).not.toHaveProperty("identityId")
   })
 
-  it("an identity that can't run on the project's runner says so, and Save waits", () => {
+  it("an identity that can't run on the project's runner says so, and Save waits", async () => {
     render(project())
     pick("idn_here")
     expect($("identity-misfit")!.textContent).toBe("The Signed here identity runs only on this computer: pick another runner or identity.")
-    expect(save().disabled).toBe(true)
+    await saveWaits()
     pick(DEFAULT_IDENTITY_ID)
     expect($("identity-misfit")).toBeNull()
   })
 
-  it("a GPG identity requires the local runner even when its runner list allows every runner", () => {
+  it("a GPG identity requires the local runner even when its runner list allows every runner", async () => {
     const gpg = identity("idn_gpg", "GPG", { signing: { kind: "gpg", format: "openpgp", publicKey: "0123456789ABCDEF0123456789ABCDEF01234567", fingerprint: "0123456789ABCDEF0123456789ABCDEF01234567", program: null, requireSigned: false, readable: true } })
     render(project(), [], [...IDENTITIES, gpg])
     pick("idn_gpg")
     expect($("identity-misfit")!.textContent).toContain("requires the local runner")
-    expect(save().disabled).toBe(true)
+    await saveWaits()
   })
 
   it("an identity that shows the Coordinator status only says so", () => {
@@ -150,17 +157,17 @@ describe("Project › Settings › Identity", () => {
     expect(save().disabled).toBe(false)
   })
 
-  it("a running turn keeps the identity until it rests", () => {
+  it("a running turn keeps the identity until it rests", async () => {
     render(project(), [{ id: "task_1", projectId: "prj_app", title: "busy", status: "working" }])
     expect($("identity-busy")).toBeNull()
     pick("idn_acme")
     expect($("identity-busy")!.textContent).toContain('"busy" is running.')
-    expect(save().disabled).toBe(true)
+    await saveWaits()
   })
 })
 
 // Project settings › Identity / Claude login (the dialog's form on its own): which identity it uses, loaded from
-// /api/identities, picked and saved with PATCH /api/projects/:id. The form closes only once the server has the save.
+// /api/identities, picked and saved with PATCH /api/projects/:id. The form says Saved only once the server has the save.
 describe("Project settings › Identity / Claude login", () => {
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
   const setup = (claude: { state: "set" | "unset"; using: "claudeOauthToken" | "anthropicApiKey" | null }, github: "set" | "unset" = "set") => ({ upstash: { available: true }, credentials: {}, claude, github: { state: github } })
@@ -256,7 +263,7 @@ describe("Project settings › Identity / Claude login", () => {
     expect(requests.filter((r) => r.url === "/api/identities")).toHaveLength(2)
   })
 
-  it("Save waits for the server before closing, and sends only the identity", async () => {
+  it("Save waits for the server before saying Saved, and sends only the identity", async () => {
     let answer!: (r: Response) => void
     vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
       requests.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined })
@@ -268,13 +275,18 @@ describe("Project settings › Identity / Claude login", () => {
     const patch = requests.find((r) => r.method === "PATCH")!
     expect(patch.url).toBe("/api/projects/prj_app")
     expect(patch.body).toMatchObject({ identityId: "idn_acme" })
-    // On its way: still open, locked, and Save says so.
+    // On its way: still open, locked, and Save says so (busy, with its spinner).
     expect(onDone).not.toHaveBeenCalled()
-    expect(save().textContent).toBe("Saving…")
+    expect(save().disabled).toBe(true)
+    expect(save().querySelector(".animate-spin")).not.toBeNull()
+    expect(save().closest("form")!.getAttribute("aria-busy")).toBe("true")
     expect(save().closest("fieldset")!.disabled).toBe(true)
+    expect($("project-settings-saved")).toBeNull()
     answer(json({ ...project(), identityId: "idn_acme" }))
     await settle()
-    expect(onDone).toHaveBeenCalledTimes(1)
+    // Saved: it stays open and says so.
+    expect(onDone).not.toHaveBeenCalled()
+    expect($("project-settings-saved")!.textContent).toContain("Saved")
     expect(cachedIdentity()).toBe("idn_acme")
   })
 

@@ -86,6 +86,7 @@ import { captainStatePath, type BootPath, type BootPayload } from "../shared/boo
 import { projectDockerPatch } from "./docker/settings.js"
 import { prTasks } from "./prTasks.js"
 import { BOX_SIZES, EFFORTS, PROJECT_BOX_LIMITS, type Health } from "../shared/types.js"
+import { serverCliProblems } from "../shared/claudeCli.js"
 import { BOX_ACTORS, BOX_EVENT_TYPES, type BoxActorKind, type BoxEventType } from "../shared/boxHistory.js"
 import { CLOUD_PROVIDERS, MAX_TTS_CHARS } from "../shared/tts.js"
 
@@ -197,6 +198,7 @@ const schemas = {
     ...projectNotesBudget,
   }),
   projectOrder: z.object({ ids: z.array(z.string().max(64)).max(1000) }).strict(),
+  taskOrder: z.object({ parentTaskId: z.string().max(64).nullable().optional(), ids: z.array(z.string().max(64)).max(1000), auto: z.boolean().optional() }).strict(),
   projectPatch: z.object({
     name: z.string().trim().min(1).max(80).optional(),
     description: z.string().max(4000).optional(),
@@ -1003,6 +1005,9 @@ export function createBoxYard(
     const coordinatorCli = settings.get().orchestratorCli
     const problems = configProblems({ ...c, ...settings.credentials.values() }, { claudeLogin: setup.localCheck()?.claudeLogin === true, codexLogin: hasOwnCodexLogin(), coordinatorCli })
     if (coordinatorCli === "claude" && !claudeVersion) problems.push(`The claude CLI (${c.claudeBin}) was not found for the Coordinator. Install it: npm i -g @anthropic-ai/claude-code`)
+    // The Coordinator and Captains run on the server's own claude: one too old for their model runs it in a small window.
+    const { orchestratorModel, captainCli, captainModel } = settings.get()
+    problems.push(...serverCliProblems(claudeVersion, [{ who: "the Coordinator's", model: coordinatorCli === "claude" ? orchestratorModel : null }, { who: "Captains'", model: captainCli === "claude" ? captainModel : null }]))
     if (coordinatorCli === "codex" && !codexVersion) problems.push(`The Coordinator runs on Codex, but the codex CLI (${c.codexBin}) was not found. Install it: npm i -g @openai/codex`)
     if (tasks.boxError) problems.push(tasks.boxError)
     return {
@@ -1072,6 +1077,13 @@ export function createBoxYard(
     const ids = projects.map((p) => p.id)
     hub.broadcast({ type: "projects.order", ids })
     res.json({ ids })
+  })
+  // The owner's order for one list of the sidebar: a project's tasks, or one task's sub-tasks (Store.orderTasks). Each
+  // task whose place changed goes out as its own event, which the stream sends as a one-field patch.
+  api.put("/projects/:id/tasks/order", (req, res) => {
+    const changed = store.orderTasks(req.params.id!, parse(schemas.taskOrder, req.body))
+    for (const task of changed) hub.broadcast({ type: "task", task })
+    res.json({ changed: changed.map((t) => t.id) })
   })
   api.patch("/projects/:id", (req, res) => {
     const body = parse(schemas.projectPatch, req.body)
@@ -1302,6 +1314,12 @@ export function createBoxYard(
     if (!store.getProject(id)) throw new BadRequestError("No such project")
     res.json(captains.state(id))
   })
+  // The Captain's cost breakdown (the $ in its header, shared/spendBreakdown.ts).
+  api.get("/projects/:id/captain/usage", (req, res) => {
+    const id = req.params.id!
+    if (!store.getProject(id)) throw new BadRequestError("No such project")
+    res.json(store.captainSpend(id))
+  })
   // Every Captain's chat as it opens, for the web app's prefetch after its first paint (server/captainRecent.ts).
   api.get("/captains/recent", async (req, res) => {
     const recent = recentCaptains(
@@ -1380,6 +1398,12 @@ export function createBoxYard(
     const task = store.getTask(req.params.id!)
     if (!task) return void res.status(404).json({ error: "Task not found" })
     res.json(task)
+  })
+  // The task's cost breakdown (the $ in its header, shared/spendBreakdown.ts): its own runs, its subtasks' apart.
+  api.get("/tasks/:id/usage", (req, res) => {
+    const spend = store.taskSpend(req.params.id!)
+    if (!spend) return void res.status(404).json({ error: "Task not found" })
+    res.json(spend)
   })
   api.get("/tasks/:id/messages", (req, res) => {
     res.json(store.listTaskMessages(req.params.id!, 1000))

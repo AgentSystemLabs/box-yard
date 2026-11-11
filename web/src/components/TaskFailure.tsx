@@ -22,6 +22,7 @@ const ICON: Record<FailureKind, LucideIcon> = {
   memory: MemoryStick,
   api_down: CloudOff,
   start_timeout: Timer,
+  old_cli: TriangleAlert,
   interrupted: Unplug,
   not_started: TriangleAlert,
   start_failed: TriangleAlert,

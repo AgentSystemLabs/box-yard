@@ -98,7 +98,7 @@ describe("cloud meter", () => {
     expect(chip().getAttribute("aria-label")).toBe(meterLabel(status()))
     expect(chip().getAttribute("aria-label")).toBe("Cloud boxes: 1 running · 1 idle · $0.42/h now · $3.10 of $10 today's cloud limit")
     // Every tier is in the DOM; the header's width (a container query) shows one.
-    expect([...chip().querySelectorAll("span")].map((e) => e.textContent)).toEqual(["$3.10 of $10 · 2 boxes · $0.42/h", "$3.10 of $10 · 2 boxes", "$3.10/$10 · 2"])
+    expect([...chip().querySelectorAll("span")].map((e) => e.textContent)).toEqual(["Today $3.10 of $10 · 2 boxes · $0.42/h", "Today $3.10 of $10 · 2 boxes", "Today $3.10 of $10"])
     act(() => chip().click())
     expect(sheet()).not.toBeNull()
     const rows = [...document.querySelectorAll("[data-testid=cloud-box]")].map((r) => r.textContent)
@@ -106,7 +106,7 @@ describe("cloud meter", () => {
     expect(rows[1]).toContain("Idle, deleted in 12 min")
     expect(document.querySelector("[role=meter]")?.getAttribute("aria-valuenow")).toBe("3.1")
     expect(sheet()!.textContent).toContain("31% used · $6.90 left until midnight")
-    expect(sheet()!.textContent).toContain("up to 50 boxes at once")
+    expect(sheet()!.textContent).toContain("Up to 50 boxes at once")
     expect(raiseButton()).toBeNull() // nothing to raise at 31%
   })
 
@@ -138,7 +138,15 @@ describe("cloud meter", () => {
     expect(chip().textContent).toContain("$3.10 today · 2 boxes")
     act(() => chip().click())
     expect(sheet()!.textContent).toContain("No daily cloud limit")
-    expect(sheet()!.textContent).toContain("No boxes right now")
+    // Boxes up but none listed yet: the counts say so.
+    expect(sheet()!.textContent).toContain("1 running · 1 idle")
+    expect(document.querySelector("[data-testid=cloud-no-boxes]")).toBeNull()
+  })
+
+  it("with nothing up and nothing costing, its sheet says there are no boxes", () => {
+    render(createElement(CloudMeter, { variant: "inline" }), { ...status({ dailyLimitUsd: 0, raiseToUsd: null }, []), hourlyUsd: 0, boxes: { running: 0, idle: 0, creating: 0, total: 0 } })
+    act(() => chip().click())
+    expect(document.querySelector("[data-testid=cloud-no-boxes]")!.textContent).toContain("No boxes right now")
   })
 })
 
@@ -157,7 +165,7 @@ describe("new boxes past the hour's free ones", () => {
     expect(requests).toContainEqual({ method: "POST", url: "/api/cloud/allow-boxes" })
     expect(chip().dataset.state).toBe("ok")
     expect(document.querySelector("[data-testid=cloud-fanout]")).toBeNull()
-    expect(sheet()!.textContent).toContain("More than 15 new boxes an hour allowed until")
+    expect(sheet()!.textContent).toContain("more than 15 new boxes an hour allowed until")
   })
 
   it("offers Allow more boxes on a task waiting for them", async () => {

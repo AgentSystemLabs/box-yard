@@ -11,7 +11,7 @@ import { useDraft } from "../lib/settingsDraft"
 import { formatBytes } from "../../../shared/disk"
 import { DOCKER_LIMITS, DOCKER_SIZES, dockerSizeOf, type DockerContainerInfo, type DockerImageBuild, type DockerSettings, type DockerStatus } from "../../../shared/docker"
 import { BoxActionDialog } from "./BoxActionDialog"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { SizeCards } from "./SizeCards"
 import { Button, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
@@ -147,7 +147,7 @@ function EngineRow({ status, memoryMb }: { status: DockerStatus; memoryMb: numbe
   return (
     <Row
       label="Docker"
-      help="Projects whose Runs on is Docker container get one container each on this computer, with only their workspace volume mounted (no folder of this computer, no Docker socket). Agents get the GitHub and Claude credentials from Settings › Credentials inside the container only; they're never in the image. When Docker isn't running, those projects' tasks wait and say why: they never run somewhere else."
+      help="Projects whose Runs on is Docker container get one container each on this computer, with only their workspace volume mounted (no folder of this computer, no Docker socket)." more={<>Agents get the GitHub and Claude credentials from <SettingsLink section="credentials">Settings › Credentials</SettingsLink> inside the container only; they're never in the image. When Docker isn't running, those projects' tasks wait and say why: they never run somewhere else.</>}
     >
       {d.error ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-200" data-testid="docker-problem">
@@ -185,10 +185,10 @@ function ImageRow({ fid, status, form, set }: { fid: (k: string) => string; stat
       help={
         <>
           Containers start from Box Yard's own image, built on this computer from this repo's <code className="font-mono">docker/Dockerfile</code> (Debian with Node, git, gh, Claude Code, build
-          tools and Chromium). It's built again when that file changes, and never pushed anywhere. Or name an image of yours (it needs bash, node, git and claude). A project can pick its own image or
-          Dockerfile in its Settings › Runs on.
+          tools and Chromium).
         </>
       }
+      more="It's built again when that file changes, and never pushed anywhere. Or name an image of yours (it needs bash, node, git and claude). A project can pick its own image or Dockerfile in its Settings › Runs on."
     >
       <input
         id={fid("docker-image")}
@@ -233,7 +233,7 @@ function ContainersRow({ status }: { status: DockerStatus }) {
   return (
     <Row
       label="Containers"
-      help={`One per Docker project, made by its first task. Stop keeps its volume, so the next task starts it again where it left off; containers also stop after ${status.settings.idleMinutes || "no"} idle minutes. Delete archives every workspace first, then removes the container and its volume.`}
+      help="One per Docker project, made by its first task." more={`Stop keeps its volume, so the next task starts it again where it left off; containers also stop after ${status.settings.idleMinutes || "no"} idle minutes. Delete archives every workspace first, then removes the container and its volume.`}
     >
       {!status.containers.length ? (
         <p className="text-xs text-zinc-500">{status.docker.error ? "Docker isn't running, so none can be listed." : "None yet."}</p>

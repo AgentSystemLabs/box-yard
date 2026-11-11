@@ -183,3 +183,20 @@ export const isOpenCodeModel = (model: string | null | undefined): boolean => Bo
 
 /** Effort controls belong only to harnesses that implement Box Yard's generic effort levels. */
 export const hasSeparateEffort = (cli: AgentCli): boolean => cli === "claude" || cli === "codex"
+
+/**
+ * Why `cli` can't take these model and effort pins, or null (continue_task, spawn_subtasks). A model another CLI owns
+ * doesn't run on it; Cursor runs other labs' models under its own ids, so a Cursor pin must be one only Cursor has or
+ * one its catalog (`knownCursor`) lists. Cursor's ids carry their effort, OpenCode takes provider/model#variant with no
+ * generic effort, and Ultra is Codex's alone.
+ */
+export function pinProblem(cli: AgentCli, model: string | null | undefined, effort: string | null | undefined, knownCursor?: (id: string) => boolean): string | null {
+  const owner = cliForModel(model)
+  if (model && owner && cli !== "cursor" && owner !== cli) return `Model ${model} cannot run on ${AGENT_CLI_LABEL[cli]}. Choose a compatible model or use its defaults.`
+  if (model && cli === "cursor" && !cursorModel(model, "", knownCursor)) return `Model ${model} is not a Cursor model in its catalog. Choose a Cursor model or use its defaults.`
+  if (effort === "ultra" && cli !== "codex") return "Ultra effort is only available on Codex."
+  if (cli === "opencode" && model && !isOpenCodeModel(model)) return "OpenCode models use provider/model or provider/model#variant."
+  if (cli === "opencode" && effort) return "OpenCode uses provider-specific variants: omit effort and use provider/model#variant."
+  if (cli === "cursor" && effort) return "Cursor's effort is part of its model id; omit effort."
+  return null
+}
