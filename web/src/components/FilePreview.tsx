@@ -3,7 +3,7 @@
 // links open it through <FileLink> and lib/preview.ts.
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { useSearchParams } from "wouter"
-import { Check, ChevronLeft, ChevronRight, Code, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, ZoomIn, ZoomOut } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, WrapText, ZoomIn, ZoomOut } from "lucide-react"
 import { useArtifacts } from "../lib/queries"
 import {
   CSV_ROW_LIMIT,
@@ -25,6 +25,7 @@ import { toast } from "../lib/toast"
 import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, maxScale, pinchView, swipeAction, zoomAt, zoomStep, type Point, type Tap, type View } from "../lib/imageGestures"
 import { DismissButton, Modal, type ModalSize } from "./Modal"
 import { Loading } from "./Loading"
+import { MessageMenu, type MenuItem } from "./MessageActions"
 import { formatSize } from "./Attachments"
 import { isTyping } from "./TaskFilters"
 import { Markdown, NewTabLink, cx } from "./ui"
@@ -49,7 +50,7 @@ export function FilePreviewHost() {
   if (!item) {
     return (
       <Modal size="sm" title="Preview" onClose={closePreview}>
-        {artifacts.isLoading ? <FileLoading /> : <Problem message="This file doesn't exist anymore." />}
+        {artifacts.isLoading ? <Loading kind="rows" label="Loading file" count={1} /> : <Problem message="This file doesn't exist anymore." />}
       </Modal>
     )
   }
@@ -88,10 +89,20 @@ const SIZE: Record<PreviewKind, ModalSize> = {
 /** Kinds that fill a fixed-height panel; the rest grow with their content up to the viewport. */
 const TALL: PreviewKind[] = ["image", "html", "pdf"]
 
+/** Wrap long lines of text or code: on, off, or (null) only where the frame is narrow, until the button says otherwise. */
+type Wrap = boolean | null
+
+/** What Copy link or Copy contents came to, shown for a moment. */
+type Flash = { what: "link" | "contents"; ok: boolean }
+const FLASH_TEXT = { link: ["Link copied", "Couldn't copy the link"], contents: ["Copied", "Couldn't copy the file"] } as const
+
 /**
  * One file, or one of a gallery (`position`: where it is, of how many; `noun`: what the gallery steps through).
- * A gallery keeps one frame for every kind, so stepping from a screenshot to a log never resizes the dialog: an image
- * has an arrow on each side, any other kind a pager under it, where nothing covers the text.
+ * A gallery keeps one frame and one pager (under the file, where nothing covers it) for every kind, so stepping from a
+ * screenshot to a log never resizes the dialog or moves the buttons, and the pressed one keeps the focus.
+ * Wide, the actions sit in the header. Narrow (a phone: the frame's own width, `@container/preview`), the header is the
+ * title and Close, and one bar under the file has the pager on the left and the actions on the right, the rarer ones
+ * in its ⋯ menu.
  */
 function FilePreview({ item, position, noun }: { item: PreviewItem; position: [number, number] | null; noun: "image" | "file" }) {
   const kind = previewKind(item)
@@ -99,14 +110,24 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const name = item.name || fileNameOf(item.url)
   const heading = item.title || name
   const [raw, setRaw] = useState(false)
-  // The image owns its zoom (ImageView). This copy only draws the button's state and hides the arrows; the button
-  // and Z ask for a toggle through the ref.
+  // The image owns its zoom (ImageView). This copy only draws the button's state; the button and Z ask for a toggle
+  // through the ref.
   const [zoomed, setZoomed] = useState(false)
   const toggleZoom = useRef<(() => void) | null>(null)
+  // Kept from file to file, unlike Raw: someone reading logs wants every one of them wrapped.
+  const [wrap, setWrap] = useState<Wrap>(null)
+  const [text, setText] = useState<string | null>(null)
+  const [flash, setFlash] = useState<Flash | null>(null)
   useEffect(() => {
     setRaw(false)
     setZoomed(false)
+    setFlash(null)
   }, [item.url])
+  useEffect(() => {
+    if (!flash) return
+    const t = setTimeout(() => setFlash(null), flash.ok ? 1500 : 4000)
+    return () => clearTimeout(t)
+  }, [flash])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -123,130 +144,184 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
     return () => window.removeEventListener("keydown", onKey)
   }, [image, position])
 
-  const place = position ? `${position[0]} of ${position[1]}` : null
-  // An image has no pager row, so its place in the gallery goes here.
-  const details = [image ? place : null, heading !== name ? name : null, item.size ? formatSize(item.size) : null].filter(Boolean).join(" · ")
+  // copyText also works over plain http on the LAN, where navigator.clipboard doesn't exist.
+  const copy = async (what: Flash["what"]) => {
+    const ok = await copyText(what === "link" ? new URL(item.url, window.location.origin).href : (text ?? ""))
+    setFlash({ what, ok })
+    if (!ok) toast.error(FLASH_TEXT[what][1], "The browser blocked clipboard access.")
+  }
+  const copied = (what: Flash["what"]) => !!flash?.ok && flash.what === what
+
+  const details = [heading !== name ? name : null, item.size ? formatSize(item.size) : null].filter(Boolean).join(" · ")
+  const hasRaw = kind === "markdown" || kind === "json" || kind === "csv"
+  /** Lines of monospace text are showing (CodeView), so Wrap lines applies. */
+  const code = kind === "text" || kind === "json" || (raw && hasRaw)
+  // With no choice made yet, lines wrap where the frame is narrow: each layout's own control says so.
+  const wrapWide = wrap ?? false
+  const wrapNarrow = wrap ?? true
+
+  /** Switches the view, so it names the one it goes to. `words`: with the name beside the icon, where there's room. */
+  const rawToggle = (words: boolean) =>
+    hasRaw && (
+      <ToolButton label={raw ? (kind === "csv" ? "Show table" : kind === "json" ? "Show formatted" : "Show rendered") : "Show raw"} onClick={() => setRaw((r) => !r)}>
+        {raw ? <Eye className="h-4 w-4" /> : <Code className="h-4 w-4" />}
+        {words && (raw ? (kind === "csv" ? "Table" : kind === "json" ? "Formatted" : "Rendered") : "Raw")}
+      </ToolButton>
+    )
+  const zoom = image && (
+    <ToolButton label={zoomed ? "Fit to screen (Z)" : "Zoom in (Z)"} active={zoomed} onClick={() => toggleZoom.current?.()}>
+      {zoomed ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
+    </ToolButton>
+  )
+  const download = (
+    <a href={item.url} download={name} className={TOOL} title="Download" aria-label="Download">
+      <Download className="h-4 w-4" />
+    </a>
+  )
+  const more: MenuItem[] = [
+    ...(code ? [{ icon: WrapText, label: wrapNarrow ? "Don't wrap lines" : "Wrap lines", run: () => setWrap(!wrapNarrow) }] : []),
+    ...(text !== null ? [{ icon: Copy, label: "Copy contents", run: () => void copy("contents") }] : []),
+    { icon: ExternalLink, label: "Open in new tab", run: () => void window.open(item.url, "_blank", "noopener") },
+    { icon: LinkIcon, label: "Copy link", run: () => void copy("link") },
+  ]
 
   return (
     <Modal
       size={position ? "full" : kind ? SIZE[kind] : "md"}
       label={name}
       onClose={closePreview}
+      // sm: is Modal's own switch from a phone's full screen to a dialog, so the dialog's height goes with it.
       className={cx((position || (kind && TALL.includes(kind))) && "sm:h-[85vh]", !position && kind && isTextKind(kind) && "sm:max-h-[85vh]")}
-      bodyClassName="relative flex min-h-0 flex-1 flex-col"
+      bodyClassName="@container/preview relative flex min-h-0 flex-1 flex-col"
     >
-      {/* Narrow (a phone): the title keeps the first row to itself, next to Close, and the actions take a second. */}
-      <header className="@container shrink-0 border-b border-zinc-900">
-        <div className="flex flex-wrap items-center gap-x-1 py-2 pr-2 pl-4 @md:min-h-14 @md:flex-nowrap @md:gap-x-2 sm:py-2.5 sm:pr-3 sm:pl-5">
-          <div className="min-w-0 flex-1 basis-[calc(100%-3.5rem)] @md:basis-0">
-            <h2 className="line-clamp-2 text-sm font-semibold wrap-anywhere text-zinc-50" title={heading}>
-              {heading}
-            </h2>
-            {details && (
-              <p className="line-clamp-2 text-xs wrap-anywhere text-zinc-500" title={name}>
-                {details}
-              </p>
-            )}
-          </div>
-          <div className="order-last flex w-full items-center justify-end gap-1 @md:order-none @md:w-auto @md:gap-2">
-            {(kind === "markdown" || kind === "json" || kind === "csv") && (
-              <ToolButton label={raw ? (kind === "csv" ? "Show table" : kind === "json" ? "Show formatted" : "Show rendered") : "Show raw"} active={raw} onClick={() => setRaw((r) => !r)}>
-                {raw ? <Eye className="h-4 w-4" /> : <Code className="h-4 w-4" />}
-                <span className="hidden sm:inline">Raw</span>
-              </ToolButton>
-            )}
-            {image && (
-              <ToolButton label={zoomed ? "Fit to screen (Z)" : "Zoom in (Z)"} active={zoomed} onClick={() => toggleZoom.current?.()}>
-                {zoomed ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
-              </ToolButton>
-            )}
-            <FileActions key={item.url} url={item.url} name={name} />
-          </div>
-          <DismissButton kind="close" onClick={closePreview} />
+      <header className="flex shrink-0 items-center gap-1 border-b border-zinc-900 py-2 pr-2 pl-4 @[30rem]/preview:min-h-14 @[30rem]/preview:gap-2 @[30rem]/preview:pr-3 @[30rem]/preview:pl-5">
+        <div className="min-w-0 flex-1">
+          <h2 className="line-clamp-2 text-sm font-semibold wrap-anywhere text-zinc-50" title={heading}>
+            {heading}
+          </h2>
+          {details && (
+            <p className="line-clamp-2 text-xs wrap-anywhere text-zinc-500" title={name}>
+              {details}
+            </p>
+          )}
         </div>
+        <div className="flex shrink-0 items-center gap-2 @max-[30rem]/preview:hidden">
+          {rawToggle(true)}
+          {code && (
+            <ToolButton label="Wrap lines" title={wrapWide ? "Don't wrap lines" : "Wrap lines"} active={wrapWide} onClick={() => setWrap(!wrapWide)}>
+              <WrapText className="h-4 w-4" />
+            </ToolButton>
+          )}
+          {zoom}
+          {isTextKind(kind) && (
+            <ToolButton label={copied("contents") ? "Copied" : "Copy contents"} disabled={text === null} onClick={() => void copy("contents")}>
+              {copied("contents") ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+            </ToolButton>
+          )}
+          <NewTabLink href={item.url} mark={false} className={TOOL} title="Open in new tab" aria-label="Open in new tab">
+            <ExternalLink className="h-4 w-4" />
+          </NewTabLink>
+          {download}
+          <ToolButton label={copied("link") ? "Copied" : "Copy link"} onClick={() => void copy("link")}>
+            {copied("link") ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className="h-4 w-4" />}
+          </ToolButton>
+        </div>
+        <DismissButton kind="close" onClick={closePreview} />
       </header>
-      <PreviewBody key={item.url} item={item} kind={kind} name={name} raw={raw} gallery={!!position} toggleZoom={toggleZoom} onZoom={setZoomed} onStep={position ? stepPreview : undefined} />
-      {/* A zoomed image pans under the pointer, so its arrows step aside: ←/→ still step. */}
-      {position && image && !zoomed && (
-        <>
-          <StepButton side="left" noun={noun} />
-          <StepButton side="right" noun={noun} />
-        </>
-      )}
-      {position && !image && (
-        <nav aria-label="Files" className="flex shrink-0 items-center justify-center gap-1 border-t border-zinc-900 px-2 py-1">
-          <StepButton side="left" noun={noun} inline />
-          <span className="min-w-16 text-center text-xs text-zinc-400 tabular-nums" aria-live="polite">
-            {place}
-          </span>
-          <StepButton side="right" noun={noun} inline />
-        </nav>
-      )}
+      <PreviewBody
+        key={item.url}
+        item={item}
+        kind={kind}
+        name={name}
+        raw={raw}
+        wrap={wrap}
+        gallery={!!position}
+        toggleZoom={toggleZoom}
+        onZoom={setZoomed}
+        onText={setText}
+        onStep={position ? stepPreview : undefined}
+      />
+      {/* Seen and announced either way, just over the bar: a toast would sit under this dialog. */}
+      <div className="relative h-0 shrink-0">
+        <p
+          role="status"
+          className={
+            flash
+              ? cx("pointer-events-none absolute bottom-2 left-1/2 z-20 -translate-x-1/2 rounded-md bg-zinc-800 px-2.5 py-1 text-xs font-medium whitespace-nowrap shadow-lg ring-1 ring-zinc-700", flash.ok ? "text-zinc-100" : "text-red-200")
+              : "sr-only"
+          }
+        >
+          {flash ? FLASH_TEXT[flash.what][flash.ok ? 0 : 1] : ""}
+        </p>
+      </div>
+      {/* Wide, only a gallery has this bar, for its pager. */}
+      <footer className={cx("flex shrink-0 items-center gap-1 border-t border-zinc-900 px-2 py-1", !position && "@[30rem]/preview:hidden")}>
+        {position && (
+          <nav aria-label="Files" className="flex items-center gap-1 @[30rem]/preview:mx-auto">
+            <StepButton side="left" noun={noun} />
+            <span className="min-w-12 text-center text-xs text-zinc-300 tabular-nums" aria-live="polite">
+              {position[0]} of {position[1]}
+            </span>
+            <StepButton side="right" noun={noun} />
+          </nav>
+        )}
+        <div className="ml-auto flex items-center gap-1 @[30rem]/preview:hidden">
+          {rawToggle(false)}
+          {zoom}
+          {download}
+          <MoreActions items={more} />
+        </div>
+      </footer>
     </Modal>
   )
 }
 
-function ToolButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick: () => void; children: ReactNode }) {
+/** A header or bar control: drawn 28px, 44px to a finger, whatever the window's width. */
+const TOOL =
+  "relative inline-flex min-h-7 min-w-7 shrink-0 items-center justify-center gap-1 rounded-md p-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+
+/** `active` makes it a toggle (aria-pressed); `title` is its tooltip when that differs from its name. */
+function ToolButton({ label, title = label, active, disabled, onClick, children }: { label: string; title?: string; active?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title={label}
+      disabled={disabled}
+      title={title}
       aria-label={label}
       aria-pressed={active}
-      className={cx(
-        "relative inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-md p-1.5 text-xs font-medium hover:bg-zinc-800 hover:text-zinc-100 sm:min-h-0 sm:min-w-0",
-        active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400",
-      )}
+      className={cx(TOOL, active && "bg-zinc-800 text-zinc-100", "disabled:text-zinc-700 disabled:hover:bg-transparent")}
     >
       {children}
     </button>
   )
 }
 
-const actionClass = "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 sm:min-h-0 sm:min-w-0"
-
-function FileActions({ url, name }: { url: string; name: string }) {
-  const [copied, setCopied] = useState<"copied" | "failed" | null>(null)
-  useEffect(() => {
-    if (!copied) return
-    const t = setTimeout(() => setCopied(null), copied === "failed" ? 4000 : 1500)
-    return () => clearTimeout(t)
-  }, [copied])
-  // copyText also works over plain http on the LAN, where navigator.clipboard doesn't exist.
-  const copy = async () => {
-    if (await copyText(new URL(url, window.location.origin).href)) return setCopied("copied")
-    setCopied("failed")
-    toast.error("Couldn't copy the link", "The browser blocked clipboard access.")
-  }
+/** The narrow bar's ⋯: the actions that don't fit it, as a menu over the dialog. */
+function MoreActions({ items }: { items: MenuItem[] }) {
+  const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
   return (
     <>
-      <NewTabLink href={url} mark={false} className={actionClass} title="Open in new tab" aria-label="Open in new tab">
-        <ExternalLink className="h-4 w-4" />
-      </NewTabLink>
-      <a href={url} download={name} className={actionClass} title="Download" aria-label="Download">
-        <Download className="h-4 w-4" />
-      </a>
-      <ToolButton label={copied === "copied" ? "Copied" : "Copy link"} onClick={() => void copy()}>
-        {copied === "copied" ? <Check className="h-4 w-4 text-emerald-400" /> : <LinkIcon className={cx("h-4 w-4", copied === "failed" && "text-red-400")} />}
-        {/* Announced either way. A failure is also shown here: the toast sits under this dialog. */}
-        <span
-          role="status"
-          className={
-            copied === "failed"
-              ? "pointer-events-none absolute top-full right-0 z-20 mt-1 rounded-md bg-zinc-800 px-2 py-1 text-[11px] font-medium whitespace-nowrap text-red-200 shadow-lg ring-1 ring-zinc-700"
-              : "sr-only"
-          }
-        >
-          {copied === "copied" ? "Link copied" : copied === "failed" ? "Couldn't copy the link" : ""}
-        </span>
-      </ToolButton>
+      <button
+        ref={button}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        title="More actions"
+        className={cx(TOOL, open && "bg-zinc-800 text-zinc-100")}
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open && <MessageMenu trigger={button} items={items} onClose={() => setOpen(false)} label="More actions" className="z-60!" />}
     </>
   )
 }
 
-/** Steps through the gallery: floating at an image's side, or `inline` in the pager row under any other kind. */
-function StepButton({ side, noun, inline = false }: { side: "left" | "right"; noun: "image" | "file"; inline?: boolean }) {
+/** Steps through the gallery, from the pager under the file. */
+function StepButton({ side, noun }: { side: "left" | "right"; noun: "image" | "file" }) {
   const Icon = side === "left" ? ChevronLeft : ChevronRight
   return (
     <button
@@ -254,24 +329,22 @@ function StepButton({ side, noun, inline = false }: { side: "left" | "right"; no
       onClick={() => stepPreview(side === "left" ? -1 : 1)}
       aria-label={side === "left" ? `Previous ${noun} (←)` : `Next ${noun} (→)`}
       title={side === "left" ? "Previous (←)" : "Next (→)"}
-      className={cx(
-        "grid h-11 w-11 shrink-0 place-items-center focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none",
-        inline
-          ? "rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50"
-          : "absolute top-1/2 z-10 rounded-full bg-zinc-950/70 text-zinc-300 shadow-lg ring-1 ring-zinc-800 backdrop-blur hover:bg-zinc-900 hover:text-zinc-50 sm:h-10 sm:w-10",
-        !inline && (side === "left" ? "left-3" : "right-3"),
-      )}
+      className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-50 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:h-11 pointer-coarse:w-11"
     >
       <Icon className="h-5 w-5" />
     </button>
   )
 }
 
-/** A file that is still loading: the shared skeleton, as lines of text. It holds the body's space and shows after 300 ms. */
-function FileLoading() {
+/**
+ * A file that is still loading: the shared skeleton, which holds its space and shows after 300 ms. Rows where text
+ * will be; `stage`: one block over the stage of an image or a page.
+ */
+function FileLoading({ stage = false }: { stage?: boolean }) {
+  if (stage) return <Loading kind="field" label="Loading file" className="absolute inset-4 h-auto! sm:h-auto!" />
   return (
-    <div className="min-w-0 flex-1 px-4 py-5 sm:px-6">
-      <Loading kind="chat" label="Loading file" className="mx-auto max-w-4xl" />
+    <div className="min-w-0 flex-1 px-4 py-5 @[30rem]/preview:px-6">
+      <Loading kind="rows" label="Loading file" className="mx-auto max-w-4xl" />
     </div>
   )
 }
@@ -295,20 +368,25 @@ function PreviewBody({
   kind,
   name,
   raw,
+  wrap,
   gallery,
   toggleZoom,
   onZoom,
+  onText,
   onStep,
 }: {
   item: PreviewItem
   kind: PreviewKind | null
   name: string
   raw: boolean
+  wrap: Wrap
   /** One of a gallery, whose frame has a fixed height: the content fills it. */
   gallery: boolean
   /** Where the image puts its zoom toggle, for the header's button and Z. */
   toggleZoom: ZoomToggle
   onZoom: (z: boolean) => void
+  /** Told a text file's contents once they load (null until then), for Copy contents. */
+  onText: (text: string | null) => void
   /** Steps through the gallery, when there is one. */
   onStep?: (delta: number) => void
 }) {
@@ -329,7 +407,7 @@ function PreviewBody({
     case "json":
     case "csv":
     case "text":
-      return <TextPreview item={item} kind={kind} raw={raw} />
+      return <TextPreview item={item} kind={kind} raw={raw} wrap={wrap} onText={onText} />
     default:
       return <Problem message="This file type can't be previewed." url={item.url} />
   }
@@ -551,9 +629,7 @@ function ImageView({
       )}
     >
       {status === "loading" && (
-        <div className="absolute inset-0 flex">
-          <FileLoading />
-        </div>
+        <FileLoading stage />
       )}
       {status === "error" ? (
         <Problem message="Couldn't load this image." url={url} />
@@ -580,8 +656,8 @@ function FrameView({ url, name, sandbox }: { url: string; name: string; sandbox?
   return (
     <div className="relative min-h-0 flex-1 bg-white">
       {!loaded && (
-        <div className="absolute inset-0 flex bg-zinc-950">
-          <FileLoading />
+        <div className="absolute inset-0 bg-zinc-950">
+          <FileLoading stage />
         </div>
       )}
       <iframe src={url} title={name} sandbox={sandbox} onLoad={() => setLoaded(true)} className="h-full w-full border-0" />
@@ -634,8 +710,13 @@ function useFileText(url: string, size?: number): TextState {
   return state
 }
 
-function TextPreview({ item, kind, raw }: { item: PreviewItem; kind: "markdown" | "json" | "csv" | "text"; raw: boolean }) {
+function TextPreview({ item, kind, raw, wrap, onText }: { item: PreviewItem; kind: "markdown" | "json" | "csv" | "text"; raw: boolean; wrap: Wrap; onText: (text: string | null) => void }) {
   const file = useFileText(item.url, item.size)
+  const loaded = file.status === "ready" ? file.text : null
+  useEffect(() => {
+    onText(loaded)
+    return () => onText(null)
+  }, [loaded, onText])
   if (file.status === "loading") return <FileLoading />
   if (file.status === "error") return <Problem message={file.message} url={item.url} />
   if (file.status === "too-large")
@@ -643,7 +724,7 @@ function TextPreview({ item, kind, raw }: { item: PreviewItem; kind: "markdown" 
   const { text } = file
   if (!raw && kind === "markdown")
     return (
-      <div className="prose-doc scroll-thin min-h-0 flex-1 overflow-auto px-4 py-5 text-sm text-zinc-200 sm:px-6">
+      <div className="prose-doc scroll-thin min-h-0 flex-1 overflow-auto px-4 py-5 text-sm text-zinc-200 @[30rem]/preview:px-6">
         {/* A readable column, centred in a gallery's wide frame. */}
         <div className="mx-auto max-w-4xl">
           <Markdown>{text}</Markdown>
@@ -653,22 +734,44 @@ function TextPreview({ item, kind, raw }: { item: PreviewItem; kind: "markdown" 
   if (!raw && kind === "csv") return <CsvTable text={text} tsv={/\.tsv$/i.test(item.name || item.url)} />
   if (!raw && kind === "json") {
     const pretty = prettyJson(text)
-    if (pretty !== null) return <CodeView text={pretty} />
-    return <CodeView text={text} note="This isn't valid JSON, so it's shown as is." />
+    if (pretty !== null) return <CodeView text={pretty} wrap={wrap} />
+    return <CodeView text={text} wrap={wrap} note="This isn't valid JSON, so it's shown as is." />
   }
-  return <CodeView text={text} />
+  return <CodeView text={text} wrap={wrap} />
 }
 
-/** Monospace text with a line-number gutter. Two text nodes, so even a 2 MB log renders quickly. */
-function CodeView({ text, note }: { text: string; note?: string }) {
+/**
+ * Monospace text with a line-number gutter. Two text nodes, so even a 2 MB log renders quickly. Wrapped, long lines
+ * fold instead of scrolling sideways, without the gutter (its numbers would no longer line up). `wrap` null: wrapped
+ * only where the frame is narrow.
+ */
+function CodeView({ text, note, wrap }: { text: string; note?: string; wrap: Wrap }) {
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-auto bg-zinc-950">
       {note && <div className="border-b border-zinc-900 px-4 py-2 text-xs text-amber-300/80">{note}</div>}
-      <div className="flex w-max min-w-full font-mono text-xs leading-5">
-        <pre aria-hidden className="sticky left-0 shrink-0 border-r border-zinc-900 bg-zinc-950 py-3 pr-3 pl-4 text-right text-zinc-600 select-none">
-          {lineNumbers(text)}
+      <div
+        className={cx(
+          "flex font-mono text-xs leading-5 @3xl/preview:text-[13px]",
+          wrap === true ? "w-full" : wrap === false ? "w-max min-w-full" : "w-full @[30rem]/preview:w-max @[30rem]/preview:min-w-full",
+        )}
+      >
+        {wrap !== true && (
+          <pre aria-hidden className={cx("sticky left-0 shrink-0 border-r border-zinc-900 bg-zinc-950 py-3 pr-3 pl-4 text-right text-zinc-600 select-none", wrap === null && "@max-[30rem]/preview:hidden")}>
+            {lineNumbers(text)}
+          </pre>
+        )}
+        <pre
+          className={cx(
+            "py-3 pl-4 text-zinc-200",
+            wrap === true
+              ? "min-w-0 flex-1 pr-4 wrap-anywhere whitespace-pre-wrap"
+              : wrap === false
+                ? "pr-6"
+                : "pr-6 @max-[30rem]/preview:min-w-0 @max-[30rem]/preview:flex-1 @max-[30rem]/preview:pr-4 @max-[30rem]/preview:wrap-anywhere @max-[30rem]/preview:whitespace-pre-wrap",
+          )}
+        >
+          {text}
         </pre>
-        <pre className="py-3 pr-6 pl-4 text-zinc-200">{text}</pre>
       </div>
     </div>
   )
