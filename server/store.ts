@@ -89,6 +89,7 @@ interface SideThreadRow {
   project_id: string | null
   anchor_id: string
   kind: string
+  parent_id: string | null
   quote: string
   created_at: number
   updated_at: number
@@ -112,6 +113,7 @@ function sideThreadFrom(r: SideThreadRow): SideThread {
     projectId: r.project_id,
     anchorId: r.anchor_id,
     kind: r.kind === "reply" || r.kind === "task" ? r.kind : "ask",
+    parentId: r.parent_id ?? null,
     quote: r.quote,
     context: r.context === "fork" || r.context === "summary" ? r.context : null,
     busy: false,
@@ -2799,13 +2801,20 @@ export class Store {
     return rows.map((r) => ({ id: r.id, role: r.role, content: r.content, meta: json(r.meta_json, null), createdAt: r.created_at }))
   }
 
-  createSideThread(input: { id?: string; projectId: string | null; anchorId: string; quote: string; sessionId: string; kind?: SideThreadKind }): SideThread {
+  createSideThread(input: { id?: string; projectId: string | null; anchorId: string; quote: string; sessionId: string; kind?: SideThreadKind; parentId?: string | null }): SideThread {
     const now = Date.now()
     const id = input.id ?? newId("thr")
     this.db
-      .prepare("INSERT INTO side_threads (id, project_id, anchor_id, kind, quote, session_id, started, context, created_at, updated_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)")
-      .run(id, input.projectId, input.anchorId, input.kind ?? "ask", input.quote, input.sessionId, now, now, now)
+      .prepare(
+        "INSERT INTO side_threads (id, project_id, anchor_id, kind, parent_id, quote, session_id, started, context, created_at, updated_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)",
+      )
+      .run(id, input.projectId, input.anchorId, input.kind ?? "ask", input.parentId ?? null, input.quote, input.sessionId, now, now, now)
     return this.getSideThread(id)!
+  }
+
+  /** The threads asked from inside this one (parent_id), oldest first. */
+  childSideThreads(parentId: string): SideThread[] {
+    return (this.db.prepare(`${SIDE_THREAD_SELECT} WHERE t.parent_id = ? ORDER BY t.created_at ASC, t.rowid ASC`).all(parentId) as SideThreadRow[]).map(sideThreadFrom)
   }
 
   getSideThread(id: string): SideThread | null {

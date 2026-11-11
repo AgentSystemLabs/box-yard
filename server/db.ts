@@ -1300,6 +1300,13 @@ export const MIGRATIONS: string[] = [
   -- window really is 200k reports it again at its next turn, and until then the flag is capped by the CLI at that window.
   UPDATE tasks SET context_window = NULL WHERE context_window = 200000 AND (agent_cli IS NULL OR agent_cli = 'claude');
   `,
+  `
+  -- A thread asked from inside another thread (a passage of the parent's messages, highlighted in its panel): the
+  -- parent's id. It starts from the parent's conversation, the panel leads back to it, and it's deleted with it
+  -- (SideThreads.delete). NULL on every thread asked from a chat or a task's transcript.
+  ALTER TABLE side_threads ADD COLUMN parent_id TEXT;
+  CREATE INDEX side_threads_parent ON side_threads(parent_id);
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {
