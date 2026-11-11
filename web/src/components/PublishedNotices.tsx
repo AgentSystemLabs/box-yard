@@ -2,14 +2,13 @@
 // small thumbnails and titled chips for other files, ending in "+3 more"; that one button swaps the strip for every
 // file as a link row, with "Hide" beside the first, which swaps it back. Every file opens the preview modal, and ←/→ step through the whole
 // group, in the order of the task's Files drawer. Grouping and order are lib/publishedNotices.ts.
-import { memo, useId, useMemo, useState } from "react"
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { TimeAgo, cx } from "./ui"
 import { FileLink } from "./FileLink"
-import { KindIcon } from "./TaskFiles"
+import { KindIcon, Thumbnail } from "./TaskFiles"
 import { NOTICE_CLASS, NoticeCard, NoticeLayout, NoticeProject } from "./ChatLine"
 import { previewKind } from "../lib/filePreview"
-import { thumbUrl } from "../../../shared/thumbs"
 import { drawerOrder, previewGallery, publishedLabel, sameGroup, type PublishedFileRef, type PublishedGroup } from "../lib/publishedNotices"
 
 /** Files shown before "+N more", so the strip stays short. A narrow card (a phone) shows three, to fit one row. */
@@ -31,6 +30,7 @@ const CHIP_FLOOR = 112
 const MORE = 82
 const MORE_WIDE = 90
 const NAMES = 104
+const NAMES_SHORT = 76
 /** The narrowest card of each narrow tier: a 320px phone's, and where the next tier starts (18rem). */
 const TINY_ROOM = 212
 const SMALL_ROOM = 288
@@ -40,13 +40,14 @@ const stripWidth = (f: PublishedFileRef) => (kindOf(f) === "image" ? IMAGE : Mat
 /**
  * How many files a narrow card's strip shows: the first ones that fit `room` in one row with the toggle, at least one.
  * A titled chip that would have to go under its floor is left to "+N more" instead, with every file after it.
+ * `names`: the toggle's width when the strip holds nothing back.
  */
-function fit(files: readonly PublishedFileRef[], room: number): number {
+function fit(files: readonly PublishedFileRef[], room: number, names: number): number {
   let used = 0
   let n = 0
   for (const f of files.slice(0, STRIP_MAX)) {
     const hidden = files.length - n - 1
-    const toggle = hidden === 0 ? NAMES : hidden < 10 ? MORE : MORE_WIDE
+    const toggle = hidden === 0 ? names : hidden < 10 ? MORE : MORE_WIDE
     const width = stripWidth(f) + GAP
     if (n > 0 && used + width + toggle > room) break
     used += width
@@ -79,7 +80,7 @@ function Thumb({ f, gallery, solo, className }: { f: PublishedFileRef; gallery: 
         className,
       )}
     >
-      {image && <img src={thumbUrl(f.url, 320)} alt="" loading="lazy" decoding="async" className="h-full w-10 shrink-0 object-cover object-top pointer-coarse:w-14" />}
+      {image && <Thumbnail url={f.url} width={320} className="h-full w-10 shrink-0 object-cover object-top pointer-coarse:w-14" />}
       {titled && (
         <span className="inline-flex min-w-0 items-center gap-1 px-1.5">
           {!image && <KindIcon kind={kind} className="h-3 w-3" />}
@@ -104,12 +105,18 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
   const gallery = useMemo(() => previewGallery(files), [files])
   const getGallery = () => gallery
   // The strip by the card's width (a phone's, a 320px phone's): each shows what fits one row with the toggle.
-  const small = fit(files, SMALL_ROOM)
-  const tiny = fit(files, TINY_ROOM)
+  // The narrowest says just "Names" when it holds nothing back, so two thumbnails and the toggle still fit its row.
+  const small = fit(files, SMALL_ROOM, NAMES)
+  const tiny = fit(files, TINY_ROOM, NAMES_SHORT)
   /** What the toggle says while closed: how many files the strip holds back, or what the list adds to it. */
-  const more = (shown: number) => (files.length > shown ? `+${files.length - shown} more` : "Show names")
+  const more = (shown: number, names = "Show names") => (files.length > shown ? `+${files.length - shown} more` : names)
+  // The list opens downwards, and a chat that follows its newest row would push this card's top out of view.
+  const card = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (open) card.current?.scrollIntoView({ block: "nearest", behavior: "instant" })
+  }, [open])
   return (
-    <div data-testid="published-group" data-count={files.length}>
+    <div ref={card} data-testid="published-group" data-count={files.length}>
       <NoticeLayout
         kind="artifact"
         title={group.taskTitle}
@@ -147,7 +154,7 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
                 ) : (
                   <>
                     {/* A narrower card shows fewer files, so it has more to add. */}
-                    <span className="@[18rem]:hidden">{more(tiny)}</span>
+                    <span className="@[18rem]:hidden">{more(tiny, "Names")}</span>
                     <span className="@max-[18rem]:hidden @md:hidden">{more(small)}</span>
                     <span className="@max-md:hidden">{more(STRIP_MAX)}</span>
                   </>
@@ -172,7 +179,7 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
                     >
                       {/* A thumbnail's column for every row, so the titles line up. */}
                       {kind === "image" ? (
-                        <img src={thumbUrl(f.url, 320)} alt="" loading="lazy" decoding="async" className="h-6 w-9 shrink-0 rounded-sm border border-zinc-800 bg-zinc-950 object-cover object-top" />
+                        <Thumbnail url={f.url} width={320} className="h-6 w-9 shrink-0 rounded-sm border border-zinc-800 bg-zinc-950 object-cover object-top" />
                       ) : (
                         <span className="grid h-6 w-9 shrink-0 place-items-center">
                           <KindIcon kind={kind} className="h-3.5 w-3.5" />
