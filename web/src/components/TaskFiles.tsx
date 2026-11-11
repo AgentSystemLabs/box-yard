@@ -3,7 +3,7 @@
 // and filtering are in lib/taskFiles.ts. The drawer's open state lives here, so opening it never re-renders the
 // transcript.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { File, FileCode, FileImage, FileText, Files, Film, Music, Search, X } from "lucide-react"
+import { File, FileCode, FileImage, FileText, FileWarning, Files, Film, Music, Search, X } from "lucide-react"
 import { Modal } from "./Modal"
 import { ArtifactLink } from "./FileLink"
 import { formatSize } from "./Attachments"
@@ -146,27 +146,11 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
               </h3>
             )}
             {s.images.length > 0 && (
-              <ul className="grid grid-cols-2 gap-2 @lg:grid-cols-3">
+              // Three across only with three to show: two tiles keep the size they have on a phone.
+              <ul className={cx("grid grid-cols-2 gap-2", s.images.length >= 3 && "@lg:grid-cols-3")}>
                 {s.images.map((f) => (
                   <li key={f.id}>
-                    <ArtifactLink
-                      artifact={f}
-                      gallery={getGallery}
-                      title={`${f.title} · ${formatSize(f.size)}`}
-                      className="group flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 hover:border-zinc-600 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
-                    >
-                      <Thumbnail url={f.url} width={640} className="aspect-video w-full shrink-0 bg-zinc-950 object-cover object-top" iconClassName="h-6 w-6" />
-                      {/* The title gets the tile's whole width; how big and how old go under it (the thumbnail says what kind). */}
-                      <span className="block px-2 py-1.5 text-xs">
-                        <span className="line-clamp-2 wrap-anywhere text-zinc-300 group-hover:text-zinc-100">
-                          {isNew(f) && <NewMark />}
-                          {shortTitle(f.title, s.label)}
-                        </span>
-                        <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                          {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
-                        </span>
-                      </span>
-                    </ArtifactLink>
+                    <ImageTile f={f} gallery={getGallery} isNew={isNew(f)} label={s.label} />
                   </li>
                 ))}
               </ul>
@@ -205,6 +189,35 @@ function FilesDrawer({ taskId, projectId, files, seenAt, onClose }: { taskId: st
   )
 }
 
+/** An image in the drawer's grid: its thumbnail over its title, size and age. A deleted one says so instead. */
+function ImageTile({ f, gallery, isNew, label }: { f: Artifact; gallery: () => ReturnType<typeof galleryOf>; isNew: boolean; label: string | null }) {
+  const [gone, setGone] = useState(false)
+  return (
+    <ArtifactLink
+      artifact={f}
+      gallery={gallery}
+      title={`${f.title} · ${gone ? "Deleted" : formatSize(f.size)}`}
+      className="group flex h-full flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 hover:border-zinc-600 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none"
+    >
+      <Thumbnail url={f.url} width={640} whole onGone={() => setGone(true)} className="aspect-video w-full shrink-0 bg-zinc-950 object-cover object-top" iconClassName="h-6 w-6" />
+      {/* The title gets the tile's whole width; how big and how old go under it (the thumbnail says what kind). */}
+      <span className="block px-2 py-1.5 text-xs">
+        <span className="line-clamp-2 wrap-anywhere text-zinc-300 group-hover:text-zinc-100">
+          {isNew && <NewMark />}
+          {shortTitle(f.title, label)}
+        </span>
+        {gone ? (
+          <span className="mt-0.5 block truncate text-xs text-zinc-600">Deleted</span>
+        ) : (
+          <span className="mt-0.5 block truncate text-xs text-zinc-500">
+            {formatSize(f.size)} · <TimeAgo ts={f.createdAt} />
+          </span>
+        )}
+      </span>
+    </ArtifactLink>
+  )
+}
+
 /** Before a title: a dot for a file published since the list was last opened, and the word for a screen reader. */
 const NewMark = () => (
   <>
@@ -231,19 +244,51 @@ export function KindIcon({ kind, className = "h-4 w-4" }: { kind: PreviewKind | 
 }
 
 /**
- * An image file's thumbnail. One that doesn't load (the file was deleted, the network dropped) is the image icon on
- * the same tile, not the browser's broken-image mark.
+ * An image file's thumbnail. One that doesn't load is an icon on the same tile, not the browser's broken-image mark:
+ * the warning for a deleted file (`onGone` hears of it), the image icon for any other failure (the network dropped).
+ * `whole`: an image smaller than its tile shows whole, not cropped to fill it.
  */
-export function Thumbnail({ url, width, className, iconClassName = "h-3.5 w-3.5" }: { url: string; width: Parameters<typeof thumbUrl>[1]; className?: string; iconClassName?: string }) {
+export function Thumbnail({ url, width, className, iconClassName = "h-3.5 w-3.5", whole, onGone }: { url: string; width: Parameters<typeof thumbUrl>[1]; className?: string; iconClassName?: string; whole?: boolean; onGone?: () => void }) {
   // The URL that failed, not a flag: a row reused for another file tries that file's own.
-  const [failed, setFailed] = useState<string | null>(null)
-  if (failed === url)
+  const [failed, setFailed] = useState<{ url: string; gone: boolean } | null>(null)
+  const [small, setSmall] = useState(false)
+  // The URL this still shows, for an answer that comes back late: none once it is gone from the page.
+  const current = useRef("")
+  useEffect(() => {
+    current.current = url
+    return () => {
+      current.current = ""
+    }
+  }, [url])
+  /** An <img> doesn't say why it failed: ask the server, as the preview does. */
+  const onError = () => {
+    setFailed({ url, gone: false })
+    void fetch(url, { method: "HEAD" }).then(
+      (res) => {
+        if (res.status !== 404 || current.current !== url) return
+        setFailed({ url, gone: true })
+        onGone?.()
+      },
+      () => {},
+    )
+  }
+  if (failed?.url === url)
     return (
       <span className={cx("grid place-items-center", className)}>
-        <KindIcon kind="image" className={iconClassName} />
+        {failed.gone ? <FileWarning className={cx("shrink-0 text-zinc-600", iconClassName)} /> : <KindIcon kind="image" className={iconClassName} />}
       </span>
     )
-  return <img src={thumbUrl(url, width)} alt="" loading="lazy" decoding="async" onError={() => setFailed(url)} className={className} />
+  return (
+    <img
+      src={thumbUrl(url, width)}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onLoad={whole ? (e) => setSmall(e.currentTarget.naturalWidth < e.currentTarget.clientWidth && e.currentTarget.naturalHeight < e.currentTarget.clientHeight) : undefined}
+      onError={onError}
+      className={cx(className, small && "object-contain! object-center!")}
+    />
+  )
 }
 
 /** The transcript's "published X" event: a small file row, with a thumbnail for images. */
