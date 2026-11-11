@@ -162,7 +162,7 @@ type QueuedTurn = "none" | "steerable" | "compacting" | "unsteerable"
 
 const WAITS: Record<QueuedTurn, (cli: string) => string> = {
   none: () => "Delivered when the agent's next turn starts.",
-  steerable: () => "Sends when the turn ends, or now with Steer.",
+  steerable: () => "Sent at turn end, or now with Steer.",
   compacting: () => "Delivered once the agent has compacted its context.",
   unsteerable: (cli) => `Delivered when the current turn ends: ${cli} can't take a message mid-turn.`,
 }
@@ -206,7 +206,7 @@ const QueuedRow = memo(function QueuedRow({
           </>
         )}
         {/* Too narrow for the time next to two 44px buttons (a 320px phone at 125% zoom): it goes, so nothing overflows. */}
-        <span className="hidden shrink-0 text-[10px] text-zinc-600 @min-[15rem]:inline">
+        <span className="hidden shrink-0 text-[11px] text-zinc-500 @min-[15rem]:inline">
           <TimeAgo ts={m.createdAt} />
         </span>
         {m.status === "uncertain" && <button type="button" className={ICON_BUTTON + " ml-auto"} title="Remove hold after reviewing the transcript; this does not undo delivery" aria-label="Remove delivery hold" onClick={() => onDelete(m)}><X className="h-3.5 w-3.5" /></button>}

@@ -34,7 +34,7 @@ export function useRestingDelete(target: SidebarDeleteTarget, close?: () => void
       if (blocked) { await blockedDialog(blocked); return }
       const queued = sidebarDeleteQueued(target, tasks)
       const descendants = Math.max(0, sidebarDeleteTasks(target, tasks).length - 1)
-      const body = descendants ? `Delete this task and its ${descendants} sub-task${descendants === 1 ? "" : "s"}, their workspaces and archives?` : "Delete this task, its workspace and its archive?"
+      const body = descendants ? `Delete "${target.name}" and its ${descendants} sub-task${descendants === 1 ? "" : "s"}, their workspaces and archives?` : `Delete "${target.name}", its workspace and its archive?`
       const ok = await confirmDialog(project
         ? { title: "Delete project?", body: `Delete ${target.name} and all its tasks? This can't be undone.`, confirmLabel: "Delete project", danger: true }
         : { title: "Delete task?", body: body + (queued ? ` This also permanently deletes ${queued} queued message${queued === 1 ? "" : "s"}. They won't be sent.` : ""), confirmLabel: "Delete task", danger: true })

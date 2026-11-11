@@ -120,7 +120,8 @@ export function TaskHeader({
             {tree ? <TaskCrumbs task={task} project={project} /> : <DismissButton kind="back" label={backLabel} onClick={onBack} className={cx("relative z-10 -ml-1", backClassName)} />}
             <div className="ml-auto flex shrink-0 items-center gap-0.5">
               {ready ? <MarkDoneButton task={task} crowded={false} /> : task.status === "done" && <ReopenButton task={task} crowded={false} />}
-              {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
+              {/* Delete keeps 8px off ⓘ: a slip beside it shouldn't land on it. */}
+              {task.status === "failed" && <DeleteFailedTaskButton task={task} className="mr-1.5" />}
               {tools}
               {menu}
               {controls}
@@ -148,8 +149,8 @@ export function TaskHeader({
           {crumbs && <TaskCrumbs task={task} project={project} className={backClassName ? "@max-[35.5rem]/coord:ml-2" : "ml-2"} />}
         </div>
       )}
-      {/* The title keeps 12rem (about 16 characters) after Back and the crumbs; any less and the chips (Mark done with
-          them) wrap to a row of their own, which starts under the title's icon. So this group's least width is its
+      {/* The title keeps 12rem (about 16 characters) after Back and the crumbs; any less and the chips (the PR, files,
+          previews) wrap to a row of their own, which starts under the title's icon. So this group's least width is its
           content's (no min-w-0), where the title counts as its 12rem alone (contain-inline-size), and the crumbs give
           way first once the header itself is narrower than that. */}
       <div className="flex flex-1 basis-0 flex-wrap items-center gap-x-0.5 @min-[36rem]/head:gap-x-1.5">
@@ -157,15 +158,14 @@ export function TaskHeader({
           <TitleButton task={task} open={details} onOpen={() => setDetails(true)} />
         </Heading>
         {/* On a row of their own they keep 4px off the title's row and the header's edge. */}
-        <div className="my-1 ml-1 flex shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5 pointer-coarse:my-0">
-          {chips}
-          {ready && <MarkDoneButton task={task} crowded={crowded} />}
-          {task.status === "done" && <ReopenButton task={task} crowded={crowded} />}
-          {task.status === "failed" && <DeleteFailedTaskButton task={task} />}
-        </div>
+        <div className="my-1 ml-1 flex shrink-0 items-center pointer-coarse:my-0">{chips}</div>
       </div>
-      {/* ⓘ stays last on the title's row, and Pin and Close after it: they never wrap with the chips. */}
+      {/* The task's own action (Mark done, Reopen, Delete), then ⓘ, Pin and Close, stay on the title's row: they never
+          wrap with the chips. */}
       <div className="flex h-11 shrink-0 items-center gap-0.5 @min-[36rem]/head:gap-1.5">
+        {ready && <MarkDoneButton task={task} crowded={crowded} />}
+        {task.status === "done" && <ReopenButton task={task} crowded={crowded} />}
+        {task.status === "failed" && <DeleteFailedTaskButton task={task} className="@max-[36rem]/head:mr-1.5" />}
         {tools}
         {menu}
         {controls}
@@ -584,7 +584,7 @@ function TaskMenu({
                 className={dangerItem}
                 onClick={async () => {
                   setOpen(false)
-                  if (!(await confirmDialog({ title: "Delete task?", body: "Delete this task, its workspace and its archive?", confirmLabel: "Delete task", danger: true }))) return
+                  if (!(await confirmDialog({ title: "Delete task?", body: `Delete "${task.title}", its workspace and its archive?`, confirmLabel: "Delete task", danger: true }))) return
                   del.mutate(task.id)
                   navigate(project ? `/projects/${project.id}` : "/")
                 }}

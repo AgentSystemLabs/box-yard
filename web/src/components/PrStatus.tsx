@@ -52,19 +52,11 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
         onClick={() => setOpen(true)}
         className={cx(HEADER_CHIP, "border", style.chip, HEADER_FOLD.chip)}
       >
-        <span className="relative inline-flex shrink-0">
-          {activity ? <StateIcon state={activity} className="h-3 w-3" /> : <Icon className={cx("h-3 w-3", HEADER_FOLD.icon)} aria-hidden />}
-          {/* Folded to its glyph, the signal sits on the glyph's corner. */}
-          {SignalIcon && !activity && (
-            <span aria-hidden data-testid="pr-signal-badge" className="absolute -right-1.5 -bottom-1 hidden rounded-full bg-zinc-950 @max-[36rem]/head:block">
-              <SignalIcon className={cx("h-2.5 w-2.5", TONE_TEXT[signal!.tone])} strokeWidth={3} />
-            </span>
-          )}
-        </span>
+        {activity ? <StateIcon state={activity} className="h-3 w-3 shrink-0" /> : <Icon className={cx("h-3 w-3 shrink-0", HEADER_FOLD.icon)} aria-hidden />}
         {word === null ? (
           <span className={HEADER_FOLD.label}>{label}</span>
         ) : (
-          // Folded, "#76" stays beside the glyph (clear of the signal on its corner): which PR, not just that there is one.
+          // Folded, "#76" stays beside the glyph, and its signal after it ("#76 ✓"): which PR, not just that there is one.
           <span className="tabular-nums @max-[36rem]/head:ml-0.5">
             <span className={HEADER_FOLD.label}>{word}</span>#{number}
           </span>
@@ -72,7 +64,7 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
         {activity ? (
           <span className={cx("font-normal", HEADER_FOLD.label)}>· {MERGE_CHIP_LABEL[activity]}</span>
         ) : (
-          SignalIcon && <SignalIcon aria-hidden data-testid="pr-signal" className={cx("h-3.5 w-3.5 shrink-0 @max-[36rem]/head:hidden", TONE_TEXT[signal!.tone])} />
+          SignalIcon && <SignalIcon aria-hidden data-testid="pr-signal" className={cx("h-3.5 w-3.5 shrink-0", TONE_TEXT[signal!.tone])} />
         )}
         {signal && !activity && <span className="sr-only">, {signal.label}</span>}
       </button>

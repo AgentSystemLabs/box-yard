@@ -178,7 +178,7 @@ export const TaskThread = memo(function TaskThread({
                 <div className="flex h-7 min-w-0 items-center gap-2 text-[11px] font-semibold text-amber-400">
                   <span className="min-w-0 truncate">The agent asks</span>
                   {asked && (
-                    <span className="shrink-0 text-[10px] font-normal text-zinc-600 @max-[15rem]/ask:hidden">
+                    <span className="shrink-0 text-[11px] font-normal text-zinc-500 @max-[15rem]/ask:hidden">
                       <TimeAgo ts={asked.createdAt} />
                     </span>
                   )}
@@ -222,7 +222,7 @@ const PublishedRun = memo(
         {messages.map((m) => (
           <PublishedFile key={m.id} artifactId={typeof m.meta?.artifactId === "string" ? m.meta.artifactId : undefined} url={String(m.meta!.url)} text={m.content} />
         ))}
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[11px] text-zinc-500">
           <TimeAgo ts={messages.at(-1)!.createdAt} />
         </span>
       </div>
@@ -263,8 +263,9 @@ const HousekeepingRun = memo(
 
 /**
  * The live line while a turn runs, in the events' column (pl-6), with no dot or colour of its own: the task's icon in
- * the header says it works. "Turn running · 2m · 4 steps › · Bash npm run typecheck": the steps since the newest line
- * unfold under it, where the newest one then is, so the line stops repeating it.
+ * the header says it works. "Turn running · 2m · › 4 steps · Bash npm run typecheck": the steps since the newest line
+ * unfold under it, where the newest one then is, so the line stops repeating it. A narrow line (a 320px phone) drops
+ * the tool rather than cut it to two letters.
  */
 function WorkingLine({ label, since, tool, steps }: { label: string; since: number | null; tool: string | null; steps: TaskMessage[] | null }) {
   const [open, setOpen] = useState(false)
@@ -272,7 +273,7 @@ function WorkingLine({ label, since, tool, steps }: { label: string; since: numb
   const Chevron = listed ? ChevronDown : ChevronRight
   return (
     <>
-      <div data-testid="working-line" className="flex min-w-0 items-baseline gap-1.5 pt-1 pl-6 text-xs text-zinc-400">
+      <div data-testid="working-line" className="@container/live flex min-w-0 items-center gap-1.5 pt-1 pl-6 text-xs text-zinc-400">
         <span className="shrink-0">{label}</span>
         {since !== null && (
           <span data-testid="working-for" className="shrink-0">
@@ -280,16 +281,16 @@ function WorkingLine({ label, since, tool, steps }: { label: string; since: numb
           </span>
         )}
         {steps && (
-          <span className="shrink-0">
-            ·{" "}
+          <span className="flex shrink-0 items-center gap-1.5">
+            <span aria-hidden>·</span>
             <button type="button" data-testid="working-steps" aria-expanded={listed} onClick={() => setOpen((o) => !o)} className={cx(TAP_AREA, STEPS_TOGGLE, "inline-flex items-center gap-0.5")}>
-              {stepsSummary(steps).count}
               <Chevron className="h-3.5 w-3.5 text-zinc-500" aria-hidden />
+              {stepsSummary(steps).count}
             </button>
           </span>
         )}
         {tool && !listed && (
-          <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px]">
+          <span data-testid="working-tool" title={tool} className="min-w-0 truncate font-mono text-[11px] @max-[17rem]/live:hidden">
             · {tool}
           </span>
         )}
@@ -387,7 +388,7 @@ function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
       ) : (
         m.content
       )}
-      <span className="ml-2 text-[10px] text-zinc-600">
+      <span className="ml-2 text-[11px] text-zinc-500">
         <TimeAgo ts={m.createdAt} />
       </span>
       {timing && <TurnTimingChip id={timing.id} ms={timing.ms} className="ml-2 align-middle" />}
@@ -399,7 +400,7 @@ function EventText({ m, children }: { m: TaskMessage; children?: ReactNode }) {
 export const Line = memo(function Line({ m, onFollowUp, next = true }: { m: TaskMessage; onFollowUp: (message: string) => void; next?: boolean }) {
   const ownerName = useOwnerName()
   const time = (
-    <span className="ml-2 text-[10px] text-zinc-600">
+    <span className="ml-2 text-[11px] text-zinc-500">
       <TimeAgo ts={m.createdAt} />
     </span>
   )

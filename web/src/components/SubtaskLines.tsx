@@ -32,7 +32,7 @@ export function SubtasksLine({ m }: { m: TaskMessage }) {
       <div className="min-w-0 flex-1">
         <div className="wrap-anywhere">
           {m.content}
-          <span className="ml-2 text-[10px] text-zinc-600">
+          <span className="ml-2 text-[11px] text-zinc-500">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>
@@ -43,8 +43,8 @@ export function SubtasksLine({ m }: { m: TaskMessage }) {
 }
 
 /**
- * A link to each sub-task: its icon says its live state (the words are for a screen reader), and its PR sits at the
- * row's end, beside the link, never inside it. Only a line that lists sub-tasks follows the task list.
+ * A link to each sub-task: its icon says its live state (the words are for a screen reader), a done one's title dims
+ * and a failed one's is red, and its PR sits at the row's end, beside the link, never inside it. Only a line that lists sub-tasks follows the task list.
  */
 function SubtaskRows({ items }: { items: Listed[] }) {
   const tasks = useTasks()
@@ -58,7 +58,7 @@ function SubtaskRows({ items }: { items: Listed[] }) {
           <li key={s.id} className="flex min-w-0 items-center gap-1">
             <AppLink
               href={`/tasks/${s.id}`}
-              className="grid min-h-8 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm text-yard-300 hover:bg-zinc-900 hover:text-yard-200 pointer-coarse:min-h-11"
+              className={cx("grid min-h-8 min-w-0 flex-1 grid-cols-[1.25rem_minmax(0,1fr)] content-center items-center gap-x-2 rounded-md px-2 py-1 text-sm hover:bg-zinc-900 hover:text-yard-200 pointer-coarse:min-h-11", status === "done" ? "text-yard-300/60" : "text-yard-300")}
             >
               {/* The word after the title names the state, so the icon stays out of the accessible name. A task that
                   is gone (deleted) keeps a neutral tile. */}
@@ -95,17 +95,15 @@ export function SubtaskReportLine({ m }: { m: TaskMessage }) {
     <div data-testid="subtask-report" className={cx(MESSAGE_BLOCK, "flex items-start gap-2 rounded-lg bg-violet-500/5 px-3 py-2 text-sm text-violet-100")}>
       <LineIcon icon={Users} className="h-4 w-4 text-violet-400" />
       <div className="min-w-0 flex-1">
-        {/* "Report" says what the card is; a narrow one (a phone) leaves "from" to screen readers, so the title has the row. */}
-        <div className="@container/report mb-0.5 flex min-w-0 items-baseline gap-x-1.5 text-[11px] leading-5 font-semibold text-violet-400 pointer-coarse:min-h-9 pointer-coarse:items-center">
-          <span className="shrink-0">
-            Report<span className="font-normal @max-[22rem]/report:sr-only"> from</span>
-          </span>
+        {/* "Report" says what the card is, the same word at every width; the title has the rest of the row. */}
+        <div className="mb-0.5 flex min-w-0 items-baseline gap-x-1.5 text-[11px] leading-5 font-semibold text-violet-400 pointer-coarse:min-h-9 pointer-coarse:items-center">
+          <span className="shrink-0">Report</span>
           <AppLink href={`/tasks/${from}`} title={name} className={cx(TAP_AREA, "flex min-w-0 text-yard-300 hover:underline")}>
             <span className="truncate">{name}</span>
           </AppLink>
           {word && <span className={cx("shrink-0 font-normal", status === "failed" ? "text-red-300" : status === "needs_input" ? "text-amber-300" : "text-violet-300/80")}>{word}</span>}
           {pr && <PrChip task={pr} variant="number" className={cx(TAP_AREA, "shrink-0 font-normal tabular-nums")} />}
-          <span className="shrink-0 text-[10px] font-normal text-zinc-600">
+          <span className="shrink-0 font-normal text-zinc-500">
             <TimeAgo ts={m.createdAt} />
           </span>
         </div>

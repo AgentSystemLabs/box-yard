@@ -4,7 +4,7 @@ import { useRestingDelete } from "../lib/restingDelete"
 import { HEADER_CHIP, HEADER_FOLD, cx } from "./ui"
 
 /** Failed-task header action; confirmation and queued-input consent are shared with other deletion surfaces. */
-export function DeleteFailedTaskButton({ task }: { task: Task }) {
+export function DeleteFailedTaskButton({ task, className }: { task: Task; className?: string }) {
   const { pending, remove } = useRestingDelete({ kind: "task", id: task.id, name: task.title, projectId: task.projectId })
   return (
     <button
@@ -17,7 +17,7 @@ export function DeleteFailedTaskButton({ task }: { task: Task }) {
       disabled={pending}
       className={cx(
         "shrink-0 text-red-300 hover:bg-red-500/10 hover:text-red-200 disabled:cursor-wait disabled:opacity-50",
-        HEADER_CHIP, HEADER_FOLD.chip, "border border-red-500/30 bg-red-500/5",
+        HEADER_CHIP, HEADER_FOLD.chip, "border border-red-500/30 bg-red-500/5", className,
       )}
       onClick={(e) => {
         e.preventDefault()
