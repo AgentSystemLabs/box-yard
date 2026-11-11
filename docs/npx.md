@@ -94,7 +94,7 @@ A git checkout with `./yard local` keeps using its own `.env` and `./data`, as b
 
 ## Updates
 
-Box Yard looks at `main` when it starts and every 30 minutes (`BOXYARD_UPDATE_CHECK_MINUTES` in `~/.boxyard/.env`; `0` turns the timer off). When there's a newer commit, a banner at the top of the app says so, with **What's new** (the compare view on GitHub) and **Update**. Nothing changes until you press it.
+Box Yard looks at `main` when it starts and every 30 minutes (`BOXYARD_UPDATE_CHECK_MINUTES` in `~/.boxyard/.env`; `0` stops looking on its own, and **Check now** in Settings still works). When there's a newer commit, a banner at the top of the app says so, with **What's new** (the compare view on GitHub) and **Update**. Nothing changes until you press it.
 
 1. **Update** builds the new commit beside the running one, in the background; the banner shows each step and you keep working.
 2. When it's built, Box Yard restarts into it as soon as no Coordinator, Captain or side-thread reply is running (it waits up to 10 minutes; **Restart now** doesn't wait). Task agents run on their own and carry on through the restart.
