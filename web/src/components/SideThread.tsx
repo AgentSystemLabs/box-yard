@@ -12,7 +12,6 @@ import { flushSync } from "react-dom"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
-  ChevronRight,
   CircleCheck,
   Loader2,
   Maximize2,
@@ -179,12 +178,11 @@ const PANEL_WIDE = "hidden @min-[35.5rem]/coord:grid"
 /** Resolve says its name where the panel's header has the room (its container); narrower, it's the ✓ alone. */
 const RESOLVE_ROOM = "@min-[24rem]/thread:flex @min-[24rem]/thread:w-auto! @min-[24rem]/thread:items-center @min-[24rem]/thread:gap-1.5 @min-[24rem]/thread:px-2.5"
 
-/** The panel's header: ‹ on a sheet, "Threads › title", its own buttons (`children`), and × in a column. */
+/** The panel's header: ‹ on a sheet, its heading (`title`), its own buttons (`children`), and × in a column. */
 function PanelHeader({
   chat,
   open,
   className,
-  crumb,
   title,
   closeLabel,
   closeTitle,
@@ -193,7 +191,6 @@ function PanelHeader({
   chat: ThreadChat
   open: OpenThread
   className: string
-  crumb: string
   title: ReactNode
   closeLabel: string
   closeTitle: string
@@ -204,11 +201,7 @@ function PanelHeader({
     <header className={cx(className, "@container/thread flex shrink-0 items-center gap-1 border-b border-zinc-900 pt-[env(safe-area-inset-top)] pr-[max(0.5rem,env(safe-area-inset-right))] pl-2")}>
       {/* A sheet goes back to the chat; a column closes with the × on the right. */}
       <DismissButton kind="back" onClick={close} label="Back to the chat" className={open.expanded ? "hidden" : "@min-[35.5rem]/coord:hidden"} />
-      <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-sm @min-[35.5rem]/coord:pl-2">
-        <span className="shrink-0 font-semibold text-zinc-100">{crumb}</span>
-        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
-        {title}
-      </nav>
+      {title}
       <div className="flex shrink-0 items-center gap-0.5">
         {children}
         <DismissButton kind="close" onClick={close} label={closeLabel} title={closeTitle} className={open.expanded ? undefined : PANEL_WIDE} />
@@ -305,13 +298,19 @@ function ThreadView({ chat, open, headerClassName }: { chat: ThreadChat; open: O
         chat={chat}
         open={open}
         className={headerClassName}
-        crumb="Threads"
         closeLabel="Close thread"
         closeTitle="Close (Esc). It stays under the message."
         title={
-          <span data-testid="side-thread-title" title={quotePreview(original, 400)} className="min-w-0 truncate text-zinc-400">
-            {reply ? threadTitle(original) : `“${quotePreview(original, 140)}”`}
-          </span>
+          // A heading, not a trail: there's no list of threads to go back to. A highlight's passage is the card under
+          // it; a reply's message scrolls with the thread, so its first line stays here.
+          <h2 title={quotePreview(original, 400)} className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-100 @min-[35.5rem]/coord:pl-2">
+            Thread
+            {reply && (
+              <span data-testid="side-thread-title" className="ml-2 font-normal text-zinc-400">
+                {threadTitle(original)}
+              </span>
+            )}
+          </h2>
         }
       >
         {thread && (
@@ -521,7 +520,7 @@ function Markers({ chat, m }: { chat: ThreadChat; m: ChatMessage }) {
 /** "↰ 2 replies" under a message: opens its reply thread. It says when an answer is coming, unread or resolved. */
 function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; onOpen: () => void }) {
   const resolved = t.resolvedAt != null
-  const state = t.busy ? "answering" : t.unread ? "new reply" : resolved ? "resolved" : null
+  const state = t.busy ? "answering" : t.unread ? "unread" : resolved ? "resolved" : null
   return (
     <button
       type="button"
@@ -532,7 +531,7 @@ function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; 
       onClick={onOpen}
       aria-pressed={active}
       aria-label={`${repliesLabel(t.replies)}${state ? `, ${state}` : ""}`}
-      title={active ? "Close the replies" : "Open the replies"}
+      title={`${active ? "Close the replies" : "Open the replies"}${state ? ` (${state})` : ""}`}
       className={cx(
         TAP_AREA,
         "-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-xs",
@@ -555,7 +554,7 @@ function RepliesButton({ t, active, onOpen }: { t: SideThread; active: boolean; 
 /** A question about a highlight, under its message: the passage, how many replies it has, and the same marks as "N replies". */
 function ThreadChip({ t, active, onOpen }: { t: SideThread; active: boolean; onOpen: () => void }) {
   const resolved = t.resolvedAt != null
-  const state = t.busy ? "answering" : t.unread ? "new reply" : resolved ? "resolved" : null
+  const state = t.busy ? "answering" : t.unread ? "unread" : resolved ? "resolved" : null
   const quote = quotePreview(t.quote, 48)
   return (
     <button
@@ -567,7 +566,8 @@ function ThreadChip({ t, active, onOpen }: { t: SideThread; active: boolean; onO
       onClick={onOpen}
       aria-pressed={active}
       aria-label={`Side thread on “${quote}”${t.replies ? `, ${repliesLabel(t.replies)}` : ""}${state ? `, ${state}` : ""}`}
-      title={active ? "Close this side thread" : "Open this side thread"}
+      // The dot and the tick are drawn only; the name and the tooltip say them.
+      title={`${active ? "Close this side thread" : "Open this side thread"}${t.replies ? `: ${repliesLabel(t.replies)}` : ""}${state ? `${t.replies ? "," : ":"} ${state}` : ""}`}
       className={cx(
         TAP_AREA,
         "inline-flex h-6 max-w-full items-center gap-1.5 rounded-full border px-2.5 text-xs",

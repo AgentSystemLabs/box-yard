@@ -1,11 +1,11 @@
 import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { Project, Task } from "../../../shared/types"
-import { ArrowDownRight, GitPullRequest } from "lucide-react"
+import { ArrowDownRight, ChevronRight } from "lucide-react"
 import { dayKey, dayLabel } from "../lib/calendarDay"
 import { api } from "../lib/api"
-import { daySummaries, type ChatDay, type DaySummary } from "../lib/chatDays"
-import { splitGithubRefs } from "../lib/linkify"
+import { DAY_SUMMARY_GROUPS, daySummaries, type ChatDay, type DaySummary } from "../lib/chatDays"
+import { githubRef, routes, shortGithubLabel } from "../lib/linkify"
 import type { NoticeLike } from "../lib/publishedNotices"
 import { fetchTasks, keys } from "../lib/queries"
 import { REVEAL_CHAT_EVENT, revealChatMessage, type ChatReveal } from "../lib/reveal"
@@ -13,7 +13,7 @@ import type { HistoryIndexState } from "../lib/transcriptHistory"
 import { Loading } from "./Loading"
 import { DismissButton } from "./Modal"
 import { releaseListBottom, scrollIntoList, type StickyScrollHandle } from "./StickyScroll"
-import { Button, cx, NewTabLink } from "./ui"
+import { AppLink, Button, cx, TAP_AREA } from "./ui"
 
 const summaryProjects = (projects: Project[]) => projects.map(({ id, repo }) => ({ id, repo }))
 
@@ -226,6 +226,10 @@ export const ChatHistory = memo(function ChatHistory({ days, messages, reveal, e
 const JUMP = "min-h-11! flex-1 transition-none"
 /** The rail's rows start under its padding and its label. */
 const RAIL_HEAD = 28
+/** A milestone's row in the popup, as one target: 44px tall, its title wrapping in it. */
+const SUMMARY_ROW = "flex min-h-11 min-w-0 flex-1 basis-32 items-center gap-2 rounded-lg px-2 py-1.5 text-left wrap-anywhere text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400"
+/** A PR or issue at a row's end: drawn as a small link, 44px to a finger (its row is that tall). */
+const SUMMARY_REF = cx(TAP_AREA, "inline-block h-7 shrink-0 rounded px-1 leading-7 whitespace-nowrap text-sky-400 hover:underline focus-visible:outline-2 focus-visible:outline-sky-400")
 
 const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId, complete, current, onEnd }: {
   days: ChatDay[]
@@ -349,8 +353,9 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
               }}
               className={cx(
                 "flex h-11 min-h-11 w-11 flex-col items-center justify-center border-l-2 text-[11px] leading-tight focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-yard-400",
-                // The open day keeps the yard colour; the day being read has a quiet tint.
-                d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : d.key === current ? "border-zinc-500 bg-zinc-800/70 text-zinc-100" : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                // Only the open day is filled. The day being read is marked in its text and a thin bar, so it doesn't
+                // read as the focus or as a second open day.
+                d.key === open ? "border-yard-400 bg-yard-500/10 text-yard-300" : d.key === current ? "border-zinc-600 font-semibold text-zinc-100 hover:bg-zinc-900" : "border-transparent text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
               )}
             >
               <span>{new Date(d.at).toLocaleDateString(undefined, { month: "short" })}</span>
@@ -374,43 +379,70 @@ const DayRail = memo(function DayRail({ days, messages, scope, projectId, taskId
             <Button size="sm" className={JUMP} onClick={() => { setOpen(null); onEnd() }}>Jump to end</Button>
           </div>
           {bullets.length > 0 ? (
-            <ul role="list" className="space-y-2 text-zinc-300">
-              {bullets.map((b, i) => <li key={i} className="wrap-anywhere">{b.sourceMessageId ? (
-                // A milestone with a message in this chat: the card goes to it. Not an <a>: its PR links would nest.
-                <div
-                  role="link"
-                  tabIndex={0}
-                  data-summary-jump
-                  onClick={() => jump(day, b.sourceMessageId, true)}
-                  onKeyDown={(e) => {
-                    if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return
-                    e.preventDefault()
-                    jump(day, b.sourceMessageId, true)
-                  }}
-                  className="min-h-11 cursor-pointer rounded-lg border border-zinc-700/80 px-2 py-2 hover:bg-zinc-800 focus-visible:outline-2 focus-visible:outline-yard-400"
-                >
-                  <SummaryText summary={b} />
-                  <span className="mt-1 flex items-center gap-1 text-[11px] font-medium text-yard-300"><ArrowDownRight aria-hidden className="h-3.5 w-3.5 shrink-0" />Jump to message</span>
-                </div>
-              ) : (
-                // Nothing in this chat to go to: a plain line, not a card that only repeats "Jump to day".
-                <div data-summary-plain className="px-2 py-1"><SummaryText summary={b} /></div>
-              )}</li>)}
-            </ul>
+            <div className="space-y-2">
+              {DAY_SUMMARY_GROUPS.map((g) => {
+                const rows = bullets.filter((b) => b.kind === g.kind)
+                if (!rows.length) return null
+                return (
+                  <section key={g.kind} data-summary-group={g.kind}>
+                    <h3 className="px-2 text-[11px] text-zinc-400">{g.label} <span aria-hidden>·</span> {rows.length}</h3>
+                    <ul role="list">
+                      {rows.map((b, i) => (
+                        <SummaryRow
+                          key={b.taskId ?? `${i}:${b.title}`}
+                          summary={b}
+                          // The task's own page has nowhere else to open it.
+                          openTask={Boolean(b.taskId) && b.taskId !== taskId}
+                          onShow={() => jump(day, b.sourceMessageId, true)}
+                          onOpen={() => setOpen(null)}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
           ) : <p className="py-1 text-zinc-400">No task milestones on this day.</p>}
-          {bullets.some((b) => b.sourceMessageId) && <p className="mt-3 text-[11px] text-zinc-400">Tap a summary to jump to its message.</p>}
         </div>
       )}
     </>
   )
 })
 
-/** A milestone's text, its PRs and issues as links to GitHub ("PR #154"). */
-function SummaryText({ summary }: { summary: DaySummary }) {
-  return splitGithubRefs(summary.text, summary.repo).map((s, j) => s.url && s.kind !== "commit" ? (
-    <NewTabLink key={j} href={s.url} mark="end" className="inline-flex min-h-11 min-w-11 max-w-full items-center justify-center gap-1 rounded px-1 py-1 align-middle text-sky-400 underline decoration-sky-400/40 underline-offset-2 focus-visible:outline-2 focus-visible:outline-sky-400">
-      {s.kind === "pull" && <GitPullRequest aria-hidden className="h-3.5 w-3.5 shrink-0" />}
-      <span className="min-w-0 wrap-anywhere">{s.label ?? s.text}</span>
-    </NewTabLink>
-  ) : <span key={j}>{s.text}</span>)
+/**
+ * One milestone: the task's title as the row's one target, and its PRs and issues as links at the row's end (beside
+ * the target, never inside it). With a message in this chat the row shows it there; otherwise it opens the task.
+ */
+function SummaryRow({ summary, openTask, onShow, onOpen }: { summary: DaySummary; openTask: boolean; onShow: () => void; onOpen: () => void }) {
+  const title = <span className="min-w-0 flex-1">{summary.title}</span>
+  return (
+    <li className="flex flex-wrap items-center gap-x-1">
+      {summary.sourceMessageId ? (
+        <button type="button" data-summary-jump title="Show in chat" onClick={onShow} className={SUMMARY_ROW}>
+          {title}
+          <ArrowDownRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-yard-300" />
+          <span className="sr-only">Show in chat</span>
+        </button>
+      ) : openTask ? (
+        // AppLink keeps its click to itself, so the popup closes on the way down.
+        <span data-summary-open className="contents" onClickCapture={onOpen}>
+          <AppLink href={routes.task(summary.taskId!)} className={SUMMARY_ROW}>
+            {title}
+            <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          </AppLink>
+        </span>
+      ) : (
+        <span data-summary-plain className="min-w-0 flex-1 px-2 py-1.5 wrap-anywhere text-zinc-300">{summary.title}</span>
+      )}
+      {summary.refs.length > 0 && (
+        <span className="ml-auto flex max-w-full shrink-0 flex-wrap items-center gap-x-2 pr-1 pointer-coarse:min-h-11 pointer-coarse:gap-y-4">
+          {summary.refs.map((url) => (
+            <AppLink key={url} href={url} className={SUMMARY_REF}>
+              {githubRef(url)?.kind === "pull" ? shortGithubLabel(url)! : `#${githubRef(url)?.number}`}
+            </AppLink>
+          ))}
+        </span>
+      )}
+    </li>
+  )
 }

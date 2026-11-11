@@ -7,7 +7,7 @@ import { AlarmClock, AlertTriangle, ChevronDown, ChevronRight, Loader2, Square, 
 import { AppLink, InRepo, LineIcon, Markdown, TAP_AREA, cx } from "./ui"
 import { useEntityIndex } from "../lib/entities"
 import { useTaskTile } from "../lib/taskTiles"
-import { routes, toolMentions } from "../lib/linkify"
+import { githubRef, routes, splitGithubRefs, toolMentions, type GithubRef } from "../lib/linkify"
 import { CAPTAIN_TOOLS, captainToolView, isLongMessage, splitNotice, type NoticeKind } from "../lib/captainTranscript"
 import { NOTICE_ICON } from "./noticeIcons"
 import { NoticeNowRow, noticeRowPr, useNoticeNow } from "./NoticeNow"
@@ -186,10 +186,10 @@ export const NOTICE_CLASS = "rounded-lg border border-zinc-800/80 bg-zinc-900/40
 
 /**
  * The task's project and a link to its Captain, as a quiet pair of links that starts a notice's meta line (with a
- * trailing "·" before the event). The project comes from the notice's meta or, for notices that don't carry it,
- * from the task; with neither known there's no pair.
+ * trailing "·" before the event; `end` when nothing follows). The project comes from the notice's meta or, for
+ * notices that don't carry it, from the task; with neither known there's no pair.
  */
-export function NoticeProject({ taskId, projectId }: { taskId: string; projectId?: string | null }) {
+export function NoticeProject({ taskId, projectId, end = false }: { taskId: string; projectId?: string | null; end?: boolean }) {
   const index = useEntityIndex()
   const id = projectId ?? index.byId.get(taskId)?.projectId
   const project = id ? index.byId.get(id) : undefined
@@ -208,14 +208,17 @@ export function NoticeProject({ taskId, projectId }: { taskId: string; projectId
         <CaptainIcon projectId={id} className="h-3 w-3" />
         Captain
       </AppLink>
-      <span aria-hidden className="text-zinc-700">
-        ·
-      </span>
+      {!end && (
+        <span aria-hidden className="text-zinc-700">
+          ·
+        </span>
+      )}
     </span>
   )
 }
 
-export const NOTICE_TITLE_LINK = "font-semibold text-yard-400 underline decoration-yard-400/40 underline-offset-2 hover:decoration-yard-400"
+/** No standing underline: the title has a row of its own, and its whole card opens the task. */
+export const NOTICE_TITLE_LINK = "font-semibold text-yard-400 decoration-yard-400/60 underline-offset-2 hover:underline"
 
 /**
  * Every notice card's layout, at every width (Cody's rule): the icon and the task title on a row of their own, so a
@@ -348,6 +351,29 @@ const NOTICE_ACCENT: Partial<Record<NoticeKind, string>> = {
   merge: "border-merged-fg/40! bg-merged/5!",
 }
 
+const sameRef = (a: GithubRef, b: GithubRef | null) =>
+  Boolean(b && a.kind === b.kind && a.number === b.number && `${a.owner}/${a.repo}`.toLowerCase() === `${b.owner}/${b.repo}`.toLowerCase())
+
+/**
+ * A PR notice's sentence without the pull request `pr`, which the card's own line links: "opened a pull request:
+ * <url>", "opened [PR #12](url)" or any other wording. With nothing else to say it is "opened a PR".
+ */
+function withoutPr(event: string, pr: string | null): string {
+  const chip = pr ? githubRef(pr) : null
+  if (!chip) return event
+  const linked = event.replace(/\[[^\]]*\]\((\S+?)\)/g, (link, url: string) => (sameRef(chip, githubRef(url)) ? "" : link))
+  const rest = splitGithubRefs(linked, null)
+    .filter((s) => !(s.url && sameRef(chip, githubRef(s.url))))
+    .map((s) => s.text)
+    .join("")
+    .replace(/\s+/g, " ")
+    .replace(/[\s:·,–—-]+$/, "")
+  return !rest || /^opened(?: an?)?(?: pull request| PR)?$/i.test(rest) ? "opened a PR" : rest
+}
+
+// A question's or failure's verb, which its card's icon and colour already say; the detail gets a line of its own.
+const ASK_VERB = /^(needs you|asks|failed):\s+(?=\S)/
+
 /** A notice in the Coordinator chat: a NoticeLayout, in a NoticeCard when it's about a task. */
 const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
   const taskId = typeof m.meta?.taskId === "string" ? m.meta.taskId : null
@@ -358,24 +384,29 @@ const NoticeLine = memo(function NoticeLine({ m }: { m: ChatMessage }) {
   const past = live?.now.live === false
   // The card's line links the PR (its number, GitHub's state), so the sentence above it doesn't name it again.
   const chipPr = live ? noticeRowPr(live.now, live.task) : null
-  const event = useMemo(() => {
-    const opened = chipPr ? n.event.match(/^opened \[PR #\d+\]\((\S+)\)$/) : null
-    return opened && opened[1] === chipPr ? "opened a PR" : n.event
-  }, [n.event, chipPr])
+  const event = useMemo(() => (n.kind === "pr" ? withoutPr(n.event, chipPr) : n.event), [n.kind, n.event, chipPr])
+  // What a question asks or how a failure went is the card's content, so it reads larger than where it came from.
+  const verb = n.kind === "needs_input" || n.kind === "failed" ? event.match(ASK_VERB) : null
+  const text = (
+    <>
+      <NoticeEvent>{verb ? event.slice(verb[0].length) : event}</NoticeEvent>
+      {n.truncated && taskId && <FullReplyLink taskId={taskId} />}
+    </>
+  )
   const body = (
     <NoticeLayout
       kind={n.kind}
       title={n.title}
       taskId={taskId}
       muted={past}
-      project={taskId && <NoticeProject taskId={taskId} projectId={projectId} />}
-      meta={
-        <>
-          <NoticeEvent>{event}</NoticeEvent>
-          {n.truncated && taskId && <FullReplyLink taskId={taskId} />}
-        </>
-      }
+      project={taskId && <NoticeProject taskId={taskId} projectId={projectId} end={Boolean(verb)} />}
+      meta={verb ? undefined : text}
     >
+      {verb && (
+        <div data-testid="notice-detail" className={cx("wrap-anywhere text-sm", past ? "text-zinc-300" : "text-zinc-100")}>
+          {text}
+        </div>
+      )}
       {live && taskId && <NoticeNowRow now={live.now} task={live.task} taskId={taskId} title={n.title} />}
     </NoticeLayout>
   )
@@ -573,8 +604,9 @@ function ChatLineBody({
     <div id={`chat-${m.id}`} data-testid="chat-reply" className={cx(MESSAGE_BLOCK, "text-sm text-zinc-200")}>
       <Markdown>{m.content}</Markdown>
       <ReplyFooter m={m} sources={sources} />
+      {/* Before the next steps: on touch the newest reply's Reply and Copy stand in a row of their own. */}
+      <MessageActions text={m.content} anchorId={m.id} standing={next} />
       {next && <RecommendedNextSteps steps={nextStepsFromMeta(m.meta)} onPick={onFollowUp} />}
-      <MessageActions text={m.content} anchorId={m.id} />
     </div>
   )
 }
