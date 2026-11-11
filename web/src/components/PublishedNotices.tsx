@@ -161,13 +161,14 @@ function GroupBody({ group, time, project }: { group: PublishedGroup; time?: num
               {files.map((f) => {
                 const kind = kindOf(f)
                 return (
-                  <li key={f.id}>
+                  // The row's bleed is the item's: the link is laid out beside "Hide", which would take its own.
+                  <li key={f.id} className="-mx-1">
                     <FileLink
                       href={f.url}
                       name={f.filename}
                       fileTitle={f.title}
                       gallery={getGallery}
-                      className="-mx-1 flex items-center gap-2 rounded px-1 py-0.5 text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:min-h-11"
+                      className="flex items-center gap-2 rounded px-1 py-0.5 text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:min-h-11"
                     >
                       {/* A thumbnail's column for every row, so the titles line up. */}
                       {kind === "image" ? (
