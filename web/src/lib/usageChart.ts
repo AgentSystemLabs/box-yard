@@ -46,3 +46,15 @@ export function axisMoney(n: number) {
   if (n < 10 && !Number.isInteger(n)) return `$${n.toFixed(2)}`
   return `$${Math.round(n)}`
 }
+
+/**
+ * A total's parts as they read once each is rounded to `unit` (a cent), made to add up to the rounded total: what the
+ * rounding leaves over goes to the largest part, so "$3.60 + $0.99 + $1.24" is never a cent off the "$5.83" beside it.
+ */
+export function roundedParts(parts: number[], total: number, unit: number): number[] {
+  const units = parts.map((v) => Math.round(v / unit))
+  const left = Math.round(total / unit) - units.reduce((a, b) => a + b, 0)
+  if (left !== 0 && units.length) units[units.indexOf(Math.max(...units))]! += left
+  // A part under half a unit keeps its own value, so it reads "<$0.01", not "$0.00".
+  return units.map((u, i) => (u === 0 ? parts[i]! : Number((u * unit).toFixed(6))))
+}

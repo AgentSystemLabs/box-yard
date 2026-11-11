@@ -17,6 +17,12 @@ export function contextLabel(tokens: number | null, window: number | null): stri
 
 export const CONTEXT_HINT = "How much of this agent's context window is used."
 
+/**
+ * Said under a meter from 75%. The meter shows where auto-compact is off, and then nothing compacts before the CLI's own
+ * last-resort compaction near the window's limit.
+ */
+export const CONTEXT_NEAR_FULL = "Nearly full. Auto-compact is off, so the CLI compacts only at the limit."
+
 /** Context use only gets loud near the limit: amber from 75%, red from 90%. Below that it stays muted. */
 export const CONTEXT_WARN_PCT = 75
 export const CONTEXT_DANGER_PCT = 90
@@ -50,13 +56,15 @@ export function ContextMiniBar({ tokens, window, hint = CONTEXT_HINT, className 
 
 /**
  * "Context 168k / 200k · 84%" over a bar, and the automatic compaction state. Sky while there's room, then the amber
- * and red of contextTone, on the words too, so a warning never looks like the calm state.
+ * and red of contextTone, on the words too, so a warning never looks like the calm state; from there a line says what
+ * happens at the limit (`nearFull`).
  */
 export function ContextMeter({
   tokens,
   window,
   compacting,
   queued,
+  nearFull = CONTEXT_NEAR_FULL,
   className,
 }: {
   tokens: number | null
@@ -64,6 +72,8 @@ export function ContextMeter({
   compacting: boolean
   /** A compaction is waiting for the current turn to end. */
   queued: boolean
+  /** What to say from 75%, while no compaction runs or waits. */
+  nearFull?: string
   className?: string
 }) {
   const pct = contextPct(tokens, window)
@@ -78,7 +88,7 @@ export function ContextMeter({
         {/* No bar without a reading: an unknown window is not an empty one. */}
         {pct !== null && (
           <div
-            className="mt-1 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-zinc-800"
+            className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-zinc-800"
             role="meter"
             aria-label="Context window used"
             aria-valuemin={0}
@@ -89,6 +99,7 @@ export function ContextMeter({
             <div className={cx("h-full rounded-full", warn ? tone.bar : "bg-sky-500")} style={{ width: `${pct}%` }} />
           </div>
         )}
+        {warn && !compacting && !queued && <p className="mt-1 text-zinc-400 wrap-anywhere" data-testid="context-near-full">{nearFull}</p>}
       </div>
       {(compacting || queued) && <span role="status" className="shrink-0 text-zinc-400">{compacting ? "Compacting…" : "Compact queued"}</span>}
     </div>

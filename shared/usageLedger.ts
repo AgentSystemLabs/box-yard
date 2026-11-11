@@ -150,10 +150,11 @@ export interface UsageSeries {
 export const USAGE_COLORS = ["#3987e5", "#d95926", "#9085e9", "#199e70", "#c98500", "#d55181", "#008300"] as const
 export const OTHER_COLOR = "#71717a"
 /**
- * Token kinds are parts of one thing, so they wear one hue no model or provider has: a cyan ramp, darkest at the bottom
- * of the stack (validate_palette.js --ordinal: monotone lightness, every step ≥ 2:1 on the dark and the light surface).
+ * Token kinds, bottom of the stack first. Cache reads are most of every bar, so they are the neutral one and the other
+ * three stand out against it: a teal ramp of a hue no model or provider has, each step 2:1 or more from the next. As
+ * stacked neighbours on the dark and the light surface (validate_palette.js): CVD ΔE ≥ 10, normal-vision ΔE ≥ 15.
  */
-export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#006478", cacheWrite: "#00859a", cacheRead: "#22a7bc", output: "#52cae0" }
+export const TOKEN_COLORS: Record<TokenKind, string> = { input: "#004c5a", cacheWrite: "#00839a", cacheRead: "#a1a1aa", output: "#85e2f1" }
 const MODEL_SLOTS = 3
 const PROVIDER_COLOR: Partial<Record<ComputeProvider, number>> = { upstash: 3, daytona: 4, runpod: 5, vast: 6 }
 

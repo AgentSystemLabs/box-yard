@@ -1,12 +1,13 @@
 // Subscription limits per login (docs/limits.md): how much of each Claude subscription's and Codex plan's 5-hour and
 // weekly windows its login has used, and when each resets, as that login's runs last reported them. The Usage modal
 // shows every login (SubscriptionLimits); Settings › Credentials and Identities show their own login's in a line
-// (LoginLimitsLine). Every figure is visible text; the titles only repeat it.
+// that opens Usage (LoginLimitsLine). Every figure is visible text; the titles only repeat it.
 import { memo, useId, useMemo } from "react"
-import { Gauge } from "lucide-react"
+import { ChevronRight, Gauge } from "lucide-react"
 import { useLimits } from "../lib/queries"
 import { runDayTime, untilText } from "../lib/scheduleText"
 import { Loading } from "./Loading"
+import { useOpenUsage } from "./UsageHost"
 import { Button, cx, timeAgo, useMinuteClock } from "./ui"
 import { WARN_PCT, isCurrent, isFull, type LimitHarness, type LimitWindow, type LoginLimits } from "../../../shared/loginLimits"
 
@@ -91,7 +92,8 @@ export function SubscriptionLimits() {
           and have no such limits.
         </p>
       ) : (
-        <ul className="grid gap-4 @3xl:grid-cols-2">
+        // One login has the full width; two or more share it from 48rem.
+        <ul className={cx("grid gap-4", logins.length > 1 && "@3xl:grid-cols-2")}>
           {logins.map((l) => (
             <LoginCard key={l.loginId} login={l} now={now} />
           ))}
@@ -107,7 +109,7 @@ const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; 
     <li className="@container/login min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/30 p-3 @lg:p-4" data-testid="limits-login" data-login={login.loginId}>
       <div className="flex flex-wrap items-baseline gap-x-2">
         <h4 className="font-medium text-zinc-100">{HARNESS_LABEL[login.harness]}</h4>
-        <span className="min-w-0 text-xs text-zinc-400 wrap-anywhere">{login.source}</span>
+        <span className="min-w-0 text-xs text-zinc-500 wrap-anywhere">Source: {login.source}</span>
       </div>
       <div className="mt-0.5 text-xs text-zinc-500 wrap-anywhere">
         {loginDetail(login)} · <time title={new Date(login.asOf).toLocaleString()}>as of {readAgo(login.asOf, now)}</time>
@@ -117,7 +119,7 @@ const LoginCard = memo(function LoginCard({ login, now }: { login: LoginLimits; 
           At its limit until {midSentence(runDayTime(at, zone(), now))} ({untilText(at, now)}).
         </p>
       )}
-      {/* Side by side once the card is wide enough for both; a narrow column breaks "78% remaining · resets tomorrow 12:00 AM (in 22h)" at the dot. */}
+      {/* Side by side once the card is wide enough for both. */}
       <div className="mt-3 grid gap-3 @md/login:grid-cols-2 @md/login:gap-x-5">
         {login.windows.map((w) => (
           <WindowMeter key={w.window} w={w} now={now} who={HARNESS_LABEL[login.harness]} />
@@ -162,10 +164,12 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
           <div className={cx("h-full rounded-full", BAR_TONE[tone])} style={{ width: `${fill}%` }} />
         </div>
       )}
-      <div className={cx("mt-1.5 text-xs tabular-nums", tone === "full" ? "text-red-300" : "text-zinc-400")}>
+      {/* What's left under the bar's start, when it comes back under its end; one above the other in a narrow column. */}
+      <div className={cx("mt-1.5 flex flex-wrap justify-between gap-x-3 text-xs tabular-nums", tone === "full" ? "text-red-300" : "text-zinc-400")}>
         {remaining !== null ? (
           <>
-            <span className="whitespace-nowrap">{usedLabel(remaining)} remaining ·</span> <span className="whitespace-nowrap">{reset[0]!.toLowerCase() + reset.slice(1)}</span>
+            <span className="whitespace-nowrap">{usedLabel(remaining)} remaining</span>
+            <span className="whitespace-nowrap">{reset[0]!.toLowerCase() + reset.slice(1)}</span>
           </>
         ) : (
           reset
@@ -179,25 +183,53 @@ function WindowMeter({ w, now, who }: { w: LimitWindow; now: number; who: string
 
 /**
  * The limits of the newest login set at `scope` (`settings`, `identity:<id>`) for `harness`, in one line of chips:
- * "5-hour 64% · Weekly 22% · as of 12m ago". Nothing until a run has read them.
+ * "5-hour 64% · Weekly 22% · as of 12m ago". Nothing until a run has read them. It opens Usage (over the settings it
+ * is in), where each window has its reset time and the cost history.
  */
 export function LoginLimitsLine({ scope, harness, className }: { scope: string; harness: LimitHarness; className?: string }) {
   const limits = useLimits()
+  const openUsage = useOpenUsage()
   const now = useServerMinute(limits.data, limits.dataUpdatedAt)
   const login = useMemo(() => (limits.data?.logins ?? []).filter((l) => l.scope === scope && l.harness === harness).sort((a, b) => b.asOf - a.asOf)[0] ?? null, [limits.data, scope, harness])
   if (!login) return null
   const live = login.windows.filter((w) => isCurrent(w, now))
+  const who = HARNESS_LABEL[harness]
+  const asOf = <time dateTime={new Date(login.asOf).toISOString()}>as of {readAgo(login.asOf, now)}</time>
   return (
-    <div className={cx("flex flex-wrap items-center gap-1.5 text-xs text-zinc-500", className)} data-testid="limits-line" data-login={login.loginId}>
-      <Gauge className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-      <span className="text-zinc-400">{HARNESS_LABEL[harness]} limits</span>
-      {live.length ? (
-        live.map((w) => <WindowChip key={w.window} w={w} now={now} who={HARNESS_LABEL[harness]} />)
-      ) : (
-        <span>every window has reset since the last run</span>
+    <button
+      type="button"
+      onClick={() => openUsage()}
+      title={`Open Usage: reset times and history. Read ${new Date(login.asOf).toLocaleString()}`}
+      className={cx(
+        "group flex w-fit max-w-full items-center gap-1 rounded-md text-left text-xs text-zinc-500 focus-visible:ring-2 focus-visible:ring-yard-400 focus-visible:outline-none pointer-coarse:min-h-11",
+        className,
       )}
-      <time title={new Date(login.asOf).toLocaleString()}>as of {readAgo(login.asOf, now)}</time>
-    </div>
+      data-testid="limits-line"
+      data-login={login.loginId}
+    >
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Gauge className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+        <span className="text-zinc-400 group-hover:text-zinc-200">{who} limits</span>
+        {/* The read time stays with the last chip, so it never wraps to a line of its own. */}
+        {live.length ? (
+          live.map((w, i) =>
+            i < live.length - 1 ? (
+              <WindowChip key={w.window} w={w} now={now} who={who} />
+            ) : (
+              <span key={w.window} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <WindowChip w={w} now={now} who={who} />
+                {asOf}
+              </span>
+            ),
+          )
+        ) : (
+          <span>
+            <span>every window has reset since the last run</span> {asOf}
+          </span>
+        )}
+      </span>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-zinc-300" aria-hidden />
+    </button>
   )
 }
 

@@ -5,7 +5,8 @@ import { memo, useState } from "react"
 import { BarChart3, Boxes, ChevronRight, Cpu, Settings as SettingsIcon } from "lucide-react"
 import type { CloudStatus } from "../../../shared/types"
 import { useAgentSettings, useAllowMoreBoxes, useCloud, useRaiseCloudLimit } from "../lib/queries"
-import { BAR_TONE, METER_TONE, boxState, countsLine, dollars, limitPct, meterLabel, meterState, newBoxes, perHour, todayLine } from "../lib/cloud"
+import { BAR_TONE, METER_TONE, boxState, countsLine, limitPct, meterLabel, meterState, newBoxes, perHour, todayLine } from "../lib/cloud"
+import { money } from "../lib/usage"
 import { useOpenSettings } from "./SettingsHost"
 import { useOpenUsage, usePrefetchUsage } from "./UsageHost"
 import { Modal } from "./Modal"
@@ -78,7 +79,10 @@ export const CloudMeter = memo(function CloudMeter({ variant }: { variant: Varia
   )
 })
 
-/** Today's spend and limit, the boxes now, and each box with what it's doing and what it cost today. */
+/**
+ * Today's spend and limit, the boxes now, and each box with what it's doing and what it cost today. Its money reads as
+ * Usage's does ("$3.10 of $10.00"); the chip keeps the short form.
+ */
 function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () => void }) {
   const openSettings = useOpenSettings()
   const openUsage = useOpenUsage()
@@ -97,8 +101,12 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
     openUsage(30)
   }
   const daily = spend.dailyLimitUsd > 0
-  const meterText = `${dollars(spend.todayUsd)} of today's ${dollars(spend.dailyLimitUsd)} cloud limit (${pct ?? 0}% used)`
+  const meterText = `${money(spend.todayUsd)} of today's ${money(spend.dailyLimitUsd)} cloud limit (${pct ?? 0}% used)`
   const dailyReached = spend.state === "reached" && daily && spend.todayUsd >= spend.dailyLimitUsd - 1e-9
+  // Nothing up and nothing costing: one line says so, instead of "$0/h" over "No boxes".
+  const quiet = s.boxes.total === 0 && s.list.length === 0 && !(s.hourlyUsd > 0)
+  // The sheet has one primary action: the body's while new boxes wait for a yes, else the way to the history.
+  const asks = (spend.state === "reached" && dailyReached && spend.raiseToUsd !== null) || s.fanout.wanted > 0
   return (
     <Modal
       onClose={onClose}
@@ -112,13 +120,13 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
       }
       footer={
         <>
-          <Button variant="subtle" onClick={usage} onPointerEnter={() => prefetchUsage(30)} onFocus={() => prefetchUsage(30)} title="Usage: daily cost and tokens over the last 30 days" data-testid="cloud-usage-history">
+          <Button variant="ghost" onClick={settings}>
+            <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
+            Limits and rates
+          </Button>
+          <Button variant={asks ? "subtle" : "primary"} onClick={usage} onPointerEnter={() => prefetchUsage(30)} onFocus={() => prefetchUsage(30)} title="Usage: daily cost and tokens over the last 30 days" data-testid="cloud-usage-history">
             <BarChart3 className="h-3.5 w-3.5" aria-hidden />
             Usage history
-          </Button>
-          <Button variant="subtle" onClick={settings}>
-            <SettingsIcon className="h-3.5 w-3.5" />
-            Limits and rates
           </Button>
         </>
       }
@@ -128,8 +136,8 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-zinc-300">Today</span>
             <span className="text-zinc-400 tabular-nums">
-              <span className="font-semibold text-zinc-100">{dollars(spend.todayUsd)}</span>
-              {daily ? ` of ${dollars(spend.dailyLimitUsd)}` : ""}
+              <span className="font-semibold text-zinc-100">{money(spend.todayUsd)}</span>
+              {daily ? ` of ${money(spend.dailyLimitUsd)}` : ""}
             </span>
           </div>
           {daily ? (
@@ -147,8 +155,8 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
                 <div className={cx("h-full rounded-full", BAR_TONE[spend.state])} style={{ width: `${pct ?? 0}%` }} />
               </div>
               <p className="mt-1 text-xs text-zinc-500 tabular-nums">
-                {pct}% used · {dollars(Math.max(0, spend.dailyLimitUsd - spend.todayUsd))} left until midnight
-                {spend.raisedUsd > 0 ? ` · raised ${dollars(spend.raisedUsd)} today` : ""}
+                {pct}% used · {money(Math.max(0, spend.dailyLimitUsd - spend.todayUsd))} left until midnight
+                {spend.raisedUsd > 0 ? ` · raised ${money(spend.raisedUsd)} today` : ""}
               </p>
             </>
           ) : (
@@ -156,7 +164,7 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
           )}
           {spend.monthlyLimitUsd > 0 && (
             <p className="mt-1 text-xs text-zinc-500 tabular-nums">
-              Last 30 days: {dollars(spend.monthUsd)} of {dollars(spend.monthlyLimitUsd)}
+              Last 30 days: {money(spend.monthUsd)} of {money(spend.monthlyLimitUsd)}
             </p>
           )}
         </section>
@@ -169,7 +177,7 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
             <div className="mt-2">
               {dailyReached && spend.raiseToUsd !== null ? (
                 <Button variant="primary" loading={raise.isPending} onClick={() => raise.mutate()} data-testid="raise-cloud-limit">
-                  Raise today's limit to {dollars(spend.raiseToUsd)}
+                  Raise today's limit to {money(spend.raiseToUsd)}
                 </Button>
               ) : (
                 <Button variant="subtle" onClick={settings}>
@@ -184,7 +192,7 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
             <p>Near the limit. At it, new boxes wait until midnight; work already running goes on.</p>
             {spend.raiseToUsd !== null && (
               <Button className="mt-2" variant="subtle" loading={raise.isPending} onClick={() => raise.mutate()} data-testid="raise-cloud-limit">
-                Raise today's limit to {dollars(spend.raiseToUsd)}
+                Raise today's limit to {money(spend.raiseToUsd)}
               </Button>
             )}
           </div>
@@ -203,18 +211,17 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
         )}
 
         <section aria-label="Now">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-zinc-300">Now</span>
-            <span className="text-zinc-400 tabular-nums">{perHour(s.hourlyUsd)}</span>
-          </div>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            {countsLine(s.boxes)} · up to {s.ceiling} boxes at once (a safety stop)
-          </p>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            {s.fanout.allowedUntil
-              ? `More than ${s.fanout.freePerHour} new boxes an hour allowed until ${new Date(s.fanout.allowedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-              : `Up to ${s.fanout.freePerHour} new boxes an hour without asking`}
-          </p>
+          {quiet ? (
+            <p className="text-zinc-400" data-testid="cloud-no-boxes">No boxes right now. One starts when a task needs it.</p>
+          ) : (
+            <>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-zinc-300">Now</span>
+                <span className="text-zinc-400 tabular-nums">{perHour(s.hourlyUsd)}</span>
+              </div>
+              <p className="mt-0.5 text-xs text-zinc-500">{countsLine(s.boxes)}</p>
+            </>
+          )}
           {s.gpu && (
             <p className="mt-1.5 flex items-center gap-1.5 text-xs text-zinc-400 tabular-nums">
               <Cpu className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
@@ -238,10 +245,8 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
           )}
         </section>
 
-        <section aria-label="Boxes">
-          {s.list.length === 0 ? (
-            <p className="text-xs text-zinc-500">No boxes right now. One starts when a task needs it.</p>
-          ) : (
+        {s.list.length > 0 && (
+          <section aria-label="Boxes">
             <ul className="divide-y divide-zinc-900 rounded-lg border border-zinc-900">
               {s.list.map((b) => {
                 const state = boxState(b, now)
@@ -264,16 +269,24 @@ function CloudSheet({ status: s, onClose }: { status: CloudStatus; onClose: () =
                       </div>
                       {b.projects.length > 0 && <div className="mt-0.5 truncate text-xs text-zinc-500">{b.projects.join(", ")}</div>}
                     </div>
-                    <div className="shrink-0 text-right text-xs text-zinc-400 tabular-nums" title={`${dollars(b.totalUsd)} since it was made`}>
-                      {dollars(b.todayUsd)}
+                    <div className="shrink-0 text-right text-xs text-zinc-400 tabular-nums" title={`${money(b.totalUsd)} since it was made`}>
+                      {money(b.todayUsd)}
                       <div className="text-zinc-600">today</div>
                     </div>
                   </li>
                 )
               })}
             </ul>
-          )}
-        </section>
+          </section>
+        )}
+
+        {/* The caps are rules, not readings: a footnote under whatever is running. */}
+        <p className="text-xs text-zinc-500" data-testid="cloud-caps">
+          Up to {s.ceiling} boxes at once (a safety stop) ·{" "}
+          {s.fanout.allowedUntil
+            ? `more than ${s.fanout.freePerHour} new boxes an hour allowed until ${new Date(s.fanout.allowedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+            : `up to ${s.fanout.freePerHour} new boxes an hour without asking`}
+        </p>
       </div>
     </Modal>
   )
