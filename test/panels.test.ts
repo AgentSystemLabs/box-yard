@@ -8,6 +8,7 @@ import { warmLazyParts } from "../web/src/components/LazyPart.js"
 import { DEFAULT_SETTINGS } from "../server/settings.js"
 import { keys } from "../web/src/lib/queries.js"
 import { currentToasts, dismiss } from "../web/src/lib/toast.js"
+import { currentConfirm, settleConfirm } from "../web/src/lib/confirm.js"
 import { navigateApp, projectChatHref, taskCardHref, taskSessionHref, APP_HOME, appHref } from "../web/src/lib/navigation.js"
 import { chatProjectFilter, setChatProjectFilter } from "../web/src/lib/projectBar.js"
 import { COORDINATOR_CHAT, closeThread, openThread, threadKeys } from "../web/src/lib/threads.js"
@@ -534,10 +535,29 @@ describe("navigation", () => {
     expect(location.pathname).toBe(APP_HOME)
   })
 
+  it("project settings with a clean draft closes on Esc at once; a dirty one asks first", async () => {
+    render("/?projectSettings=prj_demo01")
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1)
+    // Synchronous act: no awaited confirm stands between Esc and the URL update.
+    esc()
+    expect(location.search).not.toContain("projectSettings")
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+
+    render("/?projectSettings=prj_demo01")
+    const name = document.querySelector<HTMLInputElement>('[role="dialog"] input')!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
+    act(() => { setValue.call(name, "Updated name"); name.dispatchEvent(new Event("input", { bubbles: true })) })
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })) })
+    expect(location.search).toContain("projectSettings=prj_demo01")
+    expect(currentConfirm()?.title).toBe("Discard unsaved changes?")
+    await act(async () => settleConfirm(currentConfirm()!.id, false))
+  })
+
   it("project configuration stays reachable in Settings without opening the project page", () => {
     render("/?settings=projects")
-    const configure = [...document.querySelectorAll("button")].find((b) => b.textContent === "Configure project")!
-    click(configure)
+    const row = document.querySelector('[data-testid="project-settings-list"] li button')!
+    expect(row.textContent).toContain("box-yard")
+    click(row)
     expect(location.pathname).toBe(APP_HOME)
     expect(location.search).toContain("projectSettings=prj_demo01")
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2)
