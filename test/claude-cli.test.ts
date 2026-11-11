@@ -10,6 +10,7 @@ import {
   claudeCliTooOld,
   claudeCliVersion,
   minClaudeCliFor,
+  serverCliProblems,
   unrecognizedModelError,
   versionBelow,
 } from "../shared/claudeCli.js"
@@ -71,6 +72,24 @@ describe("what an old Claude Code's failure says", () => {
     expect(own).toContain("Claude Code on SSH machine build-1 doesn't know the model claude-nope-9.")
     expect(own).toContain("Update it there")
     expect(own).toContain("the model name is wrong")
+  })
+})
+
+describe("the server's own Claude Code", () => {
+  const roles = (coordinator: string | null, captains: string | null) => [{ who: "the Coordinator's", model: coordinator }, { who: "Captains'", model: captains }]
+
+  it("is a health problem when it is too old for the Coordinator's or Captains' model", () => {
+    expect(serverCliProblems("2.1.312 (Claude Code)", roles("claude-fable-5-2", "claude-opus-5-5"))).toEqual([
+      "Claude Code 2.1.312 on the server doesn't know the Coordinator's model claude-fable-5-2, which needs Claude Code 2.1.321 or later: it runs it in a 200k-token window and auto-compacts far too early. Update it (npm install -g @anthropic-ai/claude-code@latest) and restart Box Yard.",
+    ])
+    expect(serverCliProblems("2.1.312 (Claude Code)", roles("claude-fable-5-2", "claude-fable-5-2"))[0]).toContain("doesn't know the Coordinator's and Captains' model claude-fable-5-2,")
+  })
+
+  it("is none when it is new enough, runs other models, isn't used (null) or doesn't say its version", () => {
+    expect(serverCliProblems("2.1.322 (Claude Code)", roles("claude-fable-5-2", "claude-fable-5-2"))).toEqual([])
+    expect(serverCliProblems("2.1.293 (Claude Code)", roles("claude-opus-5-5", null))).toEqual([])
+    expect(serverCliProblems("0.0.0 (fake claude for Box Yard)", roles("claude-fable-5-2", null))).toEqual([])
+    expect(serverCliProblems(null, roles("claude-fable-5-2", null))).toEqual([])
   })
 })
 

@@ -91,6 +91,19 @@ export function claudeCliUpdateFailed(o: Omit<OldClaudeCli, "managed"> & { why: 
   return `${cliLine(o)} Updating it there failed (${UPDATE}): ${o.why}. Retry, or pick a model it knows.`
 }
 
+/**
+ * The server's own Claude Code against the models that run on it (the Coordinator's, Captains'): one line per model
+ * it is too old for, for the health banner. `versionText` is its `claude --version`; `who` reads "the Coordinator's".
+ */
+export function serverCliProblems(versionText: string | null | undefined, roles: { who: string; model: string | null | undefined }[]): string[] {
+  const version = claudeCliVersion(versionText)
+  const models = [...new Set(roles.filter((r) => claudeCliTooOld(version, r.model)).map((r) => r.model!))]
+  return models.map((model) => {
+    const who = roles.filter((r) => r.model === model).map((r) => r.who).join(" and ")
+    return `Claude Code ${version} on the server doesn't know ${who} model ${model}, which needs Claude Code ${minClaudeCliFor(model)} or later: it runs it in a ${UNKNOWN_MODEL_WINDOW}-token window and auto-compacts far too early. Update it (${UPDATE}) and restart Box Yard.`
+  })
+}
+
 /** A turn the runner stopped because its CLI said it doesn't recognize the model. */
 export function unrecognizedModelError(o: OldClaudeCli): string {
   const next = o.managed
