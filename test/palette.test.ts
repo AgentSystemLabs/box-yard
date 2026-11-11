@@ -278,10 +278,11 @@ describe("prefixes", () => {
     expect(groups.map((g) => g.key)).toEqual(["command"])
     expect(titles(groups[0])).toEqual(["New project…"])
     expect(search(items, ">settings")[0]!.items[0]!.command).toBe("settings")
-    // Two pages, three actions and each project's Pin.
+    // Two pages, three actions (New task… first; "Open settings" folded into the Settings page) and each project's Pin.
     expect(search(items, ">")[0]!.total).toBe(5 + projects.length)
+    expect(titles(search(items, ">")[0])[0]).toBe("New task…")
     expect(titles(search(items, ">hotkeys")[0])).toEqual(["Keyboard shortcuts"])
-    expect(search(items, ">new task")).toEqual([])
+    expect(titles(search(items, ">new task")[0])).toEqual(["New task…"])
   })
 
   it("# finds PRs by number or title, open ones first", () => {
@@ -550,12 +551,12 @@ describe("empty query", () => {
       usage: { "action:new-project": 4, "page:boxes": 2 },
     })
     expect(groups.map((g) => g.key)).toEqual(["waiting", "working", "recent", "command"])
-    expect(groups[0]!.label).toBe("Waiting on Cody")
+    expect(groups[0]!.label).toBe("Waiting on you")
     expect(titles(groups[0])).toEqual(["Review me", "Answer me"])
     expect(titles(groups[1])).toEqual(["Booting", "Busy"])
     // Tasks already shown above, missing ones and files are left out.
     expect(titles(groups[2])).toEqual(["Notes app", "Resting"])
-    expect(titles(groups[3]).slice(0, 3)).toEqual(["New project…", "Coordinator", "Settings"])
+    expect(titles(groups[3]).slice(0, 4)).toEqual(["New task…", "New project…", "Coordinator", "Settings"])
     expect(groups.some((g) => g.items.some((i) => i.kind === "artifact"))).toBe(false)
   })
 
@@ -577,7 +578,7 @@ describe("project pins", () => {
   it("stay out of the empty query's commands until used", () => {
     const items = buildItems({ projects })
     expect(titles(group(search(items, ""), "command"))).not.toContain("Pin box-yard")
-    expect(titles(group(search(items, "", { usage: { "action:pin:prj_yard": 1 } }), "command"))[0]).toBe("Pin box-yard")
+    expect(titles(group(search(items, "", { usage: { "action:pin:prj_yard": 1 } }), "command")).slice(0, 2)).toEqual(["New task…", "Pin box-yard"])
   })
 })
 

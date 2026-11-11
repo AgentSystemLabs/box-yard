@@ -134,8 +134,8 @@ describe("usage ledger aggregation", () => {
     const v = aggregateUsage(sampleLedger(), {}, "provider")
     expect(v.totals.llmUsd).toBeCloseTo(2 + 3 + 0.5 + 0.25 + 0.1 + 0.05, 9)
     expect(v.totals.computeUsd).toBeCloseTo(4.8 + 0.6 + 1.5, 9)
-    // The three dearest models get colours; the rest fold into "Other models". Docker is $0, so it has no series.
-    expect(v.cost.map((s) => s.key)).toEqual(["model:claude-sonnet-5-5", "model:claude-opus-5-5", "model:claude-haiku-5-5", "other-models", "provider:upstash", "provider:daytona", "provider:runpod"])
+    // The three dearest models get colours, in name order so a colour stays put; the rest fold into "Other models". Docker is $0, so it has no series.
+    expect(v.cost.map((s) => s.key)).toEqual(["model:claude-haiku-5-5", "model:claude-opus-5-5", "model:claude-sonnet-5-5", "other-models", "provider:upstash", "provider:daytona", "provider:runpod"])
     expect(v.rows.find((r) => r.key === "provider:docker")).toMatchObject({ costUsd: 0, computeHours: 1, detail: "Your own hardware: $0" })
     // Compute priced from size × time, and the run the CLI didn't price, are estimates; Upstash measured CPU at Settings' rates too.
     expect(v.totals.estimatedUsd).toBeCloseTo(4.8 + 0.6 + 1.5 + 0.05, 9)

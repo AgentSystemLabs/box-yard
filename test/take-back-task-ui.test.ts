@@ -115,7 +115,7 @@ describe("Task chat: Stop in the box", () => {
     const stop = byLabel("Stop the agent's turn")!
     expect(stop).not.toBeNull()
     // Right before Send, a 44px target.
-    expect(stop.nextElementSibling?.getAttribute("aria-label")).toBe("Send")
+    expect(stop.nextElementSibling?.getAttribute("aria-label")).toBe("Queue message")
     expect(stop.className).toContain("h-11 w-11")
     await click(stop)
     expect(calls).toContainEqual({ method: "POST", url: `/api/tasks/${TASK}/stop` })

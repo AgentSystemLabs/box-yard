@@ -202,7 +202,8 @@ describe("Captain tab: queued messages", () => {
     act(() => qc.setQueryData<CaptainMessage[]>(keys.captainMessages(project.id), (l) => [...l!, cap("cap_stopped001", "error", "Stopped by Cody.", now, { stopped: true })]))
     await flush()
     expect(host.querySelector("[data-testid=chat-stopped]")?.textContent).toBe("Stopped by Cody.")
-    expect(host.querySelector(".text-red-300")).toBeNull()
+    // Nothing red but the Stop button's own square (the Captain's busy again, so Stop is back).
+    expect([...host.querySelectorAll(".text-red-300")].filter((el) => !el.closest(`button[aria-label="Stop the Captain's turn"]`))).toEqual([])
   })
 
   it("has no Stop while idle or compacting (a compaction finishes)", () => {

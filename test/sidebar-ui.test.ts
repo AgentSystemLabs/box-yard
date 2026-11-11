@@ -306,9 +306,9 @@ describe("the sidebar", () => {
     render()
     expect(nav()!.querySelector("input")).toBeNull()
     const top = nav()!.firstElementChild!
-    expect([...top.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Search tasks", "Fold the sidebar"])
-    const search = button(top, "Search tasks")
-    expect(search.title).toMatch(/^Search tasks \((⌘K|Ctrl\+K) or \/\)$/)
+    expect([...top.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["Search and commands", "Fold the sidebar"])
+    const search = button(top, "Search and commands")
+    expect(search.title).toMatch(/^Search and commands \((⌘K|Ctrl\+K) or \/\)$/)
     click(search)
     expect(document.activeElement).toBe(document.querySelector('input[aria-label="Search Box Yard"]'))
     click(document.querySelector('[role="dialog"] button[aria-label="Close"]')!)

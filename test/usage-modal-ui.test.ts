@@ -118,8 +118,8 @@ const $$ = (id: string, within: ParentNode = document) => [...within.querySelect
 const dollars = (s: string | null | undefined) => Number(/\$([\d,.]+)/.exec(s ?? "")![1]!.replace(/,/g, ""))
 const buttonByText = (within: ParentNode, text: string) => [...within.querySelectorAll("button")].find((b) => b.textContent?.includes(text))!
 const click = (el: HTMLElement) => act(() => el.click())
-/** A breakdown row's own total: its last money figure. */
-const rowTotal = (r: HTMLElement) => dollars([...(r.textContent ?? "").matchAll(/\$[\d,.]+/g)].at(-1)![0])
+/** A breakdown row's own total: its last money figure (to the cent, so the share column after it isn't read in). */
+const rowTotal = (r: HTMLElement) => dollars([...(r.textContent ?? "").matchAll(/\$[\d,]+\.\d{2}/g)].at(-1)![0])
 
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -212,7 +212,7 @@ describe("the usage modal", () => {
   it("shows its token chart and how its estimates are made", async () => {
     await render()
     const tokens = $("usage-token-chart")!
-    expect([...tokens.querySelectorAll("[aria-label=Legend] button")].map((b) => b.textContent?.replace(/[\d.]+[KM]? tokens/, "").trim())).toEqual(["Input", "Cache write", "Cache read", "Output"])
+    expect([...tokens.querySelectorAll("[aria-label=Legend] button")].map((b) => b.textContent?.replace(/[\d.]+[KM]?$/, "").trim())).toEqual(["Input", "Cache write", "Cache read", "Output"])
     // A kind alone, on its own scale, and back to all four.
     click(buttonByText(tokens, "Output"))
     expect(new Set([...tokens.querySelectorAll("[data-series]")].map((e) => e.getAttribute("data-series")))).toEqual(new Set(["output"]))
@@ -224,7 +224,7 @@ describe("the usage modal", () => {
     limits = allowance()
     await render()
     const allowances = $("subscription-limits")!
-    expect(allowances.textContent).toMatch(/Claude.*Acme subscription.*Weekly.*83% used.*17% remaining.*Resets/)
+    expect(allowances.textContent).toMatch(/Claude.*Acme subscription.*Weekly.*83% used.*17% remaining.*resets/)
     expect(allowances.querySelector("[role=meter]")?.getAttribute("aria-valuenow")).toBe("83")
     expect(allowances.textContent).not.toContain("$")
     const before = allowances.textContent

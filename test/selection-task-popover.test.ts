@@ -59,6 +59,7 @@ const action = () => document.querySelector<HTMLButtonElement>("button[data-sele
 const popover = () => document.querySelector<HTMLElement>("[role=dialog]:not([aria-modal])")
 const modal = () => document.querySelector<HTMLElement>("[role=dialog][aria-modal=true]")
 const textarea = () => popover()!.querySelector("textarea")!
+const buttonStarting = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim().startsWith(label))!
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label)!
 const click = (el: HTMLElement) => act(() => el.click())
 const press = (el: Element, key: string) => {
@@ -103,7 +104,7 @@ describe("Start new task from selected text", () => {
     render()
     expect(action()).toBeNull()
     select()
-    expect(action()!.textContent).toContain("Start new task")
+    expect(action()!.textContent).toContain("New task from selection")
     click(action()!)
     const dialog = popover()!
     expect(dialog).not.toBeNull()
@@ -133,7 +134,7 @@ describe("Start new task from selected text", () => {
   it("Enter with no instructions still sends the selection", () => {
     render()
     openPopover()
-    expect(button("Start task").disabled).toBe(false)
+    expect(buttonStarting("Send to ").disabled).toBe(false)
     press(textarea(), "Enter")
     const prompt: string = onPrompt.mock.calls[0]![0]
     expect(prompt).toContain("## Selected output")
@@ -161,19 +162,19 @@ describe("Start new task from selected text", () => {
     expect(loadDraft(selectionScope(OUTPUT))).toBe("kept")
   })
 
-  it("More options opens the full dialog with the instructions and the selection carried over", async () => {
+  it("Start it myself… opens the full dialog with the instructions and the selection carried over", async () => {
     render()
     openPopover()
     type(textarea(), "Add exponential backoff with a cap")
-    click(button("More options"))
+    click(button("Start it myself…"))
     expect(popover()).toBeNull()
     const dialog = modal()!
     expect(dialog).not.toBeNull()
-    const prompt = dialog.querySelectorAll("textarea")[0]!.value
-    expect(prompt.startsWith("Add exponential backoff with a cap\n")).toBe(true)
-    expect(prompt).toContain("> so a dead remote spins the CPU.")
-    // The project comes from where the text was selected; no picker.
-    expect(dialog.querySelector("[data-testid=new-task-project]")).toBeNull()
+    // The prompt holds only the instructions; the selection is its own quote above it.
+    expect(dialog.querySelectorAll("textarea")[0]!.value).toBe("Add exponential backoff with a cap")
+    expect(dialog.querySelector("blockquote[data-testid=selection-quote]")!.textContent).toContain("so a dead remote spins the CPU.")
+    // The project starts as the one the text was selected in, and can still be changed.
+    expect(dialog.querySelector<HTMLSelectElement>("[data-testid=new-task-project]")!.value).toBe("prj_alpha1")
     click(button("Start task"))
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/tasks" && (init as RequestInit)?.method === "POST")).toBe(true))
     const [, init] = fetchMock.mock.calls.find(([url, init]) => url === "/api/tasks" && (init as RequestInit)?.method === "POST")!
@@ -184,10 +185,10 @@ describe("Start new task from selected text", () => {
     expect(loadDraft(selectionScope(OUTPUT))).toBe("")
   })
 
-  it("More options without a project in context lets you pick one", () => {
+  it("Start it myself… without a project in context lets you pick one", () => {
     render({ kind: "orchestrator", project: null })
     openPopover()
-    click(button("More options"))
+    click(button("Start it myself…"))
     const picker = modal()!.querySelector<HTMLSelectElement>("[data-testid=new-task-project]")!
     expect([...picker.options].map((o) => o.textContent)).toEqual(["zeta", "alpha"])
   })
