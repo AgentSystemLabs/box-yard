@@ -169,17 +169,19 @@ describe("the sidebar's tree: roles and attributes", () => {
     expect(outline()).toEqual([
       "Coordinator (1/5)",
       "Waiting on you2 ▾ (2/5)",
-      "  Check SSH into the benchasks (1/2)",
-      // The PR number has its own named link beside the button that names the treeitem.
-      "  Refresh the portfolio (2/2)",
+      // A Waiting on you row's name ends with its project.
+      "  Check SSH into the bench, box-yard (1/2)",
+      // The PR number has its own named link beside the button that names the treeitem; ", PR #19" (PrName) only
+      // joins the name where that link yields on a narrow touch sidebar (display:none otherwise, which jsdom ignores).
+      "  Refresh the portfolio, marketing-site, PR #19 (2/2)",
       "box-yard, Captain ▾ (3/5)",
-      "  Check SSH into the benchasks (1/2)",
+      "  Check SSH into the bench (1/2)",
       "  Plan the launch ▾ (2/2)",
       "    Write the launch post ▾ (1/2)",
       "      Draft the pricing section (1/1)",
       "    Pick the images (2/2)",
       "marketing-site, Captain ▾ (4/5)",
-      "  Refresh the portfolio (1/1)",
+      "  Refresh the portfolio, PR #19 (1/1)",
       "More projects1 ▸ (5/5)",
     ])
     expect(items().map((i) => i.dataset.treeKey)).toEqual(ALL)
@@ -444,11 +446,11 @@ describe("the sidebar's tree: lists that change", () => {
     const many = Array.from({ length: WAITING_CAP + 2 }, (_, i) => task(`task_many0${i}`, YARD.id, `Question ${i + 1}`, "needs_input"))
     render(APP_HOME, many)
     const more = at("waiting:more")
-    expect(itemName(more)).toBe("Show 2 more")
+    expect(itemName(more)).toBe(`Show all ${WAITING_CAP + 2}`)
     expect(more.getAttribute("aria-level")).toBe("2")
     focus(more)
     press("Enter")
-    expect(itemName(at("waiting:more"))).toBe("Show fewer")
+    expect(itemName(at("waiting:more"))).toBe(`Show fewer: show only the first ${WAITING_CAP}`)
     expect(focusedKey()).toBe("waiting:more")
     expect(at(WAITING).nextElementSibling!.querySelectorAll("[role=treeitem]")).toHaveLength(WAITING_CAP + 3)
   })

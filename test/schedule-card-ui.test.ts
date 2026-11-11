@@ -139,19 +139,24 @@ describe("ScheduleCard", () => {
     expect(text("schedule-next")).toMatch(/^Tomorrow 2:00 AM( Chicago)? · in 8h$/)
     const last = host.querySelector<HTMLAnchorElement>('[data-testid="schedule-last"] a')!
     expect(last.getAttribute("href")).toBe("/tasks/task_done000001")
-    expect(last.textContent).toContain("Done")
+    // The run's state is its task's own icon, never a status word.
+    expect(last.textContent).not.toContain("Done")
+    expect(last.querySelector('[data-testid="task-status-icon"]')?.getAttribute("data-status")).toBe("done")
     expect(last.textContent).toContain("Bumped 3 packages, PR opened")
     expect(last.textContent).toContain("1h ago")
-    // The raw cron and zone are one tap away, not on the card's face.
+    // A cron the words describe never shows raw, not even in the details.
     expect(host.textContent).not.toContain("0 2 * * *")
     click(button(/Show prompt and 2 runs/))
-    expect(host.textContent).toContain("Cron 0 2 * * * in America/Chicago")
+    expect(host.textContent).toContain("Bump safe minor versions.")
+    expect(host.textContent).toContain("If the server was down: run once when it's back")
+    expect(host.textContent).not.toContain("0 2 * * *")
   })
 
   it("puts a failed run's reason in a line", () => {
     qc.setQueryData(keys.tasks, [task({ status: "failed", summary: null, error: "Couldn't start the agent: the box ran out of disk" })])
     render(schedule())
-    expect(text("schedule-last")).toMatch(/^Failed\s*1h ago\s*The agent couldn't start$/)
+    expect(text("schedule-last")).toMatch(/^1h ago\s*The agent couldn't start$/)
+    expect(host.querySelector('[data-testid="schedule-last"] [data-testid="task-status-icon"]')?.getAttribute("aria-label")).toBe("Failed")
   })
 
   it("keeps the last finished run in view while a new one is going", () => {
@@ -170,15 +175,16 @@ describe("ScheduleCard", () => {
   it("Pause and Resume are labelled buttons that say what they did", async () => {
     render(schedule())
     click(button("Pause"))
-    expect(said()).toBe("Paused. Nothing runs until you resume it.")
     await settle()
+    // Said once the server has it.
+    expect(said()).toBe("Paused. Nothing runs until you resume it.")
     expect(requests.at(-1)).toMatchObject({ url: "/api/schedules/sch_nightly1", method: "PATCH", body: { enabled: false } })
-    expect(text("schedule-next")).toBe("Paused. Nothing runs until you resume it.")
+    expect(text("schedule-next")).toBe("Paused")
     expect(host.querySelector("h3")?.parentElement?.textContent).toContain("Paused")
 
     click(button("Resume"))
-    expect(said()).toMatch(/^Resumed\. Next run Tomorrow 2:00 AM( Chicago)? · in 8h\.$/)
     await settle()
+    expect(said()).toMatch(/^Resumed\. Next run Tomorrow 2:00 AM( Chicago)? · in 8h\.$/)
     expect(requests.at(-1)).toMatchObject({ method: "PATCH", body: { enabled: true } })
     expect(text("schedule-next")).toMatch(/^Tomorrow 2:00 AM/)
     expect(button("Pause")).toBeTruthy()
@@ -186,7 +192,7 @@ describe("ScheduleCard", () => {
 
   it("a resumed schedule shows its next run before the server has planned it", async () => {
     render(schedule({ enabled: false, nextRunAt: null }))
-    expect(text("schedule-next")).toBe("Paused. Nothing runs until you resume it.")
+    expect(text("schedule-next")).toBe("Paused")
     act(() => void qc.setQueryData<Schedule[]>(keys.schedules, (list) => list!.map((s) => ({ ...s, enabled: true }))))
     await settle()
     expect(text("schedule-next")).toMatch(/^Tomorrow 2:00 AM( Chicago)? · in 8h$/)
@@ -231,7 +237,7 @@ describe("ScheduleCard", () => {
     runResponse = async () => chatRun({ id: "run_bbbbbbbbbb", status: "queued", chatMessageId: null, createdAt: Date.now() })
     render(s)
     expect(text("schedule-when")).toBe("Every day at 8:00 AM Chicago")
-    expect(text("schedule-last")).toMatch(/^Done\s*1h ago\s*View in chat$/)
+    expect(text("schedule-last")).toMatch(/^1h ago\s*View in chat$/)
     const revealed: string[] = []
     const onReveal = (e: Event) => revealed.push((e as CustomEvent<string>).detail)
     window.addEventListener(REVEAL_CHAT_EVENT, onReveal)

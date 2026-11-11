@@ -46,6 +46,17 @@ export function releaseListBottom(el: Element) {
   el.dispatchEvent(new Event(LEAVE_BOTTOM, { bubbles: true }))
 }
 
+// Bubbles from an element whose own change of height is over (a message's actions row put away), up to its StickyScroll.
+const REJOIN_BOTTOM = "boxyard:rejoin-bottom"
+
+/**
+ * Undo `releaseListBottom` once what it was released for is gone: the list follows new messages again, but only if
+ * it's at its bottom now. A reader who scrolled away meanwhile stays where they are.
+ */
+export function rejoinListBottom(el: Element) {
+  el.dispatchEvent(new Event(REJOIN_BOTTOM, { bubbles: true }))
+}
+
 /**
  * Scroll `el` into view inside the StickyScroll that holds it (a card the cards view goes to, say). The list lets go
  * of the bottom first and holds the view where the scroll leaves it: pinned, content growing meanwhile (the card
@@ -497,6 +508,15 @@ export function StickyScroll({
       restoring.current = null
       unpin()
     }
+    // rejoinListBottom: back at the bottom after a release that scrolled nothing, so follow it again.
+    const onRejoinBottom = () => {
+      if (stuck.current || restoring.current) return
+      const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+      if (bottom - el.scrollTop >= BOTTOM_SLOP_PX) return
+      lastTop.current = el.scrollTop
+      seeBottom(bottom)
+      pin()
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || !(UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey)) || isEditable(e.target) || innerCanScrollUp(e.target, el)) return
       const t = e.target
@@ -511,6 +531,7 @@ export function StickyScroll({
     el.addEventListener("touchmove", onTouchMove, passive)
     el.addEventListener("pointerdown", onPointerDown)
     el.addEventListener(LEAVE_BOTTOM, onLeaveBottom)
+    el.addEventListener(REJOIN_BOTTOM, onRejoinBottom)
     // Capture runs before the list's own listener, which then sets it back for clicks inside.
     document.addEventListener("pointerdown", onDocPointerDown, true)
     document.addEventListener("pointerup", onPointerUp, true)
@@ -522,6 +543,7 @@ export function StickyScroll({
       el.removeEventListener("touchmove", onTouchMove)
       el.removeEventListener("pointerdown", onPointerDown)
       el.removeEventListener(LEAVE_BOTTOM, onLeaveBottom)
+      el.removeEventListener(REJOIN_BOTTOM, onRejoinBottom)
       document.removeEventListener("pointerdown", onDocPointerDown, true)
       document.removeEventListener("pointerup", onPointerUp, true)
       document.removeEventListener("pointercancel", onPointerUp, true)

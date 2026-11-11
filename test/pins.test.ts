@@ -362,7 +362,9 @@ describe("Columns, rule 2: a sub-task opens alone, and its crumbs lead up", () =
     }
     expect(history.querySelector("[data-scroller]")!.className).toContain("chat-column")
     click(history.querySelector("nav button")!)
-    expect(history.querySelector('[role="group"][aria-label="Transcript navigation"]')?.textContent).toBe("Jump to startJump to end")
+    // The day's title and Close above one row of jumps: the chat's start, the open day, its end.
+    const nav = history.querySelector('[role="group"][aria-label="Transcript navigation"]')!
+    expect([...nav.querySelectorAll("button")].map((b) => b.textContent || b.getAttribute("aria-label"))).toEqual(["Close day summary", "Jump to start", "Jump to day", "Jump to end"])
   })
 
   it("from the sidebar: only the sub-task; each crumb shows its level alone, a step of its own in history", async () => {

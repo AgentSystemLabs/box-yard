@@ -5,7 +5,7 @@
 import { Fragment, memo, useMemo, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 import { AppLink, InRepo, LinkedText, Markdown, cx } from "./ui"
-import { ChatLine, FullReplyLink, NoticeProject } from "./ChatLine"
+import { ChatLine, FullReplyLink, NOTICE_META, NoticeProject } from "./ChatLine"
 import { PublishedCard } from "./PublishedNotices"
 import { MESSAGE_BLOCK, MessageActions } from "./MessageActions"
 import { ThreadMarkers } from "./SideThread"
@@ -31,13 +31,23 @@ const CHIP_ROW =
 /** What an open chip shows, under its line. */
 const CHIP_BODY = "mt-0.5 mb-1 ml-2.5 border-l border-zinc-800 pl-3"
 const SOURCE_LINK = "min-w-0 max-w-[55%] shrink truncate font-medium text-yard-400 hover:underline"
+/**
+ * A task's chip in a narrow chat (ChatHistory's container): two lines. The task's name takes the first, beside its tile
+ * and the chevron, and what happened goes on the second, so a phone shows more of the name than its first word.
+ */
+const NARROW_ROW = "@max-[30rem]/history:flex-wrap @max-[30rem]/history:gap-y-0.5"
+/** The name on its line: all of it but the tile's and the chevron's room. */
+const NARROW_NAME = "@max-[30rem]/history:max-w-[calc(100%-3.5rem)]"
+/** What happened, and the preview: in the row as before (`contents`), or the second line, under the name. */
+const NARROW_EVENT =
+  "contents @max-[30rem]/history:order-3 @max-[30rem]/history:flex @max-[30rem]/history:min-w-0 @max-[30rem]/history:basis-full @max-[30rem]/history:items-center @max-[30rem]/history:gap-1.5"
 
 function Chevron({ open }: { open: boolean }) {
   return <ChevronRight className={cx("ml-auto h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform", open && "rotate-90")} aria-hidden />
 }
 
 /** A role=button line (not a <button>: the source inside is a link). Its links keep their clicks. */
-function ChipLine({ open, onToggle, title, children }: { open: boolean; onToggle: () => void; title?: string; children: ReactNode }) {
+function ChipLine({ open, onToggle, title, className, children }: { open: boolean; onToggle: () => void; title?: string; className?: string; children: ReactNode }) {
   const toggle = (e: MouseEvent | KeyboardEvent) => {
     if ((e.target as HTMLElement).closest("a")) return
     if ("key" in e && e.key !== "Enter" && e.key !== " ") return
@@ -45,7 +55,7 @@ function ChipLine({ open, onToggle, title, children }: { open: boolean; onToggle
     onToggle()
   }
   return (
-    <div role="button" tabIndex={0} aria-expanded={open} data-testid="update-chip-line" title={open ? undefined : title} onClick={toggle} onKeyDown={toggle} className={CHIP_ROW}>
+    <div role="button" tabIndex={0} aria-expanded={open} data-testid="update-chip-line" title={open ? undefined : title} onClick={toggle} onKeyDown={toggle} className={cx(CHIP_ROW, className)}>
       {children}
       <Chevron open={open} />
     </div>
@@ -84,21 +94,29 @@ const NoticeChip = memo(function NoticeChip({ m }: { m: ChatMessage }) {
   const taskId = v.captain ? null : typeof m.meta?.taskId === "string" ? m.meta.taskId : null
   const tile = useTaskTile(taskId)
   const source = v.source
+  // A Captain's chip has nothing after "replied" (its reply is under it), so it stays one line.
+  const narrow = !v.captain && Boolean(source)
+  const preview = Boolean(v.preview) && !showBody
   const line = (
     <>
       {tile ? <TaskTile id={taskId} /> : <Icon className={cx("h-3.5 w-3.5 shrink-0", className)} aria-label={label} />}
       {source && (source.href ? (
-        <AppLink href={source.href} className={SOURCE_LINK}>{source.label}</AppLink>
+        <AppLink href={source.href} className={cx(SOURCE_LINK, narrow && NARROW_NAME)}>{source.label}</AppLink>
       ) : (
-        <span className="min-w-0 max-w-[55%] shrink truncate font-medium text-zinc-300">{source.label}</span>
+        <span className={cx("min-w-0 max-w-[55%] shrink truncate font-medium text-zinc-300", narrow && NARROW_NAME)}>{source.label}</span>
       ))}
-      {tile ? <Verb icon={Icon} className={className} label={label} verb={v.verb} /> : v.verb && <span className="max-w-[45%] min-w-0 shrink-[0.5] truncate text-zinc-400">{v.verb}</span>}
-      {v.preview && !showBody && (
-        <span data-testid="update-chip-preview" className={cx("min-w-0 flex-1 truncate", source ? "text-zinc-600" : "text-zinc-400")}>
-          {source || v.verb ? "· " : ""}
-          <InRepo taskId={typeof m.meta?.taskId === "string" ? m.meta.taskId : null} projectId={typeof m.meta?.projectId === "string" ? m.meta.projectId : null}>
-            <LinkedText text={v.preview} />
-          </InRepo>
+      {(v.verb || preview || (tile && v.kind !== "info")) && (
+        <span className={narrow ? cx(NARROW_EVENT, tile ? "@max-[30rem]/history:pl-[26px]" : "@max-[30rem]/history:pl-5") : "contents"}>
+          {/* A plain notice's ⓘ says nothing its verb doesn't, so only the kinds with a meaning keep their icon. */}
+          {tile ? <Verb icon={v.kind === "info" ? null : Icon} className={className} label={label} verb={v.verb} /> : v.verb && <span className="max-w-[45%] min-w-0 shrink-[0.5] truncate text-zinc-400">{v.verb}</span>}
+          {preview && (
+            <span data-testid="update-chip-preview" className={cx("min-w-0 flex-1 truncate", source ? "text-zinc-500" : "text-zinc-400")}>
+              {source || v.verb ? "· " : ""}
+              <InRepo taskId={typeof m.meta?.taskId === "string" ? m.meta.taskId : null} projectId={typeof m.meta?.projectId === "string" ? m.meta.projectId : null}>
+                <LinkedText text={v.preview} />
+              </InRepo>
+            </span>
+          )}
         </span>
       )}
     </>
@@ -108,7 +126,7 @@ const NoticeChip = memo(function NoticeChip({ m }: { m: ChatMessage }) {
       {v.captain ? (
         <div className={cx(CHIP_ROW, "cursor-default hover:bg-transparent")}>{line}</div>
       ) : (
-        <ChipLine open={open} onToggle={toggle} title={[v.source?.label, v.verb, v.preview].filter(Boolean).join(" ")}>{line}</ChipLine>
+        <ChipLine open={open} onToggle={toggle} className={narrow ? NARROW_ROW : undefined} title={[v.source?.label, v.verb, v.preview].filter(Boolean).join(" ")}>{line}</ChipLine>
       )}
       {showBody && <NoticeBody m={m} />}
       <MessageActions text={m.content} anchorId={m.id} />
@@ -134,7 +152,7 @@ function NoticeBody({ m }: { m: ChatMessage }) {
     )
   }
   return (
-    <div data-testid="update-chip-body" className={cx(CHIP_BODY, "text-xs leading-relaxed wrap-anywhere text-zinc-400")}>
+    <div data-testid="update-chip-body" className={cx(CHIP_BODY, "text-xs leading-relaxed wrap-anywhere text-zinc-400", NOTICE_META)}>
       {taskId && <NoticeProject taskId={taskId} projectId={projectId} />}
       <div className="inline [&>.prose-chat]:inline [&>.prose-chat>p:first-child]:inline">
         <InRepo taskId={taskId} projectId={projectId}>
@@ -153,20 +171,22 @@ const FilesChip = memo(function FilesChip({ item }: { item: Extract<UpdateItem, 
   const tile = useTaskTile(g.taskId)
   return (
     <div id={`chat-${item.id}`} data-testid="update-chip" data-open={open || undefined}>
-      <ChipLine open={open} onToggle={toggle} title={`${g.taskTitle} ${publishedLabel(g.files.length)}`}>
+      <ChipLine open={open} onToggle={toggle} className={NARROW_ROW} title={`${g.taskTitle} ${publishedLabel(g.files.length)}`}>
         {tile ? <TaskTile id={g.taskId} /> : <Icon className={cx("h-3.5 w-3.5 shrink-0", className)} aria-label={label} />}
         {g.taskId ? (
-          <AppLink href={`/tasks/${g.taskId}`} className={SOURCE_LINK}>
+          <AppLink href={`/tasks/${g.taskId}`} className={cx(SOURCE_LINK, NARROW_NAME)}>
             {g.taskTitle}
           </AppLink>
         ) : (
-          <span className="min-w-0 max-w-[55%] shrink truncate font-medium text-zinc-300">{g.taskTitle}</span>
+          <span className={cx("min-w-0 max-w-[55%] shrink truncate font-medium text-zinc-300", NARROW_NAME)}>{g.taskTitle}</span>
         )}
-        <span className="flex shrink-0 items-center gap-1 text-zinc-400">
-          {tile && <Icon className={cx("h-3 w-3 shrink-0", className)} aria-label={label} />}
-          {publishedLabel(g.files.length)}
+        <span className={cx(NARROW_EVENT, tile ? "@max-[30rem]/history:pl-[26px]" : "@max-[30rem]/history:pl-5")}>
+          <span className="flex shrink-0 items-center gap-1 text-zinc-400">
+            {tile && <Icon className={cx("h-3 w-3 shrink-0", className)} aria-label={label} />}
+            {publishedLabel(g.files.length)}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-zinc-500">· {g.files.map((f) => f.title).join(", ")}</span>
         </span>
-        <span className="min-w-0 flex-1 truncate text-zinc-600">· {g.files.map((f) => f.title).join(", ")}</span>
       </ChipLine>
       {open && (
         <div className={CHIP_BODY}>
@@ -227,7 +247,7 @@ export const UpdateGroup = memo(function UpdateGroup({ id, items }: { id: string
           {marks.map(([key, k]) => ("taskId" in k ? <TaskTile key={key} id={k.taskId} /> : <k.icon key={key} className={cx("h-3.5 w-3.5", k.className)} aria-hidden />))}
         </span>
         <span className="shrink-0 font-medium text-zinc-300">{items.length} updates</span>
-        <span data-testid="update-group-names" className="min-w-0 flex-1 truncate text-zinc-600">· {names}</span>
+        <span data-testid="update-group-names" className="min-w-0 flex-1 truncate text-zinc-500">· {names}</span>
         <Chevron open={open} />
       </button>
       {open && (
@@ -244,17 +264,30 @@ export const UpdateGroup = memo(function UpdateGroup({ id, items }: { id: string
 /**
  * The Coordinator chat as a plain transcript (rows from usePlainRows): Cody's messages and the Coordinator's replies,
  * questions, PRs and failures as cards, every other update a chip, and a run of them one "N updates" line. Task and
- * Captain names in them open their panels. Only the newest reply offers its next steps: older ones were for a moment
- * that has passed. Likewise only a task's newest question, PR or failure asks for anything (lib/noticeNow.ts); `rows`
- * are the newest ones (useTail), so each task's newest card is among them.
+ * Captain names in them open their panels. Only the newest reply offers its next steps (and, on touch, its standing
+ * Reply and Copy), and only while it's the last word: older ones were for a moment that has passed, and so is this one
+ * once Cody has written after it or the chat has moved on (`moved`: the Coordinator is answering, or newer rows aren't
+ * shown). Likewise only a task's newest question, PR or failure asks for anything (lib/noticeNow.ts); `rows` are the
+ * newest ones (useTail), so each task's newest card is among them.
  */
-export const CoordinatorTranscript = memo(function CoordinatorTranscript({ rows, onFollowUp }: { rows: CoordinatorRow[]; onFollowUp: (message: string) => void }) {
+export const CoordinatorTranscript = memo(function CoordinatorTranscript({
+  rows,
+  onFollowUp,
+  moved = false,
+}: {
+  rows: CoordinatorRow[]
+  onFollowUp: (message: string) => void
+  moved?: boolean
+}) {
   const newest = useMemo(() => {
+    if (moved) return
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i]!
-      if (r.type === "message" && r.message.role === "assistant") return r.id
+      if (r.type !== "message") continue
+      if (r.message.role === "user") return
+      if (r.message.role === "assistant") return r.id
     }
-  }, [rows])
+  }, [rows, moved])
   const asks = useNewestAsks(rows)
   return (
     <NewestAsks.Provider value={asks}>
@@ -266,7 +299,7 @@ export const CoordinatorTranscript = memo(function CoordinatorTranscript({ rows,
           ) : r.type === "update" ? (
             <UpdateChip item={r.item} />
           ) : (
-            <ChatLine m={r.message} sources={r.sources} onFollowUp={onFollowUp} next={r.id === newest} />
+            <ChatLine m={r.message} sources={r.sources} onFollowUp={onFollowUp} next={r.id === newest} standing={r.id === newest} />
           )}
         </Fragment>
       ))}

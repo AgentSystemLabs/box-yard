@@ -207,10 +207,14 @@ export function agentIconLabel(state: ManagerIconState): string | undefined {
  */
 export const WORKING_PULSE = "motion-safe:animate-pulse"
 
-const CUE_DOT: Record<NonNullable<IconCue>, string> = {
-  asks: "bg-amber-400",
-  failed: "bg-red-500",
-  working: "bg-sky-400",
+/**
+ * A cue's fill. The light theme remaps the palette to inks dark enough for text (styles.css), which would draw these
+ * brown, maroon and navy, so there each takes a literal amber, red and sky; the dark theme keeps the palette's.
+ */
+export const CUE_DOT: Record<NonNullable<IconCue>, string> = {
+  asks: "bg-[#d97706] dark:bg-amber-400",
+  failed: "bg-[#dc2626] dark:bg-red-500",
+  working: "bg-[#0284c7] dark:bg-sky-400",
 }
 
 /**

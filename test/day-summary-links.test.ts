@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { ChatMessage, Task } from "../shared/types"
 import { dayKey } from "../web/src/lib/calendarDay"
-import { daySummaries, daySummaryRepo } from "../web/src/lib/chatDays"
-import { splitGithubRefs } from "../web/src/lib/linkify"
+import { type DaySummary, daySummaries, daySummaryRepo } from "../web/src/lib/chatDays"
 
 const at = +new Date(2026, 10, 6, 12)
 const projects = [{ id: "prj_alpha", repo: "git@github.com:team/alpha.git" }, { id: "prj_beta", repo: "team/beta" }]
 const task = (over: Partial<Task> = {}) => ({ id: "task_alpha", title: "Fix #12", projectId: "prj_alpha", prUrl: "https://github.com/team/alpha/pull/42", prState: "open", prMergedAt: null, createdAt: at, ...over }) as Task
 const notice = (content: string, meta: ChatMessage["meta"] = { taskId: "task_alpha" }): ChatMessage => ({ id: "chat_notice", role: "notice", content, meta, createdAt: at })
-const links = (bullet: { text: string; repo: string | null }) => splitGithubRefs(bullet.text, bullet.repo).flatMap((s) => s.url ? [s.url] : [])
+const links = (bullet: DaySummary) => bullet.refs
 
 describe("day summary repository resolution", () => {
   it("uses each bullet's task project, including in a multi-project Coordinator day", () => {
@@ -25,7 +24,7 @@ describe("day summary repository resolution", () => {
       expect(daySummaryRepo(undefined, undefined, prUrl, projects)).toBeNull()
     }
     const bullet = daySummaries([notice("✅ **Fix #12** is done: Ready.", null)], [], projects).get(dayKey(at))![0]!
-    expect(bullet).toEqual({ text: "Finished: Fix #12", repo: null, sourceMessageId: "chat_notice" })
+    expect(bullet).toEqual({ kind: "finished", title: "Fix #12", repo: null, refs: [], sourceMessageId: "chat_notice" })
     expect(links(bullet)).toEqual([])
   })
 

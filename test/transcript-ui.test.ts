@@ -80,6 +80,9 @@ function render(chat = CHAT, captain = CAPTAIN) {
 
 const centre = () => document.querySelector<HTMLElement>("[data-testid=chat-panel], [data-testid=captain-chat][data-centre]")!
 const click = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
+/** A day summary's row: its task under the group it's in ("finished"), showing the message in the chat. */
+const summaryJump = (chat: HTMLElement, group: string, title: string) =>
+  [...chat.querySelectorAll<HTMLElement>(`[data-summary-group="${group}"] [data-summary-jump]`)].find((b) => b.textContent?.includes(title))!
 const frames = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
 /** Which replies offer their next steps. */
 const stepsUnder = () => [...centre().querySelectorAll('[aria-label="Recommended next steps"]')].map((s) => s.closest("[data-chat-id], [id^='chat-']")?.textContent?.match(/All quiet|Still quiet|Two tasks finished|Anything else/)?.[0])
@@ -140,7 +143,7 @@ describe("the Coordinator's transcript", () => {
     render()
     const chat = centre()
     click(chat.querySelector<HTMLButtonElement>('[data-chat-history] nav button')!)
-    const bullet = [...chat.querySelectorAll<HTMLElement>('[data-summary-jump]')].find((b) => b.textContent?.includes(id === "d1" ? "Finished: Write the docs" : "Finished: Fix login"))!
+    const bullet = summaryJump(chat, "finished", id === "d1" ? "Write the docs" : "Fix login")
     click(bullet)
     await frames()
     const source = chat.querySelector<HTMLElement>(`[data-chat-id="${id}"]`)!
@@ -170,7 +173,7 @@ describe("the Coordinator's transcript", () => {
     render()
     const button = centre().querySelector<HTMLButtonElement>('[data-testid="chat-footer"] [data-testid="pull-requests-button"]')!
     expect(button.closest('[data-testid="dock-line"]')).toBeNull()
-    expect(button.getAttribute("aria-label")).toBe("Pull requests, 1 open")
+    expect(button.getAttribute("aria-label")).toBe("Pull requests: 1 open")
   })
 
   it("its line over the box floats, so showing Jump to latest never resizes the list (#266)", () => {
@@ -207,7 +210,7 @@ describe("a picked Captain", () => {
     // No context reading in the header: it's in ⋯, as for the Coordinator.
     expect(centre().querySelector("header [data-testid=context-mini]")).toBeNull()
     expect(centre().querySelector<HTMLTextAreaElement>("[data-testid=chat-footer] textarea")!.placeholder).toBe("Message the box-yard Captain…")
-    expect(centre().querySelector('[data-testid="pull-requests-button"]')!.getAttribute("aria-label")).toBe("Pull requests, 1 open")
+    expect(centre().querySelector('[data-testid="pull-requests-button"]')!.getAttribute("aria-label")).toBe("Pull requests: 1 open")
   })
   it("a day-summary bullet opens a collapsed Captain notice group and focuses the source", async () => {
     const notices = CHAT.filter((m) => m.role === "notice").map((m) => ({ ...m, projectId: YARD.id })) as CaptainMessage[]
@@ -217,7 +220,7 @@ describe("a picked Captain", () => {
     const chat = document.querySelector<HTMLElement>('[data-testid=captain-chat][data-centre]')!
     expect(chat.querySelector('#captain-d2')).toBeNull()
     click(chat.querySelector<HTMLButtonElement>('[data-chat-history] nav button')!)
-    const bullet = [...chat.querySelectorAll<HTMLElement>('[data-summary-jump]')].find((b) => b.textContent?.includes("Finished: Fix login"))!
+    const bullet = summaryJump(chat, "finished", "Fix login")
     click(bullet)
     await frames()
     const source = chat.querySelector<HTMLElement>('#captain-d2')!

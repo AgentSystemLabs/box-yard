@@ -54,7 +54,8 @@ describe("task notice project and Captain links", () => {
   it("links the project Captain panel, resolving the project from the task id", () => {
     line(notice(PR, { taskId: task.id }))
     expect(linkTo("/?captain=prj_tinytown")?.textContent).toBe("tiny-town")
-    expect([...chip()!.querySelectorAll("a")].find((a) => a.textContent === "Captain")?.getAttribute("href")).toBe("/?captain=prj_tinytown")
+    // On a card the project alone is the way to its Captain: no second "Captain" link costing a phone a line.
+    expect([...chip()!.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["/?captain=prj_tinytown"])
     // The task title still links the task.
     expect(host.querySelector('a[href="/?session=task_painted01"]')).toBeTruthy()
   })
