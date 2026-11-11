@@ -13,7 +13,7 @@ export interface SidebarRow {
   task: Task
   /** Resting (idle), ready for Cody's review: drawn dim, so live work stands out. */
   dim: boolean
-  /** The short word on the right: "asks", "starting", or "#253". Working/failed use the title and icon. */
+  /** The row's PR, in short: "#253", "merged #253", or nothing. Never its state: the icon says that. */
   meta: string
   /** Its sub-tasks (server/subtasks.ts), nested under it in spawn order, finished ones too. Only under a project. */
   kids?: SidebarRow[]
@@ -33,6 +33,8 @@ export interface SidebarGroup {
   rows: SidebarRow[]
   /** Tasks asking Cody. */
   needs: number
+  /** Tasks that failed. */
+  failed: number
   /** Turns running or being set up. */
   running: number
 }
@@ -43,18 +45,22 @@ const LIVE: ReadonlySet<TaskStatus> = new Set(["needs_input", "failed", "working
 
 const lastActive = (t: Task) => t.lastActiveAt ?? t.updatedAt
 
-/** The word a row ends with: what Cody would ask about first. */
+/**
+ * What a row ends with: its PR, never its state. The row's icon says the state (TaskStatusIcon, and its name to a
+ * screen reader), so a task that asks, waits, starts or is queued ends with nothing.
+ */
 export function rowMeta(t: Task): string {
   const pr = t.prUrl ? prNumber(t.prUrl) : null
   switch (t.status) {
-    case "needs_input": return "asks"
-    case "failed": return ""
-    case "working": return ""
-    case "starting": return "starting"
-    case "queued": return "queued"
-    case "waiting": return "waiting"
+    case "needs_input":
+    case "failed":
+    case "working":
+    case "starting":
+    case "queued":
+    case "waiting":
+      return ""
     case "pr_ready": return pr ? `#${pr}` : "PR"
-    case "done": return t.prMergedAt ? (pr ? `merged #${pr}` : "merged") : "done"
+    case "done": return t.prMergedAt ? (pr ? `merged #${pr}` : "merged") : ""
     default: return pr ? `#${pr}` : ""
   }
 }
@@ -131,7 +137,7 @@ export function sidebarGroups(
   opts: { now?: number; current?: string | null; closing?: ReadonlySet<string> },
 ): { shown: SidebarGroup[]; others: SidebarGroup[] } {
   const groups = new Map<string, SidebarGroup>()
-  for (const p of projects) groups.set(p.id, { project: p, pin: pins[p.id] ?? null, rows: [], needs: 0, running: 0 })
+  for (const p of projects) groups.set(p.id, { project: p, pin: pins[p.id] ?? null, rows: [], needs: 0, failed: 0, running: 0 })
   const byProject = new Map<string, Task[]>()
   const byId = new Map(tasks.map((t) => [t.id, t]))
   /** Being marked done here, or under a task that is: Mark done on a parent closes its tree, so it all leaves at once. */
@@ -143,6 +149,7 @@ export function sidebarGroups(
   for (const t of listed) {
     const g = groups.get(t.projectId)!
     if (t.status === "needs_input") g.needs++
+    if (t.status === "failed") g.failed++
     if (t.status === "working" || t.status === "starting") g.running++
     if (!trees.top(t)) continue
     const list = byProject.get(t.projectId) ?? []
@@ -200,7 +207,7 @@ export function keepGroups(prev: readonly SidebarGroup[] | undefined, next: Side
   const out = next.map((g, i) => {
     const o = old.get(g.project.id)
     const rows = keepRows(o?.rows, g.rows)
-    const kept = o && o.project === g.project && o.pin === g.pin && o.needs === g.needs && o.running === g.running && o.rows === rows ? o : rows === g.rows ? g : { ...g, rows }
+    const kept = o && o.project === g.project && o.pin === g.pin && o.needs === g.needs && o.failed === g.failed && o.running === g.running && o.rows === rows ? o : rows === g.rows ? g : { ...g, rows }
     if (kept !== prev[i]) same = false
     return kept
   })
@@ -211,17 +218,60 @@ export function keepGroups(prev: readonly SidebarGroup[] | undefined, next: Side
 export const keepSelection = (prev: Selection | undefined, next: Selection): Selection =>
   prev && prev.selected === next.selected && prev.behind === next.behind && prev.inside === next.inside ? prev : next
 
-/** How many "Waiting on you" rows show before "Show n more", so a long list doesn't push the projects away. */
+/** How many "Waiting on you" rows show before "Show all n", so a long list doesn't push the projects away. */
 export const WAITING_CAP = 5
 
 /**
- * The "Waiting on you" rows on screen: the first `cap`, or all once Cody asked for them. The open task (`keep`) always
- * stays, so the row drawn selected is never one hidden behind "Show n more".
+ * `rows` with each project's together, so the list names a project once: the projects in the order of their first
+ * (most urgent) row, each one's rows in the order they came.
+ */
+export function byProject(rows: readonly SidebarRow[]): SidebarRow[] {
+  const runs = new Map<string, SidebarRow[]>()
+  for (const r of rows) {
+    const run = runs.get(r.task.projectId)
+    if (run) run.push(r)
+    else runs.set(r.task.projectId, [r])
+  }
+  return [...runs.values()].flat()
+}
+
+const letters = (text: string) => [...text].filter((c) => /[\p{L}\p{N}]/u.test(c))
+
+/** A project's one or two letters: its first two words' first letters ("box-yard": BY), or its name's first two. */
+export function projectInitials(name: string): string {
+  const [a, b] = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const two = a && b ? [...letters(a).slice(0, 1), ...letters(b).slice(0, 1)] : letters(a ?? "").slice(0, 2)
+  return two.join("").toUpperCase()
+}
+
+/**
+ * Each project's letters on the folded sidebar's tiles, which must differ by more than their colour. Two projects that
+ * would get the same ("recipes" and "research": RE) differ by their second letter: the later one by name takes the
+ * next letter of its name that makes a pair nobody has (RS). The same for every project however the list is sorted
+ * or pinned, so a tile's letters don't change as tasks come and go.
+ */
+export function railInitials(projects: readonly { id: string; name: string }[]): Map<string, string> {
+  const taken = new Set<string>()
+  const out = new Map<string, string>()
+  for (const p of [...projects].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
+    const first = projectInitials(p.name)
+    const [head, ...rest] = letters(p.name)
+    const pick = [first, ...rest.map((c) => `${head}${c}`.toUpperCase())].find((c) => c && !taken.has(c)) ?? first
+    taken.add(pick)
+    out.set(p.id, pick)
+  }
+  return out
+}
+
+/**
+ * The "Waiting on you" rows on screen: the first `cap` (the most urgent, whatever their project), or all once Cody
+ * asked for them, then each project's together (byProject). The open task (`keep`) always stays, so the row drawn
+ * selected is never one hidden behind "Show all n".
  */
 export function cappedRows(rows: readonly SidebarRow[], opts: { expanded: boolean; keep?: string | null }): { shown: SidebarRow[]; hidden: number } {
-  if (opts.expanded || rows.length <= WAITING_CAP) return { shown: [...rows], hidden: 0 }
+  if (opts.expanded || rows.length <= WAITING_CAP) return { shown: byProject(rows), hidden: 0 }
   const shown = rows.filter((r, i) => i < WAITING_CAP || r.task.id === opts.keep)
-  return { shown, hidden: rows.length - shown.length }
+  return { shown: byProject(shown), hidden: rows.length - shown.length }
 }
 
 // --- Selection: exactly one row looks selected ----------------------------------------------------------------------

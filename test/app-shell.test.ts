@@ -126,7 +126,7 @@ describe("the app shell", () => {
   it("opens task search from a phone's header without a keyboard and returns focus when closed", () => {
     phone()
     render(APP_HOME)
-    const search = chat()!.querySelector<HTMLButtonElement>('header button[aria-label="Search tasks"]')!
+    const search = chat()!.querySelector<HTMLButtonElement>('header button[aria-label="Search and commands"]')!
     expect(search).not.toBeNull()
     act(() => search.click())
     const input = document.querySelector<HTMLInputElement>('input[aria-label="Search Box Yard"]')!
@@ -142,14 +142,15 @@ describe("the app shell", () => {
     phone()
     render(APP_HOME, 84_000, true, [...TASKS, done])
     expect(chat()!.querySelector('[data-card="task_old001"]')).toBeNull()
-    act(() => chat()!.querySelector<HTMLButtonElement>('button[aria-label="Search tasks"]')!.click())
+    act(() => chat()!.querySelector<HTMLButtonElement>('button[aria-label="Search and commands"]')!.click())
     const input = document.querySelector<HTMLInputElement>('input[aria-label="Search Box Yard"]')!
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "attachment")
       input.dispatchEvent(new Event("input", { bubbles: true }))
     })
     const result = document.querySelector<HTMLElement>('[role="option"][data-key="task:task_old001"]')!
-    expect(result.textContent).toContain("Done")
+    // Its state is the status icon's name, not a word on the row.
+    expect(result.querySelector('[aria-label="Done"]')).not.toBeNull()
     act(() => result.click())
     await settle()
     expect(document.querySelector('input[aria-label="Search Box Yard"]')).toBeNull()
@@ -184,7 +185,7 @@ describe("the app shell", () => {
       expect([...chat()!.querySelectorAll("button")].some((b) => /compact|clear|reset/i.test(`${b.textContent} ${b.getAttribute("aria-label")}`))).toBe(false)
       // Settings and search (the palette's 🔍) sit in the sidebar beside it.
       expect(document.querySelector("nav[aria-label='Projects and tasks'] [aria-label=Settings]")).not.toBeNull()
-      expect(document.querySelector("nav[aria-label='Projects and tasks'] button[aria-label='Search tasks']")).not.toBeNull()
+      expect(document.querySelector("nav[aria-label='Projects and tasks'] button[aria-label='Search and commands']")).not.toBeNull()
       expect(chat()!.querySelector("textarea")).not.toBeNull()
     }
   })

@@ -66,7 +66,7 @@ afterEach(() => {
 })
 
 const input = () => document.querySelector<HTMLInputElement>("input[role=combobox]")!
-const groupLabels = () => [...document.querySelectorAll("[role=group]")].map((g) => g.querySelector("[id]")!.textContent)
+const groupLabels = () => [...document.querySelectorAll("[role=group][data-group]")].map((g) => g.querySelector("[id]")!.textContent)
 const groupRows = (key: string) => [...document.querySelectorAll(`[data-group=${key}] [role=option]`)].map((o) => o.textContent!.trim())
 const groupKeys = (key: string) => [...document.querySelectorAll(`[data-group=${key}] [role=option]`)].map((o) => o.getAttribute("data-key"))
 const selected = () => document.querySelector("[role=option][aria-selected=true]")!
@@ -78,15 +78,19 @@ const type = (text: string) =>
   })
 
 describe("command palette", () => {
-  it("opens on the empty-query sections in order, with the owner's name and no files", () => {
+  it("opens on the empty-query sections in order (Waiting on you, as the sidebar says) and no files", () => {
     render()
-    expect(groupLabels()).toEqual(["Waiting on Ada", "Working", "Recently viewed", "Commands"])
-    expect(groupRows("waiting").map((t) => t.split("Needs")[0]!.split("PR ready")[0])).toEqual(["Pick a colorbox-yard", "Review the palette PRbox-yard"])
+    expect(groupLabels()).toEqual(["Waiting on you", "Working", "Recently viewed", "Commands"])
+    // A row's state is its status icon's name (TaskStatusIcon), not a word in its text.
+    expect(groupRows("waiting").map((t) => t.replace(/\d+m ago$/, ""))).toEqual(["Pick a colorbox-yard", "Review the palette PRbox-yard"])
+    expect([...document.querySelectorAll("[data-group=waiting] [role=option]")].every((o) => o.querySelector("[aria-label]"))).toBe(true)
     // Tasks already listed above don't repeat under Recently viewed.
     expect(groupRows("recent")[0]).toContain("box-yard")
     expect(groupRows("recent").some((r) => r.startsWith("Finished thing"))).toBe(true)
     expect(groupRows("recent").some((r) => r.startsWith("Pick a color"))).toBe(false)
-    expect(groupRows("command")[0]).toContain("Coordinator")
+    // New task… leads Commands, then the rest in their usual order.
+    expect(groupRows("command")[0]).toContain("New task…")
+    expect(groupRows("command").some((r) => r.includes("Coordinator"))).toBe(true)
     expect(document.querySelector("[data-key^='artifact:']")).toBeNull()
     expect(document.querySelector("[data-testid=palette-prefixes]")!.textContent).toContain("f:Files")
   })
@@ -154,7 +158,7 @@ describe("command palette", () => {
     showAll("working")
     // 2 waiting rows, then the first 48 of 127 working ones; the rest and the groups after them wait.
     expect(drawn()).toBe(50)
-    expect(groupLabels()).toEqual(["Waiting on Ada", "Working"])
+    expect(groupLabels()).toEqual(["Waiting on you", "Working"])
     scrolledToEnd()
     expect(drawn()).toBe(100)
     for (let i = 0; i < 100; i++) press("ArrowDown")
@@ -255,7 +259,7 @@ describe("command palette", () => {
     type("")
     press("Backspace")
     expect(document.querySelector("[data-testid=palette-scope]")).toBeNull()
-    expect(groupLabels()[0]).toBe("Waiting on Ada")
+    expect(groupLabels()[0]).toBe("Waiting on you")
   })
 
   it("doesn't re-render on live updates; the next keystroke picks them up", async () => {

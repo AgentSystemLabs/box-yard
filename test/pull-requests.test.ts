@@ -129,10 +129,10 @@ describe("pull request journey", () => {
   it("the entry counts the chat's open pull requests: the picked project's, or all of them", async () => {
     qc.setQueryData(keys.tasks, [task(), task({ id: "task_pr002", prUrl: url + "0", prState: "merged", status: "done" }), task({ id: "task_pr003", projectId: "prj_site01", prUrl: "https://github.com/acme/portfolio/pull/3" })])
     render()
-    expect(entry().getAttribute("aria-label")).toBe("Pull requests, 2 open")
+    expect(entry().getAttribute("aria-label")).toBe("Pull requests: 2 open")
     expect(entry().textContent).toBe("2")
     act(() => setChatProjectFilter("prj_site01"))
-    expect(entry().getAttribute("aria-label")).toBe("Pull requests, 1 open")
+    expect(entry().getAttribute("aria-label")).toBe("Pull requests: 1 open")
     qc.setQueryData(keys.tasks, [task({ prState: "merged" })])
     act(() => setChatProjectFilter(null))
     expect(entry().getAttribute("aria-label")).toBe("Pull requests")

@@ -141,6 +141,7 @@ describe("a live task update in the Coordinator view", () => {
     const waiting = sidebarGroup(nav(), "Waiting on you")!
     expect(waiting.textContent).toContain("Profile the shader")
     expect(row("Profile the shader")).toHaveLength(2)
-    expect(row("Profile the shader").every((b) => b.textContent?.includes("asks"))).toBe(true)
+    // Both copies redrew as asking: the row's icon says it (there's no "asks" word any more).
+    expect(row("Profile the shader").every((b) => b.querySelector('[data-testid="task-status-icon"]')?.getAttribute("data-status") === "needs_input")).toBe(true)
   })
 })
