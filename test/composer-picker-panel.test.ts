@@ -25,7 +25,17 @@ const frame = () => new Promise<void>((r) => requestAnimationFrame(() => setTime
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)))
 const input = () => document.querySelector("textarea")!
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')
-const row = (token: string) => document.querySelector<HTMLButtonElement>(`[role="option"][data-token="${token}"]`)!
+const row = (token: string) => document.querySelector<HTMLElement>(`[role="option"][data-token="${token}"]`)!
+/** The sheet's search field: it keeps the focus, and says which row is highlighted. */
+const search = () => document.querySelector<HTMLInputElement>('[role="dialog"] input[role="combobox"]')!
+const active = () => document.getElementById(search().getAttribute("aria-activedescendant") ?? "")?.dataset.token
+const tags = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].map((el) => el.textContent)
+async function find(text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search(), text)
+    search().dispatchEvent(new Event("input", { bubbles: true }))
+  })
+}
 const choices = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].map((el) => el.dataset.token!)
 const back = () => document.querySelector<HTMLElement>('button[data-dismiss="back"]')!
 const title = () => document.querySelector('[data-testid="run-target-menu-title"]')!.textContent
@@ -81,12 +91,15 @@ describe("Composer button picker panels", () => {
     await settle()
     await open("runsOn")
     expect(dialog()?.getAttribute("aria-modal")).toBe("true")
-    expect(document.activeElement).toBe(row("local"))
+    expect(document.activeElement).toBe(search())
+    expect(active()).toBe("local")
+    expect(row("local").getAttribute("aria-selected")).toBe("true")
     expect(input().getAttribute("aria-expanded")).toBe("false")
     await tap(row("box"))
     expect(choices()).toEqual(["box", "box:small", "box:medium", "box:large"])
     expect(row("box").textContent).toContain("Default size")
-    expect(document.activeElement).toBe(row("box"))
+    expect(document.activeElement).toBe(search())
+    expect(active()).toBe("box")
     expect(document.querySelector('[data-dismiss="close"]')).toBeNull()
     await tap(back())
     expect(choices()).toContain("local")
@@ -172,68 +185,162 @@ describe("Composer button picker panels", () => {
     expect(input().value).toBe("!claude:claude-opus-4-5 ")
   })
 
-  it("uses arrows, Home, End, Enter and Space; Tab stays inside and disabled locations are skipped", async () => {
+  it("moves the highlight with arrows, Home and End from the search field; Enter picks, Tab stays inside and disabled locations are skipped", async () => {
     mount()
     await settle()
     await open("runsOn")
-    expect(row("docker").disabled).toBe(true)
+    expect(row("docker").getAttribute("aria-disabled")).toBe("true")
     key("ArrowDown")
-    expect(document.activeElement).toBe(row("box"))
+    expect(active()).toBe("box")
     key("ArrowDown")
-    expect(document.activeElement?.getAttribute("data-token")).not.toBe("docker")
+    expect(active()).not.toBe("docker")
     key("End")
-    expect(document.activeElement).toBe(row(choices().at(-1)!))
+    expect(active()).toBe(choices().at(-1))
     key("Home")
-    expect(document.activeElement).toBe(row("local"))
+    expect(active()).toBe("local")
     key("ArrowUp")
-    expect(document.activeElement).toBe(row(choices().at(-1)!))
+    expect(active()).toBe(choices().at(-1))
     key("Home")
-    // The active option is the last Tab stop (the others use roving tabindex).
+    // The focus never left the field; Tab goes round the sheet's two stops.
+    expect(document.activeElement).toBe(search())
     expect(key("Tab").defaultPrevented).toBe(true)
     expect(document.activeElement?.getAttribute("data-dismiss")).toBe("close")
     key("Tab", true)
-    expect(document.activeElement).toBe(row("local"))
+    expect(document.activeElement).toBe(search())
+    await tap(row("docker"))
+    expect(input().value).toBe("@")
     key("ArrowDown")
     key("Enter")
     expect(choices()[0]).toBe("box")
     key("ArrowDown")
-    key(" ")
+    // Space is the search's (it separates words): only Enter and a press pick.
+    expect(key(" ").defaultPrevented).toBe(false)
+    expect(input().value).toBe("@box:")
+    key("Enter")
     expect(input().value).toBe("@box:small ")
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("type-to-filter in the sheet narrows options; Esc clears the filter before backing out", async () => {
+  it("searches in the sheet's field; Esc clears the search before backing out, Backspace in an empty one goes back", async () => {
     mount()
     await settle()
     await open("agent")
     expect(choices()).toEqual(["claude", "codex", "cursor"])
-    key("c")
-    key("u")
-    key("r")
-    expect(title()).toMatch(/cur/)
+    await find("cur")
     expect(choices()).toEqual(["cursor"])
-    expect(document.activeElement).toBe(row("cursor"))
-    key("Escape")
+    expect(active()).toBe("cursor")
+    expect(key("Escape").defaultPrevented).toBe(true)
+    expect(search().value).toBe("")
     expect(choices()).toEqual(["claude", "codex", "cursor"])
     expect(dialog()).not.toBeNull()
-    key("c")
-    key("u")
-    key("r")
+    await find("cur")
     key("Enter")
     expect(choices()[0]).toBe("cursor")
     expect(input().value).toBe("!cursor:")
-    // Nested filter: type deep after drilling into Cursor.
-    key("d")
-    key("e")
-    key("e")
-    key("p")
-    // No DeepSeek in the stub catalog — filter shows no matches, Esc clears it.
+    // A new level starts with an empty search, which now looks only inside it.
+    expect(search().value).toBe("")
+    await find("deep")
+    // No DeepSeek in the stub catalog: nothing matches, and Esc clears it.
     expect(choices()).toEqual([])
+    expect(dialog()?.textContent).toContain("No matches for “deep”")
+    expect(search().hasAttribute("aria-activedescendant")).toBe(false)
+    key("Enter")
+    expect(input().value).toBe("!cursor:")
     key("Escape")
-    // Filter cleared; still drilled into Cursor's models.
     expect(choices()).toEqual(["cursor", "cursor:auto", "cursor:gpt-6.1-sol-high"])
     expect(input().value).toBe("!cursor:")
+    key("Backspace")
+    expect(choices()).toEqual(["claude", "codex", "cursor"])
+    expect(dialog()).not.toBeNull()
+    // At the top there is no level to leave.
+    key("Backspace")
+    expect(dialog()).not.toBeNull()
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("finds a model and its effort from words, and Enter picks them in one go", async () => {
+    mount()
+    await settle()
+    await open("agent")
+    await find("fable high")
+    expect(choices()).toEqual(["claude:claude-fable-5-1:high", "claude:fable:high", "claude:fable[1m]:high", "claude:claude-fable-5:high"])
+    expect(active()).toBe("claude:claude-fable-5-1:high")
+    // Each row is named for its model, with the effort beside it and what sets it apart: no two read alike.
+    expect(row("claude:claude-fable-5-1:high").textContent).toMatch(/^Fable 5\.1High/)
+    expect(row("claude:fable:high").textContent).toContain("alias")
+    expect(row("claude:claude-fable-5:high").textContent).toContain("older")
+    expect(new Set(tags()).size).toBe(4)
+    expect([...row("claude:claude-fable-5-1:high").querySelectorAll("mark")].map((m) => m.textContent)).toEqual(["Fable", "High"])
+    key("Enter")
+    expect(dialog()).toBeNull()
+    expect(input().value).toBe("!claude:claude-fable-5-1:high ")
+    expect(document.activeElement).toBe(input())
+    key("Enter")
+    expect(onSubmit.mock.calls[0]![2].agent).toMatchObject({ value: "claude", model: "claude-fable-5-1", effort: "high" })
+  })
+
+  it("lists each model once for part of a name, and opens the first one's efforts on Enter", async () => {
+    mount()
+    await settle()
+    await open("agent")
+    await find("fa")
+    expect(choices()).toEqual(["claude:claude-fable-5-1", "claude:fable", "claude:fable[1m]", "claude:claude-fable-5"])
+    expect(document.querySelector('[data-testid="run-target-menu"]')?.textContent).toContain("↵ open")
+    key("Enter")
+    expect(title()).toMatch(/Fable 5\.1/)
+    expect(choices()[0]).toBe("claude:claude-fable-5-1")
+    await find("x")
+    // One letter only counts where it starts a word: "x" is Extra high, not also Max.
+    expect(choices()).toEqual(["claude:claude-fable-5-1:xhigh"])
+    await find("m")
+    expect(choices()).toEqual(["claude:claude-fable-5-1:medium", "claude:claude-fable-5-1:max"])
+    key("ArrowDown")
+    key("Enter")
+    expect(input().value).toBe("!claude:claude-fable-5-1:max ")
+  })
+
+  it("searches inside an open level, and a model's name there finds its efforts too", async () => {
+    mount()
+    await settle()
+    await open("agent")
+    await tap(row("codex"))
+    await find("fable")
+    expect(choices()).toEqual([])
+    await find("sol ultra")
+    expect(active()).toBe("codex:gpt-6.1-sol:ultra")
+    key("Enter")
+    expect(input().value).toBe("!codex:gpt-6.1-sol:ultra ")
+  })
+
+  it("the pointer moves the same highlight the keys do, so Enter picks the row under it", async () => {
+    mount()
+    await settle()
+    await open("agent")
+    act(() => void row("codex").dispatchEvent(new MouseEvent("mousemove", { bubbles: true })))
+    expect(active()).toBe("codex")
+    expect(row("claude").getAttribute("aria-selected")).toBe("false")
+    // A press on a row leaves the focus in the search field.
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+    act(() => void row("codex").dispatchEvent(down))
+    expect(down.defaultPrevented).toBe(true)
+    key("ArrowDown")
+    expect(active()).toBe("cursor")
+    key("Enter")
+    expect(choices()[0]).toBe("cursor")
+  })
+
+  it("on a touch screen the list takes the focus, and a typed letter still goes to the search", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("pointer: coarse"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }))
+    mount()
+    await settle()
+    await open("agent")
+    // No keyboard over the choices until the field is tapped.
+    expect(document.activeElement?.getAttribute("role")).toBe("listbox")
+    key("ArrowDown")
+    expect(active()).toBe("codex")
+    expect(key("c").defaultPrevented).toBe(true)
+    expect(search().value).toBe("c")
+    expect(document.activeElement).toBe(search())
   })
 
   it("Esc unwinds effort, model and picker before an enclosing dialog; focus returns to the opening button", async () => {
