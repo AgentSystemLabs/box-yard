@@ -195,29 +195,33 @@ export function NoticeProject({ taskId, projectId, end = false, captain = true }
   const id = projectId ?? index.byId.get(taskId)?.projectId
   const project = id ? index.byId.get(id) : undefined
   if (!id || project?.kind !== "project") return null
-  const link = "rounded-sm text-zinc-500 hover:text-zinc-200 hover:underline focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+  // Under a finger each link reaches past its text: 6px up and down (more would take taps from the title over it and
+  // the row under it) and 12px to the right, over the "·" after it. Padding with the same margin back, so nothing moves.
+  const link =
+    "rounded-sm text-zinc-500 hover:text-zinc-200 hover:underline focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none pointer-coarse:-my-1.5 pointer-coarse:-mr-3 pointer-coarse:py-1.5 pointer-coarse:pr-3"
+  // The link under it takes its taps.
+  const dot = (
+    <span aria-hidden className="pointer-events-none text-zinc-700">
+      ·
+    </span>
+  )
   return (
     // One line box high and top-aligned, so it sits on the meta line's first line like text.
     <span data-testid="notice-project" className="mr-1 inline-flex h-lh max-w-full items-center gap-1 align-top whitespace-nowrap">
-      <AppLink href={routes.project(id)} title={`Project: ${project.label}`} className={cx("min-w-0 truncate", link)}>
+      {/* It starts the line, so it reaches left too, into the card's own padding. */}
+      <AppLink href={routes.project(id)} title={`Project: ${project.label}`} className={cx("min-w-0 truncate pointer-coarse:-ml-3 pointer-coarse:pl-3", link)}>
         {project.label}
       </AppLink>
       {captain && (
         <>
-          <span aria-hidden className="text-zinc-700">
-            ·
-          </span>
+          {dot}
           <AppLink href={`${routes.project(id)}?tab=captain`} title={`${project.label} Captain`} className={cx("inline-flex shrink-0 items-center gap-0.5", link)}>
             <CaptainIcon projectId={id} className="h-3 w-3" />
             Captain
           </AppLink>
         </>
       )}
-      {!end && (
-        <span aria-hidden className="text-zinc-700">
-          ·
-        </span>
-      )}
+      {!end && dot}
     </span>
   )
 }
@@ -618,9 +622,9 @@ function ChatLineBody({
       <ReplyFooter m={m} sources={sources} />
       <MessageActions text={m.content} anchorId={m.id} standing={standing} />
       {standing ? (
-        // On touch its Reply and Copy stand here, and its next steps go on along the same lines.
+        // On touch its Reply and Copy stand here in a row of their own, and its next steps follow under a rule.
         <StandingActions text={m.content} anchorId={m.id}>
-          {steps.length > 0 && <RecommendedNextSteps inline steps={steps} onPick={onFollowUp} />}
+          {steps.length > 0 && <RecommendedNextSteps steps={steps} onPick={onFollowUp} />}
         </StandingActions>
       ) : (
         <RecommendedNextSteps steps={steps} onPick={onFollowUp} />

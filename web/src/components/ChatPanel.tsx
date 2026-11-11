@@ -291,13 +291,20 @@ const ChatLines = memo(function ChatLines({ messages, onFollowUp }: { messages: 
 /** The reply being streamed. Only this re-renders per streamed chunk, not the thread above it. */
 function StreamingReply({ busy }: { busy: boolean }) {
   const stream = useChatStream()
-  // Drawn as the finished reply will be, so nothing moves or changes colour when the turn ends.
-  if (stream.data)
-    return (
-      <div className="text-sm text-zinc-200">
-        <Markdown live>{stream.data}</Markdown>
-      </div>
-    )
-  if (!busy) return null
-  return <p role="status" className="py-2 text-xs text-zinc-400">Coordinator is working…</p>
+  return (
+    <>
+      {/* Drawn as the finished reply will be, so nothing moves or changes colour when the turn ends. */}
+      {stream.data && (
+        <div className="text-sm text-zinc-200">
+          <Markdown live>{stream.data}</Markdown>
+        </div>
+      )}
+      {/* It stays under the text for as long as the turn runs: text that stops coming isn't a finished reply. */}
+      {busy && (
+        <p role="status" className="py-2 text-xs text-zinc-400">
+          Coordinator is working…
+        </p>
+      )}
+    </>
+  )
 }
