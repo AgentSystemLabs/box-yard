@@ -21,6 +21,7 @@ import { type Effort, type Project } from "../../../shared/types"
 import { LOCAL_UNSANDBOXED, RUNNER_LABEL, type Runner } from "../../../shared/runner"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 import { Modal, focusables } from "./Modal"
+import { Kbd } from "./Kbd"
 import { formatSize } from "./Attachments"
 import { ComposerAttachments } from "./ComposerAttachments"
 import { Button, Field, LineIcon, Select, TAP_AREA, cx, inputClass, parseEnv } from "./ui"
@@ -262,8 +263,9 @@ export function NewTaskPopover({
           }
         }}
         placeholder={placeholder}
-        // Enter sends it, so a phone's keyboard says so.
+        // Enter sends it, so a phone's keyboard says so, and a screen reader (the hint beside the heading is drawn only).
         enterKeyHint="send"
+        aria-description={`Enter to ${onStart ? "send" : "start"}, Shift+Enter for a new line`}
         className={cx(inputClass, GROWS)}
       />
       {/* Wraps when a long label doesn't fit beside the other button; the tap areas keep 44px on a touch screen. */}
@@ -335,13 +337,54 @@ export function quotePreview(text: string, max = 240) {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat
 }
 
-/** Selected text as a read-only preview above the box for instructions (the popover's, and the full dialog's). */
+/**
+ * Selected text as a read-only preview above the box for instructions (the popover's, and the full dialog's): three
+ * lines of it, and "Show all" for the rest when there is more, which then scrolls inside its own box.
+ */
 function SelectionQuote({ text }: { text: string }) {
+  const preview = quotePreview(text)
+  const id = useId()
+  const clamp = useRef<HTMLSpanElement>(null)
+  const [open, setOpen] = useState(false)
+  // Its three lines cut it short (the preview's own cut, the "…", is known without measuring).
+  const [clamped, setClamped] = useState(false)
+  useLayoutEffect(() => {
+    const el = clamp.current
+    if (!el) return
+    const check = () => setClamped(el.scrollHeight > el.clientHeight + 1)
+    check()
+    if (typeof ResizeObserver === "undefined") return
+    const seen = new ResizeObserver(check)
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [preview, open])
+  const more = open || clamped || preview !== quotePreview(text, Infinity)
   return (
-    <blockquote data-testid="selection-quote" title={text} className="rounded-lg border border-zinc-800 border-l-2 border-l-yard-500/60 bg-zinc-900/60 px-3 py-2 text-xs leading-5 wrap-anywhere text-zinc-400">
-      {/* Clamped inside the padding, or a fourth line peeks out under the third. */}
-      <span className="line-clamp-3">{quotePreview(text)}</span>
-    </blockquote>
+    <div className="rounded-lg border border-zinc-800 border-l-2 border-l-yard-500/60 bg-zinc-900/60 px-3 py-2 text-xs leading-5 wrap-anywhere text-zinc-400">
+      <blockquote id={id} data-testid="selection-quote" aria-label="Selected text">
+        {open ? (
+          <div tabIndex={0} className="scroll-thin max-h-48 overflow-y-auto whitespace-pre-wrap">
+            {text.trim()}
+          </div>
+        ) : (
+          // Clamped inside the padding, or a fourth line peeks out under the third.
+          <span ref={clamp} className="line-clamp-3">
+            {preview}
+          </span>
+        )}
+      </blockquote>
+      {more && (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen(!open)}
+          className="-mb-2 flex min-h-11 items-center font-medium text-zinc-300 hover:text-zinc-100 pointer-fine:min-h-8"
+        >
+          {open ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -397,9 +440,13 @@ export function useAnchor(trigger: RefObject<HTMLElement | null>, panel: RefObje
     place()
     window.addEventListener("resize", place)
     window.addEventListener("scroll", place, true)
+    // What's in it grows (a quote shown in full, a long prompt): it may then fit above only.
+    const grown = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place)
+    if (panel.current) grown?.observe(panel.current)
     return () => {
       window.removeEventListener("resize", place)
       window.removeEventListener("scroll", place, true)
+      grown?.disconnect()
     }
   }, [on, trigger, panel, align])
   return style
@@ -481,21 +528,25 @@ export function NewTaskDialog({
   const models = useModels()
   const mac = isMac()
   const optionsId = useId()
-  // Folded until opened, or until one of its choices isn't the default any more.
+  // Folded until opened, or until one of its choices isn't the default any more. Open on a project that runs on this
+  // computer, whose switch to a box is in there.
   const [optionsOpen, setOptionsOpen] = useState<boolean | null>(null)
-  const showOptions = optionsOpen ?? Boolean(cli || model || effort || runsOn !== projectRunner)
+  const showOptions = optionsOpen ?? Boolean(cli || model || effort || runsOn !== projectRunner || projectRunner === "local")
   const options = useRef<HTMLDivElement>(null)
   // Unfolded by hand: what opened comes into the dialog's view (a phone's is short).
   useEffect(() => {
     if (optionsOpen) options.current?.scrollIntoView({ block: "nearest" })
   }, [optionsOpen])
 
-  // What the task runs with, in a line: the agent, its model as the picker names it, the effort and, when it isn't
-  // a box, where. It is the folded options' label, so a choice made there still shows.
+  // What the task runs with, in a line: the agent, its model as the picker names it and the effort; where it runs
+  // follows it. It is the folded options' label, so a choice made there still shows.
   const modelName = (id: string) => (agentCli === "claude" ? (findModel(models, id)?.label ?? id) : id)
   const usedModel = model || (agentCli === "opencode" ? settings?.agentOpencodeModel : agentCli === "cursor" ? settings?.agentCursorModel : agentCli === "codex" ? settings?.agentCodexModel : settings?.agentModel)
   const usedEffort = hasSeparateEffort(agentCli) ? effort || (agentCli === "claude" && settings?.agentEffort !== "orchestrator" ? settings?.agentEffort : "") : ""
-  const runsWith = [AGENT_CLI_LABEL[agentCli], usedModel ? modelName(usedModel) : "default model", usedEffort && EFFORT_LABEL[usedEffort], (runsOn === "local" || runsOn !== projectRunner) && RUNNER_LABEL[runsOn]].filter(Boolean).join(" · ")
+  const runsWith = [AGENT_CLI_LABEL[agentCli], usedModel ? modelName(usedModel) : "default model", usedEffort && EFFORT_LABEL[usedEffort]].filter(Boolean).join(" · ")
+  const whyId = useId()
+  const envId = useId()
+  const envCount = Object.keys(parseEnv(env)).length
 
   // The prompt has the caret, after any text it opened with (the popover's, a kept draft's).
   useLayoutEffect(() => {
@@ -511,6 +562,8 @@ export function NewTaskDialog({
   const uploading = files.some((f) => f.status === "uploading")
   // A selection is a task without a word more.
   const canStart = Boolean(prompt.trim() || quote) && !uploading && Boolean(projectId)
+  // What Start task waits for, said beside it.
+  const why = !(prompt.trim() || quote) ? "Describe the task to start it." : uploading ? "Files are still uploading." : ""
   const autoTitle = prompt.trim() ? titleFromPrompt(prompt) : "Made from the prompt when blank"
 
   return (
@@ -550,17 +603,25 @@ export function NewTaskDialog({
       }}
       footer={
         <>
-          {/* A keyboard's hint, so not where the footer's buttons stack (a phone). */}
-          <span aria-hidden className="mr-auto text-[11px] text-zinc-500 max-sm:hidden">
-            {startTaskChord(mac)[0]}
-            {mac ? "" : " "}↵ to start
-          </span>
+          {/* A keyboard's hint, so not where the footer's buttons stack (a phone), nor while there's nothing to start. */}
+          {!why && (
+            <span aria-hidden className="mr-auto text-[11px] text-zinc-500 max-sm:hidden">
+              <Kbd>{startTaskChord(mac)[0]}</Kbd>
+              <Kbd>↵</Kbd> to start
+            </span>
+          )}
           <Button type="button" variant="ghost" onClick={() => onCancel(prompt)}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={!canStart} aria-keyshortcuts={mac ? "Meta+Enter" : "Control+Enter"}>
+          <Button type="submit" variant="primary" disabled={!canStart} aria-keyshortcuts={mac ? "Meta+Enter" : "Control+Enter"} aria-describedby={why ? whyId : undefined}>
             Start task
           </Button>
+          {/* Last, so it is above the button where the footer stacks (bottom up); beside the buttons otherwise. */}
+          {why && (
+            <p id={whyId} className="text-xs text-zinc-400 max-sm:text-center sm:order-first sm:mr-auto">
+              {why}
+            </p>
+          )}
         </>
       }
     >
@@ -601,7 +662,12 @@ export function NewTaskDialog({
           <SlidersHorizontal aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 wrap-anywhere text-zinc-200">
             <span className="text-zinc-400">Runs with </span>
-            {runsWith}
+            {runsWith} ·{" "}
+            {/* Where: this computer has no sandbox, and says so in the warning's colour. */}
+            <span data-testid="new-task-runs-on" className={cx("whitespace-nowrap", runsOn === "local" && "text-amber-200")}>
+              {runsOn === "local" && <ShieldAlert aria-hidden className="mr-1 inline h-3.5 w-3.5 align-[-0.15em] text-amber-300" />}
+              {RUNNER_LABEL[runsOn]}
+            </span>
           </span>
           {showOptions ? <ChevronUp aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" /> : <ChevronDown aria-hidden className="h-4 w-4 shrink-0 text-zinc-500" />}
         </button>
@@ -702,7 +768,7 @@ export function NewTaskDialog({
                   type="button"
                   aria-label={`Remove ${f.name}`}
                   onClick={() => removeFile(key, f.key)}
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 sm:h-5 sm:w-5"
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 pointer-fine:h-5 pointer-fine:w-5"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -722,20 +788,28 @@ export function NewTaskDialog({
               e.target.value = ""
             }}
           />
-          <button type="button" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 sm:min-h-0" onClick={() => picker.current?.click()}>
+          {/* 44px to a finger at any width; a mouse gets them as small as the text. */}
+          <button type="button" className="inline-flex min-h-11 items-center gap-1.5 text-xs text-zinc-300 hover:text-zinc-100 pointer-fine:min-h-6" onClick={() => picker.current?.click()}>
             <Paperclip className="h-3.5 w-3.5" /> Attach files
           </button>
-          {!showEnv && (
-            <button type="button" className="min-h-11 text-xs whitespace-nowrap text-zinc-500 hover:text-zinc-300 sm:min-h-0" onClick={() => setShowEnv(true)}>
-              + env vars
-            </button>
-          )}
+          {/* Folding the field keeps what's in it, and the task still gets it: the button then says how many. */}
+          <button
+            type="button"
+            aria-expanded={showEnv}
+            aria-controls={showEnv ? envId : undefined}
+            className="inline-flex min-h-11 items-center text-xs whitespace-nowrap text-zinc-300 hover:text-zinc-100 pointer-fine:min-h-6"
+            onClick={() => setShowEnv(!showEnv)}
+          >
+            {showEnv ? "Hide env vars" : envCount ? `Env vars (${envCount})` : "+ env vars"}
+          </button>
         </div>
       </div>
       {showEnv && (
-        <Field label="Extra env vars for this task" hint="KEY=value per line; added to the project's env.">
-          <textarea className={`${inputClass} font-mono text-xs`} rows={2} value={env} onChange={(e) => setEnv(e.target.value)} />
-        </Field>
+        <div id={envId}>
+          <Field label="Extra env vars for this task" hint="KEY=value per line; added to the project's env.">
+            <textarea className={`${inputClass} font-mono text-xs`} rows={2} value={env} onChange={(e) => setEnv(e.target.value)} />
+          </Field>
+        </div>
       )}
     </Modal>
   )
