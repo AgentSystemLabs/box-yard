@@ -128,12 +128,12 @@ describe("SpendDetail", () => {
     expect(text(all("spend-notes")[0])).toContain("≈$0.25 of it is estimated from tokens")
   })
 
-  it("lists each model under the harness that ran it, priced as that run's model, most costly first", () => {
+  it("lists each model by its Usage page name and id, under the harness that ran it, priced as that run's model, most costly first", () => {
     show(createElement(SpendDetail, { data: taskSpend() }))
     const models = [...section("By model")!.querySelectorAll('[data-testid="spend-model"]')].map(text)
     expect(models).toHaveLength(2)
-    expect(models[0]).toMatch(/^claude-opus-5-5 Claude Code · 2 runs \$1\.30 · 84% in 2k out 800 cache read 60k cache write 4k$/)
-    expect(models[1]).toMatch(/^claude-sonnet-5-5 Claude Code · 1 run \$0\.25 \(≈\$0\.25 est\.\) · 16%/)
+    expect(models[0]).toMatch(/^Opus 5\.5 claude-opus-5-5 Claude Code · 2 runs \$1\.30 · 84% in 2k out 800 cache read 60k cache write 4k$/)
+    expect(models[1]).toMatch(/^Sonnet 5\.5 claude-sonnet-5-5 Claude Code · 1 run \$0\.25 \(≈\$0\.25 est\.\) · 16%/)
   })
 
   it("links each subtask with its own runs, and shows its cost as unknown when its CLI reported none", () => {
@@ -160,10 +160,10 @@ describe("SpendDetail", () => {
     const runs = all("spend-run")
     expect(runs.map((r) => text(r.querySelector("span")))).toEqual(["Turn 2", "Compaction", "Turn 1"])
     expect(text(runs[0])).toContain("≈$0.25 est.")
-    expect(text(runs[0])).toContain("claude-sonnet-5-5 · Claude Code · 1 min 30 s")
+    expect(text(runs[0])).toContain("Sonnet 5.5 · Claude Code · 1 min 30 s")
     expect(text(runs[1])).toContain("$0.10")
     // A compaction has no duration logged, so none shows.
-    expect(text(runs[1])).toContain("claude-opus-5-5 · Claude Code in 1k")
+    expect(text(runs[1])).toContain("Opus 5.5 · Claude Code in 1k")
     expect(runs[2]!.querySelector("time")!.getAttribute("dateTime")).toBe(new Date(T0).toISOString())
     // The subtask's run is in its own breakdown, not here.
     expect(runs.map(text).join(" ")).not.toContain("gpt-5.5")

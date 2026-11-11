@@ -15,6 +15,7 @@ import { formatTokens } from "./ContextMeter"
 import { AppLink, cx, TAP_AREA } from "./ui"
 import { AGENT_CLI_LABEL, type AgentCli } from "../../../shared/agentCli"
 import { formatMs } from "../../../shared/turnTimings"
+import { modelLabel } from "../../../shared/usageLedger"
 import { addSpend, emptySpend, spendTokens, type SpendBreakdown, type SpendModel, type SpendRun, type SpendTotals } from "../../../shared/spendBreakdown"
 
 export type SpendScope =
@@ -250,7 +251,11 @@ function ModelList({ rows, total }: { rows: SpendModel[]; total: number }) {
         <li key={`${m.harness}:${m.model}`} data-testid="spend-model" className="flex flex-col gap-0.5 py-2">
           <div className="flex flex-wrap items-baseline gap-x-2">
             {/* Narrow, the model's name gets the whole line and the rest goes under it. */}
-            <span className="min-w-0 basis-full font-medium wrap-anywhere text-zinc-200 @min-[26rem]/spend:flex-1 @min-[26rem]/spend:basis-0">{m.model}</span>
+            {/* Named as on the Usage page, with the id the CLI reported when that's not the name. */}
+            <span className="min-w-0 basis-full wrap-anywhere @min-[26rem]/spend:flex-1 @min-[26rem]/spend:basis-0">
+              <span className="font-medium text-zinc-200">{modelLabel(m.model)}</span>
+              {modelLabel(m.model) !== m.model && <span className="ml-1.5 text-zinc-500">{m.model}</span>}
+            </span>
             <span className="text-zinc-500">
               {harnessLabel(m.harness)} · {plural(m.runs, "run")}
             </span>
@@ -291,7 +296,7 @@ function RunRow({ run }: { run: SpendRun }) {
         </span>
       </div>
       <div className="min-w-0 wrap-anywhere text-zinc-500">
-        {run.model} · {harnessLabel(run.harness)}
+        {modelLabel(run.model)} · {harnessLabel(run.harness)}
         {run.durationMs > 0 && ` · ${formatMs(run.durationMs)}`}
       </div>
       <TokenLine totals={run} />
