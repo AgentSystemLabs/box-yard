@@ -394,6 +394,9 @@ describe("dragging", () => {
     expect(mark().style.top).toBe(`${row(API).getBoundingClientRect().top}px`)
     expect(line().style.display).toBe("block")
     expect(line().style.top).toBe(`${row(TESTS).getBoundingClientRect().bottom - 1}px`)
+    // The rows it passes don't light up as if a click would open them.
+    expect(tree().style.pointerEvents).toBe("none")
+    expect(document.documentElement.style.cursor).toBe("grabbing")
     expect(saves()).toEqual([])
 
     pointer("pointerup", window, middle(row(TESTS)) + 15)
@@ -403,6 +406,7 @@ describe("dragging", () => {
     expect(session()).toBeNull()
     expect(mark().style.display).toBe("none")
     expect(line().style.display).toBe("none")
+    expect([tree().style.pointerEvents, document.documentElement.style.cursor]).toEqual(["", ""])
     expect(under(YARD).at(-1)).toBe(API.id)
     expect(saves()).toEqual([[`/api/projects/${YARD.id}/tasks/order`, { parentTaskId: null, ids: [ASK.id, PLAN.id, TESTS.id, API.id] }]])
     expect(said()).toBe("Build the API moved to 4 of 4")
@@ -541,7 +545,10 @@ describe("a finger", () => {
     expect(click(button).defaultPrevented).toBe(true)
     expect(session()).toBeNull()
     expect(menuItems()).toEqual(["Move up", "Move down", "Move to top", "Move to bottom"])
+    // The row keeps its frame while its menu is open, so it's plain which one moves.
+    expect([mark().style.display, mark().style.top]).toEqual(["block", `${row(API).getBoundingClientRect().top}px`])
     await choose("Move up")
+    expect(mark().style.display).toBe("none")
     expect(under(YARD)[0]).toBe(API.id)
   })
 

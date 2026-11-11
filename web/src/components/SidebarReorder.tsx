@@ -95,6 +95,25 @@ const hide = (el: HTMLElement | null) => {
   if (el) el.style.display = "none"
 }
 
+/**
+ * The still frame on `item` and the rows that move with it: as wide as the row itself, so a sub-task's sits at its
+ * indent, and cut to the part of its list on screen. Returns the row's own left edge and width, for the drop line.
+ */
+function showMark(el: HTMLElement | null, item: HTMLElement, clip: DOMRect) {
+  const block = blockOf(item).getBoundingClientRect()
+  const { left, width } = item.getBoundingClientRect()
+  const top = Math.max(block.top, clip.top)
+  const bottom = Math.min(block.bottom, clip.bottom)
+  if (el) Object.assign(el.style, bottom > top ? { display: "block", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${bottom - top}px` } : { display: "none" })
+  return { left, width }
+}
+
+/** While a row is dragged the rows it passes don't light up as if they'd open, and the pointer shows it holds one. */
+function dragLook(tree: HTMLElement | null, on: boolean) {
+  if (tree) tree.style.pointerEvents = on ? "none" : ""
+  document.documentElement.style.cursor = on ? "grabbing" : ""
+}
+
 interface TreeProps {
   ref: (el: HTMLDivElement | null) => (() => void) | undefined
   onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void
@@ -178,7 +197,8 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
     const items = new Map(treeItems(tree).map((i) => [i.getAttribute("data-tree-key"), i]))
     const blocks = spot?.list.keys.map((k) => items.get(k)).map((i) => (i ? blockOf(i) : null)) ?? []
     const own = spot ? blocks[spot.index] : null
-    if (!spot || !own || blocks.includes(null)) return void (hide(mark.current), hide(line.current))
+    const item = spot && items.get(spot.list.keys[spot.index]!)
+    if (!spot || !own || !item || blocks.includes(null)) return void (hide(mark.current), hide(line.current))
     const view = scrollerOf(own, tree)
     const clip = (view ?? tree).getBoundingClientRect()
     if (p.phase === "dragging" && view) {
@@ -189,15 +209,12 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
       if (view.scrollTop !== before) p.frame = requestAnimationFrame(draw)
     }
     const rects = blocks.map((b) => b!.getBoundingClientRect())
-    const mine = rects[spot.index]!
-    const top = Math.max(mine.top, clip.top)
-    const bottom = Math.min(mine.bottom, clip.bottom)
-    if (mark.current) Object.assign(mark.current.style, bottom > top ? { display: "block", top: `${top}px`, left: `${mine.left}px`, width: `${mine.width}px`, height: `${bottom - top}px` } : { display: "none" })
+    const { left, width } = showMark(mark.current, item, clip)
     if (p.phase !== "dragging") return hide(line.current)
     const slot = rects.filter((r) => (r.top + r.bottom) / 2 < p.y).length
     p.to = slotTarget(spot.index, slot)
     const y = slot === 0 ? rects[0]!.top : slot === rects.length ? rects.at(-1)!.bottom : (rects[slot - 1]!.bottom + rects[slot]!.top) / 2
-    if (line.current) Object.assign(line.current.style, p.to !== null && y >= clip.top - 1 && y <= clip.bottom + 1 ? { display: "block", top: `${y - 1}px`, left: `${mine.left}px`, width: `${mine.width}px` } : { display: "none" })
+    if (line.current) Object.assign(line.current.style, p.to !== null && y >= clip.top - 1 && y <= clip.bottom + 1 ? { display: "block", top: `${y - 1}px`, left: `${left}px`, width: `${width}px` } : { display: "none" })
   }, [])
 
   const end = useCallback(() => {
@@ -207,6 +224,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
     if (p.timer) clearTimeout(p.timer)
     if (p.frame !== null) cancelAnimationFrame(p.frame)
     p.stop()
+    if (p.phase === "dragging") dragLook(root.current, false)
     hide(mark.current)
     hide(line.current)
   }, [])
@@ -237,7 +255,11 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
           if (touch) return void (far > HOLD_SLOP && end())
           if (far <= DRAG_SLOP) return
           p.phase = "dragging"
-        } else if (p.phase === "held" && far > HELD_SLOP) p.phase = "dragging"
+          dragLook(root.current, true)
+        } else if (p.phase === "held" && far > HELD_SLOP) {
+          p.phase = "dragging"
+          dragLook(root.current, true)
+        }
         if (p.phase === "dragging") schedule()
       }
       const onUp = (ev: PointerEvent) => {
@@ -270,13 +292,23 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
       const onSelect = (ev: Event) => {
         if (p.phase !== "pressed") ev.preventDefault()
       }
+      // The list takes no pointer while a row is dragged (dragLook), so the wheel is passed on to it.
+      const onWheel = (ev: WheelEvent) => {
+        const item = p.phase === "dragging" ? itemOf(p.key) : null
+        const view = item && root.current ? scrollerOf(item, root.current) : null
+        if (!view) return
+        view.scrollTop += ev.deltaY
+        schedule()
+      }
       window.addEventListener("pointermove", onMove)
+      window.addEventListener("wheel", onWheel, { passive: true })
       window.addEventListener("pointerup", onUp)
       window.addEventListener("pointercancel", onCancel)
       window.addEventListener("keydown", onKey, true)
       document.addEventListener("selectstart", onSelect)
       p.stop = () => {
         window.removeEventListener("pointermove", onMove)
+        window.removeEventListener("wheel", onWheel)
         window.removeEventListener("pointerup", onUp)
         window.removeEventListener("pointercancel", onCancel)
         window.removeEventListener("keydown", onKey, true)
@@ -290,7 +322,7 @@ export function useSidebarReorder<T extends TreeProps>(tree: T, groups: Groups) 
         }, HOLD_MS)
       press.current = p
     },
-    [draw, end, layer, movable, move, openMenu],
+    [draw, end, itemOf, layer, movable, move, openMenu],
   )
 
   // The click a release makes, on the row the drag started on, would open it.
@@ -389,6 +421,23 @@ function ReorderLayer({ store, mark, line, spotOf, onMove, onReset }: {
   const { menu, said } = useSyncExternalStore(store.subscribe, store.get, store.get)
   const trigger = useRef<HTMLElement | null>(null)
   trigger.current = menu?.item ?? null
+  // While the menu is open its row keeps the frame, so it's plain which row the moves are for. It follows the row as
+  // the menu does.
+  const item = menu?.item
+  useLayoutEffect(() => {
+    const el = mark.current
+    const tree = item?.closest<HTMLElement>("[role=tree]")
+    if (!item || !tree || !el) return
+    const place = () => void showMark(el, item, (scrollerOf(item, tree) ?? tree).getBoundingClientRect())
+    place()
+    window.addEventListener("resize", place)
+    window.addEventListener("scroll", place, true)
+    return () => {
+      window.removeEventListener("resize", place)
+      window.removeEventListener("scroll", place, true)
+      hide(el)
+    }
+  }, [item, mark])
   const spot = menu ? spotOf(menu.key) : null
   const items: MenuItem[] = []
   if (menu && spot) {
