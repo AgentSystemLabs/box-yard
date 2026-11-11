@@ -60,8 +60,8 @@ const settled = (r: Running, id: string, status: Task["status"]) =>
     return t.status === status && !t.currentTurnId ? t : null
   }, `task ${id} to be ${status}`, 60_000)
 let projects = 0
-const newTask = async (r: Running, model: string) => {
-  const p = await call<Project>(r, "POST", "/api/projects", { name: `example-${++projects}` })
+const newTask = async (r: Running, model: string, env?: Record<string, string>) => {
+  const p = await call<Project>(r, "POST", "/api/projects", { name: `example-${++projects}`, env })
   return call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Settings review", prompt: "write a haiku", model })
 }
 
@@ -82,11 +82,16 @@ describe("a runner whose Claude Code is too old for the model", () => {
     await settled(r, other.id, "idle")
     expect(turns()).toBe(1)
 
+    // So does the same model in a project that sets the window by hand: the CLI's own way round it.
+    const byHand = await newTask(r, "claude-fable-5-2", { CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000" })
+    await settled(r, byHand.id, "idle")
+    expect(turns()).toBe(2)
+
     // The owner updates the CLI: the refusal wasn't remembered.
     process.env.FAKE_CLAUDE_VERSION = "2.1.322"
     await call(r, "POST", `/api/tasks/${t.id}/retry`)
     expect((await settled(r, t.id, "idle")).error).toBeFalsy()
-    expect(turns()).toBe(2)
+    expect(turns()).toBe(3)
   })
 
   it("stops a turn at the CLI's own unrecognized-model line, with a clear error instead of the thrashing one", { timeout: 120_000 }, async () => {

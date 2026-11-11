@@ -48,7 +48,7 @@ import type { AgentCaptainMessage } from "./captains.js"
 import { formatTokens, sessionUsageOf } from "./usage.js"
 import { errorMessage, failedStep, isRateLimited } from "./util/retry.js"
 import { ensureClaudeCliKnows } from "./claudeCli.js"
-import { claudeCliTooOld, minClaudeCliFor, unrecognizedModelError } from "../shared/claudeCli.js"
+import { claudeCliTooOld, minClaudeCliFor, unrecognizedModelError, windowSetByHand } from "../shared/claudeCli.js"
 import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
 import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
@@ -6156,7 +6156,8 @@ export class TaskManager {
       const connectors = await this.turnConnectors(row, project.id, boxId)
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
       const { route, ...agent } = this.agentSettings(row, project)
-      if (taskJson.agent === "claude") await this.ensureClaudeCli(boxId, agent.model, taskId)
+      // A window the project sets by hand is the owner's answer to a CLI that doesn't know the model: that turn starts as it is.
+      if (taskJson.agent === "claude" && !windowSetByHand(taskJson.env)) await this.ensureClaudeCli(boxId, agent.model, taskId)
       if (taskJson.agent === "cursor") await this.ensureCursor(boxId)
       if (taskJson.agent === "opencode") await this.ensureOpenCode(boxId)
       if (taskJson.agent === "codex") {

@@ -11,6 +11,7 @@ import {
   claudeCliVersion,
   minClaudeCliFor,
   serverCliProblems,
+  windowSetByHand,
   unrecognizedModelError,
   versionBelow,
 } from "../shared/claudeCli.js"
@@ -72,6 +73,16 @@ describe("what an old Claude Code's failure says", () => {
     expect(own).toContain("Claude Code on SSH machine build-1 doesn't know the model claude-nope-9.")
     expect(own).toContain("Update it there")
     expect(own).toContain("the model name is wrong")
+  })
+})
+
+describe("a window the owner sets by hand", () => {
+  it("is the CLI's own settings for it, not a gateway alone", () => {
+    expect(windowSetByHand({ CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000" })).toBe(true)
+    expect(windowSetByHand({ CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT: "1" })).toBe(true)
+    expect(windowSetByHand({ ANTHROPIC_BASE_URL: "https://gateway.example.com", CLAUDE_CODE_MAX_CONTEXT_TOKENS: "" })).toBe(false)
+    expect(windowSetByHand({})).toBe(false)
+    expect(windowSetByHand(null)).toBe(false)
   })
 })
 

@@ -47,6 +47,16 @@ export function claudeCliTooOld(version: string | null, model: string | null | u
   return Boolean(version && min && versionBelow(version, min))
 }
 
+/**
+ * Env by which the owner sets the window by hand, the CLI's own way round a model it doesn't know: such a turn starts
+ * whatever the CLI's version. A gateway alone doesn't count: a newer CLI still gives the model its real window there.
+ */
+const WINDOW_BY_HAND_ENV = ["CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"]
+
+export function windowSetByHand(env: Readonly<Record<string, string | undefined>> | null | undefined): boolean {
+  return WINDOW_BY_HAND_ENV.some((k) => Boolean(env?.[k]))
+}
+
 const UPDATE = `npm install -g ${CLAUDE_CODE_PACKAGE}@latest`
 
 /** The update for a sandbox Box Yard manages, with sudo where the first try isn't allowed; npm's last words go to stderr when both fail. */
