@@ -12,7 +12,7 @@ import type { Settings } from "../../../shared/types"
 import { DEFAULT_PROVIDERS, DEFAULT_PROVIDER_LABEL, type DefaultProvider } from "../../../shared/runner"
 import { GPU_PROVIDERS, GPU_PROVIDER_LABEL, type GpuProvider } from "../../../shared/gpu"
 import { DEFAULT_GPU_TYPES, gpuChoices, gpuTypesWords, sameGpu } from "../../../shared/gpuCatalog"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { RunnerChoice, useRunnerDraft } from "./Setup"
 import { DockerSizes } from "./DockerSettings"
 import { DaytonaSizes } from "./DaytonaSettings"
@@ -134,7 +134,7 @@ function ProviderSize({ provider, fid, onSection, settings }: {
         {more}
       </Row>
     case "local":
-      return <Row id={fid("local-size")} label="Size" help="Tasks on this computer share its own CPU, memory and disk, so there's no size to pick. How many run at once is in Settings › Boxes & limits.">{more}</Row>
+      return <Row id={fid("local-size")} label="Size" help={<>Tasks on this computer share its own CPU, memory and disk, so there's no size to pick. How many run at once is in <SettingsLink section="limits">Settings › Boxes & limits</SettingsLink>.</>}>{more}</Row>
     case "ssh":
       return <Row id={fid("ssh-size")} label="Size" help="Each SSH machine runs tasks with its own CPU, memory and disk, so there's no size to pick. A project's label picks which machines it uses.">{more}</Row>
   }

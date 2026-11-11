@@ -10,7 +10,8 @@ import { Button, LineIcon, Select, inputClass, parseEnv } from "./ui"
 import { LOCAL_UNSANDBOXED, RUNNERS, RUNNER_LABEL, type Runner } from "../../../shared/runner"
 import { AGENT_CLIS, AGENT_CLI_LABEL, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 
-export function NewProjectDialog({ onClose }: { onClose: () => void }) {
+/** `openChat` off leaves its opener in place (Settings › Projects, whose list shows the new project). */
+export function NewProjectDialog({ onClose, openChat = true }: { onClose: () => void; openChat?: boolean }) {
   const [, navigate] = useLocation()
   const create = useCreateProject()
   const [name, setName] = useState("")
@@ -34,11 +35,13 @@ export function NewProjectDialog({ onClose }: { onClose: () => void }) {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
+    // Opened from Settings, it's inside Settings' own form in React's tree: the submit ends here, or Settings would save.
+    e.stopPropagation()
     if (!name.trim()) return
     const id = newClientId("prj")
     create.mutate({ id, name: name.trim(), description, repo: repo.trim() || null, baseBranch, env: parseEnv(env), ...(picked && { runner: picked }), ...(runner === "ssh" ? { machineLabel: machineLabel || null } : {}), ...(agentCli && { agentCli }) })
     onClose()
-    navigate(projectChatHref(id))
+    if (openChat) navigate(projectChatHref(id))
   }
 
   const dirty = Boolean(name || description || repo || env || baseBranch !== "main" || picked || machineLabel || agentCli)

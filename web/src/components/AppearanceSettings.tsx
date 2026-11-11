@@ -1,4 +1,4 @@
-import { useId, useRef, type KeyboardEvent } from "react"
+import { useRef, type KeyboardEvent } from "react"
 import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
 import { setTheme, useTheme, type ThemePreference } from "../lib/theme"
 import { useDraft } from "../lib/settingsDraft"
@@ -12,7 +12,6 @@ const THEMES: { value: ThemePreference; label: string; icon: LucideIcon }[] = [
 ]
 
 export function AppearancePanel() {
-  const id = useId()
   const saved = useTheme()
   const [theme, set] = useDraft("theme", "appearance", saved, setTheme)
   const group = useRef<HTMLDivElement>(null)
@@ -28,14 +27,14 @@ export function AppearancePanel() {
   }
   return (
     <Panel section="appearance">
-      <Row id={id} label="Theme" help="System follows your device. Saved in this browser.">
+      {/* No id: the row's <label> would name one radio. The group's aria-label names them all. */}
+      <Row label="Theme" help="System follows your device. Kept in this browser. Applies when you Save.">
         <div ref={group} role="radiogroup" aria-label="Theme" onKeyDown={onKey} className="grid grid-cols-3 gap-1 rounded-lg border border-zinc-800 bg-zinc-900 p-1">
-          {THEMES.map(({ value, label, icon: Icon }, i) => {
+          {THEMES.map(({ value, label, icon: Icon }) => {
             const on = value === theme
             return (
               <button
                 key={value}
-                id={i === 0 ? id : undefined}
                 type="button"
                 role="radio"
                 aria-checked={on}

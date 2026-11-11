@@ -1,8 +1,9 @@
 // Settings' building blocks, on their own so the first-run setup card (Setup.tsx) can use them without pulling the
 // whole Settings dialog into the first load (SettingsHost.tsx loads that on demand).
-import { useId, useState, type ReactNode } from "react"
+import { Children, isValidElement, useId, useState, type ReactNode } from "react"
 import { SETTINGS_SECTIONS, settingsPath, type SettingsSection } from "../lib/settingsNav"
-import { SettingsCategory, SettingsField, SearchHighlight, highlightSettingsText, useSettingsSearching } from "../lib/settingsSearch"
+import { SettingsCategory, SettingsField, SearchHighlight, highlightSettingsText, useSettingsSearching, useSettingsSearchWords } from "../lib/settingsSearch"
+import { useOpenSettings } from "./SettingsHost"
 import { TAP_AREA, cx } from "./ui"
 import type { SettingSource } from "../../../shared/types"
 
@@ -29,22 +30,52 @@ export const SAVE_IDLE = "disabled:bg-zinc-800! disabled:text-zinc-400! disabled
 /** A setting's name, wherever it's shown: Settings' rows, a project's settings and New project. */
 export const SETTING_LABEL = "text-sm font-medium text-zinc-200"
 const SETTING_HELP = "text-xs leading-relaxed text-zinc-500"
+/** A stacked field's label with its "unsaved" chip beside it (a project's settings). */
+export const LABEL_LINE = "flex flex-wrap items-center gap-x-2"
 
 /**
- * The rest of a help text, after the sentence that says what the setting does: closed until More is pressed, and open
- * while Settings' search is on, so a match in it shows. It stays in the page while closed, which is how search finds it.
+ * A button that reads as a word in running text (help, a hint): its line's height, over .settings-body's 44px for every
+ * button (styles.css), and still 44px to a finger (TAP_AREA). INLINE_LINK is the one that goes somewhere.
+ */
+const INLINE_BUTTON = cx(TAP_AREA, "min-h-0! min-w-0! rounded underline-offset-2 pointer-coarse:after:-inset-x-2!")
+export const INLINE_LINK = cx(INLINE_BUTTON, "text-yard-400 hover:underline")
+
+/** "Settings › Credentials" in a help text, as a link to that category. */
+export function SettingsLink({ section, children }: { section: SettingsSection; children: ReactNode }) {
+  const openSettings = useOpenSettings()
+  return (
+    <button type="button" className={INLINE_LINK} onClick={() => openSettings(section)}>
+      {children}
+    </button>
+  )
+}
+
+/** A help text's words, for search. */
+function textOfNode(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (isValidElement<{ children?: ReactNode }>(node)) return textOfNode(node.props.children)
+  return Children.toArray(node).map(textOfNode).join("")
+}
+
+/**
+ * The rest of a help text, after the sentence that says what the setting does: closed until More is pressed. Settings'
+ * search opens it only for a word found in it, so other results stay short. It stays in the page while closed, which is
+ * how search finds it.
  */
 export function HelpMore({ about, children }: { about: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
-  const searching = useSettingsSearching()
+  const words = useSettingsSearchWords()
   const id = useId()
+  const hidden = words.length ? textOfNode(children).toLocaleLowerCase() : ""
+  const found = words.some((w) => hidden.includes(w))
+  const shown = open || found
   return (
     <>
-      <span id={id} hidden={!open && !searching}>
+      <span id={id} hidden={!shown}>
         {" "}
         {highlightSettingsText(children)}
       </span>
-      {!searching && (
+      {!found && (
         <>
           {" "}
           <button
@@ -54,8 +85,7 @@ export function HelpMore({ about, children }: { about: string; children: ReactNo
             aria-controls={id}
             aria-label={`${open ? "Less" : "More"} about ${about}`}
             onClick={() => setOpen(!open)}
-            // A word in the sentence, so its line's height (over .settings-body's 44px for buttons): TAP_AREA is its 44px to a finger.
-            className={cx(TAP_AREA, "min-h-0! min-w-0! rounded text-zinc-300 underline underline-offset-2 hover:text-zinc-100 pointer-coarse:after:-inset-x-2!")}
+            className={cx(INLINE_BUTTON, "text-zinc-300 underline hover:text-zinc-100")}
           >
             {open ? "Less" : "More"}
           </button>
@@ -98,20 +128,26 @@ export function Row({ id, label, help, more, hint, wide, children }: { id?: stri
  * and help styles, so those read as Settings does. The help sits outside the `<label>`, so it isn't part of the
  * control's name and its More button isn't nested in one.
  */
-export function StackedField({ label, htmlFor, hint, more, children }: { label: string; htmlFor?: string; hint?: ReactNode; more?: ReactNode; children: ReactNode }) {
+export function StackedField({ label, htmlFor, hint, more, changed, children }: { label: string; htmlFor?: string; hint?: ReactNode; more?: ReactNode; changed?: boolean; children: ReactNode }) {
   return (
     <div className="min-w-0 space-y-1.5">
       {htmlFor ? (
         // Its control by id, for a field with other controls beside it: a wrapping label would name the first of them.
         <>
-          <label htmlFor={htmlFor} className={cx("block", SETTING_LABEL)}>
-            {label}
-          </label>
+          <span className={LABEL_LINE}>
+            <label htmlFor={htmlFor} className={SETTING_LABEL}>
+              {label}
+            </label>
+            <SourceHint changed={Boolean(changed)} />
+          </span>
           {children}
         </>
       ) : (
         <label className="block space-y-1.5">
-          <span className={cx("block", SETTING_LABEL)}>{label}</span>
+          <span className={LABEL_LINE}>
+            <span className={SETTING_LABEL}>{label}</span>
+            <SourceHint changed={Boolean(changed)} />
+          </span>
           {children}
         </label>
       )}

@@ -11,7 +11,7 @@ import { useDraft } from "../lib/settingsDraft"
 import { formatBytes } from "../../../shared/disk"
 import { DOCKER_LIMITS, DOCKER_SIZES, dockerSizeOf, type DockerContainerInfo, type DockerImageBuild, type DockerSettings, type DockerStatus } from "../../../shared/docker"
 import { BoxActionDialog } from "./BoxActionDialog"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { SizeCards } from "./SizeCards"
 import { Button, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
@@ -147,7 +147,7 @@ function EngineRow({ status, memoryMb }: { status: DockerStatus; memoryMb: numbe
   return (
     <Row
       label="Docker"
-      help="Projects whose Runs on is Docker container get one container each on this computer, with only their workspace volume mounted (no folder of this computer, no Docker socket)." more="Agents get the GitHub and Claude credentials from Settings › Credentials inside the container only; they're never in the image. When Docker isn't running, those projects' tasks wait and say why: they never run somewhere else."
+      help="Projects whose Runs on is Docker container get one container each on this computer, with only their workspace volume mounted (no folder of this computer, no Docker socket)." more={<>Agents get the GitHub and Claude credentials from <SettingsLink section="credentials">Settings › Credentials</SettingsLink> inside the container only; they're never in the image. When Docker isn't running, those projects' tasks wait and say why: they never run somewhere else.</>}
     >
       {d.error ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-200" data-testid="docker-problem">

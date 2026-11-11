@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react"
+import { flushSync } from "react-dom"
 import { ArrowLeft, Palette, BarChart3, Bell, Bot, Boxes, Check, CircleAlert, Cloud, Container, Laptop, Cpu, DollarSign, Fingerprint, FolderGit2, Info, KeyRound, Network, Plug, Server, Search, X, Volume2, Webhook, type LucideIcon } from "lucide-react"
-import { useAgentSettings, useHealth, useResetSettings, useSaveSettings, useSettings } from "../lib/queries"
+import { useAgentSettings, useHealth, useModels, useResetSettings, useSaveSettings, useSettings } from "../lib/queries"
 import {
   SETTINGS_SECTIONS,
   SETTINGS_TOP_SECTIONS,
@@ -33,7 +34,7 @@ import { MachinesPanel } from "./MachineSettings"
 import { useOpenUsage } from "./UsageHost"
 import { ProjectSettingsPicker } from "./ProjectSettingsDialog"
 import { Modal } from "./Modal"
-import { Panel, Row, SAVE_IDLE, SourceHint } from "./SettingsBlocks"
+import { Panel, Row, SAVE_IDLE, SettingsLink, SourceHint } from "./SettingsBlocks"
 import { UpstashSizes } from "./SizeCards"
 import { SettingsTabs, type SettingsTab } from "./SettingsTabs"
 import { confirmDialog } from "../lib/confirm"
@@ -41,7 +42,7 @@ import { isTouchDevice } from "../lib/composer"
 import { DEFAULT_OWNER_NAME } from "../../../shared/owner"
 import { EffortPicker, ModelPicker } from "./ModelPicker"
 import { CaptainIconPicker } from "./CaptainIconPicker"
-import { EFFORT_LABEL } from "../../../shared/models"
+import { EFFORT_LABEL, findModel } from "../../../shared/models"
 import { CodexModelSelect } from "./CodexModelSelect"
 import { OpenCodeModelInput } from "./OpenCodeModelInput"
 import { CursorModelSelect } from "./CursorModelSelect"
@@ -73,6 +74,8 @@ import {
 
 const SECTION_ICON: Record<SettingsSection, LucideIcon> = { orchestrator: Network, projects: FolderGit2, agents: Bot, runners: Server, local: Laptop, upstash: Cloud, credentials: KeyRound, identities: Fingerprint, connectors: Plug, runpod: Cpu, vast: Cpu, daytona: Cpu, docker: Container, machines: Server, hooks: Webhook, limits: Boxes, costs: DollarSign, notifications: Bell, voice: Volume2, appearance: Palette, about: Info }
 const TOP_TABS: SettingsTab<SettingsSection>[] = SETTINGS_TOP_SECTIONS.map((s) => ({ key: s.key, label: s.label, icon: SECTION_ICON[s.key] }))
+/** Categories with nothing to save: a list, or facts. With no change pending anywhere, their footer is just Close. */
+const NO_DRAFT_SECTIONS: SettingsSection[] = ["projects", "about"]
 
 // ------------------------------------------------------------------ building blocks
 
@@ -116,7 +119,7 @@ function AutoCompactControl({
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-sm text-zinc-300">
         <input id={id} type="checkbox" checked={value.enabled} onChange={(e) => onChange({ ...value, enabled: e.target.checked })} />
-        Enabled
+        <SearchHighlight text={value.enabled ? "On: compacts past the threshold below" : "Off: only the CLI's own compaction"} />
       </label>
       <div className="flex flex-col gap-2 @sm:flex-row @sm:items-center">
         <input
@@ -189,6 +192,13 @@ export function SettingsDialog({
   const [visited, setVisited] = useState<SettingsSection[]>([section])
   const [query, setQuery] = useState("")
   const searchRef = useRef<HTMLInputElement>(null)
+  // Where the tabs fold into a dropdown (a phone), search folds into a button beside it: pressing it swaps the field in.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchToggle = useRef<HTMLButtonElement>(null)
+  // After a clear or Esc, focus goes to whichever of the two is on screen: `first` is tried first.
+  const [refocus, setRefocus] = useState<{ first: "toggle" | "field" } | null>(null)
+  const models = useModels()
+  const modelName = (id: string) => findModel(models, id)?.label ?? id
   const { registry: searchRegistry, matches, searching } = useSettingsSearch(query)
   const searchCategories = new Set(matches.map((f) => f.category))
   const [saving, setSaving] = useState(false)
@@ -274,9 +284,39 @@ export function SettingsDialog({
   // Search takes focus on open, except under a finger: there it would raise the keyboard over the settings, so the
   // panel takes it instead (Modal's own pick is the header's ×).
   useEffect(() => {
-    if (isTouchDevice()) panelRef.current?.focus({ preventScroll: true })
-    else searchRef.current?.focus()
+    if (!isTouchDevice()) searchRef.current?.focus()
+    // Also where search is folded away (a narrow window): its field can't take focus there.
+    if (document.activeElement !== searchRef.current) panelRef.current?.focus({ preventScroll: true })
   }, [])
+
+  /** Focuses search, opening it first where it's folded into its button. */
+  const focusSearch = () => {
+    searchRef.current?.focus()
+    if (document.activeElement !== searchRef.current) {
+      flushSync(() => setSearchOpen(true))
+      searchRef.current?.focus()
+    }
+    searchRef.current?.select()
+  }
+  const closeSearch = () => {
+    setQuery("")
+    setRefocus({ first: searchOpen ? "toggle" : "field" })
+    setSearchOpen(false)
+  }
+  useEffect(() => {
+    if (!refocus) return
+    const order = refocus.first === "toggle" ? [searchToggle.current, searchRef.current] : [searchRef.current, searchToggle.current]
+    for (const el of order) {
+      el?.focus()
+      if (document.activeElement === el) break
+    }
+  }, [refocus])
+
+  // Another category (a tab, a link in a help text or a search result) leaves search.
+  useEffect(() => {
+    setQuery("")
+    setSearchOpen(false)
+  }, [section])
 
   // A provider drill-in hides its button. Keep keyboard focus in the visible level, and return it on Back.
   useEffect(() => {
@@ -297,18 +337,21 @@ export function SettingsDialog({
       const typing = target.closest?.("input, textarea, [contenteditable=true]")
       if ((e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f")) {
         e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
+        focusSearch()
       } else if (e.key === "Escape" && query) {
         e.preventDefault()
         e.stopPropagation()
         setQuery("")
-        searchRef.current?.focus()
+        setRefocus({ first: "field" })
+      } else if (e.key === "Escape" && searchOpen) {
+        e.preventDefault()
+        e.stopPropagation()
+        closeSearch()
       }
     }
     document.addEventListener("keydown", onKey, true)
     return () => document.removeEventListener("keydown", onKey, true)
-  }, [query])
+  }, [query, searchOpen])
 
   useEffect(() => {
     panelRef.current?.scrollTo({ top: 0 })
@@ -474,17 +517,19 @@ export function SettingsDialog({
             </Button>
           )}
           {/* Save checks every field itself: the browser's check can't reach a hidden section and refuses numbers between steps. */}
-          <Button type="submit" variant="primary" loading={saving} disabled={!dirty} className={dirty ? undefined : SAVE_IDLE} formNoValidate>
-            Save
-          </Button>
+          {(dirty || searching || !NO_DRAFT_SECTIONS.includes(section)) && (
+            <Button type="submit" variant="primary" loading={saving} disabled={!dirty} className={dirty ? undefined : SAVE_IDLE} formNoValidate>
+              Save
+            </Button>
+          )}
         </>
       }
     >
       <SettingsSearchProvider value={searchRegistry}>
-      {/* Where the tabs fold into a dropdown (SettingsTabs), search and the dropdown are one band: no line between them. */}
-      <div className={cx("shrink-0 px-3 pt-3", searching ? "border-b border-zinc-900 pb-3" : "pb-2 @3xl:border-b @3xl:border-zinc-900 @3xl:pb-3")}>
+      {/* Where the tabs fold into a dropdown (SettingsTabs), search is a button beside it until pressed, then takes its place (at the dropdown's height, so nothing under it moves). */}
+      <div className={cx("shrink-0 border-b border-zinc-900 p-3", !(searchOpen || query) && "@max-3xl:hidden")}>
         {/* One focus ring, the box's (as the composer's): the field inside draws none of its own. */}
-        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 has-[>input:focus-visible]:border-yard-500 has-[>input:focus-visible]:outline-2 has-[>input:focus-visible]:outline-offset-2 has-[>input:focus-visible]:outline-(color:--focus-ink)">
+        <div data-control-boundary className="flex min-h-11 items-center gap-2 rounded-lg border border-control bg-zinc-900 px-3 @max-3xl:h-11 has-[>input:focus-visible]:border-yard-500 has-[>input:focus-visible]:outline-2 has-[>input:focus-visible]:outline-offset-2 has-[>input:focus-visible]:outline-(color:--focus-ink)">
           <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-zinc-500" />
           <input
             ref={searchRef} type="search" aria-label="Search settings" placeholder="Search settings…" value={query}
@@ -494,8 +539,14 @@ export function SettingsDialog({
               if (e.target.value.trim()) setVisited(SETTINGS_SECTIONS.map((s) => s.key))
             }}
             onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault() }}
+            // Left empty, it folds back into its button (where it folds at all).
+            onBlur={(e) => {
+              if (e.target.value.trim() || e.currentTarget.parentElement?.contains(e.relatedTarget as Node | null)) return
+              setQuery("")
+              setSearchOpen(false)
+            }}
           />
-          {query && <button type="button" aria-label="Clear settings search" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400 focus-visible:ring-2 focus-visible:ring-yard-400" onClick={() => { setQuery(""); searchRef.current?.focus() }}><X className="h-4 w-4" /></button>}
+          {(query || searchOpen) && <button type="button" aria-label={query ? "Clear settings search" : "Close settings search"} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-zinc-400 focus-visible:ring-2 focus-visible:ring-yard-400" onClick={closeSearch}><X className="h-4 w-4" /></button>}
         </div>
         {searching && <p role="status" className="mt-2 text-xs text-zinc-400">{matches.length} matching {matches.length === 1 ? "field" : "fields"} in {searchCategories.size} {searchCategories.size === 1 ? "category" : "categories"}</p>}
       </div>
@@ -508,7 +559,20 @@ export function SettingsDialog({
         selectLabel="Settings category"
         idPrefix={ids}
         navHidden={searching}
-        selectClassName="pt-0"
+        selectHidden={searchOpen || Boolean(query)}
+        selectTrailing={
+          <button
+            ref={searchToggle}
+            type="button"
+            aria-label="Search settings"
+            aria-expanded={searchOpen}
+            title="Search settings"
+            onClick={focusSearch}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-control bg-zinc-900 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-400"
+          >
+            <Search aria-hidden="true" className="h-4 w-4" />
+          </button>
+        }
         className={searching ? "settings-searching" : undefined}
         panelRef={panelRef}
         panelRole={searching ? "region" : "tabpanel"}
@@ -568,7 +632,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("ocli")}
                     label="Agent"
-                    help="The coding agent the Coordinator chat runs on; Codex needs a Codex login in Settings › Credentials."
+                    help={<>The coding agent the Coordinator chat runs on; Codex needs a Codex login in <SettingsLink section="credentials">Settings › Credentials</SettingsLink>.</>}
                     hint={hint("orchestratorCli")}
                   >
                     <AgentCliSelect id={fid("ocli")} clis={MANAGER_CLIS} value={s.orchestratorCli} onChange={(v) => set("orchestratorCli", v)} testId="orchestrator-cli" />
@@ -586,7 +650,8 @@ export function SettingsDialog({
                     <Row
                       id={fid("om")}
                       label="Model"
-                      help="The Claude model the Coordinator chat runs on, and its quick questions unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
+                      help="The Claude model the Coordinator chat runs on."
+                      more="Its quick questions use it too, unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
                       hint={hint("orchestratorModel")}
                     >
                       <ModelPicker id={fid("om")} value={s.orchestratorModel} onChange={(v) => set("orchestratorModel", v)} testId="orchestrator-model" customInputProps={field("orchestratorModel")} />
@@ -663,7 +728,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("ccli")}
                     label="Captain agent"
-                    help="The coding agent every project's Captain runs on; Codex needs a Codex login in Settings › Credentials."
+                    help={<>The coding agent every project's Captain runs on; Codex needs a Codex login in <SettingsLink section="credentials">Settings › Credentials</SettingsLink>.</>}
                     hint={hint("captainCli")}
                   >
                     <AgentCliSelect id={fid("ccli")} clis={MANAGER_CLIS} value={s.captainCli} onChange={(v) => set("captainCli", v)} testId="captain-cli" />
@@ -681,7 +746,8 @@ export function SettingsDialog({
                     <Row
                       id={fid("cm")}
                       label="Captain model"
-                      help="The Claude model every project Captain runs on, and its quick questions unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
+                      help="The Claude model every project Captain runs on."
+                      more="Their quick questions use it too, unless Quick questions below picks one. Pick a model or alias, or enter a custom model ID."
                       hint={hint("captainModel")}
                     >
                       <ModelPicker id={fid("cm")} value={s.captainModel} onChange={(v) => set("captainModel", v)} testId="captain-model" customInputProps={field("captainModel")} />
@@ -700,7 +766,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("cicon")}
                     label="Captain icon"
-                    help="What every project's Captain shows in the sidebar, its chat and its messages, in its project's colour. A project's settings can pick its own; one with an uploaded image and no pick shows the image."
+                    help="What every project's Captain shows in the sidebar, its chat and its messages, in its project's colour."
+                    more="A project's settings can pick its own; one with an uploaded image and no pick shows the image."
                     hint={hint("captainIcon")}
                   >
                     <CaptainIconPicker id={fid("cicon")} value={s.captainIcon} onChange={(v) => v && set("captainIcon", v)} testId="captain-icon" />
@@ -719,7 +786,7 @@ export function SettingsDialog({
                         {/* The option says only "Same as chat", so it fits a phone: which model that is goes here. */}
                         {!s.quickQuestionModel && (
                           <span className="basis-full text-xs text-zinc-500" data-testid="quick-question-model-resolved">
-                            {s.orchestratorModel === s.captainModel ? `Now ${s.orchestratorModel}.` : `Now ${s.orchestratorModel} for the Coordinator, ${s.captainModel} for Captains.`}
+                            {s.orchestratorModel === s.captainModel ? `Uses ${modelName(s.orchestratorModel)}.` : `Uses ${modelName(s.orchestratorModel)} for the Coordinator, ${modelName(s.captainModel)} for Captains.`}
                           </span>
                         )}
                         {hint("quickQuestionModel")}
@@ -759,7 +826,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("nre")}
                     label="Notes retro"
-                    help="When a task's PR merges, or a task without a PR ends done, its project's Captain decides on each note suggestion the agent left: it accepts, merges or rejects it, with a one-line reason. Nobody needs to approve them; the Notes tab shows what was decided."
+                    help="When a task's PR merges, or a task without a PR ends done, its project's Captain decides on each note suggestion the agent left."
+                    more="It accepts, merges or rejects each one, with a one-line reason. Nobody needs to approve them; the Notes tab shows what was decided."
                     hint={hint("notesRetroEnabled")}
                   >
                     <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -815,7 +883,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("cim")}
                     label="Close the issues it names"
-                    help="GitHub closes the issues a PR names with Fixes, Closes or Resolves #N only when it merges into the repo's default branch. For a PR merged into any other branch (an epic branch), Box Yard closes them: open issues of the same repo only, never PRs or other repos' issues, each with a comment linking the PR."
+                    help="When a PR merges into a branch other than the repo's default (an epic branch), Box Yard closes the issues it names with Fixes, Closes or Resolves #N."
+                    more="GitHub closes them itself only on a merge into the default branch. Box Yard closes open issues of the same repo only, never PRs or other repos' issues, each with a comment linking the PR."
                     hint={hint("closeIssuesOnMerge")}
                   >
                     <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -879,8 +948,13 @@ export function SettingsDialog({
                       label="Effort"
                       help={
                         (s.agentCli === "codex" ? s.agentCodexEffort : s.agentEffort) === "orchestrator"
-                          ? "The Coordinator picks an effort in create_task and send_to_task: low for one-command chores, high for real coding. Without one, Routing YAML or the harness default applies."
-                          : "Every agent turn uses this effort, unless the task or its project's Routing YAML entry picks one. Once saved here or set by an env var, it wins over the YAML's defaults and fallback."
+                          ? "The Coordinator picks an effort in create_task and send_to_task: low for one-command chores, high for real coding."
+                          : "Every agent turn uses this effort, unless the task or its project's Routing YAML entry picks one."
+                      }
+                      more={
+                        (s.agentCli === "codex" ? s.agentCodexEffort : s.agentEffort) === "orchestrator"
+                          ? "Without one, Routing YAML or the harness default applies."
+                          : "Once saved here or set by an env var, it wins over the YAML's defaults and fallback."
                       }
                       hint={hint(s.agentCli === "codex" ? "agentCodexEffort" : "agentEffort")}
                     >
@@ -1006,7 +1080,8 @@ function LimitsPanel({
           <Row
             id={fid("mb")}
             label="Max boxes (safety ceiling)"
-            help="A safety stop, not a budget: the most worker boxes alive at once, however much work waits. What keeps spend in check is the daily cloud limit (Settings › Usage); boxes start when work needs one and are deleted when idle."
+            help="A safety stop, not a budget: the most worker boxes alive at once, however much work waits."
+            more={<>What keeps spend in check is the daily cloud limit (<SettingsLink section="costs">Settings › Usage</SettingsLink>); boxes start when work needs one and are deleted when idle.</>}
             hint={hint("maxBoxes")}
           >
             <input id={fid("mb")} type="number" min={1} max={100} className={inputClass} {...num("maxBoxes")} data-testid="max-boxes" />
@@ -1086,7 +1161,8 @@ function LimitsPanel({
       <Row
         id={fid("mup")}
         label="Memory limit (% used)"
-        help="A new agent skips a box with more than this much of its memory in use while other agents run on it, and goes to another box (or waits). Memory is read from the box's cgroup without the reclaimable page cache. 0 = off."
+        help="A new agent skips a box with more than this much of its memory in use while other agents run on it, and goes to another box (or waits). 0 = off."
+        more="Memory is read from the box's cgroup without the reclaimable page cache."
         hint={hint("memoryMaxUsedPercent")}
       >
         <input id={fid("mup")} type="number" min={0} max={100} step={5} className={inputClass} {...num("memoryMaxUsedPercent")} data-testid="memory-max-used" />
@@ -1140,7 +1216,8 @@ function LimitsPanel({
       <Row
         id={fid("gpc")}
         label="Partial clone mirrors"
-        help="Each box keeps one mirror per repo, and task checkouts borrow its objects instead of copying them. With this on, mirrors skip old file versions (git clone --filter=blob:none); git fetches one from GitHub when log -p, blame or a checkout needs it. A project can override it."
+        help="Each box keeps one mirror per repo, and task checkouts borrow its objects instead of copying them."
+        more="With this on, mirrors skip old file versions (git clone --filter=blob:none); git fetches one from GitHub when log -p, blame or a checkout needs it. A project can override it."
         hint={hint("gitPartialClone")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -1186,7 +1263,8 @@ function LimitsPanel({
       <Row
         id={fid("lfk")}
         label="Task folders kept on this computer"
-        help={`Most task folders in ${server.data?.localDir ?? "~/boxyard-workspaces"}, and on each SSH machine. Past it, the oldest done tasks' folders are archived and removed, but only when all their work is pushed. A task that isn't done keeps its folder. 0 = no limit.`}
+        help={`Most task folders in ${server.data?.localDir ?? "~/boxyard-workspaces"}, and on each SSH machine. 0 = no limit.`}
+        more="Past it, the oldest done tasks' folders are archived and removed, but only when all their work is pushed. A task that isn't done keeps its folder."
         hint={hint("localFoldersKept")}
       >
         <input id={fid("lfk")} type="number" min={0} max={1000} className={inputClass} {...num("localFoldersKept")} data-testid="local-folders-kept" />
@@ -1205,7 +1283,8 @@ function LimitsPanel({
       <Row
         id={fid("ldf")}
         label="Low-disk cleanup (GB free)"
-        help="When the disk holding the task folders has less free space than this, Box Yard frees build output (an idle task's too, unless a process still uses its folder) and then removes the oldest done tasks' folders, until there's this much free again. Each task's log says what went. It checks every couple of minutes. 0 = off."
+        help="When the disk holding the task folders has less free space than this, Box Yard frees space until there's this much again. 0 = off."
+        more="It frees build output first (an idle task's too, unless a process still uses its folder), then removes the oldest done tasks' folders. Each task's log says what went. It checks every couple of minutes."
         hint={hint("localDiskMinFreeGb")}
       >
         <input id={fid("ldf")} type="number" min={0} max={100_000} step={5} className={inputClass} {...num("localDiskMinFreeGb")} data-testid="local-disk-min-free" />
@@ -1277,7 +1356,8 @@ function UpstashBoxRows({
         id={fid("ws")}
         wide
         label="Worker size"
-        help="Upstash Box size for newly created boxes, unless a project sets its own preferred size or auto-sizing (below) picked one from its runs. Existing boxes keep their size until resized from the Boxes page."
+        help="Upstash Box size for newly created boxes."
+        more="A project's own preferred size wins, and so does one auto-sizing (below) picked from its runs. Existing boxes keep their size until resized from the Boxes page."
         hint={hint("workerSize")}
       >
         <UpstashSizes value={s.workerSize} onPick={(size) => set("workerSize", size)} />
@@ -1290,7 +1370,7 @@ function UpstashBoxRows({
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
           <input id={fid("are")} type="checkbox" checked={s.autoResizeEnabled} onChange={(e) => set("autoResizeEnabled", e.target.checked)} data-testid="auto-resize" />
-          {s.autoResizeEnabled ? "Allowed" : "Off: new boxes are Worker size, and only you resize boxes"}
+          {s.autoResizeEnabled ? "On: Box Yard sizes and resizes boxes" : "Off: new boxes are Worker size, and only you resize boxes"}
         </label>
       </Row>
       <Row id={fid("arm")} label="Max size it may choose" help="resize_box refuses anything bigger. You can still pick any size yourself on the Boxes page." hint={hint("autoResizeMaxSize")}>
@@ -1312,7 +1392,8 @@ function UpstashBoxRows({
       <Row
         id={fid("pre")}
         label="Resize an idle box when no big-enough box is free"
-        help="For projects with a box size: when the pool is at Max boxes and no box of that size has room, Box Yard may grow an idle smaller box (no agent running on it) to that size and run the task there. Larger boxes cost more. Off, the task waits for a box of its size; it never runs on a smaller one."
+        help="For projects with a box size: when the pool is at Max boxes and no box of that size has room, Box Yard may grow an idle smaller box (no agent running on it) to that size and run the task there."
+        more="Larger boxes cost more. Off, the task waits for a box of its size; it never runs on a smaller one."
         hint={hint("placementResizeEnabled")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
@@ -1330,7 +1411,8 @@ function UpstashBoxRows({
       <Row
         id={fid("spb")}
         label="Tasks running at once per box"
-        help={`Tasks that may run at the same time inside one box, every project's together (each task runs its own Claude Code agent). A project's own Tasks running at once (project settings) limits only its own tasks within this. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].slotsPerBox}`).join(", ")}.`}
+        help="Tasks that may run at the same time inside one box, every project's together (each task runs its own Claude Code agent)."
+        more={`A project's own Tasks running at once (project settings) limits only its own tasks within this. Unless set here, each box uses its own size's default: ${WORKER_SIZES.map((z) => `${z} ${SIZE_DEFAULTS[z].slotsPerBox}`).join(", ")}.`}
         hint={hint("slotsPerBox")}
       >
         <BoxLimitInput id={fid("spb")} max={20} {...limitField("slotsPerBox")} />
@@ -1541,12 +1623,13 @@ function CostsPanel({
       <Row
         id={fid("scm")}
         label="Box spend in the header"
-        help="The Coordinator's header shows the cloud meter: boxes running, what they cost an hour and today's spend against the daily limit. Off, the Boxes page still shows it, and the limit's notices and Raise today's limit work the same."
+        help="The Coordinator's header shows the cloud meter: boxes running, what they cost an hour and today's spend against the daily limit."
+        more="Off, the Boxes page still shows it, and the limit's notices and Raise today's limit work the same."
         hint={hint("showCloudMeter")}
       >
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300 sm:min-h-0">
           <input id={fid("scm")} type="checkbox" checked={Boolean(s.showCloudMeter)} onChange={(e) => set("showCloudMeter", e.target.checked)} data-testid="show-cloud-meter" />
-          {s.showCloudMeter ? "Shown in the Coordinator's header" : "Off: only on the Boxes page"}
+          {s.showCloudMeter ? "On: shown in the Coordinator's header" : "Off: only on the Boxes page"}
         </label>
       </Row>
       <Row
@@ -1601,7 +1684,7 @@ function CostsPanel({
         {money("costRates.boxStorageGbMonthUsd", s.costRates.boxStorageGbMonthUsd, (n) => set("costRates", { ...s.costRates, boxStorageGbMonthUsd: n }), fid("storage"))}
       </Row>
       <div className="mt-2 rounded-xl border border-zinc-900 bg-zinc-900/40 p-4 text-xs leading-relaxed text-zinc-400">
-        Claude Code costs come from the CLI's result JSON and don't count against the cloud limits. A box's cost is Upstash's own charge when its API reports one, its measured CPU at these rates when that's more, and the time a turn ran (labeled an estimate) while neither is known. RunPod GPU pods, Vast.ai instances and Daytona sandboxes have their own hourly caps (Settings › RunPod GPU, Settings › Vast.ai GPU, Settings › Daytona); Daytona sandboxes also count toward the cloud limits, at Box Yard's estimate of their price.
+        Claude Code costs come from the CLI's result JSON and don't count against the cloud limits. A box's cost is Upstash's own charge when its API reports one, its measured CPU at these rates when that's more, and the time a turn ran (labeled an estimate) while neither is known. RunPod GPU pods, Vast.ai instances and Daytona sandboxes have their own hourly caps (<SettingsLink section="runpod">Settings › RunPod GPU</SettingsLink>, <SettingsLink section="vast">Settings › Vast.ai GPU</SettingsLink>, <SettingsLink section="daytona">Settings › Daytona</SettingsLink>); Daytona sandboxes also count toward the cloud limits, at Box Yard's estimate of their price.
       </div>
     </Panel>
   )

@@ -40,6 +40,9 @@ interface SearchRegistry {
 const SearchContext = createContext<SearchRegistry | null>(null)
 const CategoryContext = createContext<SettingsSection | null>(null)
 export const useSettingsSearching = () => Boolean(useContext(SearchContext)?.words.length)
+const NO_WORDS: string[] = []
+/** The words being searched for, lower case; none while search is off. */
+export const useSettingsSearchWords = () => useContext(SearchContext)?.words ?? NO_WORDS
 
 export function useSettingsSearch(query: string) {
   const words = useMemo(() => searchWords(query), [query])

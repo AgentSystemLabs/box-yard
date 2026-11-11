@@ -27,7 +27,8 @@ export function SettingsTabs<K extends string>({
   idPrefix,
   navHidden,
   className,
-  selectClassName,
+  selectTrailing,
+  selectHidden,
   panelRef,
   panelRole = "tabpanel",
   panelLabel,
@@ -45,8 +46,10 @@ export function SettingsTabs<K extends string>({
   /** Hides the tabs, not the panel (Settings while it shows search results). */
   navHidden?: boolean
   className?: string
-  /** On the dropdown's band, e.g. "pt-0" under a search field that shares it. */
-  selectClassName?: string
+  /** Beside the dropdown, e.g. Settings' search button. */
+  selectTrailing?: ReactNode
+  /** Hides the dropdown's band alone (Settings' search field takes its place). */
+  selectHidden?: boolean
   panelRef?: Ref<HTMLDivElement>
   panelRole?: "tabpanel" | "region"
   panelLabel: string
@@ -70,13 +73,14 @@ export function SettingsTabs<K extends string>({
     // A container of its own, by name: the tabs fold by it, and a panel's title hides by it (PanelFrame).
     <div className="@container/settings-tabs flex min-h-0 flex-1 flex-col">
       <div className={cx("settings-layout flex min-h-0 flex-1 flex-col @3xl/settings-tabs:flex-row", className)}>
-        <div hidden={navHidden} className={cx("shrink-0 border-b border-zinc-900 p-3 @3xl/settings-tabs:hidden", selectClassName)}>
-          <Select aria-label={selectLabel} className="w-full" value={selected} onChange={(e) => onSelect(e.target.value as K)}>
+        <div hidden={navHidden || selectHidden} className="flex shrink-0 gap-2 border-b border-zinc-900 p-3 @3xl/settings-tabs:hidden">
+          <Select aria-label={selectLabel} className="min-w-0 flex-1" value={selected} onChange={(e) => onSelect(e.target.value as K)}>
             {tabs.map((t) => {
               const m = mark(t.key)
               return <option key={t.key} value={t.key}>{t.label}{m ? MARK_SUFFIX[m] : ""}</option>
             })}
           </Select>
+          {selectTrailing}
         </div>
         <div
           hidden={navHidden}

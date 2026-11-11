@@ -1,12 +1,13 @@
 // Keep write-only project configuration available without exposing the retired project page.
 import { useState } from "react"
 import { useSearchParams } from "wouter"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Plus } from "lucide-react"
 import { useProjects } from "../lib/queries"
 import { useProjectColor } from "../lib/taskTiles"
 import { PROJECT_SETTINGS_PARAM, useOpenProjectSettings } from "../lib/projectSettings"
 import { confirmDialog } from "../lib/confirm"
 import { Modal } from "./Modal"
+import { NewProjectDialog } from "./NewProjectDialog"
 import { LoadFailed, lazyPart } from "./LazyPart"
 import { Button } from "./ui"
 import { Loading } from "./Loading"
@@ -22,13 +23,31 @@ const ProjectSettings = lazyPart(() => import("./ProjectView").then((m) => m.Pro
 /** Settings › Projects: every project as a row that opens its settings. */
 export function ProjectSettingsPicker() {
   const projects = useProjects()
+  const [creating, setCreating] = useState(false)
   if (projects.isError) return <div role="alert">Couldn't load projects. <Button onClick={() => void projects.refetch()}>Retry</Button></div>
   if (projects.isLoading) return <Loading label="Loading projects" />
-  if (!projects.data?.length) return <p className="text-sm text-zinc-400">No projects yet. Ask the Coordinator to create one, or choose New project in the command palette.</p>
   return (
-    <ul aria-label="Projects" className="-mx-2.5 space-y-0.5" data-testid="project-settings-list">
-      {projects.data.map((p) => <ProjectRow key={p.id} project={p} />)}
-    </ul>
+    <>
+      {!projects.data?.length && <p className="mb-2 text-sm text-zinc-400">No projects yet. Create one here, or ask the Coordinator to.</p>}
+      <ul aria-label="Projects" className="-mx-2.5 space-y-0.5" data-testid="project-settings-list">
+        {projects.data?.map((p) => <ProjectRow key={p.id} project={p} />)}
+        <li>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            data-testid="project-settings-new"
+            className="flex min-h-11 w-full items-center gap-3 rounded-lg px-2.5 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 focus-visible:ring-2 focus-visible:ring-yard-500/40 focus-visible:outline-none"
+          >
+            <span aria-hidden className="grid h-6 w-6 shrink-0 place-items-center rounded-md border border-dashed border-zinc-700">
+              <Plus className="h-3.5 w-3.5" />
+            </span>
+            New project
+          </button>
+        </li>
+      </ul>
+      {/* Settings stays open under it, drafts and all: the new project shows up in the list above. */}
+      {creating && <NewProjectDialog openChat={false} onClose={() => setCreating(false)} />}
+    </>
   )
 }
 

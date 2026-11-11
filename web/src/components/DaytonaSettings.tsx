@@ -25,7 +25,7 @@ import {
 } from "../../../shared/daytona"
 import { BoxActionDialog } from "./BoxActionDialog"
 import { CredentialField } from "./Setup"
-import { Panel, Row } from "./SettingsBlocks"
+import { Panel, Row, SettingsLink } from "./SettingsBlocks"
 import { GpuDefaultRow } from "./GpuDefault"
 import type { GpuProvider } from "../../../shared/gpu"
 import { SizeCards } from "./SizeCards"
@@ -204,7 +204,8 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
           <Row
             id={fid("daytona-gpus")}
             label="GPU types"
-            help="Daytona gives a sandbox any free GPU of these types, so its price is counted at the dearest. CPU only makes plain Linux sandboxes with no GPU, at Daytona's CPU and memory rates. A project can pick its own (Project › Settings › Boxes)."
+            help="Daytona gives a sandbox any free GPU of these types, so its price is counted at the dearest."
+            more="CPU only makes plain Linux sandboxes with no GPU, at Daytona's CPU and memory rates. A project can pick its own (Project › Settings › Boxes)."
           >
             <DaytonaGpuPicker id={fid("daytona-gpus")} value={form.gpuTypes} onChange={(gpuTypes) => set({ gpuTypes })} />
             {price && <p className="mt-1.5 text-xs text-zinc-500">{price}</p>}
@@ -224,7 +225,7 @@ export function DaytonaPanel({ fid, active = true, gpuDefault }: { fid: (k: stri
           <Row
             id={fid("daytona-image")}
             label="GPU sandbox image"
-            help="The image GPU sandboxes are built from." more="Empty: the one Settings › Box providers › GPU clouds › RunPod GPU built, else RunPod's stock CUDA image. Box Yard adds its agent tools on top when Daytona builds the sandbox (or installs them on start when that build fails)."
+            help="The image GPU sandboxes are built from." more={<>Empty: the one <SettingsLink section="runpod">Settings › Box providers › GPU clouds › RunPod GPU</SettingsLink> built, else RunPod's stock CUDA image. Box Yard adds its agent tools on top when Daytona builds the sandbox (or installs them on start when that build fails).</>}
           >
             <input
               id={fid("daytona-image")}

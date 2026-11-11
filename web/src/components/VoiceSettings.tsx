@@ -168,7 +168,7 @@ export function VoicePanel({ fid }: { fid: (k: string) => string }) {
       <Row id={fid("vq")} label="Quiet hours" help="No announcements between these times (this computer's clock). The window may run past midnight.">
         <div className="space-y-2">
           <Check id={fid("vq")} disabled={off} checked={s.quietHours.enabled} onChange={(enabled) => set({ quietHours: { ...s.quietHours, enabled } })}>
-            Enabled
+            {s.quietHours.enabled ? "On: quiet between these times" : "Off: announcements at any time"}
           </Check>
           <div className="flex flex-col gap-2 @xs:flex-row @xs:items-center">
             <input

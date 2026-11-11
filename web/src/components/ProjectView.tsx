@@ -21,7 +21,7 @@ import {
 } from "../lib/queries"
 import { Button, LineIcon, Select, TAP_AREA, cx, inputClass, parseEnv } from "./ui"
 import { useOpenSettings } from "./SettingsHost"
-import { HelpMore, PanelFrame, Row, SAVE_IDLE, SETTING_LABEL, StackedField } from "./SettingsBlocks"
+import { HelpMore, INLINE_LINK, LABEL_LINE, PanelFrame, Row, SAVE_IDLE, SETTING_LABEL, SourceHint, StackedField } from "./SettingsBlocks"
 import { SettingsTabs, type SettingsTab } from "./SettingsTabs"
 import { MachineLabelPicker } from "./MachineSettings"
 import { IdentityBadge } from "./IdentityBadge"
@@ -105,6 +105,9 @@ function ProjectBoxSettings(p: {
   setGpuMaxHourlyUsd: (v: string) => void
   machine: MachineDraft
   setMachine: (v: MachineDraft) => void
+  /** Differs from what the form opened with: the field says "unsaved". */
+  changed: (field: "boxSize" | "agentsPerBox" | "wholeMachine" | "tasksPerBox" | "maxBoxes" | "gpuMaxHourlyUsd") => boolean
+  machineChanged: (field: keyof MachineDraft) => boolean
 }) {
   const openSettings = useOpenSettings()
   const runpod = useRunPod({ enabled: p.gpu })
@@ -153,7 +156,7 @@ function ProjectBoxSettings(p: {
         {p.ssh &&
           " This project runs on your SSH machines: Tasks running at once limits its tasks on each machine, within the machine's own (Settings › Machines), and Whole machine keeps other projects' tasks off a machine while it runs. Task folders kept per box applies when it runs on boxes."}
       </p>
-      <button type="button" onClick={() => openSettings("limits")} className="inline-flex min-h-11 items-center text-xs text-yard-400 hover:underline sm:min-h-0">
+      <button type="button" onClick={() => openSettings("limits")} className="inline-flex min-h-11 items-center text-xs text-yard-400 hover:underline">
         Global: Settings › Boxes & limits
       </button>
       {/* An Upstash box size: other runners have their own (GPU machine below, Docker's and Daytona's settings, an SSH machine's own). A size already set stays, so it can be cleared. */}
@@ -163,6 +166,7 @@ function ProjectBoxSettings(p: {
         kind={auto ? "auto" : "global"}
         global={auto ? auto.field : `${s?.workerSize ?? "Settings"} (Worker size)`}
         set={Boolean(p.boxSize)}
+        changed={p.changed("boxSize")}
         onClear={() => p.setBoxSize("")}
         hint="New boxes made for this project are this size, and its tasks only run on boxes at least this big."
         more={`${auto ? "Auto: Box Yard sizes its boxes from what its runs used, the smallest with RAM for 1.25 × the peak of the last 14 days, and a turn that runs out of memory carries on once on a bigger box. A size set here overrides that. " : ""}Boxes it already has keep their size; resize them from the Boxes page.`}
@@ -182,6 +186,7 @@ function ProjectBoxSettings(p: {
           label="Tasks running at once (this project)"
           global={agents.long}
           set={p.agentsPerBox.trim() !== ""}
+          changed={p.changed("agentsPerBox")}
           onClear={() => p.setAgentsPerBox("")}
           hint="How many of this project's tasks can run at the same time on one box or this computer. Other projects' tasks never wait for it. 1: one at a time (game engines, big builds, headless browsers)."
           effect={agentsAtOnceLine(p.name, p.agentsPerBox, p.wholeMachine)}
@@ -193,6 +198,7 @@ function ProjectBoxSettings(p: {
           label="Task folders kept per box"
           global={folders.long}
           set={p.tasksPerBox.trim() !== ""}
+          changed={p.changed("tasksPerBox")}
           onClear={() => p.setTasksPerBox("")}
           hint="Most task folders on a box that holds one of this project's; older archived ones are parked to make room. Fewer suits a big repo."
         >
@@ -203,6 +209,7 @@ function ProjectBoxSettings(p: {
           label="Max boxes"
           global={s ? `${s.maxBoxes} (the whole pool's Max boxes)` : "the pool's Max boxes"}
           set={p.maxBoxes.trim() !== ""}
+          changed={p.changed("maxBoxes")}
           onClear={() => p.setMaxBoxes("")}
           hint="Most boxes this project's tasks use at once (made for it, or holding its task folders), within the pool's Max boxes. The rest wait for a free slot."
         >
@@ -212,7 +219,10 @@ function ProjectBoxSettings(p: {
       <label className="flex min-h-11 items-start gap-2 text-sm text-zinc-200 sm:min-h-0" htmlFor="project-whole-machine">
         <input id="project-whole-machine" type="checkbox" className="mt-0.5 shrink-0" checked={p.wholeMachine} onChange={(e) => p.setWholeMachine(e.target.checked)} data-testid="project-whole-machine" />
         <span className="min-w-0">
-          Needs the whole machine
+          <span className={LABEL_LINE}>
+            Needs the whole machine
+            <SourceHint changed={p.changed("wholeMachine")} />
+          </span>
           <span className="block text-xs text-zinc-500">
             No other project's tasks run on the same box or this computer while one of its tasks runs, and its tasks wait for theirs to finish. For heavy benchmarks that need the machine to themselves. Off by default.
           </span>
@@ -224,6 +234,7 @@ function ProjectBoxSettings(p: {
           label="GPU cloud"
           global={`${GPU_PROVIDER_LABEL[globalCloud]} (${GPU_DEFAULT_PATH})`}
           set={Boolean(m.provider)}
+          changed={p.machineChanged("provider")}
           onClear={() => setM({ provider: "", gpuTypes: null })}
           hint="Where its GPU pods come from."
           more="RunPod: pods with a network volume that keeps caches between runs. Vast.ai: a marketplace with more GPU types and stock, often cheaper, but no volume and hosts of varying reliability. Daytona: managed sandboxes, with a GPU or CPU only, deleted when idle (no volume); they count toward the daily cloud limit. Its tasks move once their workspace is archived."
@@ -251,6 +262,7 @@ function ProjectBoxSettings(p: {
           label="GPU cap ($/hr)"
           global={gpuCap}
           set={p.gpuMaxHourlyUsd.trim() !== ""}
+          changed={p.changed("gpuMaxHourlyUsd")}
           onClear={() => p.setGpuMaxHourlyUsd("")}
           hint={`Most this project's ${GPU_PROVIDER_LABEL[provider]} ${pods} may cost together${onDaytona ? " (by Box Yard's estimate of Daytona's prices)" : ""}. A task that needs another over it waits and says so. 0: no cap of its own; ${where} › Max for all ${pods} still applies.`}
         >
@@ -271,6 +283,7 @@ function ProjectBoxSettings(p: {
             label="GPU types"
             global={g ? `${g.gpuTypes.map(gpuLabel).join(", ")} (${where})` : `${where} › GPU types`}
             set={m.gpuTypes !== null}
+            changed={p.machineChanged("gpuTypes")}
             onClear={() => setM({ gpuTypes: null })}
             hint={
               onVast
@@ -294,7 +307,7 @@ function ProjectBoxSettings(p: {
               </Button>
             )}
           </OverrideField>
-          {provider === "runpod" && <OverrideField id="project-gpu-cloud" label="Cloud" global={rp ? CLOUD_OPTION[rp.cloud].split(":")[0]! : "Settings › RunPod GPU › Cloud"} set={Boolean(m.cloud)} onClear={() => setM({ cloud: "" })} hint={CLOUD_HELP}>
+          {provider === "runpod" && <OverrideField id="project-gpu-cloud" label="Cloud" global={rp ? CLOUD_OPTION[rp.cloud].split(":")[0]! : "Settings › RunPod GPU › Cloud"} set={Boolean(m.cloud)} changed={p.machineChanged("cloud")} onClear={() => setM({ cloud: "" })} hint={CLOUD_HELP}>
             <Select id="project-gpu-cloud" className="w-full min-w-0 @md:w-80" value={m.cloud} onChange={(e) => setM({ cloud: e.target.value as RunPodCloud | "" })} data-testid="project-gpu-cloud">
               <option value="">Global: {rp ? CLOUD_OPTION[rp.cloud].split(":")[0] : "Settings › RunPod GPU"}</option>
               {RUNPOD_CLOUDS.map((c) => (
@@ -310,6 +323,7 @@ function ProjectBoxSettings(p: {
               label={onDaytona ? "Memory (GB)" : "Min RAM (GB)"}
               global={g ? `${g.minRamGb} GB (${where})` : `${where} › Min RAM`}
               set={m.minRamGb.trim() !== ""}
+              changed={p.machineChanged("minRamGb")}
               onClear={() => setM({ minRamGb: "" })}
               hint={
                 onDaytona
@@ -324,6 +338,7 @@ function ProjectBoxSettings(p: {
               label={onDaytona ? "vCPUs" : "Min vCPUs"}
               global={g ? `${g.minVcpus} (${where})` : `${where} › Min vCPUs`}
               set={m.minVcpus.trim() !== ""}
+              changed={p.machineChanged("minVcpus")}
               onClear={() => setM({ minVcpus: "" })}
               hint={`…and ${onDaytona ? "this many vCPUs, billed per vCPU-hour" : "at least this many vCPUs"}. Running ${pods} keep what they have; these apply to new ones.`}
             >
@@ -343,6 +358,7 @@ function OverrideField({
   kind = "global",
   global,
   set,
+  changed,
   onClear,
   hint,
   more,
@@ -355,6 +371,8 @@ function OverrideField({
   kind?: "global" | "auto"
   global: string
   set: boolean
+  /** Differs from what the form opened with: "unsaved" beside the label. */
+  changed?: boolean
   onClear: () => void
   hint: string
   /** The rest of a long hint, behind More (HelpMore). */
@@ -365,9 +383,12 @@ function OverrideField({
 }) {
   return (
     <div className="min-w-0 space-y-1.5">
-      <label htmlFor={id} className={cx("block", SETTING_LABEL)}>
-        {label}
-      </label>
+      <span className={LABEL_LINE}>
+        <label htmlFor={id} className={SETTING_LABEL}>
+          {label}
+        </label>
+        <SourceHint changed={Boolean(changed)} />
+      </span>
       <div className="flex flex-wrap items-center gap-2">
         {children}
         {set && (
@@ -447,7 +468,7 @@ const dockerOf = (d: DockerDraft): ProjectDocker => ({
  * A Docker project's image: Settings › Docker's, an image of its own, or its own Dockerfile built on Box Yard's
  * (BOXYARD_BASE), plus whether Docker can run now.
  */
-function ProjectDockerSettings({ draft, setDraft }: { draft: DockerDraft; setDraft: (d: DockerDraft) => void }) {
+function ProjectDockerSettings({ draft, setDraft, changed }: { draft: DockerDraft; setDraft: (d: DockerDraft) => void; changed: boolean }) {
   const status = useDocker()
   const openSettings = useOpenSettings()
   const global = status.data ? (status.data.settings.image ?? "Box Yard's own") : "Settings › Docker"
@@ -457,7 +478,7 @@ function ProjectDockerSettings({ draft, setDraft }: { draft: DockerDraft; setDra
       <p className="text-xs text-zinc-500">
         Each task works in this project's own container on this computer: only its workspace volume is mounted (no folder of yours, no Docker socket), and the GitHub and Claude credentials from
         Settings › Credentials are put inside it, never in the image. Previews reach http://localhost.{" "}
-        <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("docker")}>
+        <button type="button" className={INLINE_LINK} onClick={() => openSettings("docker")}>
           Settings › Docker
         </button>
       </p>
@@ -466,7 +487,7 @@ function ProjectDockerSettings({ draft, setDraft }: { draft: DockerDraft; setDra
           {status.data.docker.error}. Its tasks wait until then.
         </p>
       )}
-      <StackedField label="Docker image" hint="A Dockerfile builds on this computer on its first task (and again when it changes); FROM ${BOXYARD_BASE} starts from the image above it, with the agent tools.">
+      <StackedField label="Docker image" changed={changed} hint="A Dockerfile builds on this computer on its first task (and again when it changes); FROM ${BOXYARD_BASE} starts from the image above it, with the agent tools.">
         <Select className="w-full @md:w-80" value={draft.mode} onChange={(e) => set({ mode: e.target.value as DockerDraft["mode"], ...(e.target.value === "dockerfile" && !draft.dockerfile.trim() ? { dockerfile: DOCKERFILE_TEMPLATE } : {}) })} data-testid="project-docker-mode">
           <option value="">Settings › Docker's ({global})</option>
           <option value="image">An image of its own</option>
@@ -503,7 +524,7 @@ function ProjectDockerSettings({ draft, setDraft }: { draft: DockerDraft; setDra
  * The project's colour (shared/projectColors.ts): its tasks' tiles and its chip in the Coordinator chat, its folder in
  * the sidebar. Auto is the one picked from its name, shown as it would be.
  */
-export function ProjectColorPicker({ project, value, onChange }: { project: Project; value: ProjectColor | null; onChange: (c: ProjectColor | null) => void }) {
+export function ProjectColorPicker({ project, value, onChange, changed }: { project: Project; value: ProjectColor | null; onChange: (c: ProjectColor | null) => void; changed?: boolean }) {
   const auto = useAutoColor(project)
   const swatch = (c: ProjectColor | undefined, on: boolean, label: string, pick: () => void, auto = false) => (
     <button
@@ -518,23 +539,28 @@ export function ProjectColorPicker({ project, value, onChange }: { project: Proj
       style={projectColorStyle(c)}
       className={cx(
         "flex h-11 items-center justify-center gap-1.5 rounded-lg",
-        auto && "col-span-2 text-xs text-zinc-400",
+        auto && "px-3 text-xs text-zinc-400",
         // The picked one wears its own colour, so it reads at a glance among the dots.
         on ? "bg-zinc-800 text-zinc-100 ring-2 ring-(--pc)" : "hover:bg-zinc-800",
       )}
     >
-      <span className="h-5 w-5 shrink-0 rounded-full bg-(--pc)" />
+      {/* …and a tick, so it isn't told by hue alone: dark ink, which every one of the colours carries. */}
+      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-(--pc)">{on && <Check aria-hidden className="h-3.5 w-3.5 text-[#18181b]" strokeWidth={3} />}</span>
       {auto && "Auto"}
     </button>
   )
   return (
-    <div className="space-y-1.5">
-      <span id="project-color-label" className={cx("block", SETTING_LABEL)}>
-        Colour
+    <div className="@container space-y-1.5">
+      <span className={LABEL_LINE}>
+        <span id="project-color-label" className={SETTING_LABEL}>
+          Colour
+        </span>
+        <SourceHint changed={Boolean(changed)} />
       </span>
-      <div role="radiogroup" aria-labelledby="project-color-label" data-testid="project-color" className="grid grid-cols-[repeat(auto-fill,minmax(2.75rem,1fr))] gap-1">
+      {/* Auto on a row of its own, then the colours as an even grid: 4 a row on a phone, one row of 8 with the room. */}
+      <div role="radiogroup" aria-labelledby="project-color-label" data-testid="project-color" className="flex flex-col items-start gap-1">
         {swatch(auto, value === null, `Auto (${auto ?? "from its name"})`, () => onChange(null), true)}
-        {PROJECT_COLORS.map((c) => swatch(c, value === c, c, () => onChange(c)))}
+        <div className="grid w-full grid-cols-4 gap-1 @sm:max-w-md @sm:grid-cols-8">{PROJECT_COLORS.map((c) => swatch(c, value === c, c, () => onChange(c)))}</div>
       </div>
       <span className="block text-xs text-zinc-500">Its tasks' icons and its chip in the Coordinator chat.</span>
     </div>
@@ -574,6 +600,7 @@ function ProjectIconPicker({
   onChange,
   error,
   onError,
+  changed,
 }: {
   project: Project
   /** The name and colour as edited, for the letter. */
@@ -583,6 +610,7 @@ function ProjectIconPicker({
   onChange: (d: IconDraft) => void
   error: string | null
   onError: (message: string | null) => void
+  changed: boolean
 }) {
   const auto = useAutoColor(project)
   const input = useRef<HTMLInputElement>(null)
@@ -590,8 +618,11 @@ function ProjectIconPicker({
   const src = draft.kind === "new" ? draft.url : draft.kind === "saved" ? project.iconUrl : null
   return (
     <div className="space-y-1.5">
-      <span id={`${ids}-label`} className={cx("block", SETTING_LABEL)}>
-        Icon
+      <span className={LABEL_LINE}>
+        <span id={`${ids}-label`} className={SETTING_LABEL}>
+          Icon
+        </span>
+        <SourceHint changed={changed} />
       </span>
       <div role="group" aria-labelledby={`${ids}-label`} aria-describedby={`${ids}-hint`} className="flex flex-wrap items-center gap-2" data-testid="project-icon-picker">
         <ProjectAvatar src={src} className="h-11 w-11 rounded-lg bg-zinc-800">
@@ -666,6 +697,7 @@ function ProjectCaptainIconField({
   onChange,
   image,
   pending,
+  changed,
 }: {
   project: Project
   color: ProjectColor | null
@@ -675,6 +707,8 @@ function ProjectCaptainIconField({
   image: string | null
   /** This or the image differs from what's saved, so it applies on Save. */
   pending: boolean
+  /** This one differs from what the form opened with. */
+  changed: boolean
 }) {
   const auto = useAutoColor(project)
   const global = useCaptainIconSetting() ?? DEFAULT_CAPTAIN_ICON
@@ -683,7 +717,7 @@ function ProjectCaptainIconField({
   const globalName = captainIconInfo(global)?.label ?? "Captain's cap"
   const shows = pending ? "Once you save, its Captain shows" : "Its Captain shows"
   const settings = (
-    <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("orchestrator")} data-testid="project-captain-icon-settings">
+    <button type="button" className={INLINE_LINK} onClick={() => openSettings("orchestrator")} data-testid="project-captain-icon-settings">
       Settings › Coordinator
     </button>
   )
@@ -698,14 +732,17 @@ function ProjectCaptainIconField({
     <>{shows} the project's image: it uses the default, and a project's image comes before every Captain's icon in Settings. Pick an icon to show that instead.</>
   ) : (
     <>
-      {shows} the {globalName}: it uses the default, every Captain's icon in {settings}.
+      {shows} the {globalName}, the default for every Captain. Change it in {settings}.
     </>
   )
   return (
     <div className="space-y-1.5">
-      <label htmlFor={`${ids}-toggle`} className={cx("block", SETTING_LABEL)}>
-        Captain icon
-      </label>
+      <span className={LABEL_LINE}>
+        <label htmlFor={`${ids}-toggle`} className={SETTING_LABEL}>
+          Captain icon
+        </label>
+        <SourceHint changed={changed} />
+      </span>
       <div className="max-w-md">
         <CaptainIconPicker
           id={`${ids}-toggle`}
@@ -782,7 +819,7 @@ function ProjectIdentityField({
           <KeyRound className="h-4 w-4 text-zinc-500" aria-hidden />
           Identity / Claude login
         </h3>
-        <button type="button" className="text-xs text-yard-400 hover:underline" onClick={() => openSettings("identities")} data-testid="project-identity-manage">
+        <button type="button" className={cx(INLINE_LINK, "text-xs")} onClick={() => openSettings("identities")} data-testid="project-identity-manage">
           Settings › Identities
         </button>
       </div>
@@ -801,7 +838,7 @@ function ProjectIdentityField({
           </span>
         )}
       </p>
-      <StackedField label="Identity">
+      <StackedField label="Identity" changed={value !== saved}>
         <Select id="project-identity" className="w-full @md:w-80" disabled={!list} value={value} onChange={(e) => onChange(e.target.value)} data-testid="project-identity">
           {!picked && <option value={value}>{identities.isError ? "Couldn’t load identities" : !list ? "Loading identities…" : "Removed identity (acts as Default)"}</option>}
           {list?.map((i) => (
@@ -873,6 +910,17 @@ export const PROJECT_SECTIONS: (SettingsTab<ProjectSection> & { description: str
   { key: "notes", label: "Notes", icon: NotebookPen, description: "How much of this project's notes its agents' prompts carry." },
   { key: "env", label: "Env vars", icon: Variable, description: "Environment variables its agents get in every task." },
 ]
+
+/** The drafts each tab edits, by name: a tab's dot, the footer's count and each field's "unsaved" all read these. */
+const PROJECT_FIELDS = {
+  general: ["name", "description", "repo", "baseBranch", "color", "icon", "captainIcon"],
+  agents: ["runner", "machineLabel", "docker", "agentCli", "identityId"],
+  boxes: ["boxSize", "agentsPerBox", "wholeMachine", "tasksPerBox", "maxBoxes", "gpuMaxHourlyUsd", "machine", "depCache"],
+  git: ["partialClone", "pushAtTurnEnd", "autoDoneOnMerge", "closeIssuesOnMerge"],
+  notes: ["notesMax", "notesTokens"],
+  env: ["env", "removeKeys"],
+} as const satisfies Record<ProjectSection, readonly string[]>
+type ProjectField = (typeof PROJECT_FIELDS)[ProjectSection][number]
 
 /** One tab's fields. Hidden tabs stay mounted, so switching tabs keeps every draft. */
 function ProjectPanel({ section, open, children }: { section: ProjectSection; open: boolean; children: ReactNode }) {
@@ -994,19 +1042,26 @@ function ProjectSettingsForm({
     docker: "The project gets an isolated container of its own on this computer, started when a task needs it and stopped when idle (Settings › Docker).",
     ssh: "Agents run on one of your own computers over SSH, a free one with the label you pick (Settings › Machines).",
   }
-  // What each tab edits. Save lights up once anything differs from what the form opened with, and goes dark again when
-  // it's changed back; a tab with a change gets Settings' unsaved dot.
-  const drafts: Record<ProjectSection, unknown[]> = {
-    general: [name, description, repo, baseBranch, color, icon.kind === "new" ? icon.url : icon.kind, captainIcon],
-    agents: [runner, runner === "ssh" ? machineLabel : "", docker, agentCli, identityId],
-    boxes: [boxSize, agentsPerBox, wholeMachine, tasksPerBox, maxBoxes, gpuMaxHourlyUsd, machine, depCache],
-    git: [partialClone, pushAtTurnEnd, autoDoneOnMerge, closeIssuesOnMerge],
-    notes: [notesMax, notesTokens],
-    env: [env, removeKeys],
+  // Every draft (PROJECT_FIELDS says which tab's). Save lights up once anything differs from what the form opened with,
+  // and goes dark again when it's changed back; a changed field says "unsaved", and its tab gets Settings' unsaved dot.
+  const drafts: Record<ProjectField, unknown> = {
+    name, description, repo, baseBranch, color, icon: icon.kind === "new" ? icon.url : icon.kind, captainIcon,
+    runner, machineLabel: runner === "ssh" ? machineLabel : "", docker, agentCli, identityId,
+    boxSize, agentsPerBox, wholeMachine, tasksPerBox, maxBoxes, gpuMaxHourlyUsd, machine, depCache,
+    partialClone, pushAtTurnEnd, autoDoneOnMerge, closeIssuesOnMerge,
+    notesMax, notesTokens,
+    env, removeKeys,
   }
-  const snapshot = Object.fromEntries(PROJECT_SECTIONS.map(({ key }) => [key, drafts[key].map((v) => JSON.stringify(v))])) as Record<ProjectSection, string[]>
+  const snapshot = Object.fromEntries(Object.entries(drafts).map(([k, v]) => [k, JSON.stringify(v)])) as Record<ProjectField, string>
   const [opened] = useState(snapshot)
-  const changes = (key: ProjectSection) => snapshot[key].filter((v, i) => v !== opened[key][i]).length
+  const changed = (field: ProjectField) => snapshot[field] !== opened[field]
+  const changes = (key: ProjectSection) => {
+    const fields: readonly ProjectField[] = PROJECT_FIELDS[key]
+    return fields.filter(changed).length
+  }
+  // The GPU machine is one draft of several fields: each says "unsaved" for itself.
+  const [openedMachine] = useState(machine)
+  const machineChanged = (k: keyof MachineDraft) => JSON.stringify(machine[k]) !== JSON.stringify(openedMachine[k])
   const changeCount = PROJECT_SECTIONS.reduce((n, { key }) => n + changes(key), 0)
   const dirty = changeCount > 0
   // Save waits while the identity can't be used: its tab gets Settings' needs-a-fix dot.
@@ -1130,22 +1185,22 @@ function ProjectSettingsForm({
           panelLabel={PROJECT_SECTIONS.find((s) => s.key === tab)!.label}
         >
           <ProjectPanel section="general" open={tab === "general"}>
-            <StackedField label="Name">
+            <StackedField label="Name" changed={changed("name")}>
               <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
             </StackedField>
             <div className="grid gap-3 @md:grid-cols-[minmax(0,1fr)_minmax(0,12rem)]">
-              <StackedField label="Repo">
+              <StackedField label="Repo" changed={changed("repo")}>
                 <input className={inputClass} value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" />
               </StackedField>
-              <StackedField label="Branch">
+              <StackedField label="Base branch" changed={changed("baseBranch")}>
                 <input className={inputClass} value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} />
               </StackedField>
             </div>
-            <StackedField label="Description">
+            <StackedField label="Description" changed={changed("description")}>
               <textarea className={inputClass} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
             </StackedField>
-            <ProjectColorPicker project={project} value={color} onChange={setColor} />
-            <ProjectIconPicker project={project} name={name} color={color} draft={icon} onChange={setIconDraft} error={iconError} onError={setIconError} />
+            <ProjectColorPicker project={project} value={color} onChange={setColor} changed={changed("color")} />
+            <ProjectIconPicker project={project} name={name} color={color} draft={icon} onChange={setIconDraft} error={iconError} onError={setIconError} changed={changed("icon")} />
             <ProjectCaptainIconField
               project={project}
               color={color}
@@ -1153,6 +1208,7 @@ function ProjectSettingsForm({
               onChange={setCaptainIcon}
               image={icon.kind === "new" ? icon.url : icon.kind === "saved" ? project.iconUrl : null}
               pending={icon.kind !== "saved" || captainIcon !== (project.captainIcon ?? null)}
+              changed={changed("captainIcon")}
             />
             <div className="border-t border-zinc-900 pt-4">
               <Row label="Delete project" help={`Deletes ${project.name} and all its tasks. This can't be undone.`}>
@@ -1174,7 +1230,7 @@ function ProjectSettingsForm({
           </ProjectPanel>
           <ProjectPanel section="agents" open={tab === "agents"}>
             <div className="space-y-2">
-              <StackedField label="Runs on" hint={`${runsOn[runner]}${runner !== (project.runner ?? "box") ? " Its tasks move over when nothing would be lost." : ""}`}>
+              <StackedField label="Runs on" changed={changed("runner")} hint={`${runsOn[runner]}${runner !== (project.runner ?? "box") ? " Its tasks move over when nothing would be lost." : ""}`}>
                 <Select className="w-full @md:w-80" value={runner} onChange={(e) => setRunner(e.target.value as Runner)} data-testid="project-runner">
                   {RUNNERS.map((r) => (
                     <option
@@ -1212,7 +1268,7 @@ function ProjectSettingsForm({
                       : gpuCloud === "vast"
                         ? "Billed by Vast.ai per hour while each instance runs, within the project's GPU cap and Settings › Vast.ai GPU. Instances are destroyed when idle and start fresh each time (no volume)."
                         : "Billed by RunPod per hour while each pod runs, within the project's GPU cap and Settings › RunPod GPU. Pods stop when idle; pod #1's network volume keeps caches between its runs (more pods start from their own disk)."}{" "}
-                  <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings(runner === "gpu" ? gpuCloud : "runpod")}>
+                  <button type="button" className={INLINE_LINK} onClick={() => openSettings(runner === "gpu" ? gpuCloud : "runpod")}>
                     {runner === "gpu" ? GPU_SETTINGS_PATH[gpuCloud] : "Settings › RunPod GPU"}
                   </button>
                 </p>
@@ -1223,23 +1279,23 @@ function ProjectSettingsForm({
                   <span>{LOCAL_UNSANDBOXED}</span>
                 </div>
               )}
-              {runner === "docker" && <ProjectDockerSettings draft={docker} setDraft={setDocker} />}
+              {runner === "docker" && <ProjectDockerSettings draft={docker} setDraft={setDocker} changed={changed("docker")} />}
               {runner === "ssh" && (
-                <StackedField label="Which machines" hint="A label (or one machine's name). Each task takes a free machine with it, and keeps its folder there between turns.">
+                <StackedField label="Which machines" changed={changed("machineLabel")} hint="A label (or one machine's name). Each task takes a free machine with it, and keeps its folder there between turns.">
                   <MachineLabelPicker value={machineLabel} onChange={setMachineLabel} />
                 </StackedField>
               )}
               {(runner === "ssh" || noMachines) && (
                 <p className="text-xs text-zinc-500" data-testid="runner-ssh-note">
                   {runner === "ssh" ? "Your own computers, reached over SSH from this one. Agents there aren't sandboxed." : "Old laptops or a GPU tower around? Add them as SSH machines and run projects on them."}{" "}
-                  <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("machines")}>
+                  <button type="button" className={INLINE_LINK} onClick={() => openSettings("machines")}>
                     Settings › Machines
                   </button>
                 </p>
               )}
             </div>
             <div className="space-y-2">
-              <StackedField label="Agent" hint="The coding agent its new tasks run on. Tasks it already has keep theirs.">
+              <StackedField label="Agent" changed={changed("agentCli")} hint="The coding agent its new tasks run on. Tasks it already has keep theirs.">
                 <Select className="w-full @md:w-80" value={agentCli} onChange={(e) => setAgentCli(e.target.value as AgentCli | "")} data-testid="project-agent-cli">
                   <option value="">Settings default ({AGENT_CLI_LABEL[defaultAgentCli]})</option>
                   {AGENT_CLIS.map((c) => (
@@ -1252,7 +1308,7 @@ function ProjectSettingsForm({
               {(agentCli || defaultAgentCli) === "codex" && setup.data?.codex?.state === "unset" && (
                 <p className="text-xs text-zinc-500" data-testid="project-codex-login">
                   Codex needs a login first.{" "}
-                  <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("credentials")}>
+                  <button type="button" className={INLINE_LINK} onClick={() => openSettings("credentials")}>
                     Settings › Credentials
                   </button>
                 </p>
@@ -1260,13 +1316,13 @@ function ProjectSettingsForm({
               {(agentCli || defaultAgentCli) === "opencode" && (
                 <p className="text-xs text-zinc-500" data-testid="project-opencode-login">
                   OpenCode 1.19.5 needs provider API logins (OAuth is not supported).{" "}
-                  <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("credentials")}>Settings › Credentials</button>
+                  <button type="button" className={INLINE_LINK} onClick={() => openSettings("credentials")}>Settings › Credentials</button>
                 </p>
               )}
               {(agentCli || defaultAgentCli) === "cursor" && setup.data?.cursor?.state === "unset" && (
                 <p className="text-xs text-zinc-500" data-testid="project-cursor-login">
                   Cursor needs a login first: a Cursor API key, or cursor-agent login on this computer.{" "}
-                  <button type="button" className="text-yard-400 underline-offset-2 hover:underline" onClick={() => openSettings("credentials")}>
+                  <button type="button" className={INLINE_LINK} onClick={() => openSettings("credentials")}>
                     Settings › Credentials
                   </button>
                 </p>
@@ -1305,6 +1361,8 @@ function ProjectSettingsForm({
               setGpuMaxHourlyUsd={setGpuMaxHourlyUsd}
               machine={machine}
               setMachine={setMachine}
+              changed={changed}
+              machineChanged={machineChanged}
             />
             <div className="border-t border-zinc-900 pt-4">
               <Row
@@ -1312,6 +1370,7 @@ function ProjectSettingsForm({
                 label="Dependency cache"
                 help="On: a task with a package-lock.json and no node_modules (a fresh clone, or one the idle cleanup emptied) gets the box's installed copy for that lockfile, hard-linked in under a second, so it needs no npm ci."
                 more="Off: agents install as usual. Default: Settings › Dependency cache."
+                hint={<SourceHint changed={changed("depCache")} />}
               >
                 <Select id="project-dep-cache" className="w-full" value={depCache} onChange={(e) => setDepCache(e.target.value as "" | "on" | "off")} data-testid="project-dep-cache">
                   <option value="">Default ({settings.data?.settings.depCacheEnabled ? "on" : "off"})</option>
@@ -1329,6 +1388,7 @@ function ProjectSettingsForm({
                 label="Partial clone mirror"
                 help="On: each box's mirror of the repo skips old file versions (blob:none) and fetches them from GitHub when git log -p, blame or a checkout needs them."
                 more="Off: full mirror, for repos where agents dig through history a lot. Applies to mirrors made from now on; a mirror no task uses is re-made to match. Default: Settings › Partial clone mirrors."
+                hint={<SourceHint changed={changed("partialClone")} />}
               >
                 <Select id="project-partial-clone" className="w-full" value={partialClone} onChange={(e) => setPartialClone(e.target.value as "" | "on" | "off")} data-testid="project-partial-clone">
                   <option value="">Default ({settings.data?.settings.gitPartialClone === false ? "off" : "on"})</option>
@@ -1341,6 +1401,7 @@ function ProjectSettingsForm({
                 label="Push at turn end"
                 help="On: after every turn Box Yard pushes the task's branch and keeps uncommitted work on a hidden ref (refs/boxyard/wip/<task>), so archives stay small and any box can go without losing code."
                 more="Off: Box Yard pushes nothing itself, and archives hold the whole workspace. Needs write access to the repo; without it Box Yard falls back to full archives by itself. Default: Settings › Push at turn end."
+                hint={<SourceHint changed={changed("pushAtTurnEnd")} />}
               >
                 <Select id="project-push-at-turn-end" className="w-full" value={pushAtTurnEnd} onChange={(e) => setPushAtTurnEnd(e.target.value as "" | "on" | "off")} data-testid="project-push-at-turn-end">
                   <option value="">Default ({settings.data?.settings.gitPushAtTurnEnd === false ? "off" : "on"})</option>
@@ -1353,6 +1414,7 @@ function ProjectSettingsForm({
                 label="Done when its PR merges"
                 help="On: when a task's pull request merges and its turn is over, it moves to done and its workspace is archived, as Mark done would."
                 more="A task with queued messages or another open PR stays, and one set to stay open in its details (ⓘ) always does. Default: Settings › Done when its PR merges."
+                hint={<SourceHint changed={changed("autoDoneOnMerge")} />}
               >
                 <Select id="project-auto-done-on-merge" className="w-full" value={autoDoneOnMerge} onChange={(e) => setAutoDoneOnMerge(e.target.value as "" | "on" | "off")} data-testid="project-auto-done-on-merge">
                   <option value="">Default ({defaults?.autoDoneOnMerge === false ? "off" : "on"})</option>
@@ -1365,6 +1427,7 @@ function ProjectSettingsForm({
                 label="Close the issues it names"
                 help="On: when a task's pull request merges into a branch other than the repo's default (an epic branch), Box Yard closes the open issues of this repo it names with Fixes, Closes or Resolves #N, and comments with a link to the PR."
                 more="GitHub already does this for the default branch. Default: Settings › Close the issues it names."
+                hint={<SourceHint changed={changed("closeIssuesOnMerge")} />}
               >
                 <Select id="project-close-issues-on-merge" className="w-full" value={closeIssuesOnMerge} onChange={(e) => setCloseIssuesOnMerge(e.target.value as "" | "on" | "off")} data-testid="project-close-issues-on-merge">
                   <option value="">Default ({defaults?.closeIssuesOnMerge === false ? "off" : "on"})</option>
@@ -1376,7 +1439,7 @@ function ProjectSettingsForm({
           </ProjectPanel>
           <ProjectPanel section="notes" open={tab === "notes"}>
             <div>
-              <Row id="project-notes-max" label="Max notes" help={`This project's own notes budget for agents' prompts. Blank: ${defaults?.notesMaxCount ?? DEFAULT_NOTE_BUDGET.maxNotes} (Settings › Max notes).`}>
+              <Row id="project-notes-max" label="Max notes" help={`This project's own notes budget for agents' prompts. Blank: ${defaults?.notesMaxCount ?? DEFAULT_NOTE_BUDGET.maxNotes} (Settings › Max notes).`} hint={<SourceHint changed={changed("notesMax")} />}>
                 <input
                   id="project-notes-max"
                   type="number"
@@ -1390,7 +1453,7 @@ function ProjectSettingsForm({
                   data-testid="project-notes-max"
                 />
               </Row>
-              <Row id="project-notes-max-tokens" label="Max note tokens" help={`About how many tokens they may take. Blank: ${(defaults?.notesMaxTokens ?? DEFAULT_NOTE_BUDGET.maxTokens).toLocaleString()} (Settings).`}>
+              <Row id="project-notes-max-tokens" label="Max note tokens" help={`About how many tokens they may take. Blank: ${(defaults?.notesMaxTokens ?? DEFAULT_NOTE_BUDGET.maxTokens).toLocaleString()} (Settings).`} hint={<SourceHint changed={changed("notesTokens")} />}>
                 <input
                   id="project-notes-max-tokens"
                   type="number"
@@ -1409,7 +1472,7 @@ function ProjectSettingsForm({
           </ProjectPanel>
           <ProjectPanel section="env" open={tab === "env"}>
             {/* The label names the text field only: the keys it has are buttons of their own, in a group. */}
-            <StackedField label="Env vars" htmlFor="project-env" hint="Values are write-only. Add KEY=value lines to set or replace.">
+            <StackedField label="Env vars" htmlFor="project-env" changed={changed("env") || changed("removeKeys")} hint="Values are write-only. Add KEY=value lines to set or replace.">
               {project.envKeys.length > 0 && (
                 <div role="group" aria-label="Env vars it has: press one to remove it on Save" className="flex flex-wrap gap-1.5">
                   {project.envKeys.map((k) => (
@@ -1418,7 +1481,7 @@ function ProjectSettingsForm({
                       key={k}
                       aria-pressed={removeKeys.includes(k)}
                       onClick={() => setRemoveKeys((r) => (r.includes(k) ? r.filter((x) => x !== k) : [...r, k]))}
-                      className={`min-h-11 rounded-md px-2 py-1 font-mono text-xs sm:min-h-0 sm:py-0.5 ${removeKeys.includes(k) ? "bg-red-500/20 text-red-300 line-through" : "bg-zinc-800 text-zinc-300"}`}
+                      className={`min-h-11 rounded-md px-2 py-1 font-mono text-xs ${removeKeys.includes(k) ? "bg-red-500/20 text-red-300 line-through" : "bg-zinc-800 text-zinc-300"}`}
                       title={removeKeys.includes(k) ? "Removed on Save: click to keep it" : "Click to remove"}
                     >
                       {k}
