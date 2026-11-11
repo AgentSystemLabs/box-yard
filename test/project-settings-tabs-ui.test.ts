@@ -52,7 +52,7 @@ const PROJECT = {
 
 /** The fields each tab holds, by test id (or, for plain fields, label). Together they're every field of the form. */
 const FIELDS: Record<ProjectSection, string[]> = {
-  general: ["Name", "Repo", "Branch", "Description", "project-color", "project-icon-picker"],
+  general: ["Name", "Repo", "Base branch", "Description", "project-color", "project-icon-picker"],
   agents: ["project-runner", "project-agent-cli", "project-identity"],
   boxes: ["project-box-size", "project-agents-per-box", "project-tasks-per-box", "project-max-boxes", "project-whole-machine", "project-dep-cache"],
   git: ["project-partial-clone", "project-push-at-turn-end", "project-auto-done-on-merge", "project-close-issues-on-merge"],
@@ -113,10 +113,14 @@ const shown = () => PROJECT_SECTIONS.map((s) => s.key).filter((k) => !panel(k).h
 const dot = (key: ProjectSection) => tab(key).querySelector("[title]")?.getAttribute("title") ?? null
 const save = () => $<HTMLButtonElement>("project-settings-save")!
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 20)))
-/** A field of the form by test id, or a plain Field by its label. */
+/** A field of the form by test id, or a plain Field by its label (its own text, beside any edited mark). */
 const field = (key: ProjectSection, name: string) =>
   panel(key).querySelector(`[data-testid="${name}"]`) ??
-  [...panel(key).querySelectorAll("label")].find((l) => l.firstElementChild?.textContent === name)?.querySelector("input, textarea, select") ??
+  (() => {
+    // A label wraps its control, or (htmlFor) names one beside it.
+    const l = [...panel(key).querySelectorAll("label")].find((l) => [l, l.firstElementChild, l.firstElementChild?.firstElementChild].some((e) => e?.textContent === name))
+    return l?.querySelector("input, textarea, select") ?? l?.control ?? null
+  })() ??
   null
 
 function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
@@ -234,13 +238,18 @@ describe("Project settings › category tabs", () => {
     expect(requests.some((r) => r.method === "PATCH")).toBe(false)
   })
 
-  it("an identity that can't run on the project's runner marks Agents & runners, and Save waits", () => {
+  it("an identity that can't run on the project's runner marks Agents & runners, and Save waits", async () => {
     render()
     click(tab("agents"))
     choose($<HTMLSelectElement>("project-identity")!, "idn_here")
     expect(dot("agents")).toBe("Needs a fix")
     expect($("project-settings-problem")!.textContent).toBe("Fix 1 field to save")
-    expect(save().disabled).toBe(true)
+    // Save stays on but sends nothing: from another tab, it brings Agents & runners back and focuses the identity.
+    click(tab("general"))
+    await submit()
+    expect(requests.some((r) => r.method === "PATCH")).toBe(false)
+    expect(shown()).toEqual(["agents"])
+    expect(document.activeElement).toBe($("project-identity"))
     choose($<HTMLSelectElement>("project-runner")!, "local")
     expect(dot("agents")).toBe("Unsaved changes")
     expect(save().disabled).toBe(false)

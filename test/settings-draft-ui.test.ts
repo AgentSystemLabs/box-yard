@@ -236,6 +236,10 @@ describe("Settings drafts", () => {
     await settle()
     expect(unsaved()).toBe("2 unsaved changes")
     await click(button("Discard"))
+    // More than one change: Discard asks first.
+    expect(currentConfirm()).toBeTruthy()
+    act(() => settleConfirm(currentConfirm()!.id, true))
+    await settle()
     expect(radio("browser").getAttribute("aria-checked")).toBe("true")
     expect(checkbox("Task events").checked).toBe(before)
     expect(saveButton().disabled).toBe(true)
@@ -345,7 +349,7 @@ describe("Settings search", () => {
     expect(resultLabels()).toContain("Browser voice")
     await search("Coordinator decide")
     expect(resultLabels()).toContain("Effort")
-    expect(document.querySelector('[data-settings-label="Effort"] [data-settings-search-ignore]')?.textContent).toContain("Let the Coordinator decide")
+    expect([...document.querySelectorAll('[data-settings-label="Effort"] [data-settings-search-ignore]')].map((el) => el.textContent).join(" ")).toContain("Let the Coordinator decide")
     await search("speech")
     expect(resultLabels()).toContain("Voice announcements")
     await search("[literal.*")
@@ -368,7 +372,7 @@ describe("Settings search", () => {
     })
     await settle()
     expect(resultLabels()).toContain("Model")
-    expect(document.querySelector('[data-settings-label="Model"] [data-settings-search-ignore]')?.textContent).toContain("Newly discovered model")
+    expect([...document.querySelectorAll('[data-settings-label="Model"] [data-settings-search-ignore]')].map((el) => el.textContent).join(" ")).toContain("Newly discovered model")
   })
 
   it("edits a Codex catalog model from search and saves it with the normal Settings draft", async () => {
@@ -548,7 +552,7 @@ describe("Settings search", () => {
     expect(document.querySelector('[data-runner-section=upstash] [title="Unsaved changes"]')).not.toBeNull()
     await search("key Upstash where")
     expect(resultLabels()).toContain("Upstash Box API key")
-    expect(document.querySelector('[data-settings-category=upstash] h3')!.textContent).toBe("Box providers › Upstash boxes")
+    expect(document.querySelector('[data-settings-category=upstash] h3 button > span:first-child')!.textContent).toBe("Box providers › Upstash boxes")
     await search("")
     expect(document.querySelector('[data-runner-choice=box]')!.getAttribute('aria-pressed')).toBe("true")
     expect(writes()).toEqual([])
@@ -621,6 +625,10 @@ describe("Settings search", () => {
     await click(size("daytona:custom"))
     expect(section).toBe("daytona")
     await click(button("Discard"))
+    // More than one change: Discard asks first.
+    expect(currentConfirm()).toBeTruthy()
+    act(() => settleConfirm(currentConfirm()!.id, true))
+    await settle()
     expect(unsaved()).toBeNull()
     expect(types()).toContain("RTX 4090")
     expect(writes()).toEqual([])
@@ -658,10 +666,10 @@ describe("Settings search", () => {
     expect(document.querySelector<HTMLSelectElement>('[aria-label="Settings category"]')!.value).toBe("runners")
     await search("KEY daytona GPU providers")
     expect(resultLabels()).toContain("Daytona API key")
-    expect(document.querySelector('[data-settings-category=daytona] h3')!.textContent).toBe("Box providers › Daytona")
+    expect(document.querySelector('[data-settings-category=daytona] h3 button > span:first-child')!.textContent).toBe("Box providers › Daytona")
     expect(document.querySelector('[data-settings-category=daytona] h3 mark')!.textContent?.toLowerCase()).toBe("providers")
     await search("vast KEY gpu providers")
-    expect(document.querySelector('[data-settings-category=vast] h3')!.textContent).toBe("Box providers › GPU clouds › Vast.ai GPU")
+    expect(document.querySelector('[data-settings-category=vast] h3 button > span:first-child')!.textContent).toBe("Box providers › GPU clouds › Vast.ai GPU")
     await search("runner where")
     const categories = [...document.querySelectorAll('[data-settings-category]')].filter(visible).map((el) => el.getAttribute('data-settings-category'))
     expect(categories).toContain("local")
@@ -719,20 +727,21 @@ describe("Appearance drafts", () => {
     setTheme("dark")
     section = "appearance"
     render()
-    const label = () => [...document.querySelectorAll("label")].find((l) => l.textContent === "Theme")!
-    const select = () => document.getElementById(label().htmlFor) as HTMLSelectElement
+    // Theme is a radiogroup of System / Light / Dark.
+    const group = () => document.querySelector<HTMLElement>('[role=radiogroup][aria-label="Theme"]')!
+    const checked = () => group().querySelector('[role=radio][aria-checked="true"]')!.getAttribute("data-theme-choice")
     const choose = async (value: string) => {
-      act(() => { select().value = value; select().dispatchEvent(new Event("change", { bubbles: true })) })
+      act(() => group().querySelector<HTMLButtonElement>(`[data-theme-choice="${value}"]`)!.click())
       await settle()
     }
-    expect(select().tagName).toBe("SELECT")
+    expect(checked()).toBe("dark")
     await choose("light")
     expect(localStorage.getItem(THEME_KEY)).toBe("dark")
     expect(document.documentElement.classList.contains("dark")).toBe(true)
     expect(unsaved()).toContain("1")
     expect(navDot("appearance")).toBe(true)
     await click(button("Discard"))
-    expect(select().value).toBe("dark")
+    expect(checked()).toBe("dark")
     await choose("light")
     await click(saveButton())
     expect(localStorage.getItem(THEME_KEY)).toBe("light")

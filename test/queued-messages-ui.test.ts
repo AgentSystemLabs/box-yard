@@ -46,10 +46,10 @@ const emit = async (...events: UiEvent[]) => {
   await flush()
 }
 
-/** Transcript rows top to bottom, as text: user bubbles, replies and the streaming reply (not the typing dots). */
+/** Transcript rows top to bottom, as text: user bubbles, replies and the streaming reply (not the "is working…" line). */
 const rows = () => {
   const list = document.querySelector("[data-testid=chat-panel] .flow-root.space-y-3")!
-  return [...list.children].filter((el) => el.tagName !== "BUTTON" && !el.hasAttribute("data-day-start")).map((el) => el.textContent!.trim()).filter(Boolean)
+  return [...list.children].filter((el) => el.tagName !== "BUTTON" && !el.hasAttribute("data-day-start") && el.getAttribute("role") !== "status").map((el) => el.textContent!.trim()).filter(Boolean)
 }
 /** All of them. The chat's plain transcript leaves tool calls out. */
 const allRows = rows
@@ -121,6 +121,8 @@ describe("Coordinator chat: a message sent mid-stream", () => {
     // Right away, below the streaming text, queued.
     expect(rows().slice(-2)).toEqual(["Here is a long reply that is still", expect.stringContaining("k it works perfect")])
     expect(queuedLabels()).toBe(1)
+    // The working line stays under the streaming text while the turn runs.
+    expect([...document.querySelectorAll("[data-testid=chat-panel] .flow-root.space-y-3 > [role=status]")].map((el) => el.textContent)).toEqual(["Coordinator is working…"])
     respond()
     await flush()
     const id = posted!.id
@@ -203,7 +205,7 @@ describe("Captain tab: a message sent mid-turn", () => {
 
     const inbound = () => [...host.querySelectorAll<HTMLElement>('[data-testid="captain-inbound"]')]
     const list = host.querySelector("[data-testid=captain-chat] .space-y-3")!
-    const texts = () => [...list.children].filter((el) => el.tagName !== "BUTTON" && !el.hasAttribute("data-day-start")).map((el) => el.textContent!).filter(Boolean)
+    const texts = () => [...list.children].filter((el) => el.tagName !== "BUTTON" && !el.hasAttribute("data-day-start") && el.getAttribute("role") !== "status").map((el) => el.textContent!).filter(Boolean)
     expect(list.children[list.children.length - 2].getAttribute("data-testid")).toBe("captain-working")
     expect(texts().at(-1)).toContain("also check the docs")
     expect(inbound().at(-1)!.querySelector("[data-testid=queued-label]")).not.toBeNull()
