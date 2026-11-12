@@ -34,6 +34,8 @@ try {
     await page.route("**/api/**", async (route) => {
       const p = new URL(route.request().url()).pathname
       if (p === "/api/boot" || p === "/api/stream") return route.abort()
+      // Opening a PR records the view (lib/prViews.ts); answered here, so the mock server's data stays as it was.
+      if (p === "/api/pr-views") return route.fulfill({ json: { viewedAt: now } })
       assert.equal(route.request().method(), "GET", "Browser proof must not mutate server data")
       let data
       if (p === "/api/tasks") data = tasks
