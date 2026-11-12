@@ -133,7 +133,9 @@ export class PrCommentTracker {
   private readonly deps: PrCommentsDeps
   private readonly now: () => number
   private timer: NodeJS.Timeout | null = null
-  private stopped = true
+  private stopped = false
+  /** Whether the timer runs (start() to stop()): a tracker never started still answers pollAll, viewed and ingest. */
+  private started = false
   /** The interval the timer runs on now (0: off), to tell a changed setting from any other save. */
   private armed = 0
   private chain: Promise<unknown> = Promise.resolve()
@@ -149,17 +151,20 @@ export class PrCommentTracker {
     this.deps = deps
     this.store = deps.store
     this.now = deps.now ?? (() => Date.now())
+    this.armed = deps.intervalMs()
   }
 
   /** Start the rounds (unless the setting is off); the first one shortly after, then every interval. */
   start() {
     this.stopped = false
+    this.started = true
     this.armed = this.deps.intervalMs()
     if (this.armed) this.arm(this.deps.startDelayMs ?? PR_COMMENTS_START_DELAY_MS)
   }
 
   stop() {
     this.stopped = true
+    this.started = false
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
   }
@@ -180,7 +185,7 @@ export class PrCommentTracker {
       for (const id of this.store.clearPrNewComments()) this.deps.onCount?.(id)
       return
     }
-    if (!this.stopped) this.arm(was ? next : 0)
+    this.arm(was ? next : 0)
   }
 
   /** The computer woke from sleep: forget the error backoffs its failed requests piled up, and ask soon. */
@@ -193,7 +198,7 @@ export class PrCommentTracker {
   }
 
   private arm(delay: number) {
-    if (this.stopped) return
+    if (!this.started) return
     if (this.timer) clearTimeout(this.timer)
     this.timer = setTimeout(() => {
       this.timer = null
@@ -240,9 +245,12 @@ export class PrCommentTracker {
    * view, as of now (a view recorded while the request was out counts), and save it on every task that has the PR.
    * Null while the count is off.
    */
-  ingest(prUrl: string, activity: PrActivity, viewer: string | null, rows: TaskRow[] = this.store.listOpenPrRows()): PrCommentCount | null {
+  ingest(prUrl: string, activity: PrActivity, viewer: string | null): PrCommentCount | null {
     const key = prViewKey(prUrl)
-    if (!key || !this.deps.intervalMs()) return null
+    return key && this.deps.intervalMs() ? this.count(key, activity, viewer, this.store.listOpenPrRows()) : null
+  }
+
+  private count(key: string, activity: PrActivity, viewer: string | null, rows: TaskRow[]): PrCommentCount {
     const viewedAt = this.store.prViewedAt(key)
     const count = countNewComments(activity.remarks, viewedAt, [activity.author, viewer])
     this.seen.set(key, { updatedAt: activity.updatedAt, count })
@@ -307,7 +315,7 @@ export class PrCommentTracker {
           const open = this.store.listOpenPrRows()
           batch.forEach((pr, i) => {
             const found = data[`p${i}`]?.pullRequest
-            if (found) this.ingest(`https://github.com/${pr.owner}/${pr.name}/pull/${pr.number}`, toActivity(found), data.viewer?.login ?? null, open)
+            if (found) this.count(pr.key, toActivity(found), data.viewer?.login ?? null, open)
           })
         }
         if (h.failures) this.deps.log?.("[box-yard] PR comment checks are working again.")
