@@ -877,6 +877,8 @@ export function createBoxYard(
     retro.catchUp()
     // Turning auto-done on moves the resting tasks whose PR merged while it was off.
     tasks.doneMergedResting()
+    // New PR comments: another interval takes over now, and Off forgets the counts.
+    tasks.prComments.reschedule()
     return info
   }
   const saveRunpodSettings = (patch: unknown) => {
@@ -1519,6 +1521,12 @@ export function createBoxYard(
   // The task page's PR sheet: the PR's checks, mergeability, review and files, from GitHub (server/prDetails.ts).
   api.get("/tasks/:id/pr", async (req, res) => {
     res.json(await tasks.prDetails.get(req.params.id!))
+  })
+  // A PR link was clicked somewhere in the app (web/src/lib/prViews.ts): from now on, only comments written after this
+  // count as new on its tasks (server/prComments.ts). Any other URL is ignored, not an error: the link opened anyway.
+  api.post("/pr-views", (req, res) => {
+    const { url } = parse(z.object({ url: z.string().max(2000) }).strict(), req.body)
+    res.json({ viewedAt: tasks.prComments.viewed(url) })
   })
   // The "Merge PR" button: the standard merge message to the task's session (409 while one is pending for the PR).
   api.post("/tasks/:id/merge", (req, res) => {

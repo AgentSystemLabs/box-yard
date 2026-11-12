@@ -35,6 +35,7 @@ import { DEFAULT_OWNER_NAME } from "../shared/owner.js"
 import { DEFAULT_CAPTAIN_ICON, isCaptainIcon, type CaptainIconId } from "../shared/captainIcons.js"
 import { DEFAULT_NOTE_BUDGET, NOTE_BUDGET_LIMITS, projectNoteBudget, type NoteBudget } from "../shared/notes.js"
 import { DEFAULT_MEMORY_POLICY } from "../shared/memory.js"
+import { PR_COMMENT_MINUTES } from "../shared/prComments.js"
 import { LOCAL_AGENTS_LIMITS } from "../shared/runner.js"
 import { DEFAULT_GPU_PROVIDER, GPU_PROVIDERS, legacyGpuProvider, type GpuProvider } from "../shared/gpu.js"
 import { AGENT_CLIS, CODEX_EFFORTS, DEFAULT_AGENT_CLI, DEFAULT_MANAGER_CLI, DEFAULT_CODEX_MODEL, DEFAULT_CODEX_EFFORT, DEFAULT_CURSOR_MODEL, MANAGER_CLIS, isClaudeModel, isOpenAiModel, isOpenCodeModel } from "../shared/agentCli.js"
@@ -85,6 +86,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoDoneOnMerge: true,
   // On: Map 4's PRs merge into an epic branch, where GitHub doesn't close "Fixes #N" issues itself.
   closeIssuesOnMerge: true,
+  // Every 5 minutes: about 12 GitHub points an hour per 100 open PRs, of a token's 5,000 (server/prComments.ts).
+  prCommentMinutes: PR_COMMENT_MINUTES.default,
   orchestratorCli: DEFAULT_MANAGER_CLI,
   orchestratorModel: DEFAULT_MODEL,
   orchestratorCodexModel: "",
@@ -248,6 +251,10 @@ export const settingsPatch = z
     subtaskMaxChildren: z.number().int().min(SUBTASK_MAX_CHILDREN.min).max(SUBTASK_MAX_CHILDREN.max),
     autoDoneOnMerge: z.boolean(),
     closeIssuesOnMerge: z.boolean(),
+    prCommentMinutes: z
+      .number()
+      .refine((n) => (PR_COMMENT_MINUTES.options as readonly number[]).includes(n), `Pick one of ${PR_COMMENT_MINUTES.options.join(", ")} minutes (0 is off)`)
+      .describe(`New PR comments: minutes between the background rounds that ask GitHub for comments on open PRs, one of ${PR_COMMENT_MINUTES.options.join(", ")}. Default ${PR_COMMENT_MINUTES.default}; 0 turns the count off`),
     orchestratorCli: z.enum(MANAGER_CLIS).describe('"claude" or "codex": Cursor and OpenCode run task agents only'),
     orchestratorModel: model,
     orchestratorCodexModel: codexModelSetting,

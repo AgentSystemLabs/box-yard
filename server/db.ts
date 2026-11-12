@@ -1313,6 +1313,17 @@ export const MIGRATIONS: string[] = [
   -- (Store.updateTask). NULL: a plain question, or none.
   ALTER TABLE tasks ADD COLUMN questions_json TEXT;
   `,
+  `
+  -- New comments on a task's open PR since its owner last opened the PR from Box Yard (server/prComments.ts;
+  -- shared/prComments.ts says what counts). pr_views: when each PR was last opened from a link in the app, by
+  -- "owner/repo#number" in lower case (prViewKey), so every task and link of one PR shares it.
+  -- tasks.pr_new_comments: the count as GitHub last answered; NULL until it has (or with the count turned off).
+  CREATE TABLE pr_views (
+    pr_key TEXT PRIMARY KEY,
+    viewed_at INTEGER NOT NULL
+  );
+  ALTER TABLE tasks ADD COLUMN pr_new_comments INTEGER;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

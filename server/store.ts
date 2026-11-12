@@ -234,6 +234,8 @@ export interface TaskRow {
   source: string | null
   pr_head_sha: string | null
   pr_labels_json: string | null
+  /** Comments on its open PR since the PR was last opened from Box Yard (shared/prComments.ts); null: not counted yet. */
+  pr_new_comments?: number | null
   merge_request_json: string | null
   push_state_json: string | null
   /** Its icon (shared/taskIcons.ts); null picks one from its title. */
@@ -650,6 +652,7 @@ type TaskPatch = Partial<{
   boxSize: BoxSize | null
   prHeadSha: string | null
   prLabels: string[]
+  prNewComments: number | null
   mergeRequest: StoredMergeRequest | null
   pushState: PushState | null
   placedHow: BoxPick | null
@@ -708,6 +711,7 @@ const TASK_COLUMNS: Record<keyof TaskPatch, string> = {
   boxSize: "box_size",
   prHeadSha: "pr_head_sha",
   prLabels: "pr_labels_json",
+  prNewComments: "pr_new_comments",
   mergeRequest: "merge_request_json",
   pushState: "push_state_json",
   placedHow: "placed_how",
@@ -1583,6 +1587,7 @@ export class Store {
       prState: row.pr_state ?? null,
       prMergedAt: row.pr_merged_at ?? null,
       prMergedBy: row.pr_merged_by ?? null,
+      prNewComments: row.pr_new_comments ?? null,
       previews: json<PreviewLink[]>(row.previews_json, []),
       question: row.question,
       questions: this.taskQuestions(row),
@@ -1730,6 +1735,23 @@ export class Store {
       .prepare("SELECT * FROM tasks WHERE pr_url IS NOT NULL AND pr_url != '' AND (pr_state IS NULL OR pr_state IN ('open', 'draft')) ORDER BY created_at ASC")
       .all() as TaskRow[]
     return ids ? rows.filter((r) => ids.includes(r.id)) : rows
+  }
+
+  /** A PR was opened from Box Yard at `at` (`key`: prViewKey). A later view never moves it back. */
+  recordPrView(key: string, at: number) {
+    this.db.prepare("INSERT INTO pr_views (pr_key, viewed_at) VALUES (?, ?) ON CONFLICT(pr_key) DO UPDATE SET viewed_at = MAX(viewed_at, excluded.viewed_at)").run(key, at)
+  }
+
+  /** When a PR was last opened from Box Yard, or null. */
+  prViewedAt(key: string): number | null {
+    return (this.db.prepare("SELECT viewed_at FROM pr_views WHERE pr_key = ?").get(key) as { viewed_at: number } | undefined)?.viewed_at ?? null
+  }
+
+  /** Forget every task's count of new PR comments (the count was turned off); the tasks that had one. */
+  clearPrNewComments(): string[] {
+    const ids = (this.db.prepare("SELECT id FROM tasks WHERE pr_new_comments IS NOT NULL").all() as { id: string }[]).map((r) => r.id)
+    if (ids.length) this.db.prepare("UPDATE tasks SET pr_new_comments = NULL WHERE pr_new_comments IS NOT NULL").run()
+    return ids
   }
 
   /** Every pull request a task opened (its "Opened pull request" events), oldest first; its current one included. */
@@ -1957,6 +1979,11 @@ export class Store {
       else if (key === "sessionStarted" || key === "compactPending" || key === "compacting" || key === "stayOpenOnMerge") args.push(value ? 1 : 0)
       else if (key === "priority") args.push(value === "high" ? "high" : null)
       else args.push(value)
+    }
+    // The count of new comments is its PR's: another PR starts uncounted (SET reads the row as it was).
+    if (patch.prUrl !== undefined && patch.prNewComments === undefined) {
+      sets.push("pr_new_comments = CASE WHEN pr_url IS ? THEN pr_new_comments ELSE NULL END")
+      args.push(patch.prUrl)
     }
     // The several questions belong to the question they were asked with: a new or cleared question drops them.
     if (patch.question !== undefined && patch.questions === undefined) sets.push("questions_json = NULL")
