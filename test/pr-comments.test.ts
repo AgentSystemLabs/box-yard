@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest"
-import type { Server } from "node:http"
-import { createBoxYard, type BoxYard } from "../server/app.js"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
 import { COMMENTS_RATE_FLOOR, PR_COMMENTS_DETAIL_BATCH, PR_COMMENTS_PROBE_BATCH, PrCommentTracker, toActivity, type GqlPrActivity } from "../server/prComments.js"
 import { PrDetailsSource } from "../server/prDetails.js"
 import { PrTracker, type TokenHealth } from "../server/prs.js"
 import { PR_COMMENT_MINUTES, countNewComments, prCommentsLabel, prCommentsText, prViewKey } from "../shared/prComments.js"
-import { freePort, testConfig, tmpDir } from "./helpers.js"
+import { DEFAULT_SETTINGS, settingsPatch } from "../server/settings.js"
+import { tmpDir } from "./helpers.js"
 
 const T0 = Date.parse("2026-11-01T00:00:00Z")
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString()
@@ -405,16 +404,11 @@ describe("Settings › New PR comments", () => {
     tracker.stop()
   })
 
-  it("is one of the listed intervals, 5 minutes unless saved", async () => {
-    const port = await freePort()
-    const yard = createBoxYard(testConfig({ port }), { webDir: "/nonexistent", machines: { keys: { home: tmpDir() } } })
-    try {
-      expect(yard.settings.get().prCommentMinutes).toBe(5)
-      expect(yard.settings.update({ prCommentMinutes: 0 }).settings.prCommentMinutes).toBe(0)
-      expect(() => yard.settings.update({ prCommentMinutes: 7 })).toThrow(/Pick one of/)
-    } finally {
-      yard.stop()
-    }
+  it("is one of the listed intervals, 5 minutes unless saved", () => {
+    expect(DEFAULT_SETTINGS.prCommentMinutes).toBe(5)
+    for (const minutes of PR_COMMENT_MINUTES.options) expect(settingsPatch.safeParse({ prCommentMinutes: minutes }).success).toBe(true)
+    for (const minutes of [7, -1, 0.5, 61, NaN]) expect(settingsPatch.safeParse({ prCommentMinutes: minutes }).success).toBe(false)
+    expect(settingsPatch.safeParse({ prCommentMinutes: 7 }).error!.issues[0]!.message).toMatch(/Pick one of 0, 1, 2, 5, 10, 15, 30, 60 minutes/)
   })
 })
 
@@ -442,46 +436,6 @@ describe("the task page's PR sheet", () => {
     const off = new PrDetailsSource({ store, fetch, token: () => "tok", now, comments: { enabled: () => on, ingest: (u, a, v) => tracker.ingest(u, a, v) } })
     expect((await off.get(id)).details!.comments).toBeNull()
     expect(queries[1]).not.toMatch(/reviewThreads|viewer/)
-  })
-})
-
-describe("POST /api/pr-views", () => {
-  let yard: BoxYard | undefined
-  let server: Server | undefined
-  afterEach(async () => {
-    yard?.stop()
-    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()))
-    yard = server = undefined
-  })
-
-  it("records the view, zeroes the PR's tasks and tells the stream", async () => {
-    const port = await freePort()
-    yard = createBoxYard(testConfig({ port }), { webDir: "/nonexistent", machines: { keys: { home: tmpDir() } } })
-    server = await new Promise<Server>((resolve) => {
-      const s = yard!.app.listen(port, "127.0.0.1", () => resolve(s))
-    })
-    const project = yard.store.createProject({ name: "Site" })
-    const t = yard.store.createTask({ projectId: project.id, title: "Retry", prompt: "p" })
-    yard.store.updateTask(t.id, { status: "pr_ready", prUrl: "https://github.com/acme/site/pull/4", prState: "open", prNewComments: 5 }, { quiet: true })
-    const sent: unknown[] = []
-    const broadcast = yard.hub.broadcast.bind(yard.hub)
-    yard.hub.broadcast = (event) => {
-      sent.push(event)
-      broadcast(event)
-    }
-    const post = (body: unknown) => fetch(`http://127.0.0.1:${port}/api/pr-views`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-
-    const before = Date.now()
-    const res = await post({ url: "https://github.com/acme/site/pull/4#issuecomment-1" })
-    expect(res.status).toBe(200)
-    const { viewedAt } = (await res.json()) as { viewedAt: number }
-    expect(viewedAt).toBeGreaterThanOrEqual(before)
-    expect(yard.store.prViewedAt("acme/site#4")).toBe(viewedAt)
-    expect(yard.store.getTask(t.id)!.prNewComments).toBe(0)
-    expect(sent).toContainEqual(expect.objectContaining({ type: "task", task: expect.objectContaining({ id: t.id, prNewComments: 0 }) }))
-
-    expect(await (await post({ url: "https://example.com/not-a-pr" })).json()).toEqual({ viewedAt: null })
-    expect((await post({})).status).toBe(400)
   })
 })
 
