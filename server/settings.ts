@@ -251,9 +251,9 @@ export const settingsPatch = z
     subtaskMaxChildren: z.number().int().min(SUBTASK_MAX_CHILDREN.min).max(SUBTASK_MAX_CHILDREN.max),
     autoDoneOnMerge: z.boolean(),
     closeIssuesOnMerge: z.boolean(),
+    // A choice, not a range: the dialog offers exactly these (a Select), so there is no number rule to keep in step.
     prCommentMinutes: z
-      .number()
-      .refine((n) => (PR_COMMENT_MINUTES.options as readonly number[]).includes(n), `Pick one of ${PR_COMMENT_MINUTES.options.join(", ")} minutes (0 is off)`)
+      .literal([...PR_COMMENT_MINUTES.options], `Pick one of ${PR_COMMENT_MINUTES.options.join(", ")} minutes (0 is off)`)
       .describe(`New PR comments: minutes between the background rounds that ask GitHub for comments on open PRs, one of ${PR_COMMENT_MINUTES.options.join(", ")}. Default ${PR_COMMENT_MINUTES.default}; 0 turns the count off`),
     orchestratorCli: z.enum(MANAGER_CLIS).describe('"claude" or "codex": Cursor and OpenCode run task agents only'),
     orchestratorModel: model,
