@@ -83,8 +83,9 @@ import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
 import { CUE_DOT, CueDot, ProjectAvatar, TaskStatusIcon, WORKING_PULSE, agentIconCue, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
-import { AgentIcon, PR_STYLE, PrChip, STATUS, TAP_AREA, cx } from "./ui"
-import { prLabel, prStateOf } from "../lib/prState"
+import { AgentIcon, PR_STYLE, PrChip, PrComments, STATUS, TAP_AREA, cx } from "./ui"
+import { prLabel, prNewCommentsOf, prStateOf } from "../lib/prState"
+import { prCommentsLabel } from "../../../shared/prComments"
 
 /**
  * Keyboard focus: a white outline inside the row and no fill, so it's never mistaken for the selected row (or a hover).
@@ -994,6 +995,7 @@ const ROW_PR = cx(FOCUS, "shrink-0 tabular-nums pointer-coarse:min-h-11 pointer-
 const ROW_PR_YIELDS = "pointer-coarse:@max-[15rem]/side:hidden"
 /** Only where ROW_PR_YIELDS hides the link. */
 const ROW_PR_YIELDED = "hidden pointer-coarse:@max-[15rem]/side:block"
+const ROW_PR_YIELDED_FLEX = "hidden! pointer-coarse:@max-[15rem]/side:inline-flex!"
 
 /**
  * In the place of a PR link that ROW_PR_YIELDS hides: the PR's state icon in its state's colour (PR_STYLE), still and
@@ -1003,12 +1005,19 @@ function PrMark({ task }: { task: Task }) {
   const state = prStateOf(task)
   if (!state) return null
   const { icon: Icon, link } = PR_STYLE[state]
-  return <Icon aria-hidden data-testid="sidebar-pr-mark" data-pr-state={state} className={cx("mr-1 h-3.5 w-3.5 shrink-0", link, ROW_PR_YIELDED)} />
+  return (
+    <>
+      <Icon aria-hidden data-testid="sidebar-pr-mark" data-pr-state={state} className={cx("mr-1 h-3.5 w-3.5 shrink-0", link, ROW_PR_YIELDED)} />
+      {/* Its new comments stay beside it (PrName says them); "flex", not "block", keeps the glyph and the number on one line. */}
+      <PrComments task={task} named className={cx("mr-1 text-[11px]", ROW_PR_YIELDED_FLEX)} />
+    </>
+  )
 }
-/** ", PR #23" at the end of a row's name, where its PR link is hidden (PrMark). */
+/** ", PR #23" at the end of a row's name, where its PR link is hidden (PrMark), with its new comments. */
 function PrName({ task }: { task: Task }) {
   const label = prLabel(task)
-  return label ? <span className={cx("sr-only", ROW_PR_YIELDED)}>, {label}</span> : null
+  const comments = prNewCommentsOf(task)
+  return label ? <span className={cx("sr-only", ROW_PR_YIELDED)}>, {label}{comments ? `, ${prCommentsLabel(comments)}` : ""}</span> : null
 }
 
 /**

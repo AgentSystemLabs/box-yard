@@ -10,6 +10,13 @@
 /** Settings › New PR comments, in minutes: how often the background round asks GitHub. 0 is off. */
 export const PR_COMMENT_MINUTES = { default: 5, off: 0, options: [0, 1, 2, 5, 10, 15, 30, 60] } as const
 
+/** A Settings option in words: "Off", "Every minute", "Every 5 minutes (default)", "Every hour". */
+export function prCommentMinutesLabel(minutes: number): string {
+  if (!minutes) return "Off"
+  const every = minutes === 1 ? "Every minute" : minutes === 60 ? "Every hour" : `Every ${minutes} minutes`
+  return minutes === PR_COMMENT_MINUTES.default ? `${every} (default)` : every
+}
+
 /** The most a badge says: "99+" past it. */
 export const PR_COMMENT_BADGE_MAX = 99
 

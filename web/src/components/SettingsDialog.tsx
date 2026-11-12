@@ -52,6 +52,7 @@ import { UpdateRow } from "./UpdateBanner"
 import { BOX_SIZE_SPECS } from "../../../shared/boxSizes"
 import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, MANAGER_CLIS, type AgentCli } from "../../../shared/agentCli"
 import { NOTE_BUDGET_LIMITS } from "../../../shared/notes"
+import { PR_COMMENT_MINUTES, prCommentMinutesLabel } from "../../../shared/prComments"
 import { LOCAL_AGENTS_LIMITS, LOCAL_UNSANDBOXED } from "../../../shared/runner"
 import {
   AUTOCOMPACT_MAX_TOKENS,
@@ -917,6 +918,31 @@ export function SettingsDialog({
                       <input id={fid("cim")} type="checkbox" checked={s.closeIssuesOnMerge ?? true} onChange={(e) => set("closeIssuesOnMerge", e.target.checked)} data-testid="close-issues-on-merge" />
                       {(s.closeIssuesOnMerge ?? true) ? "On: closed after a merge into an epic branch, with a comment" : "Off: only GitHub closes them (default branch)"}
                     </label>
+                  </Row>
+                  <h4 data-settings-context className="mt-6 border-t border-zinc-900 pt-5 text-sm font-semibold text-zinc-100">New comments on open PRs</h4>
+                  <p data-settings-context className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500">
+                    A task with an open PR shows how many comments were written since you last opened the PR from a link in Box Yard. Opening the PR again reads them.
+                  </p>
+                  <Row
+                    id={fid("pcm")}
+                    label="New PR comments"
+                    help="How often Box Yard asks GitHub, in the background, for the comments on every open PR. An open task's own PR is also asked when you open the task and every minute while it stays open."
+                    more={`Counted: conversation comments, reviews with a summary and comments in unresolved review threads, written after your last visit (all of them for a PR you never opened from here). Not counted: the PR author's and the project's GitHub account's own comments, resolved threads, and merged or closed PRs. Every ${PR_COMMENT_MINUTES.default} minutes costs about 12 of a token's 5,000 GitHub points an hour per 100 open PRs, plus half a point for each PR that changed; it pauses by itself when a token runs low. Off never asks and hides the counts.`}
+                    {...row("prCommentMinutes")}
+                  >
+                    <Select
+                      id={fid("pcm")}
+                      className="w-full"
+                      value={String(s.prCommentMinutes ?? PR_COMMENT_MINUTES.default)}
+                      onChange={(e) => set("prCommentMinutes", Number(e.target.value))}
+                      data-testid="pr-comment-minutes"
+                    >
+                      {PR_COMMENT_MINUTES.options.map((m) => (
+                        <option key={m} value={m}>
+                          {prCommentMinutesLabel(m)}
+                        </option>
+                      ))}
+                    </Select>
                   </Row>
                 </Panel>
               ) : category === "agents" ? (

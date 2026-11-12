@@ -4,19 +4,20 @@
 // their logs), whether it merges cleanly, the review and files changed, the tasks that worked on it, with Open on
 // GitHub and Merge PR.
 import { useState, type ReactNode } from "react"
-import { CircleCheck, CircleDashed, CircleMinus, CircleX, FileDiff, GitMerge, TriangleAlert, type LucideIcon } from "lucide-react"
+import { CircleCheck, CircleDashed, CircleMinus, CircleX, FileDiff, GitMerge, MessageSquare, TriangleAlert, type LucideIcon } from "lucide-react"
 import type { PrCheck, PrDetails } from "../../../shared/prDetails"
 import type { Task } from "../../../shared/types"
+import { PR_COMMENTS_RULE, prCommentsLabel } from "../../../shared/prComments"
 import { MERGE_CHIP_LABEL, MERGE_LABEL } from "../lib/mergePr"
 import { checksLine, filesText, mergeLine, prSignal, reviewLine, usePrDetails, type PrLine, type PrSignal, type PrTone } from "../lib/prDetails"
-import { prLabel, prNumber, prStateOf, prTooltip } from "../lib/prState"
+import { prLabel, prNewCommentsOf, prNumber, prStateOf, prTooltip } from "../lib/prState"
 import { navigateApp, taskSessionHref } from "../lib/navigation"
 import { confirmAndSend, PENDING_TITLE, StateIcon, useMergeButton, type MergeableTask } from "./MergePr"
 import { Modal } from "./Modal"
 import { PrAgents } from "./PrAgents"
-import { Button, HEADER_CHIP, HEADER_FOLD, LineIcon, NewTabLink, PR_STYLE, TimeAgo, cx } from "./ui"
+import { Button, HEADER_CHIP, HEADER_FOLD, LineIcon, NewTabLink, PR_STYLE, PrComments, TimeAgo, cx } from "./ui"
 
-export type PrStatusTask = MergeableTask & Pick<Task, "prMergedAt" | "prMergedBy">
+export type PrStatusTask = MergeableTask & Pick<Task, "prMergedAt" | "prMergedBy" | "prNewComments">
 
 const TONE_TEXT: Record<PrTone, string> = { good: "text-emerald-400", wait: "text-amber-300", bad: "text-red-400", quiet: "text-zinc-500" }
 const TONE_ICON: Record<PrTone, LucideIcon> = { good: CircleCheck, wait: CircleDashed, bad: CircleX, quiet: CircleMinus }
@@ -67,6 +68,8 @@ export function PrStatusChip({ task }: { task: PrStatusTask }) {
           SignalIcon && <SignalIcon aria-hidden data-testid="pr-signal" className={cx("h-3.5 w-3.5 shrink-0", TONE_TEXT[signal!.tone])} />
         )}
         {signal && !activity && <span className="sr-only">, {signal.label}</span>}
+        {/* Comments written since the PR was last opened from Box Yard; the sheet's Open on GitHub reads them. */}
+        <PrComments task={task} />
       </button>
       {open && <PrSheet task={task} query={query} onClose={() => setOpen(false)} />}
     </>
@@ -131,7 +134,7 @@ function PrSheet({ task, query, onClose }: { task: PrStatusTask; query: ReturnTy
           </Button>
         </div>
       ) : (
-        <PrFacts d={d} />
+        <PrFacts d={d} newComments={prNewCommentsOf(task)} />
       )}
       {answer?.checkedAt && (
         <p className="text-xs text-zinc-500">
@@ -143,7 +146,25 @@ function PrSheet({ task, query, onClose }: { task: PrStatusTask; query: ReturnTy
   )
 }
 
-function PrFacts({ d }: { d: PrDetails }) {
+/**
+ * "5 new comments since you last opened this PR", or that there are none. `count`: the task's own count, which the
+ * event stream keeps current (opening the PR zeroes it at once); `viewed`: whether it was ever opened from Box Yard,
+ * from the sheet's answer.
+ */
+function CommentsLine({ count, viewed }: { count: number; viewed: boolean }) {
+  const text = count ? prCommentsLabel(count, viewed) : viewed ? "No new comments since you last opened this PR" : "No comments to read"
+  return (
+    <span className="block" data-count={count}>
+      <Line icon={MessageSquare} className={count ? "text-amber-300" : "text-zinc-500"} text={text} />
+      <span className="mt-0.5 block pl-5.5 text-xs leading-snug text-zinc-500">
+        {count ? "Open on GitHub reads them. " : ""}
+        {PR_COMMENTS_RULE}
+      </span>
+    </span>
+  )
+}
+
+function PrFacts({ d, newComments }: { d: PrDetails; newComments: number }) {
   const live = d.state === "open" || d.state === "draft"
   const checks = checksLine(d.checks)
   const listed = d.checks.list.filter((c) => c.state === "failed" || c.state === "pending").slice(0, 6)
@@ -186,6 +207,11 @@ function PrFacts({ d }: { d: PrDetails }) {
       <Fact label="Review" testId="pr-review">
         <ToneLine line={reviewLine(d.review)} />
       </Fact>
+      {live && d.comments && (
+        <Fact label="Comments" testId="pr-comments">
+          <CommentsLine count={newComments} viewed={d.comments.viewedAt !== null} />
+        </Fact>
+      )}
       <Fact label="Files" testId="pr-files">
         <span className="flex min-w-0 flex-wrap items-start gap-x-2 leading-5">
           <Line icon={FileDiff} className="text-zinc-400" text={filesText(d.files)} />
