@@ -24,7 +24,8 @@ const many = task("task_cmt00002", "Rewrite the importer so a large spreadsheet 
 const draft = task("task_cmt00003", "Dark mode", { prUrl: pull(19), prState: "draft", prNewComments: 1 })
 const child = task("task_cmt00004", "Review dependencies", { parentTaskId: five.id, prUrl: pull(17), prState: "open", prNewComments: 12 })
 const quiet = task("task_cmt00005", "Fix the footer", { prUrl: pull(20), prState: "open", prNewComments: 0 })
-const merged = task("task_cmt00006", "Update the docs", { status: "done", prUrl: pull(16), prState: "merged", prMergedAt: now, prNewComments: 4 })
+// Resting, not done: a done task leaves the list.
+const merged = task("task_cmt00006", "Update the docs", { status: "idle", prUrl: pull(16), prState: "merged", prMergedAt: now, prNewComments: 4 })
 const tasks = [five, many, draft, child, quiet, merged]
 // What each row shows: the count's text, or null for no badge.
 const expected = [[five, "5"], [many, "99+"], [draft, "1"], [child, "12"], [quiet, null], [merged, null]]
@@ -62,6 +63,7 @@ try {
       else if (p === "/api/projects") data = [project]
       else if (p.endsWith("/captain")) data = { projectId: project.id, busy: false, pendingCount: 0, usage: { tokens: 0, window: 200000, updatedAt: now } }
       else if (/\/(messages|compactions|queue)$/.test(p)) data = []
+      else if (p.endsWith("/history")) data = { days: [], oldestId: null }
       else if (/^\/api\/tasks\/[^/]+\/pr$/.test(p)) data = details(tasks.find((t) => p === `/api/tasks/${t.id}/pr`))
       else if (p.startsWith("/api/tasks/")) data = tasks.find((t) => p === `/api/tasks/${t.id}`) ?? []
       else return route.continue()

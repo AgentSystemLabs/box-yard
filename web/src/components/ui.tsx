@@ -293,7 +293,7 @@ export function PrChip({
       )}
     >
       {variant !== "number" && <>{activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}</>}
-      <span className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
+      <span data-pr-number={variant === "number" ? "" : undefined} className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
       {activity && <span className={cx("font-normal", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
       <PrComments task={task} named={variant === "number"} />
     </NewTabLink>

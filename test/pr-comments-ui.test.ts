@@ -127,6 +127,8 @@ describe("the count on a PR chip", () => {
     const a = host.querySelector("a")!
     expect(badge()!.textContent).toBe("5")
     expect(badge()!.getAttribute("data-count")).toBe("5")
+    // The number is marked, so a narrow sidebar row can give its room to the count (ROW_PR_COUNTED in Sidebar.tsx).
+    expect(a.querySelector("[data-pr-number]")!.textContent).toBe("#66")
     expect(a.getAttribute("aria-label")).toBe("PR #66, 5 new comments since you last opened this PR, on GitHub (opens in a new tab)")
     expect(a.title).toBe(`Open pull request\n5 new comments since you last opened this PR\nNot counted: the PR author's and the project's GitHub account's own comments, and resolved threads.\n${PR}`)
     // One link: the count is part of the PR's own target, not a second one.

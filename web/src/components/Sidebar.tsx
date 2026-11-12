@@ -996,6 +996,13 @@ const ROW_PR_YIELDS = "pointer-coarse:@max-[15rem]/side:hidden"
 /** Only where ROW_PR_YIELDS hides the link. */
 const ROW_PR_YIELDED = "hidden pointer-coarse:@max-[15rem]/side:block"
 const ROW_PR_YIELDED_FLEX = "hidden! pointer-coarse:@max-[15rem]/side:inline-flex!"
+/**
+ * A row whose PR has new comments: the count takes the ↗'s place, and under 15rem the number's too ("#18 💬5 ↗" left
+ * a title one letter there). The link is still the PR's, its name says the number, and amber says someone wrote.
+ */
+const ROW_PR_COUNTED = "[&>[data-external-mark]]:hidden @max-[15rem]/side:[&>[data-pr-number]]:hidden"
+/** ROW_PR's classes for a task's PR link: ROW_PR_COUNTED while it has new comments. */
+const rowPr = (task: Task) => cx(ROW_PR, prNewCommentsOf(task) > 0 && ROW_PR_COUNTED)
 
 /**
  * In the place of a PR link that ROW_PR_YIELDS hides: the PR's state icon in its state's colour (PR_STYLE), still and
@@ -1005,13 +1012,9 @@ function PrMark({ task }: { task: Task }) {
   const state = prStateOf(task)
   if (!state) return null
   const { icon: Icon, link } = PR_STYLE[state]
-  return (
-    <>
-      <Icon aria-hidden data-testid="sidebar-pr-mark" data-pr-state={state} className={cx("mr-1 h-3.5 w-3.5 shrink-0", link, ROW_PR_YIELDED)} />
-      {/* Its new comments stay beside it (PrName says them); "flex", not "block", keeps the glyph and the number on one line. */}
-      <PrComments task={task} named className={cx("mr-1 text-[11px]", ROW_PR_YIELDED_FLEX)} />
-    </>
-  )
+  // New comments stand in for the glyph (PrName says both): only an open PR has them, and the title needs the room.
+  if (prNewCommentsOf(task) > 0) return <PrComments task={task} named className={cx("mr-1 text-[11px]", ROW_PR_YIELDED_FLEX)} />
+  return <Icon aria-hidden data-testid="sidebar-pr-mark" data-pr-state={state} className={cx("mr-1 h-3.5 w-3.5 shrink-0", link, ROW_PR_YIELDED)} />
 }
 /** ", PR #23" at the end of a row's name, where its PR link is hidden (PrMark), with its new comments. */
 function PrName({ task }: { task: Task }) {
@@ -1062,7 +1065,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         {prMeta && closable && <PrName task={task} />}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
-      {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0", closable && ROW_PR_YIELDS)} />}
+      {prMeta && <PrChip task={task} variant="number" className={cx(rowPr(task), "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0", closable && ROW_PR_YIELDS)} />}
       {prMeta && closable && <PrMark task={task} />}
       {closable && <DoneButton task={task} />}
     </div>
@@ -1272,7 +1275,7 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           {folded && tree && <span className="col-start-3 row-start-1"><TreeCountChip tree={tree} /></span>}
           {prMeta && closable && <PrName task={task} />}
         </button>
-        {prMeta && <PrChip task={task} variant="number" className={cx(ROW_PR, "text-[11px]", closable && ROW_PR_YIELDS)} />}
+        {prMeta && <PrChip task={task} variant="number" className={cx(rowPr(task), "text-[11px]", closable && ROW_PR_YIELDS)} />}
         {prMeta && closable && <PrMark task={task} />}
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("shrink-0 text-[11px] @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </div>
