@@ -204,6 +204,11 @@ export interface Task {
   prMergedAt: number | null
   /** GitHub login of whoever merged the PR. */
   prMergedBy: string | null
+  /**
+   * Comments on its open PR since its owner last opened the PR from Box Yard (shared/prComments.ts says what counts).
+   * Null or absent: GitHub hasn't been asked yet, or Settings › New PR comments is off.
+   */
+  prNewComments?: number | null
   previews: PreviewLink[]
   question: string | null
   /**
@@ -866,6 +871,11 @@ export interface Settings {
    * default branch), Box Yard closes the same-repo issues its title and body name with a closing keyword.
    */
   closeIssuesOnMerge: boolean
+  /**
+   * New PR comments (shared/prComments.ts): how many minutes pass between the background rounds that ask GitHub for
+   * comments on open PRs, one of PR_COMMENT_MINUTES.options. 0 is off: nothing asks, and no task shows a count.
+   */
+  prCommentMinutes: number
   /** The CLI the Coordinator runs on (shared/agentCli.ts): Claude Code unless set to Codex. */
   orchestratorCli: ManagerCli
   orchestratorModel: string

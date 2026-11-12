@@ -1,5 +1,6 @@
 import type { Store } from "./store.js"
 import { parsePrUrl, type PrInfo } from "./prs.js"
+import { PR_ACTIVITY_FIELDS, toActivity, type GqlPrActivity, type PrActivity, type PrCommentCount } from "./prComments.js"
 import { errorMessage } from "./util/retry.js"
 import { PR_CHECKS_LISTED, type PrCheck, type PrDetails, type PrDetailsAnswer, type PrMergeState, type PrReviewState } from "../shared/prDetails.js"
 import type { PrState } from "../shared/types.js"
@@ -9,6 +10,8 @@ import type { PrState } from "../shared/types.js"
  * GitHub when the page shows the PR and again at most every PR_DETAILS_FRESH_MS however many tabs ask. One GraphQL
  * query costs 1 point of the token's 5,000 an hour; a token PrTracker paused for its rate limit isn't asked at all.
  * The state it reads (merged, closed, ...) is saved like a poll's answer, so the header never disagrees with the sheet.
+ * With Settings › New PR comments on, the same query reads the PR's comments (server/prComments.ts, still 1 point), so
+ * the count of new ones is current as soon as a task opens and every minute while it stays open.
  */
 export const PR_DETAILS_FRESH_MS = 20_000
 
@@ -21,10 +24,19 @@ export interface PrDetailsDeps {
   pausedUntil?: (token: string) => number
   /** Save the PR's state as a poll would (PrTracker.apply). */
   apply?: (taskId: string, prUrl: string, info: PrInfo) => void
+  /**
+   * New PR comments (server/prComments.ts). `enabled`: whether to read the comments too. `ingest`: save the count from
+   * them like a background round would (PrCommentTracker.ingest), and say what it is.
+   */
+  comments?: {
+    enabled: () => boolean
+    ingest: (prUrl: string, activity: PrActivity, viewer: string | null) => PrCommentCount | null
+  }
   now?: () => number
 }
 
-const QUERY = `query($o: String!, $n: String!, $p: Int!) { repository(owner: $o, name: $n) { pullRequest(number: $p) {
+/** `comments`: also the PR's comments and the token's own login, to count the new ones. */
+const query = (comments: boolean) => `query($o: String!, $n: String!, $p: Int!) { ${comments ? "viewer { login } " : ""}repository(owner: $o, name: $n) { pullRequest(number: $p) {
   number title url state isDraft mergedAt mergedBy { login } baseRefName headRefName headRefOid
   mergeable mergeStateStatus reviewDecision changedFiles additions deletions
   commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes {
@@ -32,6 +44,7 @@ const QUERY = `query($o: String!, $n: String!, $p: Int!) { repository(owner: $o,
     ... on CheckRun { name status conclusion detailsUrl }
     ... on StatusContext { context state targetUrl }
   } } } } } }
+  ${comments ? PR_ACTIVITY_FIELDS : ""}
 } } }`
 
 interface GqlContext {
@@ -45,7 +58,7 @@ interface GqlContext {
   targetUrl?: string | null
 }
 
-export interface GqlPrDetails {
+export interface GqlPrDetails extends Omit<GqlPrActivity, "state"> {
   number?: number
   title?: string
   url?: string
@@ -136,11 +149,17 @@ export function toDetails(pr: GqlPrDetails, url: string): PrDetails | null {
     merge: state === "open" || state === "draft" ? mergeState(pr) : "clean",
     review: (pr.reviewDecision && REVIEW[pr.reviewDecision]) || "none",
     files: { changed: pr.changedFiles ?? 0, additions: pr.additions ?? 0, deletions: pr.deletions ?? 0 },
+    comments: null,
   }
 }
 
 /** Ask GitHub about one PR. Throws with a message for Cody when it can't. */
 export async function fetchPrDetails(fetchFn: typeof fetch, token: string, url: string): Promise<PrDetails> {
+  return (await fetchPr(fetchFn, token, url, false)).details
+}
+
+/** fetchPrDetails, and with `comments` the PR's comments and the token's own login (server/prComments.ts). */
+export async function fetchPr(fetchFn: typeof fetch, token: string, url: string, comments: boolean): Promise<{ details: PrDetails; activity: PrActivity | null; viewer: string | null }> {
   const pr = parsePrUrl(url)
   if (!pr) throw new Error("It isn't a github.com pull request URL.")
   let res: Response
@@ -148,7 +167,7 @@ export async function fetchPrDetails(fetchFn: typeof fetch, token: string, url: 
     res = await fetchFn("https://api.github.com/graphql", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "box-yard" },
-      body: JSON.stringify({ query: QUERY, variables: { o: pr.owner, n: pr.name, p: pr.number } }),
+      body: JSON.stringify({ query: query(comments), variables: { o: pr.owner, n: pr.name, p: pr.number } }),
       signal: AbortSignal.timeout(10_000),
     })
   } catch (err) {
@@ -157,10 +176,13 @@ export async function fetchPrDetails(fetchFn: typeof fetch, token: string, url: 
   if (res.status === 401) throw new Error("GitHub refused this project's token (HTTP 401).")
   if (res.status === 403 || res.status === 429) throw new Error(`GitHub's rate limit for this project's token (HTTP ${res.status}). Try again in a minute.`)
   if (!res.ok) throw new Error(`GitHub answered HTTP ${res.status}.`)
-  const body = (await res.json().catch(() => null)) as { data?: { repository?: { pullRequest?: GqlPrDetails | null } | null }; errors?: { type?: string; message?: string }[] } | null
+  const body = (await res.json().catch(() => null)) as {
+    data?: { viewer?: { login?: string } | null; repository?: { pullRequest?: GqlPrDetails | null } | null }
+    errors?: { type?: string; message?: string }[]
+  } | null
   const found = body?.data?.repository?.pullRequest
   const details = found ? toDetails(found, url) : null
-  if (details) return details
+  if (found && details) return { details, activity: comments ? toActivity(found) : null, viewer: body?.data?.viewer?.login ?? null }
   const e = body?.errors?.[0]
   if (e?.type === "NOT_FOUND") throw new Error("This project's GitHub token can't see the pull request (or it doesn't exist).")
   throw new Error(e?.message ? `GitHub said: ${e.message}` : "GitHub returned no pull request.")
@@ -195,9 +217,12 @@ export class PrDetailsSource {
     const paused = this.deps.pausedUntil?.(token) ?? 0
     if (this.now() < paused) return this.fail(`GitHub's rate limit is paused for this project's token until ${new Date(paused).toLocaleTimeString()}.`)
     try {
-      const details = await fetchPrDetails(this.deps.fetch, token, url)
+      const live = (state: PrState) => state === "open" || state === "draft"
+      const { details, activity, viewer } = await fetchPr(this.deps.fetch, token, url, Boolean(this.deps.comments?.enabled()))
       this.deps.apply?.(taskId, url, { state: details.state, mergedAt: details.mergedAt, mergedBy: details.mergedBy, headSha: details.headSha })
-      return { details, error: null, checkedAt: this.now() }
+      // Counted on an open PR only, like the background round.
+      const comments = activity && live(details.state) ? (this.deps.comments?.ingest(url, activity, viewer) ?? null) : null
+      return { details: { ...details, comments }, error: null, checkedAt: this.now() }
     } catch (err) {
       return this.fail(errorMessage(err))
     }

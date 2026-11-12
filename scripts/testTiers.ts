@@ -8,6 +8,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/owner-output.e2e.test.ts": "Full server/task-manager owner personalization fixture",
   "test/owner-close.e2e.test.ts": "Full server/HTTP/MCP owner authority and state-transition fixture",
   "test/github-reference-route.test.ts": "Full Box Yard server/HTTP fixture",
+  "test/pr-comments-route.test.ts": "Full Box Yard server/HTTP fixture",
   "test/automation-status-only-mcp.test.ts": "Full server/task-manager MCP fixture",
   "test/agent-logins.e2e.test.ts": "End-to-end runner/server integration",
   "test/agent-wake.e2e.test.ts": "End-to-end runner/server integration",

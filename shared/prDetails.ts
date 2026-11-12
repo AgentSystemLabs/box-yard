@@ -46,6 +46,11 @@ export interface PrDetails {
   merge: PrMergeState
   review: PrReviewState
   files: { changed: number; additions: number; deletions: number }
+  /**
+   * Comments written since the PR was last opened from Box Yard (shared/prComments.ts says what counts), and when
+   * that was (null: never). Null for a merged or closed PR, and with Settings › New PR comments off.
+   */
+  comments: { count: number; viewedAt: number | null } | null
 }
 
 /** GET /api/tasks/:id/pr. Exactly one of `details` and `error` is set. */

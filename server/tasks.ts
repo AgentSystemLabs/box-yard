@@ -55,6 +55,7 @@ import { capReply, preview } from "./replies.js"
 import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
 import { AUTO_DONE_FROM, PrTracker, prNumber, restingStatus, type PrChange } from "./prs.js"
 import { PrDetailsSource } from "./prDetails.js"
+import { PrCommentTracker } from "./prComments.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
 import { prMark, quietAgentWake, taskTrigger, turnTrigger } from "./turnTrigger.js"
 import { isCopiedDefaultRoute, loadRouting, resolveAgentRoute } from "./routing.js"
@@ -610,6 +611,8 @@ export class TaskManager {
   readonly prs: PrTracker
   /** The task page's PR sheet: checks, mergeability, review and files, asked from GitHub on demand. */
   readonly prDetails: PrDetailsSource
+  /** New comments on open PRs since each was last opened from Box Yard (server/prComments.ts). */
+  readonly prComments: PrCommentTracker
   /** Closes the issues a merged PR names (server/mergeFollowUp.ts). */
   readonly issues: IssueCloser
   /** When this computer slept: local-runner turns and starts that sleep broke resume instead of failing (#104). */
@@ -829,12 +832,25 @@ export class TaskManager {
       autoDone: (row) => this.autoDoneOnMerge(row) && !this.mergeDoneBlocker(row),
       log: (msg) => console.warn(msg),
     })
+    this.prComments = new PrCommentTracker({
+      store: deps.store,
+      fetch: githubFetch,
+      token: this.githubTokenFor,
+      health: (token) => this.prs.tokenHealth(token),
+      intervalMs: () => this.settings.get().prCommentMinutes * 60_000,
+      onCount: (taskId) => this.emitTask(taskId),
+      log: (msg) => console.warn(msg),
+    })
     this.prDetails = new PrDetailsSource({
       store: deps.store,
       fetch: githubFetch,
       token: this.githubTokenFor,
       pausedUntil: (token) => this.prs.tokenHealth(token).pausedUntil,
       apply: (taskId, url, info) => this.prs.apply(taskId, url, info),
+      comments: {
+        enabled: () => this.settings.get().prCommentMinutes > 0,
+        ingest: (url, activity, viewer) => this.prComments.ingest(url, activity, viewer),
+      },
     })
     this.issues = new IssueCloser({
       store: deps.store,
@@ -967,12 +983,14 @@ export class TaskManager {
     this.publishDirectory()
     void this.cleanupOrphanBoxes()
     this.prs.start()
+    this.prComments.start()
     // Merges whose issues were still being closed when Box Yard stopped.
     void this.issues.run()
     this.sleep.start(5_000, (gap) => {
       console.log(`[box-yard] this computer slept for ${Math.round(gap.ms / 1000)}s`)
       // PRs may have been merged meanwhile, and requests that failed while asleep backed the tracker off.
       this.prs.wake()
+      this.prComments.wake()
     })
     this.schedule()
   }
@@ -980,6 +998,7 @@ export class TaskManager {
   stop() {
     this.stopped = true
     this.prs.stop()
+    this.prComments.stop()
     this.sleep.stop()
     for (const t of this.timers) clearInterval(t)
     if (this.emitBoxesTimer) clearTimeout(this.emitBoxesTimer)

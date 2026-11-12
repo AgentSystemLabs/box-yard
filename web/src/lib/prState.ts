@@ -1,7 +1,8 @@
 // How a task's pull request reads in the UI: GitHub's open / draft / merged / closed. Pure, so it is unit tested.
 import type { PrState, Task, TaskStatus } from "../../../shared/types"
+import { PR_COMMENTS_RULE, prCommentsLabel } from "../../../shared/prComments"
 
-export type PrTask = Pick<Task, "prUrl" | "prState" | "prMergedAt" | "prMergedBy">
+export type PrTask = Pick<Task, "prUrl" | "prState" | "prMergedAt" | "prMergedBy" | "prNewComments">
 
 export const prNumber = (url: string | null | undefined) => /\/pull\/(\d+)/.exec(url ?? "")?.[1] ?? null
 
@@ -24,10 +25,20 @@ export function prLabel(task: PrTask): string | null {
   return state === "merged" ? `Merged${num}` : state === "closed" ? `Closed${num}` : state === "draft" ? `Draft${num}` : `PR${num}`
 }
 
-/** Tooltip, e.g. "Merged 12m ago by cody". */
+/**
+ * How many comments were written on its PR since it was last opened from Box Yard (shared/prComments.ts says what
+ * counts): 0 when there are none, when GitHub hasn't said yet, and for a merged or closed PR.
+ */
+export function prNewCommentsOf(task: Pick<Task, "prUrl" | "prState" | "prNewComments">): number {
+  const state = prStateOf(task)
+  return state === "open" || state === "draft" ? Math.max(0, task.prNewComments ?? 0) : 0
+}
+
+/** Tooltip, e.g. "Merged 12m ago by cody"; an open PR with new comments says how many, and what isn't counted. */
 export function prTooltip(task: PrTask, now = Date.now()): string | null {
   const state = prStateOf(task)
   if (!state) return null
+  const comments = prNewCommentsOf(task)
   const head =
     state === "merged"
       ? ["Merged", task.prMergedAt ? ago(task.prMergedAt, now) : "", task.prMergedBy ? `by ${task.prMergedBy}` : ""].filter(Boolean).join(" ")
@@ -36,6 +47,7 @@ export function prTooltip(task: PrTask, now = Date.now()): string | null {
         : state === "draft"
           ? "Draft pull request"
           : "Open pull request"
+  if (comments) return `${head}\n${prCommentsLabel(comments)}\n${PR_COMMENTS_RULE}\n${task.prUrl}`
   return `${head}\n${task.prUrl}`
 }
 

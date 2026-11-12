@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm"
 import type { PluggableList } from "unified"
 import { useLocation } from "wouter"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowUpRight, Box, Check, ChevronDown, ChevronUp, ChevronsUp, Copy, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, HardDrive, Loader2, type LucideIcon } from "lucide-react"
+import { ArrowUpRight, Box, Check, ChevronDown, ChevronUp, ChevronsUp, Copy, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, HardDrive, Loader2, MessageSquare, type LucideIcon } from "lucide-react"
 import { hintForHref, useEntityIndex } from "../lib/entities"
 import {
   entityLookupsKey,
@@ -37,7 +37,9 @@ import { previewKind } from "../lib/filePreview"
 import { fetchTasks, keys } from "../lib/queries"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
-import { prLabel, prNumber, prStateOf, prTooltip, type BadgeStatus, type PrTask } from "../lib/prState"
+import { prLabel, prNewCommentsOf, prNumber, prStateOf, prTooltip, type BadgeStatus, type PrTask } from "../lib/prState"
+import { notePrView } from "../lib/prViews"
+import { prCommentsLabel, prCommentsText } from "../../../shared/prComments"
 import { absoluteTime, elapsedLabel, isoTime, timeAgo } from "../lib/time"
 import type { BoxSize, PrState, Task, TaskStatus } from "../../../shared/types"
 import type { ProjectColor } from "../../../shared/projectColors"
@@ -226,7 +228,27 @@ export const PR_STYLE: Record<PrState, { icon: LucideIcon; chip: string; link: s
 }
 
 /**
- * A task's pull request: "PR #23", "Draft #23", "Merged #23" or "Closed #23" in GitHub's colors. `chip` is the
+ * New comments on a task's open PR since it was last opened from Box Yard: a comment glyph and the count ("99+" past
+ * 99), amber like everything that waits on its reader. Nothing at 0, before GitHub has said, and for a merged or closed
+ * PR. Not a control: it sits inside the PR's own link (PrChip), or beside a PR mark that isn't one. Its words are for a
+ * screen reader; where the link around it has an accessible name of its own, that name says them (`named`).
+ */
+export function PrComments({ task, className, named }: { task: Pick<Task, "prUrl" | "prState" | "prNewComments">; className?: string; named?: boolean }) {
+  const count = prNewCommentsOf(task)
+  if (!count) return null
+  return (
+    <span data-testid="pr-new-comments" data-count={count} className={cx("inline-flex shrink-0 items-center gap-0.5 font-medium whitespace-nowrap text-amber-300 tabular-nums", className)}>
+      <MessageSquare aria-hidden className="h-3 w-3 shrink-0" />
+      <span aria-hidden>{prCommentsText(count)}</span>
+      {!named && <span className="sr-only">, {prCommentsLabel(count)}</span>}
+    </span>
+  )
+}
+
+/**
+ * A task's pull request: "PR #23", "Draft #23", "Merged #23" or "Closed #23" in GitHub's colors. An open one with
+ * comments written since it was last opened from Box Yard ends with their count (PrComments); opening it is what
+ * reads them (NewTabLink reports every PR link's click). `chip` is the
  * bordered pill (task header), `link` the plain inline link (card footers), `number` just the number and ↗ (compact
  * task rows), with the state in its accessible name. Renders nothing without a PR.
  * `activity` folds a running action into the chip ("PR #23 · merging…" with a spinner) instead of a second pill.
@@ -254,13 +276,14 @@ export function PrChip({
   const Icon = s.icon
   const tooltip = prTooltip(task)
   const number = prNumber(task.prUrl)
+  const comments = prNewCommentsOf(task)
   return (
     <NewTabLink
       href={task.prUrl}
       mark="end"
       markClassName={fold ? HEADER_FOLD.label : undefined}
       title={(activity ? `${activity.title}\n${tooltip}` : tooltip) ?? undefined}
-      aria-label={variant === "number" ? `${prLabel(task)} on GitHub (opens in a new tab)` : undefined}
+      aria-label={variant === "number" ? `${prLabel(task)}${comments ? `, ${prCommentsLabel(comments)},` : ""} on GitHub (opens in a new tab)` : undefined}
       data-pr-state={state}
       className={cx(
         "inline-flex shrink-0 items-center gap-1 whitespace-nowrap",
@@ -270,8 +293,9 @@ export function PrChip({
       )}
     >
       {variant !== "number" && <>{activity ? activity.icon : <Icon className={cx(variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />}{" "}</>}
-      <span className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
+      <span data-pr-number={variant === "number" ? "" : undefined} className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
       {activity && <span className={cx("font-normal", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
+      <PrComments task={task} named={variant === "number"} />
     </NewTabLink>
   )
 }
@@ -673,7 +697,7 @@ export function glueMark(children: ReactNode, mark: ReactNode): ReactNode {
  * flex chip or row (the mark is its last item), false for an icon-only button that already says where it goes.
  * Cards are often clickable themselves, so the click stops here and opens the link, not the card.
  */
-export function NewTabLink({ onClick, mark = "glued", markClassName, title, href, children, ...rest }: ComponentProps<"a"> & { mark?: "glued" | "end" | false; markClassName?: string }) {
+export function NewTabLink({ onClick, onAuxClick, mark = "glued", markClassName, title, href, children, ...rest }: ComponentProps<"a"> & { mark?: "glued" | "end" | false; markClassName?: string }) {
   const tip = !href || (title && title.includes(href)) ? title : title ? `${title}\n${href}` : href
   return (
     <a
@@ -685,7 +709,14 @@ export function NewTabLink({ onClick, mark = "glued", markClassName, title, href
       data-external=""
       onClick={(e) => {
         e.stopPropagation()
+        // A pull request: opening it from here is what marks its comments read (lib/prViews.ts).
+        notePrView(href)
         onClick?.(e)
+      }}
+      onAuxClick={(e) => {
+        // A middle click opens it in a tab too, without a click event.
+        if (e.button === 1) notePrView(href)
+        onAuxClick?.(e)
       }}
     >
       {mark === "glued" ? (

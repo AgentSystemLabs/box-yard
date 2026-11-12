@@ -126,9 +126,66 @@ export const prNumber = (url: string | null | undefined) => parsePrUrl(url)?.num
 /** The wait before a token that failed `failures` times in a row is tried again on schedule. */
 export const backoffMs = (intervalMs: number, failures: number) => Math.min(intervalMs * 2 ** Math.min(failures, 10), PR_MAX_BACKOFF_MS)
 
-class RateLimited extends Error {
+/** GitHub said to stop asking with a token until `until` (HTTP 403/429, or a RATE_LIMITED error). */
+export class RateLimited extends Error {
   constructor(readonly until: number) {
     super(`GitHub rate limit; paused until ${new Date(until).toISOString()}`)
+  }
+}
+
+export interface GqlError {
+  type?: string
+  message?: string
+  path?: (string | number)[]
+}
+
+/** A GraphQL answer: its data (fields that failed are null, with an entry in `errors`) and the token's budget after it. */
+export interface GqlAnswer<T> {
+  data: T
+  errors: GqlError[]
+  /** `rateLimit { cost remaining resetAt }` when the query asked for it: points this query cost, points left, when they reset. */
+  rate: { cost: number | null; remaining: number | null; resetAt: number | null }
+}
+
+/**
+ * One GraphQL request to GitHub. Throws RateLimited when GitHub says to stop (with when to ask again), and an Error
+ * for any other failure (HTTP error, no data). A query that names `rateLimit` gets the token's budget back in `rate`.
+ */
+export async function githubGraphql<T>(
+  fetchFn: typeof fetch,
+  token: string,
+  query: string,
+  variables: Record<string, string | number>,
+  now: () => number = Date.now,
+): Promise<GqlAnswer<T>> {
+  const res = await fetchFn("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "box-yard" },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (res.status === 403 || res.status === 429) {
+    const retryAfter = Number(res.headers.get("retry-after"))
+    const reset = Number(res.headers.get("x-ratelimit-reset"))
+    if (retryAfter > 0) throw new RateLimited(now() + retryAfter * 1000)
+    if (res.headers.get("x-ratelimit-remaining") === "0" && reset > 0) throw new RateLimited(reset * 1000)
+    // A secondary limit without a hint: GitHub asks for at least a minute.
+    throw new RateLimited(now() + 60_000)
+  }
+  if (!res.ok) throw new Error(`GitHub GraphQL returned HTTP ${res.status}`)
+  const body = (await res.json()) as { data?: T & { rateLimit?: { cost?: number; remaining?: number; resetAt?: string } }; errors?: GqlError[] }
+  const limit = body.data?.rateLimit
+  const resetAt = limit?.resetAt ? Date.parse(limit.resetAt) : NaN
+  if (body.errors?.some((e) => e.type === "RATE_LIMITED")) throw new RateLimited(Number.isFinite(resetAt) ? resetAt : now() + 60_000)
+  if (!body.data) throw new Error(body.errors?.[0]?.message ?? "GitHub GraphQL returned no data")
+  return {
+    data: body.data,
+    errors: body.errors ?? [],
+    rate: {
+      cost: typeof limit?.cost === "number" ? limit.cost : null,
+      remaining: typeof limit?.remaining === "number" ? limit.remaining : null,
+      resetAt: Number.isFinite(resetAt) ? resetAt : null,
+    },
   }
 }
 
@@ -415,38 +472,16 @@ export class PrTracker {
 fragment pr on PullRequest { state isDraft mergedAt mergedBy { login } headRefOid labels(first: 30) { nodes { name } } }`
 
     this.requests++
-    const res = await this.fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "box-yard" },
-      body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(15_000),
-    })
-    if (res.status === 403 || res.status === 429) {
-      const retryAfter = Number(res.headers.get("retry-after"))
-      const reset = Number(res.headers.get("x-ratelimit-reset"))
-      if (retryAfter > 0) throw new RateLimited(this.now() + retryAfter * 1000)
-      if (res.headers.get("x-ratelimit-remaining") === "0" && reset > 0) throw new RateLimited(reset * 1000)
-      // A secondary limit without a hint: GitHub asks for at least a minute.
-      throw new RateLimited(this.now() + 60_000)
-    }
-    if (!res.ok) throw new Error(`GitHub GraphQL returned HTTP ${res.status}`)
-    const body = (await res.json()) as {
-      data?: Record<string, { pullRequest?: GqlPr | null } | null> & { rateLimit?: { remaining?: number; resetAt?: string } }
-      errors?: { type?: string; message?: string; path?: (string | number)[] }[]
-    }
-    const limit = body.data?.rateLimit
-    const resetAt = limit?.resetAt ? Date.parse(limit.resetAt) : NaN
-    if (body.errors?.some((e) => e.type === "RATE_LIMITED")) throw new RateLimited(Number.isFinite(resetAt) ? resetAt : this.now() + 60_000)
-    if (!body.data) throw new Error(body.errors?.[0]?.message ?? "GitHub GraphQL returned no data")
+    const { data, errors, rate } = await githubGraphql<Record<string, { pullRequest?: GqlPr | null } | null>>(this.fetch, token, query, variables, this.now)
     // Leave headroom for agents using the same token.
-    if (typeof limit?.remaining === "number" && limit.remaining < RATE_FLOOR && Number.isFinite(resetAt)) h.pausedUntil = resetAt
+    if (rate.remaining !== null && rate.remaining < RATE_FLOOR && rate.resetAt !== null) h.pausedUntil = rate.resetAt
     // A missing repo or PR (or one the token can't see: GitHub says NOT_FOUND for those too) comes back as null next
     // to an error for that field; the others still count.
     return rows.map((_, i) => {
-      const pr = body.data?.[`p${i}`]?.pullRequest
+      const pr = data[`p${i}`]?.pullRequest
       const info = pr ? toInfo(pr) : null
       if (info) return { info, error: null }
-      const e = body.errors?.find((x) => x.path?.[0] === `p${i}`)
+      const e = errors.find((x) => x.path?.[0] === `p${i}`)
       const error = e
         ? `${e.type === "NOT_FOUND" ? "this project's GitHub token can't see it (or it doesn't exist)" : "GitHub said no"}: ${e.type ? `${e.type} ` : ""}${e.message ?? ""}`.trim()
         : null
