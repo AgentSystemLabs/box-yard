@@ -647,18 +647,23 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         >
           {/* It stays put above the list, so it has an edge of its own: a row scrolled half out of view ends at a line. */}
           <div className="shrink-0 border-b border-zinc-800/60 bg-zinc-950 px-2 pt-2 pb-1.5">
-            <div {...treeItem(coordinatorKey, 1, coordinatorId, { current: coordinator === "selected" })} className={cx("rounded-lg", FOCUS)}>
+            {/* Drawn as a project's row: the name opens its chat, and its settings button sits at the end. */}
+            <div
+              {...treeItem(coordinatorKey, 1, coordinatorId, { current: coordinator === "selected" })}
+              className={cx("flex items-center rounded-lg transition", FOCUS, coordinator === "selected" ? SELECTED : "hover:bg-zinc-900")}
+            >
               <button
                 type="button"
                 onClick={pick.coordinator}
                 onMouseDown={keepFocusForPick}
                 {...openPart(coordinatorId)}
-                className={cx(ROW, "font-medium", coordinator === "selected" ? SELECTED : "text-zinc-300 hover:bg-zinc-900")}
+                className={cx(ROW, "min-w-0 flex-1 font-medium", coordinator === "selected" ? "text-zinc-50" : "text-zinc-300")}
               >
                 <CoordinatorIcon />
                 <span className="min-w-0 flex-1 truncate">Coordinator</span>
                 {coordinator === "behind" && !drawer && <BehindMark />}
               </button>
+              <CoordinatorSettingsButton bright={coordinator === "selected"} />
             </div>
           </div>
 
@@ -1354,6 +1359,27 @@ function ProjectSettingsButton({ id, name, bright }: { id: string; name: string;
       tabIndex={-1}
       // A zoomed phone's drawer keeps the row for the name and the pin: the Captain's ⋯ menu has the settings too.
       className={cx(ROW_TOOL, toolInk(bright), "pointer-coarse:@max-[15rem]/side:hidden")}
+    >
+      <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
+    </button>
+  )
+}
+
+/**
+ * The Coordinator row's way to its settings (Settings › Coordinator: its agent, model and env vars, which pick its
+ * Claude login), drawn as a project row's settings button. The footer's Settings opens the same section.
+ */
+function CoordinatorSettingsButton({ bright }: { bright?: boolean }) {
+  const openSettings = useOpenSettings()
+  return (
+    <button
+      type="button"
+      onClick={() => openSettings("orchestrator")}
+      title="Coordinator settings"
+      aria-label="Coordinator settings"
+      data-testid="sidebar-coordinator-settings"
+      tabIndex={-1}
+      className={cx(ROW_TOOL, toolInk(bright))}
     >
       <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
     </button>
