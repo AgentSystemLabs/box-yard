@@ -3,7 +3,9 @@
 // every phase and splits the total into model time (waiting on the API), the CLI's own start-up and exit, and Box Yard.
 //
 //   npx tsx scripts/perf/captain-task-loop.ts [rounds=5] --real [--label baseline] [--json out.json] [--port 4701]
-//     [--data /tmp/dir] [--model claude-opus-5-5] [--effort medium] [--wake-debounce 3000] [--poll-ms 1500] [--keep]
+//     [--data /tmp/dir] [--model claude-opus-5-5] [--effort medium] [--scenario wait|wake] [--wake-debounce 3000]
+//     [--wake-quiet 250] [--poll-ms 1500] [--settings '{"claudeTelemetry":false}'] [--keep]
+//   npx tsx scripts/perf/captain-task-loop.ts [rounds] --mock     (fake-claude, no Captain: Box Yard's launch and turn end only)
 //   npx tsx scripts/perf/captain-task-loop.ts --summarize a.json b.json ...     (a table of saved runs, side by side)
 //
 // --real runs the real `claude` on this computer's own login and spends tokens (about $0.50 a round on Opus);
@@ -236,6 +238,9 @@ if (flag("--summarize")) {
 // ---------------------------------------------------------------- the run
 
 const real = flag("--real")
+// --mock: fake-claude stands in for the model and the task is created directly (no Captain), so only Box Yard's own
+// launch and turn-end phases are timed. Free, and steady enough to compare a 100 ms change.
+const mock = flag("--mock")
 const keep = flag("--keep")
 const label = opt("--label") ?? "run"
 const jsonOut = opt("--json")
@@ -243,13 +248,14 @@ const port = Number(opt("--port") ?? 4701)
 const model = opt("--model") ?? "claude-opus-5-5"
 const effort = opt("--effort") ?? "medium"
 const wakeDebounce = opt("--wake-debounce")
+const wakeQuiet = opt("--wake-quiet")
 const pollMs = opt("--poll-ms")
 const dataDir = path.resolve(opt("--data") ?? fs.mkdtempSync(path.join(os.tmpdir(), "box-yard-loop-")))
 // "wait": the Captain may wait for the task in its turn (what it does for quick work). "wake": it's told to end its
 // turn, so the answer comes from the wake-up turn the task's update starts.
 const scenario = opt("--scenario") ?? "wait"
 const rounds = Number(args[0] ?? 5)
-if (!real) {
+if (!real && !mock) {
   console.log(`Would run ${rounds} round(s) (+1 warm-up) of Captain → task → reply on ${model} (${effort}) with the real claude CLI, in ${dataDir} on port ${port}. Pass --real to spend the tokens.`)
   process.exit(0)
 }
@@ -264,6 +270,7 @@ process.env.BOXYARD_DATA_DIR = dataDir
 process.env.BOXYARD_HOME = path.join(dataDir, "home")
 process.env.BOXYARD_LOCAL_DIR = path.join(dataDir, "workspaces")
 process.env.DISABLE_AUTOUPDATER = "1"
+if (mock) process.env.BOXYARD_MOCK = "1"
 // No GitHub login either: the server would hand this computer's `gh` token to the bench's agents.
 process.env.GH_CONFIG_DIR = path.join(dataDir, "gh")
 fs.mkdirSync(process.env.GH_CONFIG_DIR, { recursive: true })
@@ -287,8 +294,8 @@ const c: Config = {
   publicUrl: "",
   provider: "local",
   defaultRunner: "local",
-  mock: false,
-  claudeBin: "claude",
+  mock,
+  claudeBin: mock ? baseConfig.claudeBin : "claude",
   githubToken: "",
   // The Captain's reports mustn't start Coordinator turns: this measures the Captain's chat.
   orchestratorAutoWake: false,
@@ -326,8 +333,9 @@ const server = await new Promise<Server>((resolve) => {
 })
 await yard.start()
 const base = `http://127.0.0.1:${port}`
-const tuning = yard.captains.tuning as { wakeDebounceMs: number }
+const tuning = yard.captains.tuning
 if (wakeDebounce) tuning.wakeDebounceMs = Number(wakeDebounce)
+if (wakeQuiet) tuning.wakeQuietMs = Number(wakeQuiet)
 const settingsPatch = opt("--settings")
 yard.settings.update({ captainModel: model, captainEffort: effort, agentModel: model, agentEffort: effort, gitUserName: "Bench", gitUserEmail: "bench@example.invalid", ...(settingsPatch ? JSON.parse(settingsPatch) : {}) })
 
@@ -351,7 +359,7 @@ async function until<T>(fn: () => T | null | undefined | false, what: string, ms
 const taskSeen = new Map<string, number>()
 const broadcast = yard.hub.broadcast.bind(yard.hub)
 yard.hub.broadcast = ((event: { type: string; task?: { id: string } }) => {
-  if (event.type === "task.updated" || event.type === "task.created") {
+  if (event.type === "task") {
     const id = event.task?.id
     if (id && !taskSeen.has(id)) taskSeen.set(id, Date.now())
   }
@@ -368,14 +376,14 @@ const projectId = project.id
 const captainIdle = () => !yard.captains.state(projectId)?.busy
 const quiet = () => captainIdle() && yard.store.listTaskRows().every((t) => !t.current_turn_id && !["queued", "starting", "working"].includes(t.status))
 
-const saved: Saved = { label, at: new Date().toISOString(), options: { scenario, model, effort, wakeDebounceMs: tuning.wakeDebounceMs, pollMs: c.pollMs, claude: execFileSync("claude", ["--version"]).toString().trim(), settings: settingsPatch ?? null, env: process.env.BOXYARD_BENCH_NOTE ?? null }, rounds: [] }
+const saved: Saved = { label, at: new Date().toISOString(), options: { scenario, model, effort, wakeDebounceMs: tuning.wakeDebounceMs, wakeQuietMs: tuning.wakeQuietMs, pollMs: c.pollMs, claude: mock ? "fake-claude" : execFileSync("claude", ["--version"]).toString().trim(), settings: settingsPatch ?? null, env: process.env.BOXYARD_BENCH_NOTE ?? null }, rounds: [] }
 const save = () => jsonOut && fs.writeFileSync(jsonOut, JSON.stringify(saved, null, 2))
 
 try {
   for (let i = 0; i <= rounds; i++) {
     await until(quiet, "everything idle before the round")
     // The turn-end push and archive of the round before: let them finish, so they don't share this round's CPU.
-    await new Promise((r) => setTimeout(r, 1500))
+    await new Promise((r) => setTimeout(r, mock ? 300 : 1500))
     const word = `PONG-${i}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
     const beforeTasks = new Set(yard.store.listTasks({ projectId }).map((t) => t.id))
     const beforeTimings = new Set(yard.store.listTurnTimings({ since: 0, limit: 10_000 }).map((t) => t.id))
@@ -386,6 +394,16 @@ try {
       scenario === "wake"
         ? `${ask} Don't call wait_for_tasks: end your turn as soon as it's started, and when its update arrives tell me the word it replied with.`
         : `${ask} When it has finished, tell me the word it replied with.`
+    if (mock) {
+      const t0 = Date.now()
+      const made = yard.tasks.createTask({ projectId, title: `Ping ${i}`, prompt: `Reply with ${word}.` } as Parameters<typeof yard.tasks.createTask>[0])
+      const end = await until(() => marks.slice(markFrom).find((m) => m.scope === made.id && m.name === "turn.end"), "the task's turn end", 60_000)
+      await until(quiet, "everything idle after the round")
+      const timings = yard.store.listTurnTimings({ since: t0 - 1000, limit: 100 }).filter((t) => !beforeTimings.has(t.id)) as unknown as Timing[]
+      const round: Round = { i, word, t0, postedAt: t0, taskId: made.id, taskCreatedAt: yard.store.getTaskRow(made.id)!.created_at, noticeAt: end.at, replyAt: end.at, firstReplyAt: null, taskSeenAt: taskSeen.get(made.id) ?? null, correct: true, timings, marks: marks.slice(markFrom), costUsd: 0, usage: [] }
+      if (i > 0) saved.rounds.push(round)
+      continue
+    }
     const t0 = Date.now()
     await call("POST", `/api/projects/${projectId}/captain/messages`, { content })
     const postedAt = Date.now()
