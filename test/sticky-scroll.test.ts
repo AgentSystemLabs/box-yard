@@ -954,7 +954,7 @@ describe("StickyScroll", () => {
       expect(atBottom()).toBe(true)
     })
 
-    it("lands on the true bottom when the sent message renders mid-glide", () => {
+    it("a send stays on the true bottom when the sent message renders a moment later", () => {
       readHistory()
       send()
       nextFrame()
@@ -970,7 +970,7 @@ describe("StickyScroll", () => {
       readHistory()
       send()
       nextFrame()
-      // An attachment row or the auto-sized textarea takes 60px off the list's height mid-glide.
+      // An attachment row or the auto-sized textarea takes 60px off the list's height right after the send.
       view -= 60
       frame()
       glideFrames()

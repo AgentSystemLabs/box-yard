@@ -119,16 +119,15 @@ describe("archive stream", () => {
     expect(outcome).toMatchObject({ ok: true, wip: "clean" })
   })
 
-  it("fails a partial archive whose snapshot couldn't be saved, with git's error", () => {
+  // Root reads anything, so the unreadable file can't make the snapshot fail there.
+  it.skipIf(process.getuid?.() === 0)("fails a partial archive whose snapshot couldn't be saved, with git's error", () => {
     const { root, work } = taskFolder()
     fs.writeFileSync(path.join(work, "README.md"), "v2\n")
     // An unreadable file makes `git add -A` fail.
     fs.writeFileSync(path.join(work, "secret.txt"), "x")
     fs.chmodSync(path.join(work, "secret.txt"), 0)
-    const asRoot = process.getuid?.() === 0
     const { outcome } = run(root, true)
     fs.chmodSync(path.join(work, "secret.txt"), 0o644)
-    if (asRoot) return // root reads anything
     expect(outcome.ok).toBe(false)
     expect(!outcome.ok && outcome.error).toMatch(/^couldn't save uncommitted work on refs\/boxyard\/wip: .*secret\.txt/)
   })

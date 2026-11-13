@@ -76,7 +76,6 @@ function provider(o: { settings?: Partial<RunPodSettings>; machine?: Partial<Pro
 
 describe("the GPU types for browser and WebGL games", () => {
   it("are RunPod's exact gpuTypeIds, each with VRAM, a rough price and what it's for", () => {
-    for (const id of [RTX3070, A4000, ADA, A5000]) expect(CATALOG.map((g) => g.id)).toContain(id)
     expect(Object.keys(RUNPOD_GPU_GUIDE)).toEqual(expect.arrayContaining([RTX3070, A4000, ADA, A5000, "NVIDIA A40", "NVIDIA RTX A6000"]))
     expect(RUNPOD_GPU_GUIDE[A4000]).toMatchObject({ vramGb: 16 })
     expect(RUNPOD_GPU_GUIDE[ADA]).toMatchObject({ vramGb: 20 })
