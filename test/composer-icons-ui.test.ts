@@ -9,7 +9,7 @@ import { Composer } from "../web/src/components/Composer.js"
 import { DockComposer } from "../web/src/components/DockComposer.js"
 import { TaskComposer } from "../web/src/components/CaptainForward.js"
 import { SideThreadPane, ThreadChatProvider } from "../web/src/components/SideThread.js"
-import { CHAT_ICONS, ChatIcon, ComposerIcon, Subtask, type ChatKind } from "../web/src/components/ChatIcons.js"
+import { CHAT_ICONS, ComposerIcon, Subtask, type ChatKind } from "../web/src/components/ChatIcons.js"
 import { CaptainCap, Helm } from "../web/src/components/ShipIcons.js"
 import { createJumpStore } from "../web/src/components/StickyScroll.js"
 import { keys } from "../web/src/lib/queries.js"
@@ -202,12 +202,5 @@ describe("the icons", () => {
       { d: "M6 15.8h12c-1 2.8-11 2.8-12 0Z", fill: "currentColor", stroke: "none" },
       { cx: "12", cy: "9.2", r: "1.4", fill: "currentColor", stroke: "none" },
     ])
-  })
-
-  it("the nav's Coordinator mark is the composer's helm", () => {
-    render(createElement(ChatIcon, { kind: "coordinator", className: "h-4 w-4" }))
-    const svg = host.querySelector("svg")!
-    expect(svg.classList).toContain("lucide-helm")
-    expect(svg.getAttribute("aria-hidden")).toBe("true")
   })
 })

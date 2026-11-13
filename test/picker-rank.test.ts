@@ -23,6 +23,10 @@ describe("pickerRank", () => {
     const named = scorePickerFields([{ text: "deepseek-login", kind: "token" }], "123")
     expect(named).toBeNull()
     expect(issue).toBeGreaterThan(800)
+    // A blurb's better hit (a prefix) still loses to an id's weaker one (a word start): details count for half.
+    const id = scorePickerFields([{ text: "#123", kind: "token", fuzzy: false }], "123")!
+    const blurb = scorePickerFields([{ text: "123 tests fail when the deepseek login token expires", kind: "detail" }], "123")!
+    expect(id).toBeGreaterThan(blurb)
   })
 
   it("rankPickerOptions keeps input order on a tie and drops non-matches", () => {

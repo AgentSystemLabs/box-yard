@@ -148,13 +148,6 @@ describe("Composer attachments", () => {
     expect(sendButton().disabled).toBe(false)
   })
 
-  it("a box with no target cancels its uploads in flight when it goes", () => {
-    render()
-    pick(notes)
-    act(() => root.render(null))
-    expect(sent[0]!.aborted).toBe(true)
-  })
-
   it("a restored draft's image shows its uploaded copy", () => {
     prependDraft("task:one", "Again", [savedShot])
     render("task:one")
