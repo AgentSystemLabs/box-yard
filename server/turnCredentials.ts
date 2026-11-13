@@ -45,7 +45,7 @@ export function serverClaudeEnv(own: Record<string, string> | null, global: Reco
 }
 
 /**
- * What turns Claude Code's usage telemetry off (Settings › Agents › Claude Code usage telemetry). The CLI flushes that
+ * What turns Claude Code's usage telemetry off (Settings › Box agents › Claude Code usage telemetry). The CLI flushes that
  * telemetry after its result line and exits only then, about 0.6 s later; a task's turn ends at that exit, and a
  * Captain's next turn waits for it. The second var keeps the feature flags the CLI last cached, so a run has the same
  * tools as one with telemetry on. Nothing when telemetry is on: the CLI's own default.

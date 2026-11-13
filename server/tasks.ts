@@ -6813,7 +6813,7 @@ export class TaskManager {
     }
     const [opencodeBin, ...opencodeArgs] = (local || this.c.mock ? this.c.opencodeBin : (provider.opencodeBin ?? "opencode")).split(" ")
     const [cursorBin, ...cursorArgs] = (local || this.c.mock ? this.c.cursorBin : (provider.cursorBin ?? "cursor-agent")).split(" ")
-    // Settings › Agents: a Claude turn without the CLI's usage telemetry exits as soon as it has answered. A project's own env wins.
+    // Settings › Box agents: a Claude turn without the CLI's usage telemetry exits as soon as it has answered. A project's own env wins.
     if (agent === "claude") for (const [k, v] of Object.entries(claudeTelemetryEnv(this.settings.get().claudeTelemetry))) if (!(k in env)) env[k] = v
     return {
       taskId: row.id,
