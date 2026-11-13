@@ -128,12 +128,13 @@ function CoordinatorEnvEditor({
                 key={k}
                 data-env-key={k}
                 className={cx(
-                  "flex min-h-11 items-center gap-2 rounded-lg border pr-1 pl-3 text-xs sm:min-h-9",
+                  "flex min-h-11 items-center gap-2 rounded-lg border py-0.5 pr-1 pl-3 text-xs sm:min-h-9",
                   removing ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-zinc-800 bg-zinc-900 text-zinc-300",
                 )}
               >
                 <KeyRound className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
-                <code className={cx("min-w-0 flex-1 truncate font-mono", removing && "line-through")} title={k}>
+                {/* A long name wraps rather than hiding its end on a phone: it's all there is to tell two vars apart. */}
+                <code className={cx("min-w-0 flex-1 font-mono wrap-anywhere", removing && "line-through")}>
                   {k}
                 </code>
                 {removing ? (
@@ -143,7 +144,8 @@ function CoordinatorEnvEditor({
                 )}
                 <Button type="button" size="sm" variant="ghost" onClick={() => toggle(k)} aria-label={removing ? `Keep ${k}` : `Remove ${k}`} title={removing ? `Keep ${k}` : `Remove ${k} on Save`}>
                   {removing ? <Undo2 className="h-3.5 w-3.5" aria-hidden /> : <X className="h-3.5 w-3.5" aria-hidden />}
-                  {removing ? "Keep" : "Remove"}
+                  {/* On a phone the icon and its name (aria-label) carry it, so the var's name keeps the room. */}
+                  <span className="@max-[22rem]:hidden">{removing ? "Keep" : "Remove"}</span>
                 </Button>
               </li>
             )
@@ -151,7 +153,7 @@ function CoordinatorEnvEditor({
         </ul>
       )}
       {/* The name field is the row's control (its label points here); the value is masked, and never comes back. */}
-      <div className="grid gap-2 @min-[30rem]:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+      <div className="grid gap-2 @min-[30rem]:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
         <input
           id={id}
           className={cx(inputClass, "font-mono")}
