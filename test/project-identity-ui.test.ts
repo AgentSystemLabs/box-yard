@@ -263,7 +263,7 @@ describe("Project settings › Identity / Claude login", () => {
     expect(requests.filter((r) => r.url === "/api/identities")).toHaveLength(2)
   })
 
-  it("Save waits for the server before saying Saved, and sends only the identity", async () => {
+  it("Save waits for the server before saying Saved, and sends the picked identity", async () => {
     let answer!: (r: Response) => void
     vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
       requests.push({ method: init.method ?? "GET", url, body: init.body ? JSON.parse(String(init.body)) : undefined })

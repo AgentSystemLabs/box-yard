@@ -213,10 +213,11 @@ describe("navigation", () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain("box-yard Captain")
   })
 
-  it("unavailable routes render as text; artifacts still preview", () => {
+  it("an unavailable route renders as text, a schedule stays an in-app link; artifacts still preview", () => {
     render()
     expect([...chat().querySelectorAll("a")].some((a) => a.textContent === "boxes")).toBe(false)
-    expect(chat().textContent).toContain("schedule")
+    expect(chat().textContent).toContain("boxes")
+    expect(chat().querySelector('a[href="/?schedule=sch_abc123"]')?.textContent).toBe("schedule")
     click(link("/artifacts/art_report01/report.md"))
     expect(previewState()?.items[0]?.url).toBe("/artifacts/art_report01/report.md")
   })

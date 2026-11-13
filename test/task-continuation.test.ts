@@ -108,9 +108,15 @@ describe("same-task harness continuation", () => {
 
   it("rejects incompatible explicit choices and accepts Codex pins including ultra", async () => {
     const { y, task } = setup()
-    for (const options of [{ agent: "codex" as const, model: "claude-opus-5-5" }, { agent: "claude" as const, model: "gpt-6.1-sol" }, { agent: "codex" as const, model: "composer-2.5" }, { agent: "claude" as const, effort: "ultra" as const }, { agent: "cursor" as const, effort: "high" as const }, { agent: "cursor" as const, model: "opus" }]) {
-      await expect(y.tasks.continueTask(task.id, options)).rejects.toThrow()
-    }
+    const refusals = [
+      [{ agent: "codex" as const, model: "claude-opus-5-5" }, /Model claude-opus-5-5 cannot run on Codex/],
+      [{ agent: "claude" as const, model: "gpt-6.1-sol" }, /Model gpt-6.1-sol cannot run on Claude Code/],
+      [{ agent: "codex" as const, model: "composer-2.5" }, /Model composer-2.5 cannot run on Codex/],
+      [{ agent: "claude" as const, effort: "ultra" as const }, /Ultra effort is only available on Codex/],
+      [{ agent: "cursor" as const, effort: "high" as const }, /Cursor's effort is part of its model id/],
+      [{ agent: "cursor" as const, model: "opus" }, /Model opus is not a Cursor model/],
+    ] as const
+    for (const [options, refusal] of refusals) await expect(y.tasks.continueTask(task.id, options)).rejects.toThrow(refusal)
     expect(y.store.listQueuedInputs(task.id)).toEqual([])
     await y.tasks.continueTask(task.id, { agent: "codex", model: "gpt-6.1-terra", effort: "ultra" })
     expect(y.store.getTask(task.id)).toMatchObject({ model: "gpt-6.1-terra", effort: "ultra", routingRule: null })
