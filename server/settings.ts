@@ -84,6 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
   subtaskMaxChildren: SUBTASK_MAX_CHILDREN.default,
   // On, as before this setting: a merged PR already moved a pr_ready task to done; this adds idle ones.
   autoDoneOnMerge: true,
+  claudeTelemetry: true,
   // On: Map 4's PRs merge into an epic branch, where GitHub doesn't close "Fixes #N" issues itself.
   closeIssuesOnMerge: true,
   // Every 5 minutes: about 12 GitHub points an hour per 100 open PRs, of a token's 5,000 (server/prComments.ts).
@@ -250,6 +251,7 @@ export const settingsPatch = z
     subtaskMaxDepth: z.number().int().min(SUBTASK_MAX_DEPTH.min).max(SUBTASK_MAX_DEPTH.max),
     subtaskMaxChildren: z.number().int().min(SUBTASK_MAX_CHILDREN.min).max(SUBTASK_MAX_CHILDREN.max),
     autoDoneOnMerge: z.boolean(),
+    claudeTelemetry: z.boolean(),
     closeIssuesOnMerge: z.boolean(),
     // A choice, not a range: the dialog offers exactly these (a Select), so there is no number rule to keep in step.
     prCommentMinutes: z

@@ -1011,7 +1011,7 @@ export class SideThreads {
     // encrypted with.
     const own = host.claudeLogin()
     const added = !own && login && !isCredentialsLogin(login.id) ? login : null
-    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())
+    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv(), this.settings.get().claudeTelemetry)
     Object.assign(env, host.extraEnv?.() ?? {})
     return { cli: "claude", bin: bin!, args: [...pre, ...args], env, translate: null, after() {}, login: rotationLoginRef(added) ?? chatClaudeLogin(env, own) }
   }

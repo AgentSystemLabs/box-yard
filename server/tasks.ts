@@ -84,7 +84,7 @@ import { DOCKER_MAX_TASKS, DOCKER_NEEDS_CLAUDE_KEY, DOCKER_NEEDS_CODEX_KEY, DOCK
 import { isMachineBox, labelPhrase, machineBoxId, machineLabel, machineMatches, machineOfBox, normalizeLabel, pickMachine, type Machine, type MachineCandidate, type MachinePick } from "../shared/machines.js"
 import type { DockerContainerState } from "./providers/docker.js"
 import { SleepWatch, sleepLength } from "./sleep.js"
-import { CLAUDE_CREDENTIAL_VARS, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, openCodeTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
+import { CLAUDE_CREDENTIAL_VARS, claudeTelemetryEnv, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, openCodeTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
 import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sessions.js"
 import type { SessionRef } from "./connectors/connectors.js"
 import { claudeLoginRef, codexLoginRef, limitsOf, recordLimits, type LoginRef } from "./loginLimits.js"
@@ -6814,6 +6814,8 @@ export class TaskManager {
     }
     const [opencodeBin, ...opencodeArgs] = (local || this.c.mock ? this.c.opencodeBin : (provider.opencodeBin ?? "opencode")).split(" ")
     const [cursorBin, ...cursorArgs] = (local || this.c.mock ? this.c.cursorBin : (provider.cursorBin ?? "cursor-agent")).split(" ")
+    // Settings › Agents: a Claude turn without the CLI's usage telemetry exits as soon as it has answered. A project's own env wins.
+    if (agent === "claude") for (const [k, v] of Object.entries(claudeTelemetryEnv(this.settings.get().claudeTelemetry))) if (!(k in env)) env[k] = v
     return {
       taskId: row.id,
       projectId: project.id,

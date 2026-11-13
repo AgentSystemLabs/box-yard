@@ -959,6 +959,12 @@ export interface Settings {
    */
   localBuildCleanup: boolean
   /**
+   * Whether the `claude` runs Box Yard starts (agents, Captains, the Coordinator) send Claude Code's usage telemetry,
+   * as the CLI does by default. Off: each run exits about 0.6 s sooner, since the CLI has nothing to flush after its
+   * result (server/turnCredentials.ts claudeTelemetryEnv).
+   */
+  claudeTelemetry: boolean
+  /**
    * Unused: a task that isn't done no longer loses its build output after idle hours (it may be running a dev server).
    * Kept so saved settings and BOXYARD_LOCAL_BUILD_CLEANUP_IDLE_HOURS still parse.
    */

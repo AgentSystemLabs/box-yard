@@ -1540,7 +1540,7 @@ class Captain {
     // the server's env vars or Settings › Credentials, read on every run so a saved token works without a restart.
     const own = this.claudeLogin()
     const added = !own && login && !isCredentialsLogin(login.id) ? login : null
-    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())
+    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv(), this.settings.get().claudeTelemetry)
     const loginRef = rotationLoginRef(added) ?? chatClaudeLogin(env, own)
     // The connectors' values: only this process's env holds them (its MCP config names them as ${VAR}).
     Object.assign(env, connectors.env)

@@ -35,13 +35,23 @@ export interface TurnEnv {
  * `own` (a Captain's project login, projectClaudeLogin, the Coordinator's, coordinatorClaudeLogin, or a rotation
  * login), alone, or else with `global` (Settings › Credentials) over the server's.
  */
-export function serverClaudeEnv(own: Record<string, string> | null, global: Record<string, string>): NodeJS.ProcessEnv {
+export function serverClaudeEnv(own: Record<string, string> | null, global: Record<string, string>, telemetry = true): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, DISABLE_AUTOUPDATER: "1" }
   // When Box Yard itself was started from inside a Claude Code session, don't let `claude` think it is that session's child.
   for (const k of Object.keys(env)) if (k === "CLAUDECODE" || /^CLAUDE_CODE_(SESSION|CHILD|ENTRYPOINT|MESSAGING)/.test(k)) delete env[k]
   delete env.BOXYARD_SECRET_KEY
   if (own) for (const k of CLAUDE_CREDENTIAL_VARS) delete env[k]
-  return Object.assign(env, own ?? global)
+  return Object.assign(env, claudeTelemetryEnv(telemetry), own ?? global)
+}
+
+/**
+ * What turns Claude Code's usage telemetry off (Settings › Agents › Claude Code usage telemetry). The CLI flushes that
+ * telemetry after its result line and exits only then, about 0.6 s later; a task's turn ends at that exit, and a
+ * Captain's next turn waits for it. The second var keeps the feature flags the CLI last cached, so a run has the same
+ * tools as one with telemetry on. Nothing when telemetry is on: the CLI's own default.
+ */
+export function claudeTelemetryEnv(on: boolean): Record<string, string> {
+  return on ? {} : { DISABLE_TELEMETRY: "1", CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF: "1" }
 }
 
 /** The strongest Claude credential in `env`, as a one-var env; empty values don't count. */
