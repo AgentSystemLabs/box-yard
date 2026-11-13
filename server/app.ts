@@ -80,6 +80,7 @@ import { GithubReferences } from "./githubReferences.js"
 import { isMachineBox, MACHINE_LIMITS, machineOfBox, normalizeLabel, type MachineKeyRef } from "../shared/machines.js"
 import { ClaudeModels } from "./claudeModels.js"
 import { projectClaudeLogin, serverClaudeEnv } from "./turnCredentials.js"
+import { CoordinatorEnv } from "./coordinatorEnv.js"
 import { recentCaptains, recentLimit, sendCompressedJson } from "./captainRecent.js"
 import { compressResponses } from "./compress.js"
 import { webApp, webBuild } from "./webApp.js"
@@ -494,8 +495,10 @@ export function createBoxYard(
   const identityDetector = new IdentityDetector({ ...opts.detect, github: opts.github?.fetch })
   /** This computer's memory, swap and load for machine_stats, sampled once a minute from start(). */
   const machine = new MachineStats(opts.machine)
+  /** The Coordinator's own env vars (Settings › Coordinator › Env vars): names out, values only ever in. */
+  const coordinatorEnv = new CoordinatorEnv(store)
   /** Every credential value in effect: no transcript keeps one, and no error shows one. */
-  const secretValues = () => [...settings.credentials.secrets(), ...identities.secretValues(), ...logins.secretValues(), ...connectors.store.secretValues()]
+  const secretValues = () => [...settings.credentials.secrets(), ...identities.secretValues(), ...logins.secretValues(), ...connectors.store.secretValues(), ...coordinatorEnv.secrets()]
   // More Claude and Codex logins (docs/logins.md): new sessions go round robin over them and Settings › Credentials'.
   // Their values are encrypted like identity secrets and never leave the server except as a turn's login.
   const logins = new AgentLogins({
@@ -759,6 +762,8 @@ export function createBoxYard(
   captains.projectDefaults = (projectId) => tasks.projectDefaults(projectId)
   orchestrator.projectDefaults = (projectId) => tasks.projectDefaults(projectId)
   orchestrator.logins = logins
+  // Its own env vars, read on every run: a Claude credential there is its login (turnCredentials.ts coordinatorClaudeLogin).
+  orchestrator.env = () => coordinatorEnv.values()
   captains.logins = logins
   threads.logins = logins
   // External MCP connectors (docs/connectors.md › Sessions): each session gets the ones its scope reaches, side threads none.
@@ -1995,6 +2000,16 @@ export function createBoxYard(
   })
   api.get("/orchestrator", (_req, res) => {
     res.json(orchestrator.state())
+  })
+  // The Coordinator's own env vars (Settings › Coordinator › Env vars): their names out, values only ever in. The next
+  // run reads them, so a saved Claude token applies without a restart.
+  api.get("/orchestrator/env", (_req, res) => {
+    res.json(coordinatorEnv.info())
+  })
+  api.patch("/orchestrator/env", (req, res) => {
+    const env = coordinatorEnv.update(req.body)
+    hub.broadcast({ type: "coordinator.env", env })
+    res.json(env)
   })
   // ?from=&to= (epoch ms) adds `period`: the page's numbers for that range. The client
   // sends its own local midnights, so "Today" and the daily chart follow Cody's time zone.

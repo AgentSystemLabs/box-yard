@@ -12,6 +12,7 @@ import {
   savePatch,
   type SettingsSection,
 } from "../lib/settingsNav"
+import { CoordinatorEnvRow } from "./CoordinatorEnv"
 import { SettingsDraftContext, SettingsFieldError, draftSlots, updateParts, useDraft, type DraftPart, type DraftRegistry } from "../lib/settingsDraft"
 import { SettingsField, SettingsSearchProvider, SearchHighlight, useSettingsSearch } from "../lib/settingsSearch"
 import { NUMBER_RULES, numberText, problemSections, refusedByBrowser, settingsProblems, typedNumber, type SettingPath } from "../lib/settingsValidation"
@@ -684,6 +685,7 @@ export function SettingsDialog({
                       testId="orchestrator-effort"
                     />
                   </Row>
+                  <CoordinatorEnvRow fid={fid} codex={s.orchestratorCli === "codex"} />
                   <Row
                     id={fid("oac")}
                     label="Auto-compact"

@@ -17,7 +17,7 @@ export const SETTINGS_SECTIONS: SectionInfo[] = [
   {
     key: "orchestrator",
     label: "Coordinator",
-    description: "The Coordinator chat and every project's Captain: agent, model, icon, notes, compaction, merges.",
+    description: "The Coordinator chat and every project's Captain: agent, model, the Coordinator's env vars, icon, notes, compaction, merges.",
     fields: [
       "orchestratorCli",
       "orchestratorModel",

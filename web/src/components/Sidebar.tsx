@@ -647,18 +647,25 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
         >
           {/* It stays put above the list, so it has an edge of its own: a row scrolled half out of view ends at a line. */}
           <div className="shrink-0 border-b border-zinc-800/60 bg-zinc-950 px-2 pt-2 pb-1.5">
-            <div {...treeItem(coordinatorKey, 1, coordinatorId, { current: coordinator === "selected" })} className={cx("rounded-lg", FOCUS)}>
+            {/* Drawn as a project's row: the name opens its chat, and its settings button sits at the end. */}
+            <div
+              {...treeItem(coordinatorKey, 1, coordinatorId, { current: coordinator === "selected" })}
+              className={cx("flex items-center rounded-lg transition", FOCUS, coordinator === "selected" ? SELECTED : "hover:bg-zinc-900")}
+            >
               <button
                 type="button"
                 onClick={pick.coordinator}
                 onMouseDown={keepFocusForPick}
                 {...openPart(coordinatorId)}
-                className={cx(ROW, "font-medium", coordinator === "selected" ? SELECTED : "text-zinc-300 hover:bg-zinc-900")}
+                className={cx(ROW, "min-w-0 flex-1 font-medium", coordinator === "selected" ? "text-zinc-50" : "text-zinc-300")}
               >
                 <CoordinatorIcon />
                 <span className="min-w-0 flex-1 truncate">Coordinator</span>
                 {coordinator === "behind" && !drawer && <BehindMark />}
               </button>
+              <CoordinatorSettingsButton bright={coordinator === "selected"} />
+              {/* The pin's place, so its gear lines up with the projects' gears (their pins hold the end). */}
+              <span aria-hidden className={PIN_PLACE} />
             </div>
           </div>
 
@@ -1359,6 +1366,30 @@ function ProjectSettingsButton({ id, name, bright }: { id: string; name: string;
     </button>
   )
 }
+
+/**
+ * The Coordinator row's way to its settings (Settings › Coordinator: its agent, model and env vars, which pick its
+ * Claude login), drawn as a project row's settings button. The footer's Settings opens the same section.
+ */
+function CoordinatorSettingsButton({ bright }: { bright?: boolean }) {
+  const openSettings = useOpenSettings()
+  return (
+    <button
+      type="button"
+      onClick={() => openSettings("orchestrator")}
+      title="Coordinator settings"
+      aria-label="Coordinator settings"
+      data-testid="sidebar-coordinator-settings"
+      tabIndex={-1}
+      className={cx(ROW_TOOL, toolInk(bright))}
+    >
+      <SettingsIcon className="h-3.5 w-3.5" aria-hidden />
+    </button>
+  )
+}
+
+/** As wide as a project row's pin (ROW_TOOL), and gone where its gear goes (a zoomed phone's drawer): the Coordinator has no pin. */
+const PIN_PLACE = "w-8 shrink-0 pointer-fine:@max-[15rem]/side:w-6 pointer-coarse:w-11 pointer-coarse:@max-[15rem]/side:hidden"
 
 /** "Show fewer", in the head of the whole "Waiting on you" list: quiet, in the head's amber, 44px to a finger. */
 const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium whitespace-nowrap text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 @max-[19rem]/side:mr-0 @max-[19rem]/side:px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5 pointer-coarse:@max-[19rem]/side:px-1", FOCUS)

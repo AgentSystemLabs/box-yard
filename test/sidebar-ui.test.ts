@@ -671,6 +671,49 @@ describe("the logo at the top left goes to the Coordinator", () => {
   })
 })
 
+describe("the Coordinator row's settings button", () => {
+  const dialog = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find((d) => d.querySelector("h2")?.textContent === "Settings")
+  const settingsParam = () => new URLSearchParams(location.search).get("settings")
+  const coordinatorRow = () => button(nav()!, "Coordinator").closest<HTMLElement>("[role=treeitem]")!
+
+  it.each([400, 1440])("opens Settings › Coordinator over the chat, with its env vars, at %ipx", (width) => {
+    viewport(width)
+    const qc = render()
+    act(() => void qc.setQueryData(keys.coordinatorEnv, { keys: ["CLAUDE_CODE_OAUTH_TOKEN"], claudeLogin: "CLAUDE_CODE_OAUTH_TOKEN" }))
+    if (width < 1000) click(document.querySelector("button[aria-label^='Projects and tasks']")!)
+    const gear = button(coordinatorRow(), "Coordinator settings")
+    // Drawn as a project row's: the same icon and tool button, 44px to a finger, in the row beside its name.
+    const projectGear = button(section("box-yard")!, "box-yard project settings")
+    // Its ink is a step brighter on the selected row's fill, as a selected project's is.
+    const shape = (b: HTMLElement) => b.className.replace(/ text-zinc-[35]00| pointer-coarse:@max-\[15rem\]\/side:hidden/g, "")
+    expect(shape(gear)).toBe(shape(projectGear))
+    expect(gear.className).toContain("text-zinc-300")
+    expect(gear.className).toContain("pointer-coarse:h-11 pointer-coarse:w-11")
+    expect(gear.querySelector("svg")!.outerHTML).toBe(projectGear.querySelector("svg")!.outerHTML)
+    expect(gear.title).toBe("Coordinator settings")
+    gear.focus()
+    click(gear)
+    const settings = dialog()!
+    expect(settingsParam()).toBe("orchestrator")
+    expect(settings.querySelector("[data-section=orchestrator]")!.getAttribute("aria-selected")).toBe("true")
+    expect(settings.querySelector("[data-testid=coordinator-env] [data-env-key=CLAUDE_CODE_OAUTH_TOKEN]")).not.toBeNull()
+    // The chat underneath never changed: it's the Coordinator's, and its row is still the selected one.
+    expect(title()).toContain("Coordinator")
+    click(button(settings, "Close"))
+    expect(settingsParam()).toBeNull()
+    expect(document.activeElement).toBe(gear)
+  })
+
+  it("keeps the row's name a button of its own: a click there picks the Coordinator, never Settings", () => {
+    render(`${APP_HOME}?project=${YARD.id}`)
+    click(button(nav()!, "Coordinator"))
+    expect(title()).toContain("Coordinator")
+    expect(settingsParam()).toBeNull()
+    // The selected fill is on the row, under its name and its gear alike.
+    expect(coordinatorRow().getAttribute("aria-current")).toBe("page")
+  })
+})
+
 describe("Project settings from the sidebar and the Captain's ⋯", () => {
   const dialogs = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')]
   const dialog = (heading: string) => dialogs().find((d) => d.querySelector("h2")?.textContent === heading)
