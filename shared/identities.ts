@@ -228,8 +228,11 @@ export interface IdentityDetection {
   notes: string[]
 }
 
-/** A GitHub owner or login: letters, digits and single hyphens, up to 39 characters. */
-export const GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/
+/**
+ * A GitHub owner or login, up to 39 characters: a letter or digit, then letters, digits, underscores and single
+ * hyphens. Underscores are for Enterprise Managed Users ("jdoe_acme"); a hyphen never ends the name or doubles up.
+ */
+export const GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_]|-(?=[A-Za-z0-9_])){0,38}$/
 
 /** "the Acme identity", for sentences. */
 export const identityPhrase = (i: Pick<Identity, "name" | "isDefault">) => (i.isDefault ? "the Default identity" : `the ${i.name} identity`)

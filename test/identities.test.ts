@@ -114,6 +114,21 @@ describe("Identities", () => {
     expect(JSON.stringify(identities.list())).not.toMatch(/tok-/)
   })
 
+  it("matches an Enterprise Managed User's underscored owner to its repos, whatever the case", async () => {
+    const { store, identities } = setup({ github: { "tok-emu-00001": { login: "jdoe_acme", id: 9 } } })
+    const emu = identities.create({ name: "EMU", owners: ["JDoe_Acme"] })
+    expect(emu.owners).toEqual(["JDoe_Acme"])
+    const url = store.createProject({ name: "site", repo: "https://github.com/JDoe_Acme/site.git" })
+    const slug = store.createProject({ name: "app", repo: "jdoe_acme/app" })
+    const other = store.createProject({ name: "other", repo: "jdoe-acme/app" })
+    for (const p of [url, slug, other]) identities.assign(p.id, emu.id)
+    await identities.saveToken(emu.id, { owner: "JDoe_Acme", token: "tok-emu-00001" })
+    expect(identities.require(emu.id).tokens.map((t) => [t.owner, t.login])).toEqual([["jdoe_acme", "jdoe_acme"]])
+    expect(identities.base(url.id, url.repo).githubToken).toBe("tok-emu-00001")
+    expect(identities.base(slug.id, slug.repo).githubToken).toBe("tok-emu-00001")
+    expect(identities.base(other.id, other.repo).githubToken).toBe("")
+  })
+
   it("refuses a token GitHub doesn't accept, or another account's, and the Default identity's secrets", async () => {
     const { identities } = setup({ github: { "tok-alice-001": { login: "alice", id: 1 }, "tok-bob-00001": { login: "bob", id: 2 } } })
     const a = identities.create({ name: "Alice" })

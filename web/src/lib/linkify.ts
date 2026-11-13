@@ -212,7 +212,7 @@ export function githubRepo(repo: string | null | undefined): string | null {
 const GH_TEXT = new RegExp(
   [
     String.raw`(?<url>https?:\/\/[^\s<>()"'\x60]+)`,
-    String.raw`(?<![\w./-])(?<owner>[A-Za-z0-9][A-Za-z0-9-]{0,38})/(?<name>[\w.-]{1,100})#(?<xn>[1-9]\d{0,6})(?![\w-])`,
+    String.raw`(?<![\w./-])(?<owner>[A-Za-z0-9][\w-]{0,38})/(?<name>[\w.-]{1,100})#(?<xn>[1-9]\d{0,6})(?![\w-])`,
     String.raw`(?<![\w-])(?:PRs?|[Pp]ull [Rr]equests?) ?#(?<pn>[1-9]\d{0,6})(?![\w-])`,
     String.raw`(?<![\w&#/\\-])#(?<n>[1-9]\d{0,6})(?![\w-])`,
     String.raw`(?<=(?<![\w-])(?:[Hh]ead|HEAD|[Cc]ommits?|as|[Ss]quash(?:ed|-merged)?|SHA|sha)(?::? +))(?<sha>[0-9a-f]{7,40})(?![\w-])`,
