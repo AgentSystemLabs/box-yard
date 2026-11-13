@@ -264,6 +264,42 @@ function readOnlyTools(server: McpServer, ownerName?: string) {
   server.registerTool = ((name: string, config: Record<string, unknown>, cb: unknown) => register(name, config, THREAD_TOOLS.has(name) ? cb : refuse)) as typeof server.registerTool
 }
 
+/** How long wait_for_tasks gives a task just created or messaged to leave "idle", before idle counts as finished. */
+export const WAIT_GRACE_MS = 1500
+
+/**
+ * Resolve when none of the tasks is busy any more, or at the deadline. It hears every task update instead of only
+ * polling, so a wait ends in the same tick the turn does (the 1 s poll stays as a fallback). A task just created or
+ * messaged may not have left "idle" yet: before the grace is over, idle only counts for tasks this wait saw busy.
+ */
+export function settle(tasks: Pick<TaskManager, "onTaskUpdate">, read: () => { id: string; busy: boolean }[], deadline: number, graceMs = WAIT_GRACE_MS): Promise<void> {
+  const graceUntil = Date.now() + graceMs
+  const sawBusy = new Set<string>()
+  return new Promise((resolve) => {
+    let done = false
+    const check = () => {
+      if (done) return
+      const now = Date.now()
+      const list = read()
+      for (const t of list) if (t.busy) sawBusy.add(t.id)
+      const busy = list.some((t) => t.busy)
+      if (now < deadline && (busy || (now < graceUntil && !list.every((t) => sawBusy.has(t.id))))) return
+      done = true
+      off()
+      clearInterval(poll)
+      clearTimeout(grace)
+      clearTimeout(end)
+      resolve()
+    }
+    // After the update's own tick: the turn end that settled a task has then written its notice too.
+    const off = tasks.onTaskUpdate(() => queueMicrotask(check))
+    const poll = setInterval(check, 1000)
+    const grace = setTimeout(check, graceMs + 5)
+    const end = setTimeout(check, Math.max(0, deadline - Date.now()) + 5)
+    check()
+  })
+}
+
 /** The box settings create_project and update_project take. */
 interface BoxSettingsArgs {
   box_size?: BoxSize | null
@@ -1771,12 +1807,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     safe(async (a: { tasks: string[]; timeout_seconds?: number }) => {
       const ids = a.tasks.map((ref) => task(ref).id)
       const deadline = Date.now() + (a.timeout_seconds ?? 120) * 1000
-      // A task just created or messaged may not have left "idle" yet; give the scheduler a moment.
-      await new Promise((r) => setTimeout(r, 1500))
       const current = () => ids.map((id) => store.getTask(id)).filter((t): t is Task => Boolean(t))
-      while (Date.now() < deadline && current().some((t) => BUSY.has(t.status) || t.pendingCount > 0)) {
-        await new Promise((r) => setTimeout(r, 1000))
-      }
+      await settle(tasks, () => current().map((t) => ({ id: t.id, busy: BUSY.has(t.status) || t.pendingCount > 0 })), deadline)
       const list = current()
       const settled = list.filter((t) => !BUSY.has(t.status) && t.pendingCount === 0)
       store.markNoticesSeen(settled.map((t) => t.id))

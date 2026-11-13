@@ -9611,10 +9611,19 @@ export class TaskManager {
     this.hub.broadcast({ type: "chat.message", message: msg })
   }
 
+  private readonly taskWatchers = new Set<() => void>()
+
+  /** Hear every task update as it's sent to the UI, for a wait that would otherwise poll. Returns the unsubscribe. */
+  onTaskUpdate(fn: () => void): () => void {
+    this.taskWatchers.add(fn)
+    return () => void this.taskWatchers.delete(fn)
+  }
+
   emitTask(taskId: string) {
     if (this.stopped) return
     const task = this.store.getTask(taskId)
     if (task) this.hub.broadcast({ type: "task", task })
+    for (const fn of this.taskWatchers) fn()
     // A sub-task's status is in its parent's subtasks.json (wait_for_subtasks, finish).
     if (task?.parentTaskId) this.syncSubtasks(task.parentTaskId)
     this.emitBoxes()
