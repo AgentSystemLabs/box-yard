@@ -152,6 +152,6 @@ describe("PR states are checked before they're reported", () => {
     const [t] = await coordinator<{ id: string; prState: string; prCheckedAt?: string; prUnverified?: string }[]>("list_inbox")
     expect(t).toMatchObject({ id, prState: "open" })
     expect(t!.prCheckedAt).toBeUndefined()
-    expect(t!.prUnverified).toMatch(/hasn't confirmed this PR's state since Box Yard started \(GitHub GraphQL returned HTTP 502\).*don't tell Cody it's waiting on him/)
+    expect(t!.prUnverified).toMatch(/hasn't confirmed this PR's state since Box Yard started \(GitHub GraphQL returned HTTP 502\).*don't tell the owner it's waiting on him/)
   })
 })
