@@ -195,7 +195,7 @@ describe("Captain and Coordinator notices", () => {
     await waitFor(async () => (await getTask(r, t.id)).status === "working", "agent busy")
     r.yard.store.updateTask(t.id, { prUrl: PR, prState: "open" })
     expect((await merge(r, t.id)).status).toBe(200)
-    const notice = "🚢 Cody asked **Cart page** to merge PR #12 (Merge button): " + PR
+    const notice = "🚢 the owner asked **Cart page** to merge PR #12 (Merge button): " + PR
 
     // The Captain has it queued, and doesn't wake for it while the agent is busy.
     const captainNotice = r.yard.store.listCaptainMessages(p.id, 100).find((m) => m.role === "notice" && m.meta?.kind === "merge_requested")
@@ -231,10 +231,12 @@ describe("Captain and Coordinator notices", () => {
 
   it("prompts tell the Captain and the Coordinator not to start a parallel merge", async () => {
     const { ORCHESTRATOR_PROMPT, captainPrompt } = await import("../server/prompts.js")
+    const { withOwner } = await import("../shared/owner.js")
     const captain = captainPrompt({ id: "prj_x", name: "shop", description: "", repo: "acme/shop", baseBranch: "main" } as Project)
-    for (const text of [ORCHESTRATOR_PROMPT, captain]) {
+    // As the Coordinator gets it: with no owner name set, "the owner".
+    for (const text of [withOwner(ORCHESTRATOR_PROMPT, undefined), captain]) {
       expect(text).toContain('"Merge PR" button')
-      expect(text).toContain("🚢 Cody asked <task> to merge PR #N")
+      expect(text).toContain("🚢 the owner asked <task> to merge PR #N")
       expect(text).toMatch(/don't start (a parallel|or ask for another) merge of that PR/)
     }
   })
