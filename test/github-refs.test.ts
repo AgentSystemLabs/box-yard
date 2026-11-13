@@ -36,6 +36,9 @@ describe("splitGithubRefs", () => {
   it("links an explicit owner/repo#N to that repo, even when the text is about another", () => {
     expect(refs("see vercel/next.js#123", REPO)).toEqual([["vercel/next.js#123", "https://github.com/vercel/next.js/issues/123"]])
     expect(refs("see vercel/next.js#123", null)).toEqual([["vercel/next.js#123", "https://github.com/vercel/next.js/issues/123"]])
+    // An Enterprise Managed User's repo: underscores after the first character.
+    expect(refs("see jdoe_acme/app#7", null)).toEqual([["jdoe_acme/app#7", "https://github.com/jdoe_acme/app/issues/7"]])
+    expect(refs("see _acme/app#7", null)).toEqual([])
     // A path or URL that happens to end in "#12" isn't one.
     expect(refs("open src/a.ts/x#12 or www/foo#3", null)).toEqual([])
   })
