@@ -9,6 +9,7 @@ import { runDayTime } from "../lib/scheduleText"
 import { Button, LineIcon, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { LoginLimitsLine } from "./LoginLimits"
+import { NO_AUTOFILL, SecretInput } from "./SecretInput"
 import { SourceHint } from "./SettingsBlocks"
 import { LOGIN_LABEL_MAX, type AgentLogin, type LoginHarness } from "../../../shared/agentLogins"
 
@@ -203,7 +204,6 @@ function AddLogin({ harness, id }: { harness: LoginHarness; id: string }) {
     }
   }
   const valueProps = {
-    autoComplete: "off",
     spellCheck: false,
     placeholder: VALUE_PLACEHOLDER[harness],
     value: draft.value,
@@ -226,11 +226,12 @@ function AddLogin({ harness, id }: { harness: LoginHarness; id: string }) {
         value={draft.label}
         onChange={(e) => setDraft({ ...draft, label: e.target.value })}
         onKeyDown={onKey}
+        {...NO_AUTOFILL}
       />
       {harness === "codex" ? (
-        <textarea {...valueProps} rows={4} className={cx(inputClass, "min-h-24 resize-y font-mono text-xs leading-5")} />
+        <textarea {...valueProps} {...NO_AUTOFILL} rows={4} className={cx(inputClass, "min-h-24 resize-y font-mono text-xs leading-5")} />
       ) : (
-        <input {...valueProps} type="password" className={cx(inputClass, "font-mono")} />
+        <SecretInput {...valueProps} className={cx(inputClass, "font-mono")} />
       )}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" variant="ghost" loading={result?.state === "running"} disabled={!draft.value.trim()} onClick={runTest} title="Check the login you pasted, without adding it">

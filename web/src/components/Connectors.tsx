@@ -26,6 +26,7 @@ import type { Project } from "../../../shared/types"
 import { Panel } from "./SettingsBlocks"
 import { Button, NewTabLink, Select, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
+import { NO_AUTOFILL, SecretInput } from "./SecretInput"
 import { GmailGuide, GoogleClientFile } from "./GmailSetup"
 
 // ------------------------------------------------------------------ drafts
@@ -994,12 +995,9 @@ function EnvSecretFields({ fid, c, edit, onEdit }: { fid: (k: string) => string;
         )
       })}
       <div className="grid gap-2 @min-[30rem]:grid-cols-[12rem_minmax(0,1fr)]">
-        <input className={cx(inputClass, "font-mono")} value={edit.envSecret?.name ?? ""} onChange={(e) => setPair({ name: e.target.value, value: edit.envSecret?.value ?? "" })} placeholder="API_KEY" aria-label="Secret env var name" spellCheck={false} autoCapitalize="characters" data-testid="connector-env-name" />
-        <input
+        <input className={cx(inputClass, "font-mono")} value={edit.envSecret?.name ?? ""} onChange={(e) => setPair({ name: e.target.value, value: edit.envSecret?.value ?? "" })} placeholder="API_KEY" aria-label="Secret env var name" spellCheck={false} autoCapitalize="characters" {...NO_AUTOFILL} data-testid="connector-env-name" />
+        <SecretInput
           id={fid("envSecret")}
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
           className={cx(inputClass, "font-mono")}
           value={edit.envSecret?.value ?? ""}
           onChange={(e) => setPair({ name: edit.envSecret?.name ?? "", value: e.target.value })}
@@ -1049,7 +1047,7 @@ function SecretField({
           </Button>
         </div>
       )}
-      {!removing && <input id={id} type="password" autoComplete="off" spellCheck={false} className={cx(inputClass, "font-mono")} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={label} data-testid={testId} />}
+      {!removing && <SecretInput id={id} className={cx(inputClass, "font-mono")} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={label} data-testid={testId} />}
     </FormField>
   )
 }

@@ -113,7 +113,7 @@ One card per connector: its server or command, how it signs in, its secrets (fin
 - **Sign in and Test act at once**, on what's saved, so they wait while the card has unsaved changes.
   - Sign in asks Box Yard for the provider's page, which opens in a new tab. It comes back by itself, or, when the address it returns to won't load on this device (a phone, plain http), you paste that address into the card.
   - Test connects the way a session would and lists the tools.
-- **Secrets are write-only.** Token, client secret and secret env var fields are password fields; what's saved shows as a fingerprint, with Remove.
+- **Secrets are write-only.** Token, client secret and secret env var fields are masked `SecretInput`s that browsers and password managers don't autofill; what's saved shows as a fingerprint, with Remove.
 - **Who gets it** starts at the Coordinator only. Captains and agents are each a tick, then every project or chosen ones, and for agents the runners. A status-only project can't be chosen while the Coordinator gets the connector too, and a remote runner shows the warning that its token sits in the task folder there.
 - It works on a phone: 44 px targets, the cards reflow on their own width, nothing hides behind hover.
 

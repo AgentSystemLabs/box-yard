@@ -133,7 +133,7 @@ const click = async (el: Element | null | undefined) => {
 const type = async (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
   act(() => {
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
   await settle()
 }
@@ -175,9 +175,9 @@ describe("Settings › Connectors › Gmail", () => {
     expect(q(card("new"), "connector-client-id").value).toBe("987-desk.apps.googleusercontent.com")
     expect(q(card("new"), "gmail-client-picked").textContent).toContain("sent when you save")
     expect(writes()).toEqual([])
-    // The secret waits in the password field, unsent and unshown, until Save.
+    // The secret waits in the masked secret field, unsent and unshown, until Save.
     const secretField = q(card("new"), "connector-client-secret")
-    expect([secretField.type, secretField.value]).toEqual(["password", CLIENT_SECRET])
+    expect([secretField.matches("[data-secret]"), secretField.value]).toEqual([true, CLIENT_SECRET])
     expect(card("new").textContent).not.toContain(CLIENT_SECRET)
 
     await click(saveButton())

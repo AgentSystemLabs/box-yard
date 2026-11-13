@@ -121,7 +121,7 @@ const choose = async (el: HTMLSelectElement, value: string) => {
 const type = (el: HTMLInputElement, value: string) =>
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
 const saveSettings = async () => {
   for (const f of document.querySelectorAll("form")) f.noValidate = true
@@ -187,12 +187,12 @@ describe("Settings › Box agents › Cursor", () => {
 describe("Settings › Credentials › Cursor", () => {
   const field = () => document.querySelector<HTMLElement>("[data-credential=cursorApiKey]")!
 
-  it("takes the Cursor API key in a password field, tests it unsaved, and saves it with the dialog", async () => {
+  it("takes the Cursor API key in a masked secret field, tests it unsaved, and saves it with the dialog", async () => {
     settings("credentials")
     expect($("cursor-credentials-intro")!.textContent).toContain("Only for agents set to run on Cursor")
     expect(document.body.textContent).toContain("Integrations › User API Keys")
     const input = field().querySelector("input")!
-    expect(input.type).toBe("password")
+    expect(input.matches("[data-secret]")).toBe(true)
     type(input, "key_cursor_0000")
     act(() => button("Test", field())!.click())
     await settle()

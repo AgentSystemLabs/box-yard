@@ -97,7 +97,7 @@ const byText = (text: string, scope: ParentNode = document) => [...scope.querySe
 const type = (input: HTMLInputElement, value: string) =>
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value)
-    input.dispatchEvent(new Event("input", { bubbles: true }))
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
 
 beforeEach(() => {
@@ -180,7 +180,7 @@ describe("first-run setup", () => {
     routes["PUT /api/setup/credentials"] = () => setup({ upstashBoxApiKey: saved })
     render(APP_HOME, { status: setup() })
     const input = card()!.querySelector<HTMLInputElement>("[data-credential=upstashBoxApiKey] input")!
-    expect(input.type).toBe("password")
+    expect(input.matches("[data-secret]")).toBe(true)
     type(input, "box_key_typed_secret_123")
     act(() => byText("Save", card()!.querySelector("[data-credential=upstashBoxApiKey]")!)!.click())
     await settle()

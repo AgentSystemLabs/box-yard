@@ -30,6 +30,8 @@ Settings edits stay as drafts until **Save**. Save checks every pending identity
 
 **Owners** accepts GitHub user or org names separated by commas or spaces. **Token owner**, under GitHub token, accepts one such name, or blank for every owner. Neither accepts a repository (`acme/app`) or URL. Names are trimmed and token owners are lowercased for saving; a valid hyphenated name such as `acme-example-daily` is accepted. A token error naming `owner` refers to Token owner, rather than the Owners list or git author.
 
+The GitHub token and Claude login fields are masked text fields, not password fields, with the password managers' opt-outs, so a browser never fills a saved password into them or offers to save a token as one. They take only what you type, paste or drop: an autofill that gets through anyway is dropped and the field clears, so a field you left alone is never sent and never blocks saving the rest.
+
 ## What a turn gets
 
 From strongest to weakest:

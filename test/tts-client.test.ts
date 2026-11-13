@@ -787,7 +787,7 @@ describe("Settings › Voice provider section", () => {
     expect(host.querySelector("[data-key-masked]")?.textContent).toContain("••••")
     const buttons = [...host.querySelectorAll("button")].map((b) => b.textContent?.trim())
     expect(buttons).toEqual(expect.arrayContaining(["Replace", "Remove", "Test"]))
-    expect(host.querySelector('input[type="password"]')).toBeNull()
+    expect(host.querySelector('input[data-secret]')).toBeNull()
     expect(host.textContent).toContain("saved here")
     // The voice list, with a preview button per voice.
     expect(host.querySelector('[data-voice-picker="elevenlabs"]')?.textContent).toContain("George")
@@ -801,7 +801,7 @@ describe("Settings › Voice provider section", () => {
     expect(labels).not.toContain("Remove")
     expect(host.textContent).toContain("OPENAI_API_KEY")
     await render(info({ provider: "openai" }))
-    expect(host.querySelector('input[type="password"]')).not.toBeNull()
+    expect(host.querySelector('input[data-secret]')).not.toBeNull()
   })
 
   it("OpenAI shows the Realtime model, its ten voices, instructions and the 1.5× speed cap", async () => {
@@ -849,11 +849,11 @@ describe("Settings › Voice provider section", () => {
   it("a typed key and a Remove wait for Save too, sent with the rest", async () => {
     parts = {}
     await render(info({ provider: "openai" }, { elevenlabs: { state: "set", source: "ui" } }))
-    const input = host.querySelector<HTMLInputElement>('input[type="password"]')!
+    const input = host.querySelector<HTMLInputElement>('input[data-secret]')!
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!
     await act(async () => {
       setter.call(input, " sk-new ")
-      input.dispatchEvent(new Event("input", { bubbles: true }))
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
     })
     expect(puts).toEqual([])
     expect(parts.tts?.count).toBe(1)
