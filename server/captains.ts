@@ -54,6 +54,7 @@ import { CAPTAIN_TOOLS, CHAT_ALLOWED_TOOLS, attachedImages, chatClaudeLogin, cod
 import { limitsOf, recordLimits } from "./loginLimits.js"
 import { codexModel, type ManagerCli } from "../shared/agentCli.js"
 import { TurnClock, turnTiming, type McpHandshakes } from "./turnTimings.js"
+import { perfMark } from "./perfTrace.js"
 import { captainReplyWakes, takeFyiMarker } from "./captainWake.js"
 import { NO_PICKS, turnPicks, type TurnPicks } from "../shared/runTargets.js"
 import { pickNotes } from "./runTargets.js"
@@ -828,6 +829,7 @@ class Captain {
   }
 
   nudge() {
+    perfMark(`captain:${this.project.id}`, "nudge")
     if (this.wakeTimer) return
     this.wakeTimer = setTimeout(() => {
       this.wakeTimer = null
@@ -1548,6 +1550,7 @@ class Captain {
       const clock = new TurnClock()
 
       let child: ChildProcess
+      perfMark(`captain:${this.project.id}`, `spawn.${kind}`)
       try {
         child = spawn(launch.bin, launch.args, { cwd: this.workdir, env: launch.env, stdio: ["pipe", "pipe", "pipe"] })
       } catch (err) {

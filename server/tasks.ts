@@ -99,6 +99,7 @@ import { BOX_GIT_CREDENTIAL_SCRIPT } from "./providers/upstash.js"
 import { BoxHistory, type BoxEventInput } from "./boxHistory.js"
 import { TurnMeter, type MeasuredTurn } from "./turnPeaks.js"
 import { turnTiming } from "./turnTimings.js"
+import { perfMark, perfSpan } from "./perfTrace.js"
 import type { TurnClockReading } from "../shared/turnTimings.js"
 import { pickAutoSize, type ProjectAutoSize, type TurnPeak } from "../shared/autoSize.js"
 import type { BoxActor, BoxEvent } from "../shared/boxHistory.js"
@@ -3678,7 +3679,7 @@ export class TaskManager {
       const local = this.store.taskRunner(listed) !== "box" || Boolean(this.parentBox(listed))
       let boxId: string | null
       try {
-        boxId = !local && cap > 0 && this.runningTotal() >= cap ? null : await this.place(listed)
+        boxId = !local && cap > 0 && this.runningTotal() >= cap ? null : await perfSpan(listed.id, "schedule.place", () => this.place(listed))
       } catch (err) {
         this.setWaitReason(listed.id, errorMessage(err))
         continue
@@ -6147,14 +6148,15 @@ export class TaskManager {
     try {
       this.checkEnvironmentRunner(row)
       this.environment.launching(row, boxId)
+      perfMark(taskId, "launch")
       await this.provider.wake(boxId)
       const project = this.store.getProject(row.project_id)
       if (!project) throw new Error("Project was deleted")
 
-      const check = await this.provider.exec(boxId, `[ -d ${q(dir + "/work")} ] && echo present || echo missing`)
+      const check = await perfSpan(taskId, "launch.check", () => this.provider.exec(boxId, `[ -d ${q(dir + "/work")} ] && echo present || echo missing`))
       if (check.exitCode !== 0) throw new Error(`box not responding: ${check.stderr.slice(-300)}`)
       fresh = check.stdout.includes("missing")
-      const prepared = fresh ? await this.prepareWorkspace(row, boxId, dir) : null
+      const prepared = fresh ? await perfSpan(taskId, "launch.workspace", () => this.prepareWorkspace(row, boxId, dir)) : null
       this.release(boxId, taskId)
       row = this.requireRow(taskId)
 
@@ -6203,7 +6205,7 @@ export class TaskManager {
         ? `${recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { workspace: recapWorkspaceNote(row.branch, prepared!.branch, project.baseBranch, prepared!.fallback) })}\n\n---\n\n${followup}`
         : followup
 
-      const runnerPath = await this.installRunner(boxId)
+      const runnerPath = await perfSpan(taskId, "launch.runner", () => this.installRunner(boxId))
       await this.dropBoxGitCredential(boxId)
       // A key Box Yard keeps goes to the box for this one turn: the runner moves it out of the task folder and
       // removes it when the turn ends (box-runner.mjs setupSigning).
@@ -6212,15 +6214,15 @@ export class TaskManager {
         keyWaiting = true
         await this.provider.writeFile(boxId, `${dir}/signing.key`, signing.privateKey)
       }
-      const author = await this.turnAuthor(row, project, boxId, dir)
+      const author = await perfSpan(taskId, "launch.author", () => this.turnAuthor(row, project, boxId, dir))
       // The login it runs on, round robin over Settings › Credentials' and the added ones (docs/logins.md).
       const login = this.pickTurnLogin(row, project.id, boxId, !firstTurn && !recapped && !handoff)
       // The connectors its scope reaches here (docs/connectors.md › Sessions), OAuth tokens refreshed to last 45 minutes.
-      const connectors = await this.turnConnectors(row, project.id, boxId)
+      const connectors = await perfSpan(taskId, "launch.connectors", () => this.turnConnectors(row, project.id, boxId))
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
       const { route, ...agent } = this.agentSettings(row, project)
       // A window the project sets by hand is the owner's answer to a CLI that doesn't know the model: that turn starts as it is.
-      if (taskJson.agent === "claude" && !windowSetByHand(taskJson.env)) await this.ensureClaudeCli(boxId, agent.model, taskId)
+      if (taskJson.agent === "claude" && !windowSetByHand(taskJson.env)) await perfSpan(taskId, "launch.cli", () => this.ensureClaudeCli(boxId, agent.model, taskId))
       if (taskJson.agent === "cursor") await this.ensureCursor(boxId)
       if (taskJson.agent === "opencode") await this.ensureOpenCode(boxId)
       if (taskJson.agent === "codex") {
@@ -6289,10 +6291,13 @@ export class TaskManager {
       // pid someone else holds now is never hit. The runner writes run.json and turn.pid itself.
       this.checkEnvironmentRunner(this.requireRow(taskId))
       this.environment.placement(this.requireRow(taskId), boxId)
-      const start = await this.provider.exec(
-        boxId,
-        `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 50); do [ -f turn.pid ] && break; sleep 0.2; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
+      const start = await perfSpan(taskId, "launch.start", () =>
+        this.provider.exec(
+          boxId,
+          `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 50); do [ -f turn.pid ] && break; sleep 0.2; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
+        ),
       )
+      perfMark(taskId, "launch.done")
       if (start.exitCode !== 0) throw new Error(`runner did not start: ${(start.stdout + start.stderr).slice(-800)}`)
       keyWaiting = false
       credsWaiting = false
@@ -7580,6 +7585,7 @@ export class TaskManager {
         return
       }
       case "turn_end": {
+        perfMark(taskId, "turn.end.seen")
         await this.reconcileCodexDelivery(row)
         await this.takeBackCodexAuth(row)
         if (!this.store.db.open) return
@@ -7639,6 +7645,7 @@ export class TaskManager {
   private finishTurn(row: TaskRow, ev: WorkerEvent, pr: PrState | null = null) {
     if (ev.turnId && row.current_turn_id && ev.turnId !== row.current_turn_id) return // stale event from an older turn
     if (!row.current_turn_id) return
+    perfMark(row.id, "turn.end")
     this.captainWaits.delete(row.id)
     // A Captain reply handed to a wait the agent didn't take: queued (and editable) again, for the next turn.
     this.store.releaseInputs(handoffClaim(row.current_turn_id))
