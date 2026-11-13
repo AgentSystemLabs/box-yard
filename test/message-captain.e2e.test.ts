@@ -101,7 +101,7 @@ const event = (t: string, fields: Record<string, unknown>): WorkerEvent => ({ se
 
 describe("explicit informational agent messages", () => {
   it("logs FYIs to a busy task while preserving every question, Cody message, Coordinator message and Captain message", async () => {
-    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = 600_000 })
+    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 600_000 })
     const gate = path.join(tmpDir(), "gate")
     const p = await call<Project>(r, "POST", "/api/projects", { name: "receiver", env: { FAKE_CLAUDE_GATE: gate } })
     const receiver = await task(r, p, "Receiver", "Do the work")
@@ -148,7 +148,7 @@ describe("explicit informational agent messages", () => {
   })
 
   it("does not wake an idle task for FYIs", async () => {
-    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = 600_000 })
+    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 600_000 })
     const p = await project(r, "demo")
     const receiver = await task(r, p, "Receiver", "Do the work")
     await settled(r, receiver)
@@ -159,7 +159,7 @@ describe("explicit informational agent messages", () => {
   })
 
   it("shows FYIs in a busy Captain's view without queuing another turn or losing protected messages", async () => {
-    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = 600_000 })
+    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 600_000 })
     const p = await project(r, "demo")
     const url = `/api/projects/${p.id}/captain/messages`
     await call(r, "POST", url, { content: "status [slow:5]" })
@@ -188,7 +188,7 @@ describe("explicit informational agent messages", () => {
   })
 
   it("keeps Captain FYIs quiet while idle, including on resume, and a requested reply overrides FYI", async () => {
-    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = 600_000 })
+    const r = await start((yard) => { yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 600_000 })
     const p = await project(r, "demo")
     const reporter = await task(r, p, "Reporter", "Report findings\nmessage captain fyi: Just a note")
     await settled(r, reporter)

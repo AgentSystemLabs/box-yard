@@ -1047,6 +1047,18 @@ export function SettingsDialog({
                     <AutoCompactControl id={fid("aac")} label="Agent auto-compact" value={s.agentAutoCompact} onChange={(v) => set("agentAutoCompact", v)} field={field("agentAutoCompact")} />
                   </Row>
                   <Row
+                    id={fid("ctel")}
+                    label="Claude Code usage telemetry"
+                    help="Claude Code sends Anthropic usage telemetry, and holds every run open about 0.6 s after its answer to flush it. Off: agents, Captains and the Coordinator run without it, so each turn ends that much sooner."
+                    more="Off sets DISABLE_TELEMETRY=1 and CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF=1 on Claude runs, so the CLI keeps the feature flags it last cached. It applies from the next turn. Codex, Cursor and OpenCode runs are unchanged."
+                    {...row("claudeTelemetry")}
+                  >
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
+                      <input id={fid("ctel")} type="checkbox" checked={s.claudeTelemetry ?? true} onChange={(e) => set("claudeTelemetry", e.target.checked)} data-testid="claude-telemetry" />
+                      {(s.claudeTelemetry ?? true) ? "On: Claude Code's default" : "Off: turns end about 0.6 s sooner"}
+                    </label>
+                  </Row>
+                  <Row
                     id={fid("smd")}
                     label="Sub-task depth"
                     help="How deep sub-tasks may nest. An agent splits its work with spawn_subtasks; each sub-task runs as a task of its own and reports back. 1: a sub-task can't start its own."

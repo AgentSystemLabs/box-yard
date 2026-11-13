@@ -161,19 +161,46 @@ export function branchName(input: { title: string; prompt?: string; evidence?: B
 }
 
 export const BRANCH_EVIDENCE_MARK = "boxyard-branch-evidence="
+export const MERGED_HEADS_MARK = "boxyard-merged-heads="
 
-/** Runs on any provider, against the fresh clone's remote refs. All subprocess arguments are data. */
-export function branchEvidenceScript(node: string, work: string, base: string, repo: string | null, github: boolean): string {
-  const script = `
+/** Node source (for `node -e`) of `run(bin, args, required)` and `mergedHeads()`: the head branches of the repo's last 50 merged PRs, or [] without gh. */
+function ghSource(repo: string | null): string {
+  return `
     const { spawnSync } = require('node:child_process');
     const run = (bin, args, required = false) => { const r = spawnSync(bin, args, { encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024, env: { ...process.env, GH_TOKEN: process.env.GITHUB_TOKEN || '', GH_PROMPT_DISABLED: '1', GH_PAGER: 'cat' } }); if (required && r.status !== 0) throw new Error('Could not inspect remote branch refs'); return r.status === 0 ? r.stdout : ''; };
+    const mergedHeads = () => { try { return JSON.parse(run('gh', ['pr', 'list', '--repo', ${JSON.stringify(repo ?? "")}, '--state', 'merged', '--limit', '50', '--json', 'headRefName'])).map(p => p.headRefName).filter(n => typeof n === 'string'); } catch { return []; } };
+  `
+}
+
+/**
+ * The GitHub half of branchEvidenceScript on its own: it needs no clone, so a launch asks while the clone runs
+ * (GitHub takes about half a second to answer) and hands the answer to the evidence as `merged`.
+ */
+export function mergedHeadsScript(node: string, repo: string): string {
+  return `${q(node)} -e ${q(`${ghSource(repo)}
+    console.log(${JSON.stringify(MERGED_HEADS_MARK)} + JSON.stringify(mergedHeads()));`)}`
+}
+
+/** What mergedHeadsScript printed, or null when it printed nothing usable (the script didn't run). */
+export function parseMergedHeads(stdout: string): string[] | null {
+  try {
+    const line = stdout.split("\n").find((l) => l.startsWith(MERGED_HEADS_MARK))
+    const value: unknown = line ? JSON.parse(line.slice(MERGED_HEADS_MARK.length)) : null
+    return Array.isArray(value) ? value.filter((s): s is string => typeof s === "string") : null
+  } catch {
+    return null
+  }
+}
+
+/** Runs on any provider, against the fresh clone's remote refs. All subprocess arguments are data. `github`: ask GitHub for the merged PRs' branches here too. */
+export function branchEvidenceScript(node: string, work: string, base: string, repo: string | null, github: boolean): string {
+  const script = `${ghSource(repo)}
     const git = (args, required = false) => run('git', ['-C', ${JSON.stringify(work)}, ...args], required);
     const branches = git(['for-each-ref', '--format=%(refname:strip=3)', 'refs/remotes/origin'], true).trim().split('\\n').filter(Boolean);
     const base = ${JSON.stringify(base)};
     const files = git(['ls-tree', '-r', '--name-only', base, '--', 'CONTRIBUTING.md', 'CONTRIBUTING', 'AGENTS.md', 'CLAUDE.md', '.github']).trim().split('\\n').filter(p => /^(CONTRIBUTING(?:\\.md)?|AGENTS\\.md|CLAUDE\\.md|\\.github\\/.*\\.md)$/i.test(p)).sort((a, b) => Number(a.startsWith('.github/')) - Number(b.startsWith('.github/'))).slice(0, 20);
     const documents = files.map(p => git(['show', base + ':' + p]).slice(0, 16000));
-    let merged = [];
-    if (${JSON.stringify(Boolean(repo) && github)}) { try { merged = JSON.parse(run('gh', ['pr', 'list', '--repo', ${JSON.stringify(repo ?? "")}, '--state', 'merged', '--limit', '50', '--json', 'headRefName'])).map(p => p.headRefName).filter(n => typeof n === 'string'); } catch {} }
+    const merged = ${JSON.stringify(Boolean(repo) && github)} ? mergedHeads() : [];
     console.log(${JSON.stringify(BRANCH_EVIDENCE_MARK)} + JSON.stringify({ branches, merged, documents }));
   `
   return `${q(node)} -e ${q(script)}`

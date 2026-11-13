@@ -65,7 +65,7 @@ import { isQuietRun, noopBlockers, type RunEvidence } from "../shared/quiet.js"
 import { memoryPressure, type BoxMemory, type MemoryPolicy } from "../shared/memory.js"
 import { cleanupSummary, dfCommand, diskLine, formatBytes, isOutOfSpace, parseDf, requiredFreeBytes, rootLow, type BoxCleanup, type CleanupStepKey, type DiskSpace } from "../shared/disk.js"
 import { BoxJanitor, DEPS_DIR, cleanOutput, pushedCheck, pushedVerdict } from "./janitor.js"
-import { branchEvidenceScript, branchName, parseBranchEvidence } from "./branchNames.js"
+import { branchEvidenceScript, branchName, mergedHeadsScript, parseBranchEvidence, parseMergedHeads } from "./branchNames.js"
 import { OWN_UPKEEP_MS, OwnCleanup } from "./ownCleanup.js"
 import type { GitAuth } from "./captainRepo.js"
 import { atRisk, deleteCheckScript, deleteVerdict, parseDeleteCheck, refusalLine, refusalsOf, type BoxDeleteResult, type WorkspaceGit } from "./boxDelete.js"
@@ -84,7 +84,7 @@ import { DOCKER_MAX_TASKS, DOCKER_NEEDS_CLAUDE_KEY, DOCKER_NEEDS_CODEX_KEY, DOCK
 import { isMachineBox, labelPhrase, machineBoxId, machineLabel, machineMatches, machineOfBox, normalizeLabel, pickMachine, type Machine, type MachineCandidate, type MachinePick } from "../shared/machines.js"
 import type { DockerContainerState } from "./providers/docker.js"
 import { SleepWatch, sleepLength } from "./sleep.js"
-import { CLAUDE_CREDENTIAL_VARS, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, openCodeTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
+import { CLAUDE_CREDENTIAL_VARS, claudeTelemetryEnv, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, openCodeTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
 import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sessions.js"
 import type { SessionRef } from "./connectors/connectors.js"
 import { claudeLoginRef, codexLoginRef, limitsOf, recordLimits, type LoginRef } from "./loginLimits.js"
@@ -99,6 +99,7 @@ import { BOX_GIT_CREDENTIAL_SCRIPT } from "./providers/upstash.js"
 import { BoxHistory, type BoxEventInput } from "./boxHistory.js"
 import { TurnMeter, type MeasuredTurn } from "./turnPeaks.js"
 import { turnTiming } from "./turnTimings.js"
+import { perfMark, perfSpan } from "./perfTrace.js"
 import type { TurnClockReading } from "../shared/turnTimings.js"
 import { pickAutoSize, type ProjectAutoSize, type TurnPeak } from "../shared/autoSize.js"
 import type { BoxActor, BoxEvent } from "../shared/boxHistory.js"
@@ -3678,7 +3679,7 @@ export class TaskManager {
       const local = this.store.taskRunner(listed) !== "box" || Boolean(this.parentBox(listed))
       let boxId: string | null
       try {
-        boxId = !local && cap > 0 && this.runningTotal() >= cap ? null : await this.place(listed)
+        boxId = !local && cap > 0 && this.runningTotal() >= cap ? null : await perfSpan(listed.id, "schedule.place", () => this.place(listed))
       } catch (err) {
         this.setWaitReason(listed.id, errorMessage(err))
         continue
@@ -6147,14 +6148,15 @@ export class TaskManager {
     try {
       this.checkEnvironmentRunner(row)
       this.environment.launching(row, boxId)
+      perfMark(taskId, "launch")
       await this.provider.wake(boxId)
       const project = this.store.getProject(row.project_id)
       if (!project) throw new Error("Project was deleted")
 
-      const check = await this.provider.exec(boxId, `[ -d ${q(dir + "/work")} ] && echo present || echo missing`)
+      const check = await perfSpan(taskId, "launch.check", () => this.provider.exec(boxId, `[ -d ${q(dir + "/work")} ] && echo present || echo missing`))
       if (check.exitCode !== 0) throw new Error(`box not responding: ${check.stderr.slice(-300)}`)
       fresh = check.stdout.includes("missing")
-      const prepared = fresh ? await this.prepareWorkspace(row, boxId, dir) : null
+      const prepared = fresh ? await perfSpan(taskId, "launch.workspace", () => this.prepareWorkspace(row, boxId, dir)) : null
       this.release(boxId, taskId)
       row = this.requireRow(taskId)
 
@@ -6203,7 +6205,7 @@ export class TaskManager {
         ? `${recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { workspace: recapWorkspaceNote(row.branch, prepared!.branch, project.baseBranch, prepared!.fallback) })}\n\n---\n\n${followup}`
         : followup
 
-      const runnerPath = await this.installRunner(boxId)
+      const runnerPath = await perfSpan(taskId, "launch.runner", () => this.installRunner(boxId))
       await this.dropBoxGitCredential(boxId)
       // A key Box Yard keeps goes to the box for this one turn: the runner moves it out of the task folder and
       // removes it when the turn ends (box-runner.mjs setupSigning).
@@ -6212,15 +6214,15 @@ export class TaskManager {
         keyWaiting = true
         await this.provider.writeFile(boxId, `${dir}/signing.key`, signing.privateKey)
       }
-      const author = await this.turnAuthor(row, project, boxId, dir)
+      const author = await perfSpan(taskId, "launch.author", () => this.turnAuthor(row, project, boxId, dir))
       // The login it runs on, round robin over Settings › Credentials' and the added ones (docs/logins.md).
       const login = this.pickTurnLogin(row, project.id, boxId, !firstTurn && !recapped && !handoff)
       // The connectors its scope reaches here (docs/connectors.md › Sessions), OAuth tokens refreshed to last 45 minutes.
-      const connectors = await this.turnConnectors(row, project.id, boxId)
+      const connectors = await perfSpan(taskId, "launch.connectors", () => this.turnConnectors(row, project.id, boxId))
       const taskJson = this.taskJson(row, project, boxId, signing, author, login, connectors)
       const { route, ...agent } = this.agentSettings(row, project)
       // A window the project sets by hand is the owner's answer to a CLI that doesn't know the model: that turn starts as it is.
-      if (taskJson.agent === "claude" && !windowSetByHand(taskJson.env)) await this.ensureClaudeCli(boxId, agent.model, taskId)
+      if (taskJson.agent === "claude" && !windowSetByHand(taskJson.env)) await perfSpan(taskId, "launch.cli", () => this.ensureClaudeCli(boxId, agent.model, taskId))
       if (taskJson.agent === "cursor") await this.ensureCursor(boxId)
       if (taskJson.agent === "opencode") await this.ensureOpenCode(boxId)
       if (taskJson.agent === "codex") {
@@ -6289,10 +6291,13 @@ export class TaskManager {
       // pid someone else holds now is never hit. The runner writes run.json and turn.pid itself.
       this.checkEnvironmentRunner(this.requireRow(taskId))
       this.environment.placement(this.requireRow(taskId), boxId)
-      const start = await this.provider.exec(
-        boxId,
-        `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 50); do [ -f turn.pid ] && break; sleep 0.2; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
+      const start = await perfSpan(taskId, "launch.start", () =>
+        this.provider.exec(
+          boxId,
+          `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 50); do [ -f turn.pid ] && break; sleep 0.2; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
+        ),
       )
+      perfMark(taskId, "launch.done")
       if (start.exitCode !== 0) throw new Error(`runner did not start: ${(start.stdout + start.stderr).slice(-800)}`)
       keyWaiting = false
       credsWaiting = false
@@ -6808,6 +6813,8 @@ export class TaskManager {
     }
     const [opencodeBin, ...opencodeArgs] = (local || this.c.mock ? this.c.opencodeBin : (provider.opencodeBin ?? "opencode")).split(" ")
     const [cursorBin, ...cursorArgs] = (local || this.c.mock ? this.c.cursorBin : (provider.cursorBin ?? "cursor-agent")).split(" ")
+    // Settings › Box agents: a Claude turn without the CLI's usage telemetry exits as soon as it has answered. A project's own env wins.
+    if (agent === "claude") for (const [k, v] of Object.entries(claudeTelemetryEnv(this.settings.get().claudeTelemetry))) if (!(k in env)) env[k] = v
     return {
       taskId: row.id,
       projectId: project.id,
@@ -7026,6 +7033,8 @@ export class TaskManager {
   private async cloneWorkspace(row: TaskRow, project: NonNullable<ReturnType<Store["getProject"]>>, boxId: string, dir: string, mirror: ReturnType<TaskManager["mirrorSpec"]> | null): Promise<PreparedWorkspace> {
     const pendingName = Boolean(row.branch && this.store.getKv(`branch_naming:${row.id}`) === row.branch)
     const steps = [`mkdir -p ${q(dir)}`, `rm -rf ${q(dir + "/work")}`]
+    // GitHub takes about half a second to list the merged PRs a new branch's name goes by: ask while the clone runs.
+    const merged = mirror && pendingName ? this.mergedHeads(boxId, project, mirror.env) : null
     if (mirror) {
       const { spec, env, helper, only } = mirror
       // One mirror per repo per box (see server/gitShare.ts): the task's clone borrows its objects, so a task
@@ -7058,7 +7067,7 @@ export class TaskManager {
       this.addEvent(row.id, `Re-created the box's mirror of ${project.repo} as a ${mirror!.spec.partial ? "partial (blob:none)" : "full"} clone to match the project's partial clone setting.`)
     }
     if (mirror && pendingName) {
-      row = await this.nameNewBranch(row, project, boxId, dir, mirror)
+      row = await this.nameNewBranch(row, project, boxId, dir, mirror, merged)
       res = await this.provider.exec(boxId, `cd ${q(dir + "/work")} && git checkout -b ${q(row.branch!)} && echo ${BRANCH_MARK}base`)
       if (res.exitCode !== 0) throw new Error(`Creating branch ${row.branch} failed: ${errorTail(res.stderr || res.stdout)}`)
     }
@@ -7072,16 +7081,31 @@ export class TaskManager {
     return this.store.listTaskRows().flatMap((r) => r.id !== except && projects.has(r.project_id) && r.branch ? [r.branch] : [])
   }
 
-  private async nameNewBranch(row: TaskRow, project: Project, boxId: string, dir: string, mirror: NonNullable<ReturnType<TaskManager["mirrorSpec"]>>): Promise<TaskRow> {
+  /**
+   * The head branches of the repo's merged PRs, asked of GitHub on its own (see mergedHeadsScript). Null when there
+   * is nobody to ask (a mock, a repo that isn't on GitHub); a failed ask is [], like gh failing inside the evidence.
+   */
+  private mergedHeads(boxId: string, project: Project, env: string): Promise<string[]> | null {
+    const slug = githubSlug(project.repo)
+    if (this.c.mock || !slug) return null
+    return this.provider
+      .exec(boxId, [env, mergedHeadsScript(providerOf(this.provider, boxId).nodeBin, slug)].join("\n"))
+      .then((res) => parseMergedHeads(res.stdout) ?? [])
+      .catch(() => [])
+  }
+
+  /** `merged`: GitHub's merged PR branches when the launch already asked (mergedHeads), so this doesn't ask again. */
+  private async nameNewBranch(row: TaskRow, project: Project, boxId: string, dir: string, mirror: NonNullable<ReturnType<TaskManager["mirrorSpec"]>>, merged: Promise<string[]> | null = null): Promise<TaskRow> {
     const key = `branch_naming:${row.id}`
     if (this.store.getKv(key) !== row.branch || !row.branch) return row
     const { env } = mirror
     const result = await this.provider.exec(boxId, [
       env,
-      branchEvidenceScript(providerOf(this.provider, boxId).nodeBin, dir + "/work", project.baseBranch, githubSlug(project.repo), !this.c.mock),
+      branchEvidenceScript(providerOf(this.provider, boxId).nodeBin, dir + "/work", project.baseBranch, githubSlug(project.repo), !merged && !this.c.mock),
     ].join("\n"))
     if (result.exitCode !== 0) throw new Error("Couldn't inspect the repository's branch names before creating a task branch")
     const evidence = parseBranchEvidence(result.stdout)
+    if (merged) evidence.merged = await merged
     // Reserve atomically after the async probe, so two simultaneous starts can't choose the same name.
     this.store.db.transaction(() => {
       const current = this.requireRow(row.id)
@@ -7580,6 +7604,7 @@ export class TaskManager {
         return
       }
       case "turn_end": {
+        perfMark(taskId, "turn.end.seen")
         await this.reconcileCodexDelivery(row)
         await this.takeBackCodexAuth(row)
         if (!this.store.db.open) return
@@ -7639,6 +7664,7 @@ export class TaskManager {
   private finishTurn(row: TaskRow, ev: WorkerEvent, pr: PrState | null = null) {
     if (ev.turnId && row.current_turn_id && ev.turnId !== row.current_turn_id) return // stale event from an older turn
     if (!row.current_turn_id) return
+    perfMark(row.id, "turn.end")
     this.captainWaits.delete(row.id)
     // A Captain reply handed to a wait the agent didn't take: queued (and editable) again, for the next turn.
     this.store.releaseInputs(handoffClaim(row.current_turn_id))
@@ -9604,10 +9630,19 @@ export class TaskManager {
     this.hub.broadcast({ type: "chat.message", message: msg })
   }
 
+  private readonly taskWatchers = new Set<() => void>()
+
+  /** Hear every task update as it's sent to the UI, for a wait that would otherwise poll. Returns the unsubscribe. */
+  onTaskUpdate(fn: () => void): () => void {
+    this.taskWatchers.add(fn)
+    return () => void this.taskWatchers.delete(fn)
+  }
+
   emitTask(taskId: string) {
     if (this.stopped) return
     const task = this.store.getTask(taskId)
     if (task) this.hub.broadcast({ type: "task", task })
+    for (const fn of this.taskWatchers) fn()
     // A sub-task's status is in its parent's subtasks.json (wait_for_subtasks, finish).
     if (task?.parentTaskId) this.syncSubtasks(task.parentTaskId)
     this.emitBoxes()

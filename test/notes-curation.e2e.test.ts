@@ -28,7 +28,7 @@ async function start({ captainTurns = false } = {}): Promise<Running> {
   const config = testConfig({ port })
   const yard = createBoxYard(config, { webDir: "/nonexistent" })
   // Most tests here are about the notes, not the Captain's turns: keep its wake-ups far away unless asked.
-  yard.captains.tuning.wakeDebounceMs = captainTurns ? 100 : 10 * 60_000
+  yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = captainTurns ? 100 : 10 * 60_000
   yard.retro.tuning.debounceMs = 50
   yard.retro.tuning.maxWaitMs = 500
   const server = await new Promise<Server>((resolve) => {

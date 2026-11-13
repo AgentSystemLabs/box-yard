@@ -863,7 +863,7 @@ export function createBoxYard(
   // The model/effort pickers' list, from the installed CLI (logged in like the Coordinator), over the built-in one.
   const claudeModels = new ClaudeModels({
     claudeBin: c.claudeBin,
-    env: () => serverClaudeEnv(null, settings.credentials.claudeEnv()),
+    env: () => serverClaudeEnv(null, settings.credentials.claudeEnv(), settings.get().claudeTelemetry),
     version: async () => (claudeVersion === undefined ? (claudeVersion = await checkClaude()) : claudeVersion),
   })
 

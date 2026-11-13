@@ -979,7 +979,7 @@ export class Orchestrator {
     const coordinatorEnv = this.env()
     const own = coordinatorClaudeLogin(coordinatorEnv)
     const added = !own && login && !isCredentialsLogin(login.id) ? login : null
-    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())
+    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv(), this.settings.get().claudeTelemetry)
     const loginRef = rotationLoginRef(added) ?? chatClaudeLogin(env, own)
     Object.assign(env, coordinatorExtraEnv(coordinatorEnv))
     // The connectors' values: only this process's env holds them (its MCP config names them as ${VAR}).

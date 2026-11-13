@@ -198,6 +198,22 @@ describe("shared git objects", () => {
     expect(r.yard.store.getKv(`branch_naming:${a.id}`)).toBeNull()
   })
 
+  it("names a new branch by the merged PR branches the launch asked GitHub for beside the clone", async () => {
+    const o = origin()
+    const r = await start()
+    const p = await repoProject(r, "naming-merged", o.url)
+    // A mock never asks GitHub: stand in for the answer, as mergedHeads gives it for a GitHub repo.
+    const asked: string[] = []
+    ;(r.yard.tasks as unknown as { mergedHeads(boxId: string, project: { id: string }): Promise<string[]> | null }).mergedHeads = (_boxId, project) => {
+      asked.push(project.id)
+      return new Promise((resolve) => setTimeout(() => resolve(["feature/new-menu", "feature/new-search"]), 50))
+    }
+    const t = await startTask(r, p.id, "Add search")
+    expect(asked).toEqual([p.id])
+    expect(t.branch).toBe("feature/add-search")
+    expect(git(workOf(r, t), "branch", "--show-current")).toBe("feature/add-search")
+  })
+
   it("reads base-branch documentation in partial mirrors before creating a branch", async () => {
     const o = origin({ ".github/CONTRIBUTING.md": "## Branch naming\nUse `task/ABC-<ticket>-<slug>` for all branches.\n" })
     for (const branch of ["feature/old-menu", "feature/old-search", "task/ABC-42-add-search"]) git(o.bare, "branch", branch, "main")
