@@ -279,7 +279,7 @@ function seedHistory(r: Running) {
 describe("search_history", () => {
   it("searches the Coordinator's and every Captain's summaries, chats and tasks, and opens chat hits", async () => {
     const r = await start()
-    const { alpha, ta, c1 } = seedHistory(r)
+    const { ta, c1 } = seedHistory(r)
     const coordinator = await mcpAs(r, { kind: "coordinator" })
     const res = await coordinator.json("search_history", { query: "local runner", limit: 30 })
     const kinds = new Set(res.hits.map((h: { kind: string }) => h.kind))
@@ -331,7 +331,6 @@ describe("search_history", () => {
     const alphaAround = await coordinator.json("search_history", { around: res.hits.find((h: { kind: string; project?: string }) => h.kind === "captain_chat" && h.project === "alpha").id })
     expect(alphaAround).toMatchObject({ kind: "captain_chat", project: "alpha" })
     expect(alphaAround.messages.map((m: { content: string }) => m.content)).toEqual(["Alpha chat: local runner status?", "Alpha: it's in review."])
-    expect(alpha.id).toBeTruthy()
   })
 
   it("keeps a Captain to its own project's history", async () => {

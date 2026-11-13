@@ -460,8 +460,8 @@ describe("live project defaults", () => {
     const picks = { runsOn: { value: "box", token: "box", label: "Upstash box" }, agent: { value: "codex", token: "codex", label: "Codex" } }
     const captain = await mcpAs(r, { kind: "captain", projectId: p.id }, { turnPicks: () => picks })
     const res = await captain.json("create_task", { project: "mac", title: "Picked", prompt: "a", runs_on: "box", agent: "codex" })
-    expect(res.runs_on_pick).toBeTruthy()
-    expect(res.agent_pick).toBeTruthy()
+    expect(res.runs_on_pick).toContain("@box (Upstash box)")
+    expect(res.agent_pick).toContain("!codex (Codex)")
     expect(res.overridesDefault).toBeUndefined()
     const batch = await captain.json("create_tasks", { project: "mac", tasks: [{ title: "One", prompt: "a", runs_on: "box", agent: "codex" }] })
     expect(batch.tasks[0].overridesDefault).toBeUndefined()
