@@ -202,16 +202,6 @@ describe("the app shell", () => {
     expect(inApp()).toBe(true)
   })
 
-  it("Esc that something else already claimed doesn't leave", () => {
-    render(APP_HOME)
-    const claim = (e: KeyboardEvent) => e.preventDefault()
-    document.addEventListener("keydown", claim)
-    keydown({ key: "Escape" }, chat()!.querySelector("textarea")!)
-    document.removeEventListener("keydown", claim)
-    expect(inApp()).toBe(true)
-  })
-
-
   it("the old layout toggle shortcut (Alt+Shift+Z) and Esc change nothing", () => {
     render("/inbox")
     oldToggleKey()

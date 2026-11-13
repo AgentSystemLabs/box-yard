@@ -228,18 +228,6 @@ describe("CloudSynth under the speech queue", () => {
     expect(r.q.speaking).toBe(false)
   })
 
-  it("a late error event from a finished line doesn't touch the next one (or speak it twice)", async () => {
-    const r = rig()
-    r.q.say("one", OPTS)
-    await flush()
-    r.audio.finish()
-    expect(r.q.speaking).toBe(false)
-    // iOS reloading the element after the page wakes up, a preview, a primed silent clip...
-    expect(r.audio.onerror).toBeNull()
-    expect(r.fallbacks).toEqual([])
-    expect(r.os.spoken).toHaveLength(0)
-  })
-
   it("an autoplay block keeps the queue and the clip: unblock() inside the tap plays it at once, then the rest", async () => {
     const r = rig()
     r.audio.playError = { name: "NotAllowedError" }
@@ -350,6 +338,7 @@ describe("CloudSynth under the speech queue", () => {
     expect(r.q.speaking).toBe(false)
     expect([r.audio.onplaying, r.audio.onended, r.audio.onerror]).toEqual([null, null, null])
     // What a tap did before: swap in the silent unlock clip, which some phones fail to play.
+    // (iOS reloading the element after the page wakes up, or a preview, fires one the same way.)
     r.audio.onerror?.({})
     await flush()
     expect(r.os.spoken).toEqual([])
