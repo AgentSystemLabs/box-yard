@@ -182,7 +182,7 @@ const type = (el: HTMLInputElement | HTMLTextAreaElement, value: string) =>
   act(() => {
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
 const saveSettings = async () => {
   for (const f of document.querySelectorAll("form")) f.noValidate = true
@@ -309,7 +309,7 @@ describe("Settings › Box agents", () => {
 describe("Settings › Credentials › Codex", () => {
   const field = (k: CredentialKey) => document.querySelector<HTMLElement>(`[data-credential=${k}]`)!
 
-  it("takes the ChatGPT login as a pasted auth.json in a text box, and the API key in a password field", async () => {
+  it("takes the ChatGPT login as a pasted auth.json in a text box, and the API key in a masked secret field", async () => {
     settings("credentials")
     const text = document.body.textContent!
     expect(text).toContain("Codex ChatGPT login")
@@ -317,7 +317,7 @@ describe("Settings › Credentials › Codex", () => {
     expect(text).toContain("Only for agents set to run on Codex")
     expect(text).toContain("~/.codex/auth.json")
     expect(document.querySelector("[aria-label='Copy codex login']")).not.toBeNull()
-    expect(field("codexApiKey").querySelector("input")!.type).toBe("password")
+    expect(field("codexApiKey").querySelector("input")!.matches("[data-secret]")).toBe(true)
 
     const box = field("codexAuthJson").querySelector("textarea")!
     expect(box.placeholder).toContain("~/.codex/auth.json")
@@ -371,7 +371,7 @@ describe("the setup card", () => {
     expect(sent("PUT", "/api/setup/credentials")).toEqual([{ codexAuthJson: '{"auth_mode":"chatgpt"}' }])
     // The API key is the other way in.
     act(() => button("API key", group)!.click())
-    expect(document.querySelector<HTMLInputElement>("[data-credential=codexApiKey] input")!.type).toBe("password")
+    expect(document.querySelector<HTMLInputElement>("[data-credential=codexApiKey] input")!.matches("[data-secret]")).toBe(true)
   })
 })
 

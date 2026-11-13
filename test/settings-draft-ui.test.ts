@@ -322,7 +322,7 @@ const searchInput = () => document.querySelector<HTMLInputElement>('input[aria-l
 const typeInput = async (el: HTMLInputElement, value: string) => {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
   await settle()
 }

@@ -18,6 +18,7 @@ import { useOpenSettings } from "./SettingsHost"
 import { Button, LineIcon, Select, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
 import { LoginLimitsLine } from "./LoginLimits"
+import { NO_AUTOFILL, SecretInput, type SecretInputProps } from "./SecretInput"
 
 // ------------------------------------------------------------------ drafts
 
@@ -547,11 +548,8 @@ function TokenFields({ fid, identity: i, edit, onEdit }: { fid: (k: string) => s
       ))}
       <p className="text-xs text-zinc-500">Token owner: one GitHub user or org, like acme-corp. Blank: every owner. No repository or URL.</p>
       <div className="grid gap-2 @min-[30rem]:grid-cols-[10rem_minmax(0,1fr)]">
-        <IdentityInput fid={fid} field="tokenOwner" className={inputClass} value={edit.token?.owner ?? ""} onChange={(e) => setToken({ owner: e.target.value, value: edit.token?.value ?? "" })} placeholder="every owner" aria-label="Token owner (blank: every owner)" spellCheck={false} />
-        <IdentityInput fid={fid} field="token"
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
+        <IdentityInput fid={fid} field="tokenOwner" className={inputClass} value={edit.token?.owner ?? ""} onChange={(e) => setToken({ owner: e.target.value, value: edit.token?.value ?? "" })} placeholder="every owner" aria-label="Token owner (blank: every owner)" spellCheck={false} {...NO_AUTOFILL} />
+        <IdentitySecret fid={fid} field="token"
           className={cx(inputClass, "font-mono")}
           value={edit.token?.value ?? ""}
           onChange={(e) => setToken({ owner: edit.token?.owner ?? "", value: e.target.value })}
@@ -595,10 +593,7 @@ function ClaudeField({ fid, identity: i, edit, set }: { fid: (k: string) => stri
             <option value="oauth_token">OAuth token</option>
             <option value="api_key">API key</option>
           </Select>
-          <IdentityInput fid={fid} field="claude"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
+          <IdentitySecret fid={fid} field="claude"
             className={cx(inputClass, "font-mono")}
             value={edit.claude?.value ?? ""}
             onChange={(e) => set("claude", e.target.value.trim() ? { kind, value: e.target.value } : undefined)}
@@ -689,7 +684,7 @@ function SigningField({ fid, identity: i, edit, set }: { fid: (k: string) => str
                 pattern={GPG_KEY_ID_RE.source}
                 title="Enter a hex key id (8 or 16 characters) or fingerprint (40 or 64 characters)."
                 spellCheck={false}
-                autoComplete="off"
+                {...NO_AUTOFILL}
               />
               <p className="text-xs text-zinc-500">Only a key id or fingerprint is saved. Never paste a private key or passphrase.</p>
               <p className="flex items-start gap-1.5 text-xs text-amber-300">
@@ -906,6 +901,10 @@ function IdentityControl({ fid, field, children }: { fid: (k: string) => string;
 }
 function IdentityInput({ fid, field, ...props }: InputHTMLAttributes<HTMLInputElement> & { fid: (k: string) => string; field: string }) {
   return <IdentityControl fid={fid} field={field}>{(check) => <input {...props} {...check} />}</IdentityControl>
+}
+/** A token or key: never a password field, and only what the user typed or pasted gets into the draft. */
+function IdentitySecret({ fid, field, ...props }: SecretInputProps & { fid: (k: string) => string; field: string }) {
+  return <IdentityControl fid={fid} field={field}>{(check) => <SecretInput {...props} {...check} />}</IdentityControl>
 }
 
 const Muted = ({ children }: { children: ReactNode }) => <span className="text-zinc-500">{children}</span>

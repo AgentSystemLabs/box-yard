@@ -28,6 +28,7 @@ import {
 } from "../../../shared/setup"
 import { LOCAL_UNSANDBOXED, SETUP_RUNNERS, type DefaultProvider } from "../../../shared/runner"
 import { LoginLimitsLine } from "./LoginLimits"
+import { NO_AUTOFILL, SecretInput } from "./SecretInput"
 
 // ------------------------------------------------------------------ "Skip for now" (this browser)
 
@@ -125,7 +126,6 @@ export function CredentialField({ k, status, id, section = "credentials" }: { k:
   }
   const inputProps = {
     id,
-    autoComplete: "off",
     spellCheck: false,
     placeholder: info.placeholder,
     value,
@@ -142,9 +142,9 @@ export function CredentialField({ k, status, id, section = "credentials" }: { k:
     <div className="space-y-2" data-credential={k}>
       {showInput ? (
         multiline ? (
-          <textarea {...inputProps} rows={5} className={cx(inputClass, "min-h-28 resize-y font-mono text-xs leading-5")} />
+          <textarea {...inputProps} {...NO_AUTOFILL} rows={5} className={cx(inputClass, "min-h-28 resize-y font-mono text-xs leading-5")} />
         ) : (
-          <input {...inputProps} type="password" className={cx(inputClass, "font-mono")} />
+          <SecretInput {...inputProps} className={cx(inputClass, "font-mono")} />
         )
       ) : removing ? (
         <p id={id} className="flex min-h-11 items-center rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-xs text-amber-200 sm:min-h-9" data-key-removing>

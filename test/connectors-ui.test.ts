@@ -135,7 +135,7 @@ const click = async (el: Element | null | undefined) => {
 const type = async (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
   act(() => {
     Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
   await settle()
 }
@@ -173,7 +173,7 @@ describe("Settings › Connectors", () => {
     await type(q(fresh, "connector-url"), "https://docs.example/mcp")
     await choose(q<HTMLSelectElement>(fresh, "connector-auth"), "token")
     const token = q(card("new"), "connector-token")
-    expect(token.type).toBe("password")
+    expect(token.matches("[data-secret]")).toBe(true)
     await type(token, PASTED)
     expect(writes()).toEqual([])
     expect(unsaved()).toBe("1 unsaved change")

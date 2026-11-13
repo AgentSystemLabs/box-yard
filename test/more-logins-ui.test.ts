@@ -67,7 +67,7 @@ function type(el: HTMLInputElement | HTMLTextAreaElement, value: string) {
   act(() => {
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }))
   })
 }
 /** The dialog's Save: every draft part. */
@@ -157,7 +157,7 @@ describe("More Claude logins", () => {
     // Open with nothing pasted isn't a change.
     expect(Object.keys(parts)).toEqual([])
     type(host.querySelector<HTMLInputElement>("[data-login-add] input[aria-label='Login name']")!, "Team Max")
-    type(host.querySelector<HTMLInputElement>("[data-login-add] input[type=password]")!, "sk-ant-oat01-secret-7777")
+    type(host.querySelector<HTMLInputElement>("[data-login-add] input[data-secret]")!, "sk-ant-oat01-secret-7777")
     expect(Object.keys(parts)).toEqual(["login-add-claude"])
 
     // Test checks the typed value without adding it.

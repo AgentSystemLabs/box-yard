@@ -9,6 +9,7 @@ import { playPreview, stopPreview, usePreviewing, useVoiceList } from "../lib/tt
 import { filterVoices, voiceMeta } from "../lib/ttsVoices"
 import { stopSpeech } from "../lib/speech"
 import { SearchHighlight } from "../lib/settingsSearch"
+import { SecretInput } from "./SecretInput"
 import { draftChanges, useDraft } from "../lib/settingsDraft"
 import {
   CLOUD_PROVIDERS,
@@ -252,11 +253,8 @@ function KeyRow({ provider, info, draft, fid, volume }: { provider: CloudProvide
     >
       {showInput ? (
         <div className="space-y-2">
-          <input
+          <SecretInput
             id={id}
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
             className={inputClass}
             placeholder={provider === "openai" ? "sk-…" : "sk_…"}
             value={edit ?? ""}

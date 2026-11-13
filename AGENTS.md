@@ -35,6 +35,7 @@ Use these instead of hand-rolling:
 | A Back or Close button | `<DismissButton kind="back\|close">`: Back (‹) top left for drill-ins, Close (×) top right for interruptions, never both on one surface (`docs/dismiss.md`) | `web/src/components/Modal.tsx` |
 | A level inside a dialog or panel (a detail, a sub-view) | `useModalStep(active, back, label)` (or `<ModalStep>`): Esc and the header's Back leave it before the Modal closes | `Modal.tsx` |
 | Yes/no prompt | `await confirmDialog({ title, body, confirmLabel, danger })`, not `window.confirm` | `web/src/lib/confirm.ts` |
+| A field for a token, key or other secret | `<SecretInput>`, never `type="password"` (browsers ignore `autocomplete="off"` there, fill a saved password in and offer to save the token). It's a CSS-masked text field with the password managers' opt-outs whose `onChange` hears only what the user typed or pasted. Spread `NO_AUTOFILL` on a text field next to one | `web/src/components/SecretInput.tsx` |
 | A dropdown | `<Select>` (width via `className`, `size="sm"` inline), not a raw `<select>` | `web/src/components/ui.tsx` |
 | Link to another site | `<NewTabLink>`; never hand-write `target="_blank"`. It adds the ↗ (`ExternalMark`) and the URL tooltip: `mark="end"` in a flex chip, `mark={false}` only for icon buttons that already say where they go | `ui.tsx` |
 | Link that may be in-app, a file or external (e.g. markdown) | `<AppLink>`, which routes by `linkTarget()` in `lib/linkify.ts` | `ui.tsx` |
