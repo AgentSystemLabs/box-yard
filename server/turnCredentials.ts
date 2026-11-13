@@ -32,8 +32,8 @@ export interface TurnEnv {
 /**
  * The env of a `claude` process Box Yard runs on this server (the Coordinator, a Captain): the server's own, without
  * what would mark it a Claude Code session's child or the key identities' secrets are encrypted with. It logs in with
- * `own` (a Captain's project login, projectClaudeLogin, or a rotation login), alone, or else with `global` (Settings ›
- * Credentials) over the server's.
+ * `own` (a Captain's project login, projectClaudeLogin, the Coordinator's, coordinatorClaudeLogin, or a rotation
+ * login), alone, or else with `global` (Settings › Credentials) over the server's.
  */
 export function serverClaudeEnv(own: Record<string, string> | null, global: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, DISABLE_AUTOUPDATER: "1" }
@@ -60,6 +60,28 @@ export function projectClaudeLogin(project: { id: string; name: string }, projec
   const env = strongestClaude(projectEnv)
   if (Object.keys(env).length) return { env, source: `${project.name}'s env vars`, scope: `project:${project.id}` }
   return identity()
+}
+
+/** Who a Claude login from the Coordinator's own env vars is, in limits and usage. */
+export const COORDINATOR_ENV_LOGIN = { source: "the Coordinator's env vars", scope: "coordinator" } as const
+
+/**
+ * The Coordinator's own Claude login (it and its side threads): the strongest Claude credential in its env vars
+ * (Settings › Coordinator › Env vars, server/coordinatorEnv.ts), picked as a task turn picks its project's. Null: none,
+ * so the rotation's login (docs/logins.md), else Settings › Credentials'.
+ */
+export function coordinatorClaudeLogin(coordinatorEnv: Record<string, string>): OwnClaudeLogin | null {
+  const env = strongestClaude(coordinatorEnv)
+  return Object.keys(env).length ? { env, ...COORDINATOR_ENV_LOGIN } : null
+}
+
+/**
+ * The Coordinator's other env vars, which reach its `claude` runs as they are: all but its Claude credentials (only
+ * coordinatorClaudeLogin's one logs it in) and Box Yard's own BOXYARD_* vars.
+ */
+export function coordinatorExtraEnv(coordinatorEnv: Record<string, string>): Record<string, string> {
+  const claude: readonly string[] = CLAUDE_CREDENTIAL_VARS
+  return Object.fromEntries(Object.entries(coordinatorEnv).filter(([k, v]) => v && !claude.includes(k) && !k.toUpperCase().startsWith("BOXYARD_")))
 }
 
 /**

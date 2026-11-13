@@ -710,6 +710,8 @@ export type UiEvent =
   | { type: "tts"; info: TtsInfo }
   /** A credential was saved or removed in the app (status only, never a value). */
   | { type: "setup"; status: SetupStatus }
+  /** The Coordinator's own env vars changed (their names only, never a value). */
+  | { type: "coordinator.env"; env: CoordinatorEnvInfo }
   /** Settings › RunPod GPU's image build moved on (state and the log's tail; never a secret). */
   | { type: "runpod.build"; build: RunPodImageBuild }
   /** Settings › Docker's image build moved on (state and the log's tail; never a secret). */
@@ -1329,6 +1331,16 @@ export interface TaskCompactionRecord {
   archivePath: string | null
   archiveAvailable: boolean
   archiveNote: string | null
+}
+
+/**
+ * The Coordinator's own env vars (Settings › Coordinator › Env vars, server/coordinatorEnv.ts): their names only, never
+ * a value. `claudeLogin` names the Claude credential its runs log in with (the strongest one set), or null when it has
+ * none, so the rotation's or Settings › Credentials' login applies.
+ */
+export interface CoordinatorEnvInfo {
+  keys: string[]
+  claudeLogin: "ANTHROPIC_API_KEY" | "ANTHROPIC_AUTH_TOKEN" | "CLAUDE_CODE_OAUTH_TOKEN" | null
 }
 
 export interface OrchestratorState {

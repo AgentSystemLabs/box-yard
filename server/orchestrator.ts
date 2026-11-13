@@ -36,10 +36,10 @@ import {
 import { routingInstructions } from "./routing.js"
 import { compactionTaskSnapshots, liveTaskLines, mentionedTaskIds, type StatusOnly } from "./compactionTasks.js"
 import { NEXT_STEPS_META_KEY, parseNextSteps } from "../shared/nextSteps.js"
-import { serverClaudeEnv } from "./turnCredentials.js"
+import { coordinatorClaudeLogin, coordinatorExtraEnv, serverClaudeEnv } from "./turnCredentials.js"
 import { sessionLineMeta, type ThreadHost } from "./sideThreads.js"
 import { MISSING_SESSION, codexErrorText } from "./codex.js"
-import { CHAT_ALLOWED_TOOLS, CHAT_TOOLS, attachedImages, chatClaudeLogin, codexAttachmentNote, codexChatLaunch, codexManagerNote, type ChatLaunch } from "./chatAgent.js"
+import { CHAT_ALLOWED_TOOLS, CHAT_TOOLS, attachedImages, chatClaudeLogin, codexAttachmentNote, codexChatLaunch, codexManagerNote, type ChatLaunch, type OwnClaudeLogin } from "./chatAgent.js"
 import { limitsOf, recordLimits } from "./loginLimits.js"
 import { codexModel, type ManagerCli } from "../shared/agentCli.js"
 import { TurnClock, turnTiming, type McpHandshakes } from "./turnTimings.js"
@@ -228,6 +228,16 @@ export class Orchestrator {
   logins: AgentLogins | null = null
   /** The external MCP connectors a session gets (docs/connectors.md › Sessions); app.ts wires them in. */
   connectors: ((ref: SessionRef) => Promise<SessionConnectors>) | null = null
+  /**
+   * Its own env vars (Settings › Coordinator › Env vars, server/coordinatorEnv.ts); app.ts wires them in. Read on every
+   * run, so a saved change applies from the next one.
+   */
+  env: () => Record<string, string> = () => ({})
+
+  /** Its own Claude login: the strongest Claude credential in its env vars, else null (the rotation's or Settings'). */
+  private claudeLogin(): OwnClaudeLogin | null {
+    return coordinatorClaudeLogin(this.env())
+  }
 
   /**
    * Written before every run rather than once at startup: the token is per
@@ -592,8 +602,9 @@ export class Orchestrator {
       effort: () => this.settings.get().orchestratorEffort,
       compactionsDir: this.compactionsDir,
       caller: { kind: "coordinator" },
-      claudeLogin: () => null,
-      login: () => this.logins?.heldBy("coordinator", this.cli()) ?? null,
+      claudeLogin: () => this.claudeLogin(),
+      extraEnv: () => coordinatorExtraEnv(this.env()),
+      login: () => (this.cli() === "claude" && this.claudeLogin() ? null : (this.logins?.heldBy("coordinator", this.cli()) ?? null)),
       usage: { source: "orchestrator", projectId: null },
       taskState: (task) => tasksState([task], this.stateOptions(), TASK_THREAD_HEADING),
       statusOnly: (projectId) => this.statusOnly(projectId),
@@ -962,11 +973,15 @@ export class Orchestrator {
     }
     this.writeMcpConfig(connectors)
     const [bin, ...pre] = this.c.claudeBin.split(" ")
-    // The rotation's login (docs/logins.md), else env vars or Settings › Credentials, read on every run so a saved token
-    // works without a restart.
-    const added = login && !isCredentialsLogin(login.id) ? login : null
-    const env = serverClaudeEnv(added?.env ?? null, this.settings.credentials.claudeEnv())
-    const loginRef = rotationLoginRef(added) ?? chatClaudeLogin(env, null)
+    // Its own Claude login (a Claude credential in its env vars), else the rotation's (docs/logins.md), else the server's
+    // env vars or Settings › Credentials, read on every run so a saved token works without a restart. Its other env vars
+    // go on top; the connectors' values win over them.
+    const coordinatorEnv = this.env()
+    const own = coordinatorClaudeLogin(coordinatorEnv)
+    const added = !own && login && !isCredentialsLogin(login.id) ? login : null
+    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())
+    const loginRef = rotationLoginRef(added) ?? chatClaudeLogin(env, own)
+    Object.assign(env, coordinatorExtraEnv(coordinatorEnv))
     // The connectors' values: only this process's env holds them (its MCP config names them as ${VAR}).
     Object.assign(env, connectors.env)
     return { cli: "claude", bin: bin!, args: [...pre, ...this.claudeArgs(kind, sessionId, resume, ask, connectors)], env, translate: null, after() {}, login: loginRef }
@@ -984,8 +999,9 @@ export class Orchestrator {
       if (this.cli() === "codex" && (kind === "compact" || kind === "context")) return resolve({ ok: true, error: "", text: "", raw: "", sessionId: null })
       // Stopped while it was still setting up: nothing to start.
       if (kind === "turn" && this.stopping) return resolve({ ok: false, stopped: true, error: withOwner(STOPPED_LINE, this.owner()), text: "", raw: "", sessionId: null })
-      // A summary, compaction or /context continues the turn's session, so it keeps the turn's login.
-      const login = this.logins?.pick({ harness: this.cli(), holder: "coordinator", resume: resume || kind !== "turn" }) ?? null
+      // A summary, compaction or /context continues the turn's session, so it keeps the turn's login. Its own Claude
+      // login (its env vars') wins over the rotation's, so it takes none.
+      const login = this.cli() === "claude" && this.claudeLogin() ? null : (this.logins?.pick({ harness: this.cli(), holder: "coordinator", resume: resume || kind !== "turn" }) ?? null)
       const launch = this.launch(kind, sessionId, resume, ask, login, connectors)
       const cliName = launch.cli === "codex" ? `codex (${this.c.codexBin})` : `claude (${this.c.claudeBin})`
       const { model: runModel, effort } = this.modelFor(kind, ask)

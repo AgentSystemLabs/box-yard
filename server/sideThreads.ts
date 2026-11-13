@@ -139,8 +139,13 @@ export interface ThreadHost {
   compactionsDir: string
   /** The chat's MCP caller; the thread gets a read-only one like it. */
   caller: McpCaller
-  /** The chat's own Claude login (a Captain's project's: its env vars', else its identity's), or null for Settings › Credentials'. */
+  /**
+   * The chat's own Claude login (a Captain's project's: its env vars', else its identity's; the Coordinator's: its env
+   * vars'), or null for the rotation's or Settings › Credentials'.
+   */
   claudeLogin(): OwnClaudeLogin | null
+  /** The chat's other env vars, which its `claude` gets as they are (the Coordinator's own env vars but its Claude login). */
+  extraEnv?(): Record<string, string>
   /** The rotation's login the chat runs on now (docs/logins.md): its threads run on it too. Null: the usual login. */
   login?(): PickedLogin | null
   /** How its runs are counted in usage. */
@@ -1002,10 +1007,12 @@ export class SideThreads {
       host.effort(),
     ]
     const [bin, ...pre] = this.c.claudeBin.split(" ")
-    // Like its chat's own `claude`: the chat's Claude login, and never the key identities' secrets are encrypted with.
+    // Like its chat's own `claude`: the chat's Claude login and env vars, and never the key identities' secrets are
+    // encrypted with.
     const own = host.claudeLogin()
     const added = !own && login && !isCredentialsLogin(login.id) ? login : null
     const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())
+    Object.assign(env, host.extraEnv?.() ?? {})
     return { cli: "claude", bin: bin!, args: [...pre, ...args], env, translate: null, after() {}, login: rotationLoginRef(added) ?? chatClaudeLogin(env, own) }
   }
 

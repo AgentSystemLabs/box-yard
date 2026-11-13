@@ -54,6 +54,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/codex-app-server.test.ts": "Isolated worker/protocol subprocess lifecycle",
   "test/codex-task.e2e.test.ts": "End-to-end runner/server integration",
   "test/connector-routes.test.ts": "Full Box Yard server/task-manager fixture",
+  "test/coordinator-env.e2e.test.ts": "End-to-end runner/server integration",
   "test/context.e2e.test.ts": "End-to-end runner/server integration",
   "test/create-tasks.test.ts": "Full Box Yard server/task-manager fixture",
   "test/opencode-task.e2e.test.ts": "End-to-end OpenCode worker/server and archive integration",
