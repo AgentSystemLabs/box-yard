@@ -145,7 +145,7 @@ function CoordinatorEnvEditor({
                 <Button type="button" size="sm" variant="ghost" onClick={() => toggle(k)} aria-label={removing ? `Keep ${k}` : `Remove ${k}`} title={removing ? `Keep ${k}` : `Remove ${k} on Save`}>
                   {removing ? <Undo2 className="h-3.5 w-3.5" aria-hidden /> : <X className="h-3.5 w-3.5" aria-hidden />}
                   {/* On a phone the icon and its name (aria-label) carry it, so the var's name keeps the room. */}
-                  <span className="@max-[22rem]:hidden">{removing ? "Keep" : "Remove"}</span>
+                  <span className="@max-[26rem]:hidden">{removing ? "Keep" : "Remove"}</span>
                 </Button>
               </li>
             )
@@ -159,7 +159,8 @@ function CoordinatorEnvEditor({
           className={cx(inputClass, "font-mono")}
           value={draft.name}
           onChange={(e) => set({ name: e.target.value })}
-          placeholder="CLAUDE_CODE_OAUTH_TOKEN"
+          // Short, so it fits a phone's wider type; the list (focus, or ↓) offers the Claude vars.
+          placeholder="VAR_NAME"
           aria-label="New env var name"
           aria-invalid={problem?.field === "name" || undefined}
           list={listId}
