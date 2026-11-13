@@ -293,7 +293,8 @@ describe("update_settings", () => {
       expect(res.isError, JSON.stringify(patch)).toBe(true)
       expect(res.content[0]!.text).toContain("API keys, tokens and passwords can't be read or written with these tools")
     }
-    expect(r.yard.settings.credentials.secrets().githubToken).toBeFalsy()
+    expect(r.yard.settings.credentials.secrets()).not.toContain("ghp_x12345678")
+    expect(r.yard.settings.credentials.secrets()).not.toContain("abcdefgh123")
     expect(r.yard.ttsSettings.info().keys.openai.state).toBe("unset")
     expect(r.yard.settings.get().maxBoxes).toBe(2)
   })

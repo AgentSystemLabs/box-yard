@@ -44,11 +44,7 @@ describe("SelfUpdate", () => {
     expect(su.status()).toEqual(UNMANAGED_UPDATE)
     expect(() => su.start()).toThrow(UpdateNotManagedError)
     expect(() => su.check()).toThrow(/git pull, then \.\/yard local/)
-    try {
-      su.restartNow()
-    } catch (err) {
-      expect((err as UpdateNotManagedError).status).toBe(409)
-    }
+    expect(() => su.restartNow()).toThrow(expect.objectContaining({ status: 409 }))
   })
 
   it("asks the launcher for its status, then relays Check and Update", () => {

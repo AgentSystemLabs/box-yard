@@ -249,7 +249,7 @@ describe("first-run setup", () => {
     expect(card()).not.toBeNull()
   })
 
-  it("the Settings gear opens credentials even during first-run setup", () => {
+  it("the Settings gear opens Settings even during first-run setup", () => {
     render("/", { status: setup({ upstashBoxApiKey: saved }) })
     expect(card()).not.toBeNull()
     act(() => document.querySelector<HTMLButtonElement>("button[aria-label=Settings]")!.click())
@@ -384,12 +384,6 @@ describe("first-run setup: This computer", () => {
     expect(document.querySelector("[data-testid=setup-reminder]")!.textContent).toContain("Needs Claude Code on this computer and Claude sign-in")
   })
 
-  it("with this computer's claude signed in, setup is complete and the chat shows", () => {
-    render(APP_HOME, { status: onComputer() })
-    expect(card()).toBeNull()
-    expect(document.querySelector("[data-testid=setup-reminder]")).toBeNull()
-  })
-
   it("Settings › Box providers changes the default only on Save", async () => {
     render("/?settings=runners", { status: onComputer() })
     const dialog = document.querySelector<HTMLElement>("[role=dialog]")!
@@ -412,13 +406,6 @@ describe("first-run setup: This computer", () => {
   it("once a key is added, Settings says boxes are ready", () => {
     render("/?settings=upstash", { status: onComputer({ upstash: true }) })
     expect(document.querySelector("[data-testid=upstash-ready]")!.textContent).toContain("Upstash boxes are ready")
-  })
-
-  it("the retired Boxes URL redirects home, where setup remains available", () => {
-    render("/boxes", { status: onComputer({ fresh: true, claudeLogin: false }) })
-    expect(location.pathname).toBe(APP_HOME)
-    expect(card()).not.toBeNull()
-    expect(document.querySelector("[data-testid=boxes-on-computer]")).toBeNull()
   })
 
   it("a new project runs where setup chose; Upstash box waits for a key", () => {

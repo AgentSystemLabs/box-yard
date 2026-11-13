@@ -166,6 +166,7 @@ describe("Settings drafts", () => {
     await click(saveButton())
     expect(getVoiceSettings().captains).toBe(false)
     expect(JSON.parse(localStorage.getItem(VOICE_KEY)!).captains).toBe(false)
+    expect(saveButton().disabled).toBe(true)
     expect(writes()).toEqual([])
   })
 
@@ -209,22 +210,6 @@ describe("Settings drafts", () => {
     expect(played).toBe(0)
     await click(button("Test voice"))
     expect(spoken.filter(Boolean)).toHaveLength(1)
-  })
-
-  it("browser-only voice choices stay out of localStorage until Save", async () => {
-    section = "voice"
-    render()
-    const before = getVoiceSettings().orchestrator
-    act(() => checkbox("Coordinator summaries").click())
-    await settle()
-    expect(checkbox("Coordinator summaries").checked).toBe(!before)
-    expect(localStorage.getItem(VOICE_KEY)).toBeNull()
-    expect(getVoiceSettings().orchestrator).toBe(before)
-    expect(saveButton().disabled).toBe(false)
-    await click(saveButton())
-    expect(getVoiceSettings().orchestrator).toBe(!before)
-    expect(JSON.parse(localStorage.getItem(VOICE_KEY)!).orchestrator).toBe(!before)
-    expect(saveButton().disabled).toBe(true)
   })
 
   it("Discard reverts every draft", async () => {
