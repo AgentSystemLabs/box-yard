@@ -223,7 +223,7 @@ describe("Project settings › Identity / Claude login", () => {
 
   it("a Claude login in the project's env vars beats the identity's for its agents, and says so", () => {
     renderSettings(project({ envKeys: ["CLAUDE_CODE_OAUTH_TOKEN"] }))
-    expect(text("identity-env-login")).toBe("Its agents log in with this project’s CLAUDE_CODE_OAUTH_TOKEN env var instead; its Captain uses the login above.")
+    expect(text("identity-env-login")).toBe("Its agents and Captain log in with this project’s CLAUDE_CODE_OAUTH_TOKEN env var instead.")
   })
 
   it("links to Settings › Identities", () => {

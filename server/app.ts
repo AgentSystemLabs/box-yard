@@ -79,7 +79,7 @@ import { listHarnessTargets, listRunTargets, resolveHarnessPick, resolveInlinePi
 import { GithubReferences } from "./githubReferences.js"
 import { isMachineBox, MACHINE_LIMITS, machineOfBox, normalizeLabel, type MachineKeyRef } from "../shared/machines.js"
 import { ClaudeModels } from "./claudeModels.js"
-import { serverClaudeEnv } from "./turnCredentials.js"
+import { projectClaudeLogin, serverClaudeEnv } from "./turnCredentials.js"
 import { recentCaptains, recentLimit, sendCompressedJson } from "./captainRecent.js"
 import { compressResponses } from "./compress.js"
 import { webApp, webBuild } from "./webApp.js"
@@ -737,11 +737,15 @@ export function createBoxYard(
   // Cody's message from a task's chat goes to that task's own project's Captain, and its reply back to the task's chat.
   tasks.onForwardToCaptain = (projectId, content, attachments, viaTask) => captains.send(projectId, content, { attachments, source: "cody", meta: { viaTask } })
   captains.onForwardsHandled = (projectId, messages, reply) => tasks.captainAnsweredForwards(projectId, messages, reply)
-  captains.claudeLogin = (projectId) => {
-    const env = identities.ownClaude(projectId)
-    const id = identities.idOf(projectId)
-    return env ? { env, source: `${identities.nameOf(id) ?? "Its"} identity`, scope: `identity:${id}` } : null
-  }
+  // A Captain and its side threads log in like the project's tasks (turnEnv): a Claude credential in the project's env
+  // vars, else its identity's own login, else the rotation or Settings › Credentials. Read on every run, so a saved
+  // token applies without a restart.
+  captains.claudeLogin = (projectId) =>
+    projectClaudeLogin({ id: projectId, name: store.getProject(projectId)?.name ?? projectId }, store.projectEnv(projectId), () => {
+      const env = identities.ownClaude(projectId)
+      const id = identities.idOf(projectId)
+      return env ? { env, source: `${identities.nameOf(id) ?? "Its"} identity`, scope: `identity:${id}` } : null
+    })
   // Coordinator sees: status only (docs/identities.md): its summaries, recaps and hook messages leave those projects' content out,
   // and their Captains are told to answer it with state, not content.
   orchestrator.statusOnly = (projectId) => identities.statusOnly(projectId)

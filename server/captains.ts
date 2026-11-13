@@ -250,7 +250,7 @@ export class CaptainManager {
   onForwardsHandled: ((projectId: string, messages: CaptainMessage[], reply: string) => void) | null = null
   /** A Captain turn that read these notices ended; the notes retro settles the suggestions its retros held. */
   onNoticesHandled: ((projectId: string, notices: CaptainNoticeEntry[], ok: boolean) => void) | null = null
-  /** The Claude login a project's Captain runs on when its identity has one of its own (app.ts: Identities.ownClaude). */
+  /** The Claude login a project's Captain runs on when the project has one of its own: its env vars', else its identity's (app.ts: projectClaudeLogin). */
   claudeLogin: ((projectId: string) => OwnClaudeLogin | null) | null = null
   /** Whether a project's identity shows the Coordinator its status only (app.ts: Identities.statusOnly). */
   statusOnly: ((projectId: string) => boolean) | null = null
@@ -651,7 +651,7 @@ class Captain {
     private readonly tuning: CaptainTuning,
     private readonly noticesHandled: (notices: CaptainNoticeEntry[], ok: boolean) => void = () => {},
     private readonly agentMessagesHandled: (messages: CaptainMessage[], reply: string) => void = () => {},
-    /** Its project identity's own Claude login (Identities.ownClaude), or null for the global one. */
+    /** Its project's own Claude login (projectClaudeLogin: its env vars', else its identity's), or null for the rotation's or the global one. */
     private readonly claudeLogin: () => OwnClaudeLogin | null = () => null,
     /** Its identity shows the Coordinator status only, so its replies to the Coordinator report state, not content. */
     private readonly statusOnly: () => boolean = () => false,
@@ -1487,8 +1487,8 @@ class Captain {
   }
 
   /**
-   * The login this run takes from the rotation (docs/logins.md), or null for the usual one: a project identity's own
-   * Claude login wins. A summary, compaction or /context continues the turn's session, so it keeps the turn's login.
+   * The login this run takes from the rotation (docs/logins.md), or null for the usual one: the project's own Claude
+   * login (its env vars', else its identity's) wins. A summary, compaction or /context continues the turn's session, so it keeps the turn's login.
    */
   private pickLogin(kind: RunKind, resume: boolean): PickedLogin | null {
     const cli = this.cli()
@@ -1518,8 +1518,8 @@ class Captain {
     }
     this.writeMcpConfig(connectors)
     const [bin, ...pre] = this.c.claudeBin.split(" ")
-    // Its project identity's own Claude login, else the rotation's (docs/logins.md), else env vars or Settings ›
-    // Credentials, read on every run so a saved token works without a restart.
+    // Its project's own Claude login (its env vars', else its identity's), else the rotation's (docs/logins.md), else
+    // the server's env vars or Settings › Credentials, read on every run so a saved token works without a restart.
     const own = this.claudeLogin()
     const added = !own && login && !isCredentialsLogin(login.id) ? login : null
     const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())

@@ -5,6 +5,7 @@
 // (server/identity/identities.ts `base`), and for the Default identity from Settings › Credentials.
 import { OPENCODE_CREDENTIAL_VARS, parseOpenCodeAuth } from "./opencode.js"
 import { CLAUDE_CREDENTIAL_VARS, DEFAULT_IDENTITY_ID } from "../shared/identities.js"
+import type { OwnClaudeLogin } from "./chatAgent.js"
 
 export { CLAUDE_CREDENTIAL_VARS }
 
@@ -31,7 +32,8 @@ export interface TurnEnv {
 /**
  * The env of a `claude` process Box Yard runs on this server (the Coordinator, a Captain): the server's own, without
  * what would mark it a Claude Code session's child or the key identities' secrets are encrypted with. It logs in with
- * `own` (a project identity's Claude login), alone, or else with `global` (Settings › Credentials) over the server's.
+ * `own` (a Captain's project login, projectClaudeLogin, or a rotation login), alone, or else with `global` (Settings ›
+ * Credentials) over the server's.
  */
 export function serverClaudeEnv(own: Record<string, string> | null, global: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, DISABLE_AUTOUPDATER: "1" }
@@ -46,6 +48,18 @@ export function serverClaudeEnv(own: Record<string, string> | null, global: Reco
 function strongestClaude(env: Record<string, string>): Record<string, string> {
   const k = CLAUDE_CREDENTIAL_VARS.find((v) => env[v])
   return k ? { [k]: env[k]! } : {}
+}
+
+/**
+ * The Claude login of a project's Captain and its side threads, picked in a task turn's order (turnEnv): the strongest
+ * Claude credential in the project's env vars, else its identity's own login (asked only then). Null: neither, so the
+ * rotation's login (docs/logins.md), else Settings › Credentials'. Only that one var: the project's other env vars
+ * never reach the Captain.
+ */
+export function projectClaudeLogin(project: { id: string; name: string }, projectEnv: Record<string, string>, identity: () => OwnClaudeLogin | null): OwnClaudeLogin | null {
+  const env = strongestClaude(projectEnv)
+  if (Object.keys(env).length) return { env, source: `${project.name}'s env vars`, scope: `project:${project.id}` }
+  return identity()
 }
 
 /**

@@ -47,7 +47,7 @@ async function start() {
     claude,
     // One append per invocation: polling a partially written shell block used to expose only CWD,
     // before env arrived, and simultaneous Captain/thread starts could interleave their blocks.
-    `#!/bin/sh\n${JSON.stringify(process.execPath)} -e 'const env = Object.entries(process.env).filter(([k]) => /^(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|GH_TOKEN|GITHUB_TOKEN|GIT_AUTHOR_[A-Z]+|GIT_COMMITTER_[A-Z]+)$/.test(k)).map(([k,v]) => k + "=" + v); if (process.env.BOXYARD_SECRET_KEY) env.push("SECRET_KEY_SET"); require("node:fs").appendFileSync(process.argv[1], JSON.stringify({cwd: process.cwd(), env}) + "\\n")' ${JSON.stringify(log)}\nexec ${FAKE_CLAUDE} "$@"\n`,
+    `#!/bin/sh\n${JSON.stringify(process.execPath)} -e 'const env = Object.entries(process.env).filter(([k]) => /^(ANTHROPIC_AUTH_TOKEN|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|GH_TOKEN|GITHUB_TOKEN|GIT_AUTHOR_[A-Z]+|GIT_COMMITTER_[A-Z]+|ACME_PROJECT_VAR)$/.test(k)).map(([k,v]) => k + "=" + v); if (process.env.BOXYARD_SECRET_KEY) env.push("SECRET_KEY_SET"); require("node:fs").appendFileSync(process.argv[1], JSON.stringify({cwd: process.cwd(), env}) + "\\n")' ${JSON.stringify(log)}\nexec ${FAKE_CLAUDE} "$@"\n`,
     { mode: 0o755 },
   )
   const port = await freePort()
@@ -224,6 +224,35 @@ describe("identities over the API", () => {
     } finally {
       delete process.env.BOXYARD_SECRET_KEY
     }
+  })
+
+  it("run a project's Captain and its side threads on a Claude login in the project's env vars first, like its tasks, read on every run", async () => {
+    const r = await start()
+    const acme = await r.call<Identity>("POST", "/api/identities", { name: "Acme" })
+    await r.call("PUT", `/api/identities/${acme.id}/claude`, { kind: "api_key", value: "acme-key-0001" })
+    // A login in the rotation doesn't beat the project's own either (docs/logins.md).
+    await r.call("POST", "/api/logins", { harness: "claude", label: "Rotation", value: "oat-rotation-0001" })
+    const project = await r.call<Project>("POST", "/api/projects", { name: "acme-app", identityId: acme.id })
+    await r.call("PATCH", `/api/projects/${project.id}`, { env: { CLAUDE_CODE_OAUTH_TOKEN: "project-oauth-0001", ACME_PROJECT_VAR: "only-for-tasks" } })
+    // Its Claude vars, and whether the project's other env vars reached it.
+    const claudeOf = (run: string[]) => run.filter((l) => /^(ANTHROPIC|CLAUDE_CODE_OAUTH|ACME_PROJECT_VAR)/.test(l))
+    const idle = () => waitFor(async () => !(await r.call<{ busy: boolean }>("GET", `/api/projects/${project.id}/captain`)).busy, "the Captain to finish")
+
+    await r.call("POST", `/api/projects/${project.id}/captain/messages`, { content: "status" })
+    const reply = await waitFor(async () => (await r.call<{ id: string; role: string }[]>("GET", `/api/projects/${project.id}/captain/messages`)).find((m) => m.role === "assistant") ?? null, "the Captain's reply")
+    expect(claudeOf(await waitFor(() => r.turns(true)[0] ?? null, "the Captain's run"))).toEqual(["CLAUDE_CODE_OAUTH_TOKEN=project-oauth-0001"])
+    await r.call("POST", "/api/threads", { projectId: project.id, anchorId: reply.id, quote: "status", question: "Why?" })
+    expect(claudeOf(await waitFor(() => r.turns(true)[1] ?? null, "the Captain side thread's run"))).toEqual(["CLAUDE_CODE_OAUTH_TOKEN=project-oauth-0001"])
+
+    // Without it, the Captain's next run is back on its identity's login, with no restart.
+    await idle()
+    await waitFor(() => !r.yard.threads.anyBusy, "the side thread to finish")
+    await r.call("PATCH", `/api/projects/${project.id}`, { removeEnv: ["CLAUDE_CODE_OAUTH_TOKEN"] })
+    const before = r.turns(true).length
+    await r.call("POST", `/api/projects/${project.id}/captain/messages`, { content: "status again" })
+    await waitFor(() => r.turns(true).length > before || null, "the Captain's next run")
+    await idle()
+    expect(r.turns(true).slice(before).map(claudeOf)).toEqual(r.turns(true).slice(before).map(() => ["ANTHROPIC_API_KEY=acme-key-0001"]))
   })
 
   it("keep projects on runners their identity allows, and move them to Default when it's removed", async () => {

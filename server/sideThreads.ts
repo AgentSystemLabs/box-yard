@@ -139,7 +139,7 @@ export interface ThreadHost {
   compactionsDir: string
   /** The chat's MCP caller; the thread gets a read-only one like it. */
   caller: McpCaller
-  /** The chat's own Claude login (a Captain's project identity's), or null for Settings › Credentials'. */
+  /** The chat's own Claude login (a Captain's project's: its env vars', else its identity's), or null for Settings › Credentials'. */
   claudeLogin(): OwnClaudeLogin | null
   /** The rotation's login the chat runs on now (docs/logins.md): its threads run on it too. Null: the usual login. */
   login?(): PickedLogin | null

@@ -47,12 +47,15 @@ export interface ChatLaunch {
   login: LoginRef
 }
 
-/** A chat's own Claude login (a Captain's project identity's, Identities.ownClaude) as a one-var env, and whose it is. */
+/**
+ * A chat's own Claude login (a Captain's project's: its env vars' or its identity's, projectClaudeLogin) as a one-var
+ * env, and whose it is.
+ */
 export interface OwnClaudeLogin {
   env: Record<string, string>
-  /** "Acme identity". */
+  /** "acme's env vars" or "Acme identity". */
   source: string
-  /** `identity:<id>`. */
+  /** `project:<id>` or `identity:<id>`. */
   scope: string
 }
 

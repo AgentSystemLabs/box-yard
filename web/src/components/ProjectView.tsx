@@ -818,7 +818,7 @@ function ProjectIdentityField({
         : picked.claude.readable
           ? `its own ${picked.claude.kind === "api_key" ? "API key" : "OAuth token"}`
           : `its own can’t be read (this server’s secret key changed), so ${global} until it’s saved again`
-  // A Claude login in the project's env vars beats the identity's for its agents (turnEnv); Captains don't read them.
+  // A Claude login in the project's env vars beats the identity's for its agents (turnEnv) and its Captain (projectClaudeLogin).
   const envLogin = CLAUDE_CREDENTIAL_VARS.find((v) => project.envKeys.includes(v))
   const sharedWith = picked && !picked.isDefault ? picked.projectIds.filter((id) => id !== project.id).length : 0
   return (
@@ -881,7 +881,7 @@ function ProjectIdentityField({
       )}
       {envLogin && (
         <p className="text-xs text-zinc-500" data-testid="identity-env-login">
-          Its agents log in with this project’s {envLogin} env var instead; its Captain uses the login above.
+          Its agents and Captain log in with this project’s {envLogin} env var instead.
         </p>
       )}
       {sharedWith > 0 && (
