@@ -281,6 +281,9 @@ export function useServerEvents(enabled: boolean): Connection {
         case "logins":
           qc.setQueryData(keys.logins, ev.logins)
           break
+        case "coordinator.env":
+          qc.setQueryData(keys.coordinatorEnv, ev.env)
+          break
         case "setup":
           qc.setQueryData(keys.setup, ev.status)
           void qc.invalidateQueries({ queryKey: keys.health })

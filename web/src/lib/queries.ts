@@ -49,6 +49,7 @@ import type {
   CaptainMessage,
   CaptainState,
   ChatMessage,
+  CoordinatorEnvInfo,
   Effort,
   Health,
   OrchestratorState,
@@ -96,6 +97,8 @@ export const keys = {
   models: ["models"] as const,
   tts: ["tts-settings"] as const,
   setup: ["setup"] as const,
+  /** The Coordinator's own env vars' names (Settings › Coordinator › Env vars); the "coordinator.env" event keeps it live. */
+  coordinatorEnv: ["coordinator-env"] as const,
   /** Settings › Credentials › More logins; the "logins" event keeps it live. */
   logins: ["logins"] as const,
   runpod: ["runpod"] as const,
@@ -477,6 +480,16 @@ export const useRecentRepos = (o: { enabled?: boolean } = {}) =>
   useQuery({ queryKey: keys.setupRepos, queryFn: () => api<RecentRepos>("/api/setup/repos"), staleTime: Infinity, enabled: o.enabled })
 /** The Claude and Codex logins new sessions rotate over (docs/logins.md): a label, last 4 and state, never a value. */
 export const useLogins = () => useQuery({ queryKey: keys.logins, queryFn: () => api<AgentLogin[]>("/api/logins"), staleTime: Infinity })
+/** The names of the Coordinator's own env vars, and which one is its Claude login. Values never come back. */
+export const useCoordinatorEnv = () => useQuery({ queryKey: keys.coordinatorEnv, queryFn: () => api<CoordinatorEnvInfo>("/api/orchestrator/env"), staleTime: Infinity })
+/** Set or replace some of the Coordinator's env vars and remove others; its next run reads them. */
+export function useSaveCoordinatorEnv() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (patch: { env?: Record<string, string>; removeEnv?: string[] }) => api<CoordinatorEnvInfo>("/api/orchestrator/env", { method: "PATCH", body: patch }),
+    onSuccess: (info) => qc.setQueryData(keys.coordinatorEnv, info),
+  })
+}
 /**
  * Add, rename or remove a login (Settings' Save runs them). The server's "logins" event updates the list too; these
  * apply the answer at once. Errors show in the dialog's "Couldn't save", so there's no toast.
