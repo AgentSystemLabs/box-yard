@@ -1,7 +1,7 @@
 import { useTranscriptHistory } from "../lib/transcriptHistory"
 import { HistoryNavigation } from "./HistoryNavigation"
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react"
-import { Bot, ChevronDown, ChevronRight, MessageCircleQuestion, MessageSquareReply, Navigation2, Users, Webhook } from "lucide-react"
+import { Bot, ChevronDown, ChevronRight, Loader2, MessageCircleQuestion, MessageSquareReply, Navigation2, Users, Webhook } from "lucide-react"
 import { useOwnerName, useTaskMessages } from "../lib/queries"
 import { useEntityIndex } from "../lib/entities"
 import { useTail } from "../lib/tail"
@@ -282,10 +282,11 @@ const HousekeepingRun = memo(
 )
 
 /**
- * The live line while a turn runs, in the events' column (pl-6), with no dot or colour of its own: the task's icon in
- * the header says it works. "Turn running · 2m · › 4 steps · Bash npm run typecheck": the steps since the newest line
- * unfold under it, where the newest one then is, so the line stops repeating it. A narrow line (a phone, under 24rem)
- * is two: "Turn running · 2m", then the steps and the tool, which so keeps the room to be read.
+ * The live line while a turn runs, in the events' column (pl-6), with a spinner left of its words in the icons'
+ * column (WorkingSpinner), so the thread's foot shows the session works. "Turn running · 2m · › 4 steps · Bash npm
+ * run typecheck": the steps since the newest line unfold under it, where the newest one then is, so the line stops
+ * repeating it. A narrow line (a phone, under 24rem) is two: "Turn running · 2m", then the steps and the tool, which
+ * so keeps the room to be read.
  */
 function WorkingLine({ label, since, tool, steps }: { label: string; since: number | null; tool: string | null; steps: TaskMessage[] | null }) {
   const [open, setOpen] = useState(false)
@@ -297,7 +298,8 @@ function WorkingLine({ label, since, tool, steps }: { label: string; since: numb
     <>
       <div data-testid="working-line" className="@container/live pt-1 pl-6 text-xs text-zinc-400">
         <div className="flex min-w-0 items-center gap-x-1.5 @max-[24rem]/live:flex-col @max-[24rem]/live:items-start @max-[24rem]/live:gap-y-0.5">
-          <span className="flex shrink-0 items-center gap-1.5">
+          <span className="relative flex shrink-0 items-center gap-1.5">
+            <WorkingSpinner />
             <span>{label}</span>
             {since !== null && (
               <span data-testid="working-for">
@@ -335,6 +337,20 @@ function WorkingLine({ label, since, tool, steps }: { label: string; since: numb
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * The live line's spinner, left of "Turn running": the one motion besides WORKING_PULSE (Cody asked for it). It hangs
+ * out of the flow in the icons' column (the 16px left of the events' pl-6), centred on the words' line, so nothing
+ * moves when it comes or goes. The words are its label, so screen readers skip it; under prefers-reduced-motion it
+ * stands still.
+ */
+function WorkingSpinner() {
+  return (
+    <span aria-hidden data-testid="working-spinner" className="absolute inset-y-0 -left-6 flex w-4 items-center justify-center">
+      <Loader2 className="h-3.5 w-3.5 text-sky-400 motion-safe:animate-spin" />
+    </span>
   )
 }
 
