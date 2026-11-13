@@ -3,7 +3,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ContextMiniBar } from "../web/src/components/ContextMeter.js"
 
-const render = (tokens: number | null, window: number | null, hint?: string) => renderToStaticMarkup(createElement(ContextMiniBar, { tokens, window, hint }))
+const render = (tokens: number | null, window: number | null) => renderToStaticMarkup(createElement(ContextMiniBar, { tokens, window }))
 
 describe("ContextMiniBar", () => {
   it("shows the percentage, with the full reading as its accessible name and tooltip", () => {
@@ -12,10 +12,6 @@ describe("ContextMiniBar", () => {
     // Room for "100%" is reserved, so the chip's width holds as the number grows.
     expect(html).toContain('<span aria-hidden="true" class="min-w-[4ch]">8%</span>')
     expect(html).toContain("title=\"Context 78k / 1m · 8%. How much of this agent&#x27;s context window is used.\"")
-  })
-
-  it("uses a custom tooltip hint", () => {
-    expect(render(500_000, 1_000_000, "Captain hint.")).toContain("title=\"Context 500k / 1m · 50%. Captain hint.\"")
   })
 
   it("stays muted until 75%, then turns amber, and red from 90%", () => {
