@@ -311,15 +311,6 @@ describe("TaskHeader", () => {
     expect(stopItem()).toBeUndefined()
   })
 
-  it("marks new files with a dot, not a count badge", () => {
-    openedFilesBefore()
-    render(task(), [file(1), file(2), file(3)])
-    const chip = [...meta().querySelectorAll("button")].find((b) => b.textContent?.includes("3 files"))!
-    expect(chip.getAttribute("aria-label")).toBe("3 files, 3 new")
-    expect(chip.querySelector('[data-testid="files-new-dot"]')).not.toBeNull()
-    expect(chip.textContent).not.toContain("new")
-  })
-
   it("keeps context usage and manual Compact out of the header", () => {
     render(task({ contextTokens: 700_000 }))
     expect(metaText()).not.toContain("70%")

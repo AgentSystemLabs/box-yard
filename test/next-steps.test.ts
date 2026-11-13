@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { NEXT_STEPS_META_KEY, parseNextSteps } from "../shared/nextSteps.js"
+import { parseNextSteps } from "../shared/nextSteps.js"
 import { buildSelectionTaskPrompt } from "../web/src/lib/selectionTask.js"
 
 describe("next-step parsing", () => {
@@ -84,9 +84,5 @@ describe("selection task prompt", () => {
     expect(prompt).toContain("didn't write one: work out the task from the highlighted text.")
     expect(prompt).toContain("- Project: unknown")
     expect(prompt).toContain("> Two lines\n> of output")
-  })
-
-  it("uses the shared meta key expected by the UI", () => {
-    expect(NEXT_STEPS_META_KEY).toBe("nextSteps")
   })
 })

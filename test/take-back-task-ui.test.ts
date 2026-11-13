@@ -184,5 +184,6 @@ describe("Task chat: Cancel a queued message", () => {
     expect(box().value).toBe("draft")
     expect(toasts().find((t) => t.title === "Couldn't cancel the message")?.body).toMatch(/already delivered/)
     expect(host.querySelector("[data-testid=queued-deleted]")).toBeNull()
+    expect(host.querySelectorAll("[data-testid=queued-message]")).toHaveLength(1)
   })
 })
