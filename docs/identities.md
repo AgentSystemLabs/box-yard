@@ -28,7 +28,7 @@ Every project starts on the **Default** identity, which is Settings › Credenti
 
 Settings edits stay as drafts until **Save**. Save checks every pending identity draft, including cards you collapsed or left in another settings category; unchanged identities are not rewritten or revalidated. Invalid drafts stay as typed. Save opens the relevant identity, clears settings search, and scrolls to and focuses the field with its explanation. Correct it and Save again.
 
-**Owners** accepts GitHub user or org names separated by commas or spaces. **Token owner**, under GitHub token, accepts one such name, or blank for every owner. Neither accepts a repository (`acme/app`) or URL. Names are trimmed and token owners are lowercased for saving; a valid hyphenated name such as `acme-example-daily` is accepted. A token error naming `owner` refers to Token owner, rather than the Owners list or git author.
+**Owners** accepts GitHub user or org names separated by commas or spaces. **Token owner**, under GitHub token, accepts one such name, or blank for every owner. Neither accepts a repository (`acme/app`) or URL. Names are trimmed and token owners are lowercased for saving; a name may hold letters, digits, single hyphens and underscores, so `acme-example-daily` and an Enterprise Managed User such as `jdoe_acme` are accepted (up to 39 characters, starting with a letter or digit, never ending in a hyphen). A token error naming `owner` refers to Token owner, rather than the Owners list or git author.
 
 ## What a turn gets
 
