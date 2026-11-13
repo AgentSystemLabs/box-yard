@@ -1780,6 +1780,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       const list = current()
       const settled = list.filter((t) => !BUSY.has(t.status) && t.pendingCount === 0)
       store.markNoticesSeen(settled.map((t) => t.id))
+      // A Captain that waited has the result in hand: the task's update must not wake it again to say "(no update)".
+      if (scopeId) store.markCaptainNoticesSeen(scopeId, settled.map((t) => t.id))
       return ok({
         allFinished: settled.length === list.length,
         tasks: list.map((t) => ({ ...replyFields(t).fields, stillRunning: !settled.includes(t) })),
