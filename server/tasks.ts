@@ -6288,14 +6288,13 @@ export class TaskManager {
       const helper = project.repo ? `([ ! -d work/.git ] || (cd work && ${setHelperScript(GITHUB_HELPER, this.onlyBoxYardHelper(boxId, project.id))})) && ` : ""
       // setsid (where it exists; on macOS the runner makes its own session) + nohup: the turn survives a dropped
       // exec connection and a Box Yard restart. Any half-started runner is stopped first, by its run record, so a
-      // pid someone else holds now is never hit. The runner writes run.json and turn.pid itself, about 80 ms after it
-      // starts: the wait looks every 50 ms (10 s at most), so a launch doesn't sit out a 200 ms sleep.
+      // pid someone else holds now is never hit. The runner writes run.json and turn.pid itself.
       this.checkEnvironmentRunner(this.requireRow(taskId))
       this.environment.placement(this.requireRow(taskId), boxId)
       const start = await perfSpan(taskId, "launch.start", () =>
         this.provider.exec(
           boxId,
-          `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 200); do [ -f turn.pid ] && break; sleep 0.05; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
+          `${TURN_SH}\ncd ${q(dir)} && ([ ! -f signing.key ] || chmod 600 signing.key) && ${helper}(by_turn_kill . TERM; rm -f turn.pid run.json; true) && ($(command -v setsid || true) nohup ${q(providerOf(this.provider, boxId).nodeBin)} ${q(runnerPath)} turn ${q(dir)} >> runner.log 2>&1 < /dev/null &) && for i in $(seq 1 50); do [ -f turn.pid ] && break; sleep 0.2; done; [ -f turn.pid ] && cat turn.pid || (tail -n 20 runner.log; exit 1)`,
         ),
       )
       perfMark(taskId, "launch.done")
