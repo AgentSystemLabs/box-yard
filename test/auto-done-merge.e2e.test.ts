@@ -31,7 +31,7 @@ async function start(): Promise<Running> {
     return new Response(JSON.stringify({ data }), { status: 200, headers: { "content-type": "application/json" } })
   }) as unknown as typeof globalThis.fetch
   const yard = createBoxYard(config, { webDir: "/nonexistent", github: { fetch, token: () => "test-token" } })
-  yard.captains.tuning.wakeDebounceMs = 10 * 60_000
+  yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 10 * 60_000
   const server = await new Promise<Server>((resolve) => {
     const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
   })

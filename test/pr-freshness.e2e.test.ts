@@ -43,7 +43,7 @@ function setup() {
   const yard = createBoxYard(config, { webDir: "/nonexistent", github: { fetch, token: () => "test-token" } })
   yards.push(yard)
   // The hook below messages the Captain; it shouldn't wake and start a turn in this test.
-  yard.captains.tuning.wakeDebounceMs = 10 * 60_000
+  yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 10 * 60_000
   const project = yard.store.createProject({ name: "castle" })
   const as = async (caller: McpCaller) => {
     const deps = {

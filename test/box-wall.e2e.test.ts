@@ -25,7 +25,7 @@ afterEach(async () => {
 async function start(overrides: Partial<Config> = {}) {
   const port = await freePort()
   const yard = createBoxYard(testConfig({ port, ...overrides }), { webDir: "/nonexistent" })
-  yard.captains.tuning.wakeDebounceMs = 10 * 60_000
+  yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 10 * 60_000
   const server = await new Promise<Server>((resolve) => {
     const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
   })
