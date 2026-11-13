@@ -147,6 +147,7 @@ describe("pool limits", () => {
     const t2 = await task(r, b.id, "b2")
     await until(r, t1.id, "working")
     await until(r, t2.id, "working")
+    expect((await getTask(r, t1.id)).status).toBe("working")
     await until(r, t1.id, "idle")
     await until(r, t2.id, "idle")
   })
