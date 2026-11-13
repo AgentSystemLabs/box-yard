@@ -26,6 +26,7 @@ These keep their own login and never rotate:
 
 - a project whose identity has its own Claude login (docs/identities.md), and its Captain
 - a Claude or Codex credential in the project's or the task's env vars (a Claude one in the project's env vars keeps its Captain off the rotation too)
+- the Coordinator, with a Claude credential in its own env vars (Settings › Coordinator › Env vars, or the gear on its sidebar row), and its side threads. Only the strongest one (`ANTHROPIC_AUTH_TOKEN`, then `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`) reaches it, as a task's; its other vars reach it as they are. It's read on every run, so a new token applies from the next one, and with none the Coordinator is back in the rotation. Codex doesn't get them
 - a Codex task on an SSH machine that can't keep a ChatGPT login in memory (it gets Settings' API key, as before)
 - this computer's own `claude` or `codex` login, when Settings › Credentials has none: it can't be read into a rotation. Paste a token there to include it.
 

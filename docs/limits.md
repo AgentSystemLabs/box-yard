@@ -45,6 +45,7 @@ a new token is a new login.
 | Settings › Credentials' Claude token or key (or the server's env var) | `lgn_cred-claude-<fp8>` | Settings › Credentials |
 | An identity's own Claude login | `lgn_cred-claude-<fp8>` | "Acme identity" |
 | A project's own `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` env var | `lgn_cred-claude-<fp8>` | "demo's env vars" |
+| The Coordinator's own Claude env var (Settings › Coordinator › Env vars) | `lgn_cred-claude-<fp8>` | "the Coordinator's env vars" |
 | A ChatGPT login (Codex), by its account id, so a token refresh keeps the id | `lgn_cred-codex-<fp8>` | Settings › Credentials |
 | A Codex API key | `lgn_cred-codex-<fp8>` | Settings › Credentials, or the project's env vars |
 | An added login in More Claude / Codex logins (docs/logins.md) | its own `lgn_…` id | "Work Max (…a1b2)", on its row in Settings › Credentials |
