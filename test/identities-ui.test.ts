@@ -122,6 +122,7 @@ beforeEach(() => {
     if (method === "PUT" && url === "/api/identities/idn_example/tokens") return json(identity("idn_example", "Example Git"))
     if (method === "PUT" && url === "/api/identities/idn_acme/signing") return json(acme())
     if (method === "PUT" && url === "/api/identities/idn_acme/tokens") return json(acme())
+    if (method === "PUT" && url === "/api/identities/idn_acme/claude") return json(acme())
     if (method === "DELETE" && url.startsWith("/api/identities/idn_acme")) return json({ movedProjectIds: ["prj_app"] })
     return new Promise(() => {})
   })
@@ -152,14 +153,18 @@ const click = async (el: Element | null | undefined) => {
   act(() => (el as HTMLElement).click())
   await settle()
 }
-/** Type into a controlled input the way React hears it. */
-const type = async (el: HTMLInputElement, value: string) => {
+/** Set a controlled input's value and dispatch `event`, the way React hears it. */
+const fill = async (el: HTMLInputElement, value: string, event: Event) => {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value)
-    el.dispatchEvent(new Event("input", { bubbles: true }))
+    el.dispatchEvent(event)
   })
   await settle()
 }
+/** Type (or paste) into a field as a person does: an input event with the inputType a keyboard or paste gives. */
+const type = (el: HTMLInputElement, value: string, inputType = "insertText") => fill(el, value, new InputEvent("input", { bubbles: true, inputType, data: value }))
+/** A browser's or password manager's autofill: the value changes with an event no person made. */
+const autofill = fill
 
 const choose = async (el: HTMLSelectElement, value: string) => {
   act(() => {
@@ -188,8 +193,9 @@ describe("Settings › Identities", () => {
     await click(card("Acme").querySelector("[data-testid=identity-edit]"))
     await type(card("Acme").querySelector<HTMLInputElement>("input[placeholder=Acme]")!, "Acme Corp")
     const token = card("Acme").querySelector<HTMLInputElement>("[data-testid=identity-token]")!
-    expect(token.type).toBe("password")
+    expect(token.className).not.toContain("text-security") // the placeholder reads
     await type(token, PASTED)
+    expect(token.className).toContain("[-webkit-text-security:disc]") // masked, like a password
     expect(writes()).toEqual([])
     expect(unsaved()).toBe("2 unsaved changes")
     expect(document.querySelector('[data-section=identities] [title="Unsaved changes"]')).not.toBeNull()
@@ -201,6 +207,33 @@ describe("Settings › Identities", () => {
     ])
     expect(unsaved()).toBeNull()
     expect(document.body.innerHTML).not.toContain(PASTED)
+  })
+
+  it("an autofilled GitHub token never reaches the draft, so a pasted Claude token saves alone", async () => {
+    render()
+    await settle()
+    await click(card("Acme").querySelector("[data-testid=identity-edit]"))
+    const token = card("Acme").querySelector<HTMLInputElement>("[data-testid=identity-token]")!
+    // Not a password field, so browsers neither fill a saved password in nor offer to save a pasted token as one.
+    expect(token.type).toBe("text")
+    expect(token.autocomplete).toBe("off")
+    expect(token.dataset).toMatchObject({ "1pIgnore": "true", lpignore: "true", bwignore: "true", formType: "other" })
+    expect(document.querySelector("input[type=password]")).toBeNull()
+
+    // Chrome and Safari fill with a plain input event, Firefox with insertReplacementText; neither is the user's.
+    await autofill(token, "saved-site-password", new Event("input", { bubbles: true }))
+    expect(token.value).toBe("")
+    await autofill(token, "saved-site-password", new InputEvent("input", { bubbles: true, inputType: "insertReplacementText" }))
+    expect(token.value).toBe("")
+    expect(unsaved()).toBeNull()
+
+    const claude = card("Acme").querySelector<HTMLInputElement>("input[aria-label='Claude login']")!
+    await type(claude, "sk-ant-oat01-pastedClaudeToken000000", "insertFromPaste")
+    expect(unsaved()).toBe("1 unsaved change")
+    await click(saveButton())
+    expect(writes()).toEqual([{ method: "PUT", url: "/api/identities/idn_acme/claude", body: { kind: "oauth_token", value: "sk-ant-oat01-pastedClaudeToken000000" } }])
+    expect(card("Acme").querySelector("[data-identity-field=token][aria-invalid]")).toBeNull()
+    expect(unsaved()).toBeNull()
   })
 
   it("GPG key ids stay a draft until Save, with local-runner and headless warnings", async () => {
