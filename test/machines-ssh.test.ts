@@ -67,8 +67,8 @@ describe("runs_on and machine_label", () => {
   it("refuses a label with another runner, two different labels, and labels with nothing in them", () => {
     expect(() => resolveRunsOn("docker", "gpu", null)).toThrow(/machine_label goes with SSH machines/)
     expect(() => resolveRunsOn("local", "gpu", "laptops")).toThrow(/machine_label goes with SSH machines/)
-    expect(() => resolveRunsOn("label:gpu", "laptops", null)).toThrow()
-    expect(() => resolveRunsOn("label:!!", null, null)).toThrow()
+    expect(() => resolveRunsOn("label:gpu", "laptops", null)).toThrow(/name different labels/)
+    expect(() => resolveRunsOn("label:!!", null, null)).toThrow(/names no label/)
     expect(() => resolveRunsOn(undefined, "!!", null)).toThrow(/no letters or digits/)
     expect(() => resolveRunsOn("mainframe", null, null)).toThrow(/isn't a runner/)
   })
@@ -272,6 +272,8 @@ describe("SSH key references", () => {
   const home = dir("by-ssh-keys-")
   const ssh = path.join(home, ".ssh")
   fs.mkdirSync(ssh, { mode: 0o700 })
+  // A real file just outside ~/.ssh, so `~/.ssh/../.bashrc` is refused for leaving ~/.ssh, not for being missing.
+  fs.writeFileSync(path.join(home, ".bashrc"), "")
   execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", path.join(ssh, "id_laptops")])
   const pub = fs.readFileSync(path.join(ssh, "id_laptops.pub"), "utf8").trim()
   const fingerprint = execFileSync("ssh-keygen", ["-l", "-E", "sha256", "-f", path.join(ssh, "id_laptops.pub")], { encoding: "utf8" }).split(" ")[1]!
@@ -301,7 +303,7 @@ describe("SSH key references", () => {
     expect(errors[1]).toMatch(/only from ~\/.ssh/)
     expect(errors[2]).toMatch(/only from ~\/.ssh/)
     expect(errors[3]).toMatch(/no key file at ~\/.ssh\/nope/)
-    expect(errors[4]).toBeTruthy()
+    expect(errors[4]).toMatch(/only from ~\/.ssh/)
     expect(errors[5]).toMatch(/isn't an SSH key reference/)
     expect(errors[6]).toMatch(/isn't an SSH key reference/)
     for (const e of errors) expect(e).not.toMatch(/BEGIN|PRIVATE KEY|AAAA/)

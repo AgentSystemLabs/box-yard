@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
-import { ONSTART_MAX, VastApi, VastError, hostPort, instanceStatus, offerQuery, sshEndpoint, vastGpuName, type OfferQuery, type VastInstance, type VastOffer } from "../server/vast/api.js"
+import { ONSTART_MAX, VastApi, VastError, hostPort, instanceStatus, offerQuery, sshEndpoint, type OfferQuery, type VastInstance, type VastOffer } from "../server/vast/api.js"
 import { VastSettingsStore } from "../server/vast/settings.js"
 import { VastProvider, type VastProjectMachine } from "../server/providers/vast.js"
 import { POD_HTTP_PORTS } from "../server/providers/runpod.js"
@@ -250,12 +250,6 @@ describe("Vast.ai instances as pods", () => {
     expect(hostPort({ id: 1, ports: { "3000/tcp": [{ HostPort: 40001 }] } }, 3000)).toBe(40001)
     expect(hostPort({ id: 1 }, 3000)).toBeNull()
   })
-
-  it("names RunPod's GPU ids as Vast does", () => {
-    expect(vastGpuName("NVIDIA RTX A5000")).toBe("RTX A5000")
-    expect(vastGpuName("NVIDIA GeForce RTX 3090")).toBe("RTX 3090")
-    expect(vastGpuName("A40")).toBe("A40")
-  })
 })
 
 describe("Settings › Vast.ai GPU", () => {
@@ -267,7 +261,7 @@ describe("Settings › Vast.ai GPU", () => {
     store.setKv("vast", JSON.stringify({ ...s.get(), minRamGb: "lots" }))
     expect(s.get()).toMatchObject({ maxHourlyUsd: 0.5, minRamGb: DEFAULT_VAST_SETTINGS.minRamGb })
     expect(() => s.update({ gpuTypes: [] })).toThrow(/Pick at least one GPU type/)
-    expect(() => s.update({ apiKey: "x" })).toThrow()
+    expect(() => s.update({ apiKey: "x" })).toThrow(/Unrecognized key: "apiKey"/)
     s.setKeepWarm(BOX, Date.now() + 60_000)
     expect(Object.keys(s.keepWarm())).toEqual([BOX])
     s.setKeepWarm(BOX, null)
