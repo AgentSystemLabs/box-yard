@@ -1,12 +1,13 @@
 // The changes that shortened "ask a Captain → it starts a task → the task answers → the Captain answers"
 // (scripts/perf/captain-task-loop.ts measures the loop itself).
 import { afterEach, describe, expect, it } from "vitest"
-import { spawn } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { createBoxYard, type BoxYard } from "../server/app.js"
+import { mergedHeadsScript, parseMergedHeads } from "../server/branchNames.js"
 import { ALWAYS_LOAD, buildMcpServer, settle, type McpCaller } from "../server/mcp.js"
 import { claudeTelemetryEnv, serverClaudeEnv } from "../server/turnCredentials.js"
 import { testConfig, tmpDir } from "./helpers.js"
@@ -175,5 +176,22 @@ describe("Claude Code usage telemetry", () => {
     expect(yard.settings.get().claudeTelemetry).toBe(true)
     yard.settings.update({ claudeTelemetry: false })
     expect(yard.settings.get().claudeTelemetry).toBe(false)
+  })
+})
+
+describe("the merged PR branches a new branch's name goes by", () => {
+  it("are asked of GitHub by a script of their own, which a launch runs beside the clone", () => {
+    const bin = tmpDir()
+    const gh = path.join(bin, "gh")
+    const args = ["pr", "list", "--repo", "acme/site", "--state", "merged", "--limit", "50", "--json", "headRefName"]
+    fs.writeFileSync(gh, `#!${process.execPath}\nif (JSON.stringify(process.argv.slice(2)) !== ${JSON.stringify(JSON.stringify(args))} || process.env.GH_TOKEN !== 'project-test-token') process.exit(1); console.log(JSON.stringify([{headRefName:'feature/new-menu'}, {headRefName:7}, {headRefName:'feature/new-search'}]));\n`, { mode: 0o755 })
+    const ask = () => execFileSync("sh", ["-c", mergedHeadsScript(process.execPath, "acme/site")], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_TOKEN: "ambient-test-token", GITHUB_TOKEN: "project-test-token" } }).toString()
+    expect(parseMergedHeads(ask())).toEqual(["feature/new-menu", "feature/new-search"])
+    // gh failing is no evidence, as it is inside the evidence script: not an error.
+    fs.writeFileSync(gh, "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+    expect(parseMergedHeads(ask())).toEqual([])
+    // The script never ran (the box didn't answer): nothing to read.
+    expect(parseMergedHeads("")).toBeNull()
+    expect(parseMergedHeads("boxyard-merged-heads=oops")).toBeNull()
   })
 })

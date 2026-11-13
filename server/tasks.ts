@@ -65,7 +65,7 @@ import { isQuietRun, noopBlockers, type RunEvidence } from "../shared/quiet.js"
 import { memoryPressure, type BoxMemory, type MemoryPolicy } from "../shared/memory.js"
 import { cleanupSummary, dfCommand, diskLine, formatBytes, isOutOfSpace, parseDf, requiredFreeBytes, rootLow, type BoxCleanup, type CleanupStepKey, type DiskSpace } from "../shared/disk.js"
 import { BoxJanitor, DEPS_DIR, cleanOutput, pushedCheck, pushedVerdict } from "./janitor.js"
-import { branchEvidenceScript, branchName, parseBranchEvidence } from "./branchNames.js"
+import { branchEvidenceScript, branchName, mergedHeadsScript, parseBranchEvidence, parseMergedHeads } from "./branchNames.js"
 import { OWN_UPKEEP_MS, OwnCleanup } from "./ownCleanup.js"
 import type { GitAuth } from "./captainRepo.js"
 import { atRisk, deleteCheckScript, deleteVerdict, parseDeleteCheck, refusalLine, refusalsOf, type BoxDeleteResult, type WorkspaceGit } from "./boxDelete.js"
@@ -7033,6 +7033,8 @@ export class TaskManager {
   private async cloneWorkspace(row: TaskRow, project: NonNullable<ReturnType<Store["getProject"]>>, boxId: string, dir: string, mirror: ReturnType<TaskManager["mirrorSpec"]> | null): Promise<PreparedWorkspace> {
     const pendingName = Boolean(row.branch && this.store.getKv(`branch_naming:${row.id}`) === row.branch)
     const steps = [`mkdir -p ${q(dir)}`, `rm -rf ${q(dir + "/work")}`]
+    // GitHub takes about half a second to list the merged PRs a new branch's name goes by: ask while the clone runs.
+    const merged = mirror && pendingName ? this.mergedHeads(boxId, project, mirror.env) : null
     if (mirror) {
       const { spec, env, helper, only } = mirror
       // One mirror per repo per box (see server/gitShare.ts): the task's clone borrows its objects, so a task
@@ -7065,7 +7067,7 @@ export class TaskManager {
       this.addEvent(row.id, `Re-created the box's mirror of ${project.repo} as a ${mirror!.spec.partial ? "partial (blob:none)" : "full"} clone to match the project's partial clone setting.`)
     }
     if (mirror && pendingName) {
-      row = await this.nameNewBranch(row, project, boxId, dir, mirror)
+      row = await this.nameNewBranch(row, project, boxId, dir, mirror, merged)
       res = await this.provider.exec(boxId, `cd ${q(dir + "/work")} && git checkout -b ${q(row.branch!)} && echo ${BRANCH_MARK}base`)
       if (res.exitCode !== 0) throw new Error(`Creating branch ${row.branch} failed: ${errorTail(res.stderr || res.stdout)}`)
     }
@@ -7079,16 +7081,31 @@ export class TaskManager {
     return this.store.listTaskRows().flatMap((r) => r.id !== except && projects.has(r.project_id) && r.branch ? [r.branch] : [])
   }
 
-  private async nameNewBranch(row: TaskRow, project: Project, boxId: string, dir: string, mirror: NonNullable<ReturnType<TaskManager["mirrorSpec"]>>): Promise<TaskRow> {
+  /**
+   * The head branches of the repo's merged PRs, asked of GitHub on its own (see mergedHeadsScript). Null when there
+   * is nobody to ask (a mock, a repo that isn't on GitHub); a failed ask is [], like gh failing inside the evidence.
+   */
+  private mergedHeads(boxId: string, project: Project, env: string): Promise<string[]> | null {
+    const slug = githubSlug(project.repo)
+    if (this.c.mock || !slug) return null
+    return this.provider
+      .exec(boxId, [env, mergedHeadsScript(providerOf(this.provider, boxId).nodeBin, slug)].join("\n"))
+      .then((res) => parseMergedHeads(res.stdout) ?? [])
+      .catch(() => [])
+  }
+
+  /** `merged`: GitHub's merged PR branches when the launch already asked (mergedHeads), so this doesn't ask again. */
+  private async nameNewBranch(row: TaskRow, project: Project, boxId: string, dir: string, mirror: NonNullable<ReturnType<TaskManager["mirrorSpec"]>>, merged: Promise<string[]> | null = null): Promise<TaskRow> {
     const key = `branch_naming:${row.id}`
     if (this.store.getKv(key) !== row.branch || !row.branch) return row
     const { env } = mirror
     const result = await this.provider.exec(boxId, [
       env,
-      branchEvidenceScript(providerOf(this.provider, boxId).nodeBin, dir + "/work", project.baseBranch, githubSlug(project.repo), !this.c.mock),
+      branchEvidenceScript(providerOf(this.provider, boxId).nodeBin, dir + "/work", project.baseBranch, githubSlug(project.repo), !merged && !this.c.mock),
     ].join("\n"))
     if (result.exitCode !== 0) throw new Error("Couldn't inspect the repository's branch names before creating a task branch")
     const evidence = parseBranchEvidence(result.stdout)
+    if (merged) evidence.merged = await merged
     // Reserve atomically after the async probe, so two simultaneous starts can't choose the same name.
     this.store.db.transaction(() => {
       const current = this.requireRow(row.id)
