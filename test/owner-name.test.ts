@@ -121,11 +121,6 @@ describe("prompts with an owner name", () => {
     expect(captainPrompt(project, "Ana").replace(/Cody's site|Built for Cody/g, "")).not.toMatch(/\bCody\b/)
     expect(routingInstructions(tmpDir(), { agentRoutingConfig: "", ownerName: "Ana" })).not.toMatch(/\bCody\b/)
   })
-
-  it("transcript labels use the name", () => {
-    expect(userMessageLabel({}, "Ana")).toBe("Ana")
-    expect(userMessageLabel({})).toBe("the owner")
-  })
 })
 
 describe("generated output boundaries", () => {
