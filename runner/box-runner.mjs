@@ -2329,6 +2329,14 @@ const TOOLS = [
   },
 ]
 
+/**
+ * The tools nearly every task ends a turn with. Claude Code's tool search defers an MCP server's tools: the model sees
+ * a deferred tool's name only and spends a whole model round trip on ToolSearch before its first call. These stay
+ * loaded (the same `_meta` key as CORE_TOOLS in server/mcp.ts), so a turn's `finish` costs no extra round trip.
+ */
+const CORE_TOOLS = new Set(["finish", "ask_user", "create_pull_request"])
+const alwaysLoaded = (tool) => (CORE_TOOLS.has(tool.name) ? { ...tool, _meta: { "anthropic/alwaysLoad": true } } : tool)
+
 const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) })
 
 function sh(cmd, args, opts = {}) {
@@ -2883,7 +2891,7 @@ function serveMcp() {
           handshake.readyAt = Date.now()
           noteHandshake()
         }
-        return { tools: namedTools(TOOLS.filter((t) => t.name !== "message_parent" || task.parentTaskId)) }
+        return { tools: namedTools(TOOLS.filter((t) => t.name !== "message_parent" || task.parentTaskId)).map(alwaysLoaded) }
       case "tools/call":
         return callTool(req.params?.name, req.params?.arguments ?? {})
       default:
