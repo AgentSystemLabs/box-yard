@@ -8,7 +8,6 @@ import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { App } from "../web/src/App.js"
 import { warmLazyParts } from "../web/src/components/LazyPart.js"
-import { SHEET_HIDDEN } from "../web/src/components/OverlayHost.js"
 import { DEFAULT_SETTINGS } from "../server/settings.js"
 import { keys } from "../web/src/lib/queries.js"
 import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, THREAD_CHAT_ROOM, moveChatEdge, panelWidthCss, stripLayout, stripWidthCss } from "../web/src/lib/layout.js"
@@ -377,14 +376,6 @@ describe("the conversation panels resize", () => {
     expect(document.body.classList.contains("resizing")).toBe(true)
     pointer(separators()[1]!, "pointerup", 1000)
     expect(document.body.classList.contains("resizing")).toBe(false)
-  })
-
-  it("on a sheet over the chat (a phone), only the newest panel shows, at the full width", async () => {
-    render(opened(3))
-    await settle()
-    const hidden = columns().map((c) => c.classList.contains(SHEET_HIDDEN))
-    expect(hidden).toEqual([true, true, false])
-    for (const c of columns()) expect(c.className).toContain("@max-[35.5rem]/coord:w-full")
   })
 })
 

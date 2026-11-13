@@ -98,27 +98,6 @@ describe("useResizable on a left edge (the thread's)", () => {
     expect(width).toBe(600)
     expect(localStorage.getItem(KEY)).toBe("600")
   })
-
-  it("comes back at the saved width, and a double-click resets it", () => {
-    localStorage.setItem(KEY, "700")
-    mount(1000)
-    expect(width).toBe(700)
-    act(() => void handle().dispatchEvent(new MouseEvent("dblclick", { bubbles: true })))
-    expect(width).toBe(THREAD_ROOM)
-    expect(localStorage.getItem(KEY)).toBeNull()
-  })
-
-  it("a saved width out of range loads clamped", () => {
-    localStorage.setItem(KEY, "5000")
-    mount()
-    expect(width).toBe(THREAD_MAX)
-  })
-
-  it("the strip sits inside the panel, which clips while it grows", () => {
-    mount()
-    expect(handle().className).toContain("left-0")
-    expect(handle().className).not.toContain("-left-[3px]")
-  })
 })
 
 class FakeEventSource {

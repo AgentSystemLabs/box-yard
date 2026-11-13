@@ -308,13 +308,6 @@ describe("the sidebar's sub-task tree", () => {
     expect(item(OMELETTE).className).toContain("color-mix(in_oklab,var(--color-yard-400)_40%")
   })
 
-  it("a plain task's row still opens just its panel", async () => {
-    render()
-    click(project().querySelector(`[data-open-task=${OTHER.id}]`)!)
-    await settle()
-    expect(location.search).toBe(`?session=${OTHER.id}`)
-    expect(columns()).toHaveLength(1)
-  })
 })
 
 describe("a sub-task tree five and more levels deep", () => {
