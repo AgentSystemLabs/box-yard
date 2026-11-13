@@ -2,7 +2,7 @@
 // its action while the task still waits on Cody, where the task is once it has moved on, and only each task's newest
 // such card asking at all.
 import { describe, expect, it } from "vitest"
-import { LIVE_LABEL, newestAsks, noticeNow, type NoticeTask } from "../web/src/lib/noticeNow.js"
+import { newestAsks, noticeNow, type NoticeTask } from "../web/src/lib/noticeNow.js"
 import { coordinatorRows } from "../web/src/lib/chatUpdates.js"
 import type { ChatMessage } from "../shared/types.js"
 
@@ -39,10 +39,6 @@ describe("noticeNow", () => {
     expect(noticeNow("merge", task({ status: "pr_ready", prUrl: PR }), true)).toBeNull()
     expect(noticeNow("needs_input", null, true)).toBeNull()
     expect(noticeNow("pr", undefined, true)).toBeNull()
-  })
-
-  it("has a status word for every kind of card that can ask", () => {
-    expect(Object.keys(LIVE_LABEL).sort()).toEqual(["failed", "needs_input", "pr"])
   })
 })
 

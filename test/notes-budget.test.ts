@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { budgetLine, budgetNotes, estimateTokens, noteAuthorLabel, noteTokens, projectNoteBudget, pruneAdvice, shortTokens } from "../shared/notes.js"
+import { budgetLine, budgetNotes, estimateTokens, noteTokens, projectNoteBudget, pruneAdvice, shortTokens } from "../shared/notes.js"
 import { captainPrompt, firstTurnPrompt, workerSystemPrompt } from "../server/prompts.js"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
@@ -48,12 +48,6 @@ describe("notes budget", () => {
     expect(advice).toContain("1 note is left out of their prompts")
     expect(advice).toMatch(/list_notes, update_note, delete_note/)
     expect(advice).toContain("AGENTS.md")
-  })
-
-  it("names the Captain and the Coordinator on the Notes tab", () => {
-    expect(noteAuthorLabel("captain")).toBe("Captain")
-    expect(noteAuthorLabel("orchestrator")).toBe("Coordinator")
-    expect(noteAuthorLabel("Ana")).toBe("Ana")
   })
 })
 

@@ -116,17 +116,6 @@ function startOnYardTask() {
   expect(shownTask()).toBe(BUILD.id)
 }
 
-/** marketing-site's Captain in the centre, its task in the panel, and the sidebar agreeing. */
-function expectSiteCaptainWithPortfolio() {
-  expect(shownTask()).toBe(PORTFOLIO.id)
-  expect(centre()).toBe("marketing-site Captain")
-  expect(chatProjectFilter()).toBe(SITE.id)
-  expect(marked()).toMatch(/^Refresh the portfolio/)
-  expect(behind()).toMatch(/^marketing-site, Captain/)
-  expect(panelTitle()).toContain(PORTFOLIO.title)
-  expect(document.querySelector("[data-testid=captain-chat][data-centre]")!.textContent).not.toContain("See the portfolio")
-}
-
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()

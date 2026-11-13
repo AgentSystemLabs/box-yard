@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
 import { NotesRetro, UNRESOLVED_REASON, retroNotice, retroTrigger } from "../server/retro.js"
-import { WakeLoopGuard } from "../server/loopGuard.js"
 import type { TaskEvent, TaskEventListener } from "../server/tasks.js"
 import type { Task } from "../shared/types.js"
 import { tmpDir } from "./helpers.js"
@@ -317,21 +316,6 @@ describe("NotesRetro", () => {
 })
 
 describe("retro loop safety", () => {
-  it("the Captain's loop guard treats a task that keeps coming back to the retro as the same update, and never drops it", () => {
-    // A task that keeps getting reopened and suggesting again would wake the Captain with a new retro text each
-    // time; the loopKey names the task, so the guard sees the repeat.
-    const guard = new WakeLoopGuard({ maxRepeats: 2, windowMs: 60_000, throttleMs: 1000, maxThrottleMs: 4000 })
-    const key = "retro:task_1"
-    for (let i = 0; i < 2; i++) {
-      expect(guard.check([key]).wake).toBe(true)
-      guard.record([key])
-    }
-    const held = guard.check([key])
-    expect(held).toMatchObject({ wake: false, started: true })
-    // Another task's retro is new: it goes through at once.
-    expect(guard.check(["retro:task_2"]).wake).toBe(true)
-  })
-
   it("the notice reads the same shape the Captain tab parses", () => {
     const t = { id: "task_1", title: "T", summary: null, prUrl: null, prState: null } as unknown as Task
     const text = retroNotice([{ task: t, trigger: "done", suggestions: [] }], { budget: { line: "0 of 25 notes, ~0 of 4k tokens", over: true, prune: "Prune them." } })

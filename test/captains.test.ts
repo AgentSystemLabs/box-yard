@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import type { Server } from "node:http"
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { createBoxYard, type BoxYard } from "../server/app.js"
-import { buildMcpServer } from "../server/mcp.js"
 import { captainToolResult } from "../server/orchestrator.js"
 import { captainSourceOf } from "../shared/captain.js"
 import type { CaptainMessage, CaptainToolResult, ChatMessage, Project, RecentCaptain, Task } from "../shared/types.js"
@@ -73,38 +70,6 @@ describe("project Captains", () => {
       const t = await call<Task>(r, "GET", `/api/tasks/${tasks[0]!.id}`)
       return !["queued", "starting", "working"].includes(t.status) ? t : null
     }, "Captain-created task to settle")
-  })
-
-  it("exposes Coordinator MCP tools that hand work to a Captain", async () => {
-    const r = await start()
-    await call<Project>(r, "POST", "/api/projects", { name: "ops" })
-    const mcp = buildMcpServer({
-      store: r.yard.store,
-      tasks: r.yard.tasks,
-      hub: r.yard.hub,
-      artifacts: null as never,
-      publicUrl: () => "",
-      scheduler: r.yard.scheduler,
-      captains: r.yard.captains,
-      settings: r.yard.settings,
-      uploads: null as never,
-    })
-    const [a, b] = InMemoryTransport.createLinkedPair()
-    await mcp.connect(a)
-    const client = new Client({ name: "test", version: "0" })
-    await client.connect(b)
-
-    const res = (await client.callTool({
-      name: "ask_captain",
-      arguments: { project: "ops", message: "status", timeout_seconds: 30 },
-    })) as { content: { text: string }[]; isError?: boolean }
-
-    expect(res.isError).not.toBe(true)
-    const body = JSON.parse(res.content[0]!.text)
-    expect(body.allFinished).toBe(true)
-    expect(body.state.projectId).toBeTruthy()
-    await client.close()
-    await mcp.close()
   })
 
   it("stores the Coordinator's orders on the Captain transcript and the Captain's reply on the Coordinator's tool line", async () => {

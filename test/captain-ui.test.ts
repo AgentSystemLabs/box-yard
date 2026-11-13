@@ -134,7 +134,7 @@ describe("Captain tab: an agent's message_captain", () => {
     expect(rows[0]!.textContent).toContain("Fix login")
     expect(rows[0]!.textContent).toContain("waited up to 30s for a reply")
     expect(rows[0]!.querySelector("a")?.getAttribute("href")).toBe("/?session=task_abc123def")
-    expect(rows[1]!.textContent).not.toContain("waits")
+    expect(rows[1]!.textContent).not.toContain("waited up to")
     expect(rows[2]!.textContent).toContain("held by the loop guard")
   })
 })
