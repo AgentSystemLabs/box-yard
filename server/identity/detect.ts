@@ -750,9 +750,9 @@ async function tokenFromGh(host: string, login: string, c: Ctx): Promise<{ host:
   return { host, login, token }
 }
 
-/** "gh:octocat" or "gh:github.com:octocat". */
+/** "gh:octocat", "gh:github.com:octocat" or an Enterprise Managed User's "gh:jdoe_acme". */
 export function parseTokenRef(ref: string): { host: string; login: string } | null {
-  const m = /^gh:(?:([a-z0-9.-]+):)?([A-Za-z0-9-]{1,39})$/i.exec(ref.trim())
+  const m = /^gh:(?:([a-z0-9.-]+):)?([A-Za-z0-9_-]{1,39})$/i.exec(ref.trim())
   return m && GITHUB_OWNER_RE.test(m[2]!) ? { host: (m[1] ?? "github.com").toLowerCase(), login: m[2]! } : null
 }
 

@@ -90,6 +90,10 @@ Host box
     expect(githubOwnerOf("git@github-acme:acme-corp/app.git")).toBeNull()
     expect(githubOwnerOf("https://gitlab.com/acme/app")).toBeNull()
     expect(githubOwnerOf("https://github.com/acme/**")).toBe("acme")
+    // An Enterprise Managed User's repos: the owner is lowercased like any other, so it matches a token owner.
+    expect(githubOwnerOf("https://github.com/JDoe_Acme/app.git")).toBe("jdoe_acme")
+    expect(githubOwnerOf("git@github.com:jdoe_acme/app.git")).toBe("jdoe_acme")
+    expect(githubOwnerOf("https://github.com/_acme/app")).toBeNull()
     expect(remoteUrls(`[core]\n\turl = nope\n[remote "origin"]\n\turl = git@github.com:a/b.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[remote "up"]\n  url = "https://github.com/c/d"\n[branch "main"]\n\tremote = origin\n`)).toEqual(["git@github.com:a/b.git", "https://github.com/c/d"])
   })
 
@@ -98,6 +102,12 @@ Host box
     expect(parseTokenRef("gh:github.com:octo-acme")).toEqual({ host: "github.com", login: "octo-acme" })
     expect(parseTokenRef("gho_abc")).toBeNull()
     expect(parseTokenRef("gh:bad--name")).toBeNull()
+    expect(parseTokenRef("gh:jdoe_acme")).toEqual({ host: "github.com", login: "jdoe_acme" })
+    expect(parseTokenRef(" gh:github.com:JDoe_Acme ")).toEqual({ host: "github.com", login: "JDoe_Acme" })
+    expect(parseTokenRef("gh:ghe.acme.test:jane-doe_acme")).toEqual({ host: "ghe.acme.test", login: "jane-doe_acme" })
+    expect(parseTokenRef("gh:_acme")).toBeNull()
+    expect(parseTokenRef("gh:acme-")).toBeNull()
+    expect(parseTokenRef(`gh:a${"_".repeat(39)}`)).toBeNull()
   })
 
   it("compute a fingerprint as ssh-keygen does", () => {
