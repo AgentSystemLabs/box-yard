@@ -664,6 +664,8 @@ export const Sidebar = memo(function Sidebar({ rail = false, drawer = false, onE
                 {coordinator === "behind" && !drawer && <BehindMark />}
               </button>
               <CoordinatorSettingsButton bright={coordinator === "selected"} />
+              {/* The pin's place, so its gear lines up with the projects' gears (their pins hold the end). */}
+              <span aria-hidden className={PIN_PLACE} />
             </div>
           </div>
 
@@ -1385,6 +1387,9 @@ function CoordinatorSettingsButton({ bright }: { bright?: boolean }) {
     </button>
   )
 }
+
+/** As wide as a project row's pin (ROW_TOOL), and gone where its gear goes (a zoomed phone's drawer): the Coordinator has no pin. */
+const PIN_PLACE = "w-8 shrink-0 pointer-fine:@max-[15rem]/side:w-6 pointer-coarse:w-11 pointer-coarse:@max-[15rem]/side:hidden"
 
 /** "Show fewer", in the head of the whole "Waiting on you" list: quiet, in the head's amber, 44px to a finger. */
 const FEWER = cx("relative z-1 mr-1 flex min-h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-[11px] font-medium whitespace-nowrap text-amber-200/80 hover:bg-amber-300/10 hover:text-amber-100 @max-[19rem]/side:mr-0 @max-[19rem]/side:px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:px-2.5 pointer-coarse:@max-[19rem]/side:px-1", FOCUS)
