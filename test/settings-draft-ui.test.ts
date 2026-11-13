@@ -166,6 +166,7 @@ describe("Settings drafts", () => {
     await click(saveButton())
     expect(getVoiceSettings().captains).toBe(false)
     expect(JSON.parse(localStorage.getItem(VOICE_KEY)!).captains).toBe(false)
+    expect(saveButton().disabled).toBe(true)
     expect(writes()).toEqual([])
   })
 

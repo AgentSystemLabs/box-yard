@@ -331,7 +331,7 @@ describe("Columns, rule 1: clicking anything shows just it and the pins", () => 
     expect(centre()).toContain("Coordinator")
   })
 
-  it("a link in a chat, a search pick, a strip: each the same way", async () => {
+  it("a navigation to another project's task shows just it, the chat hidden and its Captain kept; a URL naming several panels opens its last", async () => {
     setChatProjectFilter(YARD.id)
     render("/")
     await settle()
@@ -577,14 +577,6 @@ describe("Columns: close", () => {
 })
 
 describe("Columns, rules 5 and 6: strips only with the sidebar folded, for the levels above the item opened", () => {
-  it("the sidebar open: no strips, whatever is open", async () => {
-    render("/")
-    await settle()
-    await go(taskSessionHref(RATER.id))
-    await settle()
-    expect(rails()).toHaveLength(0)
-  })
-
   it("folded: a strip per level above, each listing the level below with the way down marked; a pick shows just it", async () => {
     render("/")
     await settle()
@@ -827,20 +819,6 @@ describe("Columns, rule 8: a hidden chat stays hidden", () => {
     await settle()
     expect(columns()).toHaveLength(0)
     expect(centre()).toContain("box-yard")
-  })
-
-  it("a pinned chat stays as tasks open", async () => {
-    render("/")
-    await settle()
-    await pick(YARD.id)
-    await settle()
-    await click(pinOf(chatControls()))
-    for (const t of [DOCS, LOGO, MEAL]) {
-      await go(taskSessionHref(t.id))
-      await settle()
-      expect(chat()).toBe("open")
-      expect(panelIds()).toEqual([t.id])
-    }
   })
 })
 

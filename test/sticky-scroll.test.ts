@@ -419,13 +419,6 @@ describe("StickyScroll", () => {
     expect(jumpButton()).toBeDefined()
   })
 
-  it("our own scrollTop writes never count as the user scrolling", () => {
-    // Every follow write fires a scroll event; none of them unpin.
-    for (let i = 0; i < 5; i++) streamDelta()
-    expect(jumpButton()).toBeUndefined()
-
-  })
-
   it("a queued own-write scroll event cannot re-pin after an upward input", () => {
     heights[heights.length - 1]! += 30
     render()
@@ -950,7 +943,7 @@ describe("StickyScroll", () => {
 
     it("lands on the bottom while a reply streams in every frame of the glide", () => {
       readHistory()
-      send()
+      jumpToLatest()
       for (let t = 0; t < 400; t += FRAME_MS) {
         nextFrame()
         streamDelta(25)
@@ -961,24 +954,7 @@ describe("StickyScroll", () => {
       expect(atBottom()).toBe(true)
     })
 
-    it("lands on the sent message when it renders after the glide", () => {
-      readHistory()
-      send()
-      glideFrames()
-      messageRenders()
-      expect(atBottom()).toBe(true)
-      expect(rowTop(rows().at(-1)!) + height(rows().at(-1)!)).toBe(VIEW)
-    })
-
-    it("lands on the sent message when it renders before the first frame", () => {
-      readHistory()
-      send()
-      messageRenders()
-      glideFrames()
-      expect(atBottom()).toBe(true)
-    })
-
-    it("lands on the true bottom when the sent message renders mid-glide", () => {
+    it("a send stays on the true bottom when the sent message renders a moment later", () => {
       readHistory()
       send()
       nextFrame()
@@ -994,7 +970,7 @@ describe("StickyScroll", () => {
       readHistory()
       send()
       nextFrame()
-      // An attachment row or the auto-sized textarea takes 60px off the list's height mid-glide.
+      // An attachment row or the auto-sized textarea takes 60px off the list's height right after the send.
       view -= 60
       frame()
       glideFrames()

@@ -301,6 +301,7 @@ describe("workspace retention", () => {
     const done = await archivedDone(r, (await task(r, p.id, "keep deps")).id)
     const work = path.join(r.yard.tasks.taskDir(done.boxId!, done.id), "work")
     put(path.join(work, "node_modules", "left-pad", "index.js"))
+    r.yard.store.db.prepare("UPDATE tasks SET status = 'done' WHERE id = ?").run(done.id)
     age(r, done.id, Date.now() - 2 * DAY, false)
     await r.yard.tasks.maintain()
     expect(fs.existsSync(path.join(work, "node_modules"))).toBe(true)

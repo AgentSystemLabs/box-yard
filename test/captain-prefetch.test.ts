@@ -160,7 +160,7 @@ describe("Captain prefetch", () => {
     seedRecentCaptains(qc, [recent(project.id, history(project.id, 2))])
     await vi.advanceTimersByTimeAsync(60 * 60_000)
     expect(qc.getQueryData<CaptainMessage[]>(keys.captainMessages(project.id))).toHaveLength(2)
-    expect(qc.getQueryData(keys.captain(project.id))).toBeDefined()
+    expect(qc.getQueryData(keys.captain(project.id))).toEqual(state(project.id))
   })
 
   it("shows a prefetched tail at once, then loads the whole history in above it without a blank or a new-message count", async () => {

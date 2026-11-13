@@ -160,5 +160,6 @@ describe("published files card", () => {
     render(createElement(PublishedRow, { group: (g as { group: PublishedGroup }).group }))
     expect(host.querySelector('[data-testid="published-group"]')?.textContent).toContain("published 2 files")
     expect(host.querySelector('[id^="captain-"]')).toBeTruthy()
+    expect(host.querySelector('[data-testid="published-group"] time')?.getAttribute("datetime")).toBe(new Date(eight[1]!.createdAt).toISOString())
   })
 })

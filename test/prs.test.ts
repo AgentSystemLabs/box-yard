@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
 import { PR_BATCH, PR_MAX_BACKOFF_MS, PR_REPORT_FRESH_MS, PrTracker, RATE_FLOOR, parsePrUrl, type PrChange } from "../server/prs.js"
@@ -300,9 +300,8 @@ describe("PR state tracking", () => {
     gh.failWith(null)
     gh.prs.set("acme/site#1", { state: "MERGED" })
     tracker.wake()
-    await new Promise((r) => setTimeout(r, 30))
+    await vi.waitFor(() => expect(store.getTask(id)).toMatchObject({ prState: "merged" }))
     tracker.stop()
-    expect(store.getTask(id)).toMatchObject({ prState: "merged" })
     expect(tracker.tokenHealth("tok").failures).toBe(0)
   })
 

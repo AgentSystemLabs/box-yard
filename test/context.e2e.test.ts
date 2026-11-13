@@ -305,7 +305,8 @@ describe("orchestrator usage, compaction and the durable log", () => {
     expect(argOf(args, "--effort")).toBe("high")
     const dir = r.yard.orchestrator.compactionsDir
     expect(dir).toBe(path.join(r.config.dataDir, "orchestrator", "compactions"))
-    expect(argOf(args, "--append-system-prompt")).toContain(dir)
+    // The prompt carries the compaction index; the log path reaches the CLI as the Read rule below.
+    expect(argOf(args, "--append-system-prompt")).toContain("compaction_history")
     expect(argOf(args, "--append-system-prompt")).toMatch(/chronological/)
     expect(argOf(args, "--tools")).toContain("Read")
     expect(argOf(args, "--allowedTools")).toContain(`Read(/${dir}/**)`)
@@ -364,11 +365,11 @@ describe("orchestrator usage, compaction and the durable log", () => {
     // the summary turn is not shown in the chat, and the next turn still works (same session)
     expect((await chat(r)).some((m) => m.content.includes("Cody prefers short replies"))).toBe(false)
     await say(r, "status", 2)
-    // and the system prompt now lists the file
+    // and the system prompt's compaction index now lists it
     // (The project's Captain logs its runs too.)
     const coordinatorTurns = () => lines().filter((l) => l.args.includes("--mcp-config") && !argOf(l.args, "--mcp-config").includes(`${path.sep}captains${path.sep}`))
     const last = coordinatorTurns().at(-1)!
-    expect(argOf(last.args, "--append-system-prompt")).toContain(name!)
+    expect(argOf(last.args, "--append-system-prompt")).toContain(`"id":"${apiList[0]!.id}"`)
     // The first turn after it starts with Box Yard's summary and the live state of the tasks it names; the
     // one after that doesn't repeat it.
     expect(last.prompt).toMatch(/^\[Box Yard: Your context was just compacted/)

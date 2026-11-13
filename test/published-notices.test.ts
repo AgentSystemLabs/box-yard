@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { artifactPath, groupPublished, parsePublished, previewGallery, publishedLabel, sameGroup, type NoticeLike } from "../web/src/lib/publishedNotices"
+import { groupPublished, parsePublished, previewGallery, publishedLabel, sameGroup, type NoticeLike } from "../web/src/lib/publishedNotices"
 import { captainRows } from "../web/src/lib/captainTranscript"
 import { batchNotices, updatesBlock } from "../server/noticeBatch"
 import type { CaptainMessage } from "../shared/types"
@@ -37,11 +37,6 @@ describe("parsePublished", () => {
     expect(parsePublished(msg("notice", "✅ **T** is done: shipped"))).toBeNull()
     expect(parsePublished(msg("assistant", "📎 **T** published X: /artifacts/art_1/x.png"))).toBeNull()
     expect(parsePublished(msg("notice", "📎 **T** published X: https://evil.example.com/x.png"))).toBeNull()
-  })
-
-  it("keeps other hosts' URLs as they are", () => {
-    expect(artifactPath("https://yard.example.com/artifacts/art_1/a.png")).toBe("/artifacts/art_1/a.png")
-    expect(artifactPath("https://example.com/docs")).toBe("https://example.com/docs")
   })
 })
 

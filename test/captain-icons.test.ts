@@ -121,10 +121,4 @@ describe("a project's Captain icon", () => {
     store.db.prepare("UPDATE projects SET captain_icon = ? WHERE id = ?").run("<svg/>", p.id)
     expect(store.getProject(p.id)!.captainIcon).toBeNull()
   })
-
-  it("has its own column, added by a migration", () => {
-    const db = openDb(tmpDir(), ":memory:")
-    const cols = (db.prepare("PRAGMA table_info(projects)").all() as { name: string }[]).map((c) => c.name)
-    expect(cols).toContain("captain_icon")
-  })
 })

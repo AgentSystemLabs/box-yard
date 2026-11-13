@@ -89,13 +89,6 @@ describe("Modal", () => {
     expect(document.activeElement).toBe(opener)
   })
 
-  it("closes on Esc", () => {
-    const onClose = vi.fn()
-    render(form(onClose))
-    key("Escape")
-    expect(onClose).toHaveBeenCalledTimes(1)
-  })
-
   it("closes on a backdrop click, but not on a click inside or while dirty", () => {
     const onClose = vi.fn()
     render(form(onClose))

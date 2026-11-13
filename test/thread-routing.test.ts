@@ -224,6 +224,11 @@ describe("a reply thread routes each message", () => {
     await settled(thread.id, 1)
     const asked = await threads.reroute(thread.id, message.id, "thread")
     expect(routeOf(asked.meta)).toMatchObject({ route: "thread", recalled: false, delivered: true })
+    const list = await waitFor(() => {
+      const l = threads.messages(thread.id)
+      return l.some((m) => m.role === "assistant") && !threads.get(thread.id).busy ? l : null
+    }, "the answer")
+    expect(list.at(-1)).toMatchObject({ role: "assistant", content: "Answer: fix the redirect" })
   })
 
   it("re-routes an answered question to the agent: 'Send to agent instead'", async () => {

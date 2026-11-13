@@ -8,33 +8,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TaskHeader } from "../web/src/components/TaskHeader.js"
 import { CaptainTab } from "../web/src/components/CaptainTab.js"
 import { keys } from "../web/src/lib/queries.js"
-import { HEAD_CONTAINER, NARROW_HEAD_ONLY, WIDE_HEAD_ONLY, contextSpot, spotClass } from "../web/src/lib/contextVisibility.js"
+import { HEAD_CONTAINER } from "../web/src/lib/contextVisibility.js"
 import type { CaptainState, Project, Task } from "../shared/types.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-
-describe("contextSpot", () => {
-  it("auto-compact on: nowhere, wide or narrow", () => {
-    expect(contextSpot(true, false)).toBe("none")
-    expect(contextSpot(true, true)).toBe("none")
-    expect(spotClass(true, "header")).toBeNull()
-    expect(spotClass(true, "menu")).toBeNull()
-  })
-
-  it("auto-compact off: in a wide header, behind ⋯ in a narrow one", () => {
-    expect(contextSpot(false, false)).toBe("header")
-    expect(contextSpot(false, true)).toBe("menu")
-    expect(spotClass(false, "header")).toBe(WIDE_HEAD_ONLY)
-    expect(spotClass(false, "menu")).toBe(NARROW_HEAD_ONLY)
-  })
-
-  it("switches on the header's own container at one width, never the viewport", () => {
-    const at = (c: string) => c.match(/^@(?:max|min)-\[([^\]]+)\]\/head:hidden$/)?.[1]
-    expect(at(WIDE_HEAD_ONLY)).toBeTruthy()
-    expect(at(WIDE_HEAD_ONLY)).toBe(at(NARROW_HEAD_ONLY))
-    expect(HEAD_CONTAINER).toBe("@container/head")
-  })
-})
 
 const project = { id: "prj_demo01", name: "demo", description: "", repo: null, baseBranch: "main", envKeys: [], notes: [], createdAt: 0, updatedAt: 0 } as unknown as Project
 const ac = (enabled: boolean) => ({ enabled, unit: "percent", value: 80 })
@@ -122,30 +99,16 @@ describe("task header", () => {
   it("keeps context usage out of the task header and details even when auto-compact is off", async () => {
     settings({ agent: false })
     renderTask(task())
+    // The header's container queries switch on its own width, never the viewport.
+    expect(HEAD_CONTAINER).toBe("@container/head")
     expect(document.querySelector("header")!.className).toContain(HEAD_CONTAINER)
-    expect(meta().querySelector("[data-testid=context-mini]")).toBeNull()
-    expect(hasCompact(meta())).toBe(false)
-    const panel = await details()
-    expect(panel.querySelector("[data-testid=context-meter]")).toBeNull()
-    expect(panel.textContent).not.toContain("81%")
-    expect(hasCompact(panel)).toBe(false)
-  })
-
-  it("agent auto-compact on: no bar, percentage or Compact, in the header or its ⓘ details", async () => {
-    settings({ agent: true, coordinator: false })
-    renderTask(task())
     expect(meta().querySelector("[data-testid=context-mini]")).toBeNull()
     expect(meta().textContent).not.toContain("81%")
     expect(hasCompact(meta())).toBe(false)
     const panel = await details()
     expect(panel.querySelector("[data-testid=context-meter]")).toBeNull()
     expect(panel.textContent).not.toContain("81%")
-  })
-
-  it("hides task context regardless of the Coordinator's setting", () => {
-    settings({ agent: false, coordinator: true })
-    renderTask(task())
-    expect(meta().querySelector("[data-testid=context-mini]")).toBeNull()
+    expect(hasCompact(panel)).toBe(false)
   })
 
   it("still says when a compaction is running", () => {

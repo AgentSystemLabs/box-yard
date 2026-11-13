@@ -133,6 +133,8 @@ describe("Captain replies to the Coordinator (#46)", () => {
     expect(Date.now() - t0).toBeLessThan(15_000)
     expect(res.reply).toMatch(/No tasks yet/)
     expect(res.note).toBeUndefined()
+    expect(res.allFinished).toBe(true)
+    expect(res.state.projectId).toBe(p.id)
 
     await captainIdle(r, p)
     await new Promise((resolve) => setTimeout(resolve, 300))

@@ -294,7 +294,7 @@ describe("queue MCP tools", () => {
     const listed = (await coord.json("list_queued_messages", { task: t.id })) as { messages: { id: string; from: string; text: string; status: string; version: number }[] }
     expect(listed.messages.map((m) => [m.from, m.text, m.status])).toEqual([
       ["Coordinator", "use tabs", "queued"],
-      ["Cody", "and a README", "queued"],
+      ["the owner", "and a README", "queued"],
     ])
     const edited = await coord.json("edit_queued_message", { task: t.id, message_id: sent.queuedMessageId, message: "use spaces", version: listed.messages[0]!.version })
     expect(edited).toMatchObject({ text: "use spaces", version: 2 })

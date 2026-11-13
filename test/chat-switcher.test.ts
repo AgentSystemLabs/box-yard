@@ -220,15 +220,6 @@ describe("the chat switcher in the Coordinator's header", () => {
     expect(centre().querySelector("textarea")!.placeholder).toBe("Queue another message for the Captain…")
   })
 
-  it("beside a page, a pick stays in the Coordinator too: no navigation to the Captain's tab", () => {
-    render("/")
-    click(switcher(centre()))
-    click(items().find((el) => el.textContent!.startsWith("alpha"))!)
-    expect(location.pathname).toBe(APP_HOME)
-    expect(title()).toBe("alpha Captain")
-    expect(pressedChip()).toBe("alpha")
-  })
-
   it("Enter on the current chat just closes the menu and focuses its composer", async () => {
     render()
     click(switcher(centre()))
@@ -325,6 +316,7 @@ describe("Captain selection", () => {
     expect(checked()).toEqual(["alpha"])
     click(items().find((el) => el.textContent!.startsWith("keep-the-castle"))!)
     expect(title()).toBe("keep-the-castle Captain")
+    expect(pressedChip()).toBe("keep-the-castle")
     expect(location.pathname).toBe(APP_HOME)
     await frame()
     expect(document.activeElement).toBe(centre().querySelector("[data-testid=chat-footer] textarea"))

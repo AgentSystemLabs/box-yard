@@ -201,7 +201,7 @@ describe("sound on send: Settings", () => {
       el.dispatchEvent(new Event("input", { bubbles: true }))
     })
 
-  it("is on by default", () => {
+  it("shows the saved setting in the toggle and the volume slider", () => {
     setSendSound({ enabled: true, volume: 0.6 })
     open()
     expect(toggle().checked).toBe(true)

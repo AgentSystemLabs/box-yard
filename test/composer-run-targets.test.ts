@@ -369,7 +369,11 @@ describe('Composer "!" harness', () => {
   it("warns about Codex on an SSH machine before sending, and won't send it", async () => {
     mount(true)
     await type("build @studio-mac !codex")
-    expect(document.querySelector('[data-testid="pick-conflict"]')?.textContent).toMatch(/Codex is unavailable here \(you picked @studio-mac\)/)
+    // The place's availability check answers on a later tick (later still under load): "Checking availability…" until then.
+    await vi.waitFor(async () => {
+      await settle()
+      expect(document.querySelector('[data-testid="pick-conflict"]')?.textContent).toMatch(/Codex is unavailable here \(you picked @studio-mac\)/)
+    }, { timeout: 3000 })
     expect(document.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.disabled).toBe(true)
     // The Harness button says it too, without hover.
     expect(harnessButton().getAttribute("aria-label")).toBe("Harness: !codex (Codex, Codex is unavailable here)")
@@ -377,7 +381,10 @@ describe('Composer "!" harness', () => {
     expect(onSubmit).not.toHaveBeenCalled()
     // Another place clears it.
     await type("build @box !codex")
-    expect(document.querySelector('[data-testid="pick-conflict"]')).toBeNull()
+    await vi.waitFor(async () => {
+      await settle()
+      expect(document.querySelector('[data-testid="pick-conflict"]')).toBeNull()
+    }, { timeout: 3000 })
   })
 })
 

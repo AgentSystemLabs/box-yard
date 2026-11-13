@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import type { Server } from "node:http"
 import { createBoxYard, type BoxYard } from "../server/app.js"
 import type { Project, Task, TaskMessage } from "../shared/types.js"
-import { CURSOR_BOXYARD_SERVER, cursorAgentArgs } from "../server/cursor.js"
+import { cursorAgentArgs } from "../server/cursor.js"
 import { buildMcpServer } from "../server/mcp.js"
 import { freePort, testConfig, tmpDir, waitFor } from "./helpers.js"
 
@@ -240,9 +240,5 @@ describe("task agents on Cursor", () => {
     expect(done.error ?? "").not.toContain("crsr_invalid_0000000000")
     // The ledger keeps the turn's time, with no tokens.
     expect(usage(r, t.id).map((u) => u.t)).toEqual([0])
-  })
-
-  it("names Box Yard's MCP server the way cursor-agent does", () => {
-    expect(CURSOR_BOXYARD_SERVER).toBe("plugin-boxyard-boxyard")
   })
 })

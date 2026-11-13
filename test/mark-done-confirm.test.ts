@@ -201,7 +201,7 @@ describe("Mark done in the task header, with sub-tasks", () => {
     expect(posts).toEqual([])
   })
 
-  it("Stop and mark done marks it done, with Undo, and sends the close once the undo window is over", async () => {
+  it("Stop and mark done marks it done with Undo, and holds the close (and the sub-tasks' stop) for the undo window", async () => {
     render([ROOT, STARTERS, SOUPS])
     await act(async () => void markDone().click())
     await act(async () => void buttonIn(dialog()!, "Stop and mark done").click())

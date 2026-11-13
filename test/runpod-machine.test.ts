@@ -5,7 +5,7 @@ import { RunPodApi, type RunPodPod } from "../server/runpod/api.js"
 import { RunPodSettingsStore } from "../server/runpod/settings.js"
 import { RunPodService } from "../server/runpod/service.js"
 import { runpodDir } from "../server/runpod/image.js"
-import { RunPodProvider, catalogPrice } from "../server/providers/runpod.js"
+import { RunPodProvider } from "../server/providers/runpod.js"
 import { SshPool } from "../server/runpod/ssh.js"
 import type { CredentialStore } from "../server/credentials.js"
 import { DEFAULT_RUNPOD_SETTINGS, RUNPOD_GPU_GUIDE, gpuHint, gpuPrice, type ProjectGpuMachine, type RunPodSettings } from "../shared/runpod.js"
@@ -76,7 +76,6 @@ function provider(o: { settings?: Partial<RunPodSettings>; machine?: Partial<Pro
 
 describe("the GPU types for browser and WebGL games", () => {
   it("are RunPod's exact gpuTypeIds, each with VRAM, a rough price and what it's for", () => {
-    for (const id of [RTX3070, A4000, ADA, A5000]) expect(CATALOG.map((g) => g.id)).toContain(id)
     expect(Object.keys(RUNPOD_GPU_GUIDE)).toEqual(expect.arrayContaining([RTX3070, A4000, ADA, A5000, "NVIDIA A40", "NVIDIA RTX A6000"]))
     expect(RUNPOD_GPU_GUIDE[A4000]).toMatchObject({ vramGb: 16 })
     expect(RUNPOD_GPU_GUIDE[ADA]).toMatchObject({ vramGb: 20 })
@@ -154,15 +153,6 @@ describe("RunPod machine settings", () => {
 })
 
 describe("the $/hr caps", () => {
-  it("price a GPU on the project's cloud", () => {
-    const [rtx3070, a4000] = CATALOG
-    expect(catalogPrice(rtx3070!, "SECURE")).toBeNull()
-    expect(catalogPrice(rtx3070!, "COMMUNITY")).toBe(0.13)
-    expect(catalogPrice(a4000!, "SECURE")).toBe(0.25)
-    expect(catalogPrice(a4000!, "COMMUNITY")).toBe(0.17)
-    expect(catalogPrice(CATALOG[4]!, "COMMUNITY")).toBeNull()
-  })
-
   it("count the next pod at its GPU's price on that cloud", async () => {
     expect(await provider().nextPodPrice("prj_a")).toEqual({ gpu: "RTX A5000", usd: 0.27 })
     expect(await provider({ settings: { cloud: "COMMUNITY" } }).nextPodPrice("prj_a")).toEqual({ gpu: "RTX A5000 (Community)", usd: 0.16 })

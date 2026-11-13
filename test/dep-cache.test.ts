@@ -134,7 +134,7 @@ describe("dependency cache", () => {
 
     const stale = task("stale")
     fs.rmSync(path.join(stale.nm, ".package-lock.json"))
-    expect(deps(stale.dir, "save")).toMatchObject({ action: "skipped" })
+    expect(deps(stale.dir, "save")).toMatchObject({ action: "skipped", reason: "node_modules doesn't match package-lock.json" })
 
     const nested = { ...LOCK, packages: { ...LOCK.packages, "packages/web/node_modules/left": { version: "0.9.0" } } }
     expect(deps(task("nested", { lock: nested }).dir, "save")).toMatchObject({ action: "skipped", reason: expect.stringMatching(/^nested node_modules/) })

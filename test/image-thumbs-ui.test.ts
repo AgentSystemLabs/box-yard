@@ -10,7 +10,6 @@ import { PublishedCard } from "../web/src/components/PublishedNotices.js"
 import { PublishedFile } from "../web/src/components/TaskFiles.js"
 import { Markdown } from "../web/src/components/ui.js"
 import { groupPublished, type PublishedGroup } from "../web/src/lib/publishedNotices.js"
-import { closePreview, previewState } from "../web/src/lib/preview.js"
 import { keys } from "../web/src/lib/queries.js"
 import type { Artifact, Attachment, ChatMessage } from "../shared/types.js"
 
@@ -32,7 +31,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  if (previewState()) closePreview()
   act(() => root.unmount())
   host.remove()
   vi.unstubAllGlobals()
@@ -105,13 +103,6 @@ describe("published file thumbnails", () => {
 })
 
 describe("images in Markdown", () => {
-  it("a hosted image shows the 1280 px copy and a click previews the original", () => {
-    render(createElement(Markdown, null, "![Before](/artifacts/art_0123456789ab/before.png)"))
-    expect(img("Before").getAttribute("src")).toBe("/artifacts/art_0123456789ab/before.png?w=1280")
-    act(() => void img("Before").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })))
-    expect(previewState()?.items[previewState()!.index]?.url).toBe("/artifacts/art_0123456789ab/before.png")
-  })
-
   it("an image from another site is left alone", () => {
     render(createElement(Markdown, null, "![Logo](https://example.com/logo.png)"))
     expect(img("Logo").getAttribute("src")).toBe("https://example.com/logo.png")

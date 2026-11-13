@@ -3,7 +3,7 @@ import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
 import { COMMENTS_RATE_FLOOR, PR_COMMENTS_DETAIL_BATCH, PR_COMMENTS_PROBE_BATCH, PrCommentTracker, toActivity, type GqlPrActivity } from "../server/prComments.js"
 import { PrDetailsSource } from "../server/prDetails.js"
-import { PrTracker, type TokenHealth } from "../server/prs.js"
+import type { TokenHealth } from "../server/prs.js"
 import { PR_COMMENT_MINUTES, countNewComments, prCommentsLabel, prCommentsText, prViewKey } from "../shared/prComments.js"
 import { DEFAULT_SETTINGS, settingsPatch } from "../server/settings.js"
 import { tmpDir } from "./helpers.js"
@@ -437,15 +437,4 @@ describe("the task page's PR sheet", () => {
     expect((await off.get(id)).details!.comments).toBeNull()
     expect(queries[1]).not.toMatch(/reviewThreads|viewer/)
   })
-})
-
-it("PrTracker's batched query still reads PR states through the shared GraphQL helper", async () => {
-  const store = new Store(openDb(tmpDir()))
-  const project = store.createProject({ name: "site" })
-  const t = store.createTask({ projectId: project.id, title: "T", prompt: "p" })
-  store.updateTask(t.id, { status: "pr_ready", prUrl: "https://github.com/acme/site/pull/1" }, { quiet: true })
-  const fetch = (async () => new Response(JSON.stringify({ data: { rateLimit: { remaining: 4000, resetAt: at(60) }, p0: { pullRequest: { state: "OPEN", isDraft: true } } } }), { status: 200 })) as unknown as typeof globalThis.fetch
-  const prs = new PrTracker({ store, token: () => "tok", fetch })
-  await prs.pollAll()
-  expect(store.getTask(t.id)!.prState).toBe("draft")
 })

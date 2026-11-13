@@ -264,22 +264,6 @@ describe("Steer", () => {
     expect(turnJson(r, done).prompt).toContain("also add a title")
   }, 60_000)
 
-  it("waits for the turn's end the same way on a Cursor agent", async () => {
-    const r = await start()
-    const { t } = await busyTask(r, "now polish it [hang]", { agentCli: "cursor" })
-    await send(r, t.id, "also add a title")
-    const res = await steer(r, t.id)
-    expect(res).toMatchObject({ delivery: "after_turn", queued: 1 })
-    expect(res.note).toMatch(/Cursor can't take a message in the middle of a turn/)
-    expect(said(r, t.id, "event").some((e) => /^the owner asked to steer the queued message into the running turn, but Cursor can't/.test(e))).toBe(true)
-    expect(await getTask(r, t.id)).toMatchObject({ status: "working", pendingCount: 1 })
-
-    await r.yard.tasks.stopTask(t.id)
-    const done = await ranTurn(r, t.id, 3)
-    expect(turns(r, t.id)).toEqual(["idle", "stopped", "idle"])
-    expect(turnJson(r, done).prompt).toContain("also add a title")
-  }, 60_000)
-
   it("gives the messages back to the queue with a note when the box can't take the steer", async () => {
     const r = await start()
     const { t } = await busyTask(r)

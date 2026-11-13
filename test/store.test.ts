@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { openDb, migrate } from "../server/db.js"
+import { openDb, migrate, MIGRATIONS } from "../server/db.js"
 import { Store, normalizeRepo, githubSlug, cloneUrl } from "../server/store.js"
 import { tmpDir } from "./helpers.js"
 
@@ -29,8 +29,7 @@ describe("store", () => {
     const db = openDb(tmpDir())
     migrate(db)
     migrate(db)
-    const v = db.prepare("SELECT MAX(version) v FROM _migrations").get() as { v: number }
-    expect(v.v).toBeGreaterThan(0)
+    expect(db.prepare("SELECT MAX(version) v, COUNT(*) n FROM _migrations").get()).toEqual({ v: MIGRATIONS.length, n: MIGRATIONS.length })
   })
 
   it("keeps env values server-side and only exposes names", () => {

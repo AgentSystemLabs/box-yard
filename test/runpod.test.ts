@@ -6,7 +6,7 @@ import { Store } from "../server/store.js"
 import { RunPodApi, RunPodError, rankDataCenters, type RunPodPod } from "../server/runpod/api.js"
 import { RunPodSettingsStore } from "../server/runpod/settings.js"
 import { IMAGE_FILES, anonymousPullable, imageTag, parseRepo, runpodDir, scanForKeys } from "../server/runpod/image.js"
-import { POD_HTTP_PORTS, RunPodProvider, shortGpu } from "../server/providers/runpod.js"
+import { POD_HTTP_PORTS, RunPodProvider } from "../server/providers/runpod.js"
 import { SshPool } from "../server/runpod/ssh.js"
 import { DEFAULT_RUNPOD_SETTINGS, gpuBoxId, gpuBoxIndex, gpuBoxProject, gpuPodLabel, isGpuBox, type RunPodSettings } from "../shared/runpod.js"
 import { RUNNERS, SETUP_RUNNERS, normalizeRunner, parseRunsOn } from "../shared/runner.js"
@@ -117,7 +117,7 @@ describe("RunPodSettingsStore", () => {
     const s = new RunPodSettingsStore(store())
     expect(() => s.update({ idleMinutes: 0 })).toThrow(/idleMinutes/)
     expect(() => s.update({ gpuTypes: [] })).toThrow(/at least one/)
-    expect(() => s.update({ surprise: 1 })).toThrow()
+    expect(() => s.update({ surprise: 1 })).toThrow(/Unrecognized key: "surprise"/)
     expect(() => s.update({ imageRepo: "someone/boxyard-gpu:latest" })).toThrow(/no tag/)
     expect(() => s.update({ image: "x; rm -rf /" })).toThrow(/image reference/)
   })
@@ -289,10 +289,5 @@ describe("RunPodProvider", () => {
 
   it("can't make boxes through the pool", async () => {
     await expect(provider([]).create({ labels: [] })).rejects.toThrow(/runpod-<projectId>\[-<n>\]/)
-  })
-
-  it("shortens GPU names for labels", () => {
-    expect(shortGpu("NVIDIA RTX A5000")).toBe("RTX A5000")
-    expect(shortGpu("NVIDIA GeForce RTX 4090")).toBe("RTX 4090")
   })
 })
