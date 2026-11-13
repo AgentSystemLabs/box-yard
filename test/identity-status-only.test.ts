@@ -224,7 +224,7 @@ describe("the seal is one-way through the tools", () => {
   it("lets the Coordinator set status, never back; nor move a sealed project to an open identity or delete into an open Default", async () => {
     const r = await start()
     const tool = await r.as({ kind: "coordinator" })
-    const refused = /Only Cody can let the Coordinator see more: [\s\S]*Settings › Identities/
+    const refused = /Only the owner can let the Coordinator see more: [\s\S]*Settings › Identities/
     const back = await tool("update_identity", { identity: "Private", coordinator_sees: "everything" })
     expect(back.ok).toBe(false)
     expect(back.text).toMatch(refused)

@@ -385,7 +385,7 @@ describe("box_history over MCP", () => {
     const coordinator = await mcpAs(r, { kind: "coordinator" })
     const all = JSON.parse((await coordinator("box_history")).content[0]!.text) as { box: string; event: string; by: string }[]
     expect(all.map((e) => [e.box, e.event, e.by])).toEqual([
-      [tb.boxId, "deleted", "Cody"],
+      [tb.boxId, "deleted", "the owner"],
       [tb.boxId, "created", "Box Yard (placement)"],
       [ta.boxId, "created", "Box Yard (placement)"],
     ])
