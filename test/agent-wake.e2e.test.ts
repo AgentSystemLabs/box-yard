@@ -46,7 +46,7 @@ async function start(): Promise<Running> {
   }) as unknown as typeof globalThis.fetch
   const yard = createBoxYard(config, { webDir: "/nonexistent", github: { fetch, token: () => "test-token" } })
   // Captains would wake on task notices and start turns of their own; these tests read what they were sent.
-  yard.captains.tuning.wakeDebounceMs = 10 * 60_000
+  yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 10 * 60_000
   // Our own hook engine, whose message_coordinator only records, replaces the app's.
   yard.hooks.stop()
   const fired: Running["fired"] = []

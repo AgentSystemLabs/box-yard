@@ -54,6 +54,7 @@ import { CAPTAIN_TOOLS, CHAT_ALLOWED_TOOLS, attachedImages, chatClaudeLogin, cod
 import { limitsOf, recordLimits } from "./loginLimits.js"
 import { codexModel, type ManagerCli } from "../shared/agentCli.js"
 import { TurnClock, turnTiming, type McpHandshakes } from "./turnTimings.js"
+import { perfMark } from "./perfTrace.js"
 import { captainReplyWakes, takeFyiMarker } from "./captainWake.js"
 import { NO_PICKS, turnPicks, type TurnPicks } from "../shared/runTargets.js"
 import { pickNotes } from "./runTargets.js"
@@ -225,8 +226,14 @@ function briefTask(t: Task, ownerName?: string) {
   return `- ${t.id} "${t.title}" ${t.status}${t.pendingCount ? ` (+${t.pendingCount} queued messages)` : ""}${t.prUrl ? ` PR ${t.prUrl}` : ""}${merge}`
 }
 
+/** A task whose turn is on its way or running: its update isn't final yet. */
+const BUSY_TASK: ReadonlySet<string> = new Set(["queued", "starting", "working"])
+
 export interface CaptainTuning {
+  /** The wait before a wake-up while other tasks of the project still run: their updates are likely to follow, and share the turn. */
   wakeDebounceMs: number
+  /** The wait when no task of the project is running: nothing else is expected, so only the update's own burst is gathered. */
+  wakeQuietMs: number
   loopGuard: LoopGuardOptions
   /** Its read-only clone of the project's repo (server/captainRepo.ts). */
   repo: RepoTuning
@@ -269,7 +276,7 @@ export class CaptainManager {
   /** A project's live defaults for new tasks, for its [Project now] (app.ts: TaskManager.projectDefaults). */
   projectDefaults: ((projectId: string) => ProjectDefaults | null) | null = null
   /** Read when a Captain is created; tests shorten these. */
-  readonly tuning: CaptainTuning = { wakeDebounceMs: 3000, loopGuard: { ...DEFAULT_LOOP_GUARD }, repo: { ...DEFAULT_REPO_TUNING } }
+  readonly tuning: CaptainTuning = { wakeDebounceMs: 3000, wakeQuietMs: 250, loopGuard: { ...DEFAULT_LOOP_GUARD }, repo: { ...DEFAULT_REPO_TUNING } }
   private sweepTimer: NodeJS.Timeout | null = null
 
   constructor(
@@ -828,16 +835,27 @@ class Captain {
   }
 
   nudge() {
+    perfMark(`captain:${this.project.id}`, "nudge")
     if (this.wakeTimer) return
     this.wakeTimer = setTimeout(() => {
       this.wakeTimer = null
-      const busy = new Set(["queued", "starting", "working"])
-      const ready = this.store.unseenCaptainNoticeTasks(this.project.id).some((id) => !id || !busy.has(this.store.getTask(id)?.status ?? "idle"))
+      const ready = this.store.unseenCaptainNoticeTasks(this.project.id).some((id) => !id || !BUSY_TASK.has(this.store.getTask(id)?.status ?? "idle"))
       if (!ready) return
       this.wakeWanted = true
       void this.drain()
-    }, this.tuning.wakeDebounceMs)
+    }, this.wakeDelay())
     this.wakeTimer.unref?.()
+  }
+
+  /**
+   * How long a wake-up waits for more updates to share its turn. While another task of the project runs, the full
+   * debounce: its update may be seconds away. With none running (the usual end of "start a task, tell me when it's
+   * done"), nothing else is coming, and the owner is waiting on this answer.
+   */
+  private wakeDelay(): number {
+    const { wakeDebounceMs, wakeQuietMs } = this.tuning
+    if (wakeQuietMs >= wakeDebounceMs) return wakeDebounceMs
+    return this.store.hasBusyTask(this.project.id) ? wakeDebounceMs : wakeQuietMs
   }
 
   stop() {
@@ -1522,7 +1540,7 @@ class Captain {
     // the server's env vars or Settings › Credentials, read on every run so a saved token works without a restart.
     const own = this.claudeLogin()
     const added = !own && login && !isCredentialsLogin(login.id) ? login : null
-    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv())
+    const env = serverClaudeEnv(own?.env ?? added?.env ?? null, this.settings.credentials.claudeEnv(), this.settings.get().claudeTelemetry)
     const loginRef = rotationLoginRef(added) ?? chatClaudeLogin(env, own)
     // The connectors' values: only this process's env holds them (its MCP config names them as ${VAR}).
     Object.assign(env, connectors.env)
@@ -1548,6 +1566,7 @@ class Captain {
       const clock = new TurnClock()
 
       let child: ChildProcess
+      perfMark(`captain:${this.project.id}`, `spawn.${kind}`)
       try {
         child = spawn(launch.bin, launch.args, { cwd: this.workdir, env: launch.env, stdio: ["pipe", "pipe", "pipe"] })
       } catch (err) {

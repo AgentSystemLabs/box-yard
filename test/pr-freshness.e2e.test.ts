@@ -43,7 +43,7 @@ function setup() {
   const yard = createBoxYard(config, { webDir: "/nonexistent", github: { fetch, token: () => "test-token" } })
   yards.push(yard)
   // The hook below messages the Captain; it shouldn't wake and start a turn in this test.
-  yard.captains.tuning.wakeDebounceMs = 10 * 60_000
+  yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 10 * 60_000
   const project = yard.store.createProject({ name: "castle" })
   const as = async (caller: McpCaller) => {
     const deps = {
@@ -152,6 +152,6 @@ describe("PR states are checked before they're reported", () => {
     const [t] = await coordinator<{ id: string; prState: string; prCheckedAt?: string; prUnverified?: string }[]>("list_inbox")
     expect(t).toMatchObject({ id, prState: "open" })
     expect(t!.prCheckedAt).toBeUndefined()
-    expect(t!.prUnverified).toMatch(/hasn't confirmed this PR's state since Box Yard started \(GitHub GraphQL returned HTTP 502\).*don't tell the owner it's waiting on/)
+    expect(t!.prUnverified).toMatch(/hasn't confirmed this PR's state since Box Yard started \(GitHub GraphQL returned HTTP 502\).*don't tell the owner it's waiting on him/)
   })
 })

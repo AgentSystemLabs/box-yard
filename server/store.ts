@@ -3059,6 +3059,11 @@ export class Store {
     })
   }
 
+  /** Whether any task of the project is queued, starting or working. */
+  hasBusyTask(projectId: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM tasks WHERE project_id = ? AND status IN ('queued', 'starting', 'working') LIMIT 1").get(projectId))
+  }
+
   unseenCaptainNoticeTasks(projectId: string): (string | null)[] {
     const rows = this.db
       .prepare("SELECT json_extract(meta_json, '$.taskId') AS task_id FROM captain_messages WHERE project_id = ? AND seen_by_captain = 0")
