@@ -52,7 +52,7 @@ A turn's commits are by the first of these that's there (`server/gitAuthor.ts`):
 
 Box Yard writes no author into a clone's `.git/config` or a box's global config. Clones made before this have the old fallback, `user.name = Box Yard Agent`, in their `.git/config`; the local runner removes it before a turn, and everywhere else the author env vars beat it.
 
-Box Yard's own git work for the project (clones, fetches, the turn-end push, PR checks, branch cleanup) uses the same token. A project's Captain runs on its identity's Claude login.
+Box Yard's own git work for the project (clones, fetches, the turn-end push, PR checks, branch cleanup) uses the same token. A project's Captain and its side threads pick their Claude login in the same order as its turns: a Claude var in the project's env vars (only that one var reaches the Captain, none of the project's other env vars), else its identity's own Claude login, else a login from the rotation (docs/logins.md), else Settings › Credentials. Like a turn's, it's read on every run, so a new token applies without a restart.
 
 On the local runner, a project on any identity but Default gets separate git and `gh` configuration for normal commands:
 
@@ -102,7 +102,7 @@ Not covered yet: commits Box Yard makes through GitHub's API (the screenshots on
 - **Back up the key with the database.** Without it, identities keep their names, logins and fingerprints, but each token and Claude login shows `readable: false` and turns don't get it until it's saved again.
 - **Write-only.** Values go in through the API and never come out: the API, the web app and the model see logins, owners, emails, scopes, expiry and a fingerprint (the first 12 hex of the value's sha256).
 - **Kept out of transcripts.** Known credential values of at least six characters (Settings › Credentials’ and the identities’, a signing key also line by line) are replaced with `[redacted]` in task, Captain, Coordinator and side thread messages before they’re saved or shown. Recognized private-key blocks, including truncated blocks, become `[redacted private key]`. The owner’s own messages are kept as written. API errors also use secret-shape filtering. Redaction is not a guarantee against unknown secrets, encoded values or copies in files/artifacts.
-- **Kept from `claude`.** `BOXYARD_SECRET_KEY` is removed from the env of the Coordinator, the Captains and their side threads (a Captain's logs in with its identity's Claude login, like the Captain), and the local runner already strips every `BOXYARD_*` var from agents.
+- **Kept from `claude`.** `BOXYARD_SECRET_KEY` is removed from the env of the Coordinator, the Captains and their side threads (a Captain's logs in with the same Claude login as the Captain), and the local runner already strips every `BOXYARD_*` var from agents.
 
 ## Boxes
 
@@ -146,7 +146,7 @@ It's a view, not a wall. What remains:
 - **Coordinator sees** is *Everything* or *Status only* on each card, saved with its draft (see [Coordinator sees: status only](#coordinator-sees-status-only)). Only here and in the project's picker can it go back to *Everything*.
 - **Import from this computer** runs the same detection as `detect_identities` (with GitHub unless *Ask GitHub too* is off) and lists a proposal per account with its evidence. Tick a proposal, untick any project that should stay, and Save: Box Yard reads the token and key by reference on the server, so they never pass through the page.
 
-**A project's identity** is picked in its project settings (the Captain's ⋯ › Project settings, a sidebar project row's settings button, or Settings › Projects), in *Identity / Claude login*, and saved with the rest of the form. The section says which identity the project uses (Default inherited from Settings › Credentials, too), the picked one's GitHub account and which Claude login its agents and Captain get (a kind, never a value), and when a Claude login in the project's env vars wins for its agents. The picker says when the identity can't run on the project's runner or shows the Coordinator status only, and Save waits while one of the project's tasks is running, so no turn switches accounts halfway.
+**A project's identity** is picked in its project settings (the Captain's ⋯ › Project settings, a sidebar project row's settings button, or Settings › Projects), in *Identity / Claude login*, and saved with the rest of the form. The section says which identity the project uses (Default inherited from Settings › Credentials, too), the picked one's GitHub account and which Claude login its agents and Captain get (a kind, never a value), and when a Claude login in the project's env vars wins for its agents and Captain. The picker says when the identity can't run on the project's runner or shows the Coordinator status only, and Save waits while one of the project's tasks is running, so no turn switches accounts halfway.
 
 **Badges.** A project on another identity than Default shows its colour dot and name in the sidebar (just the dot when the sidebar is narrow), and the task's ⓘ details say which identity its turns act as. The project header doesn't.
 

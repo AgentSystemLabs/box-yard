@@ -25,7 +25,7 @@ Only a name, the last 4 characters (a Codex login: of its ChatGPT account id), a
 These keep their own login and never rotate:
 
 - a project whose identity has its own Claude login (docs/identities.md), and its Captain
-- a Claude or Codex credential in the project's or the task's env vars
+- a Claude or Codex credential in the project's or the task's env vars (a Claude one in the project's env vars keeps its Captain off the rotation too)
 - a Codex task on an SSH machine that can't keep a ChatGPT login in memory (it gets Settings' API key, as before)
 - this computer's own `claude` or `codex` login, when Settings › Credentials has none: it can't be read into a rotation. Paste a token there to include it.
 
