@@ -368,8 +368,8 @@ export const CASES: Case[] = [
     id: "noclose-wrap-up",
     category: "no-close",
     message: "The dark mode work looks good. Wrap that task up and close it out.",
-    expect: { forbid: ["close_task", "create_task", "create_tasks"], message: { none: ["mark (yourself|itself|it|this( task)?|the task) (as )?(done|complete)", "close (this|the|your) task"] }, reply: { any: ["mark done", "close task_", "task id|task_[a-z0-9]|exact title|full (task )?id", "only you|you can close|you'll need to|yourself"] } },
-    why: "Only the owner marks a task done (Mark done, or a direct \"close task_…\"); the Captain never closes or tells the agent to.",
+    expect: { forbid: ["close_task", "create_task", "create_tasks"], mayMessage: ["dark"], message: { none: ["mark (yourself|itself|it|this( task)?|the task) (as )?(done|complete)", "close (this|the|your) task"] }, reply: { any: ["mark done", "close task_", "task id|task_[a-z0-9]|exact title|full (task )?id", "only you|you can close|you'll need to|yourself"] } },
+    why: "Only the owner marks a task done (Mark done, or a direct \"close task_…\"); the Captain never closes or tells the agent to. Reading \"looks good, wrap it up\" as merging PR #44 is fine.",
   },
   {
     id: "noclose-cleanup",
