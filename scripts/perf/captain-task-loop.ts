@@ -5,6 +5,7 @@
 //   npx tsx scripts/perf/captain-task-loop.ts [rounds=5] --real [--label baseline] [--json out.json] [--port 4701]
 //     [--data /tmp/dir] [--model claude-opus-5-5] [--effort medium] [--scenario wait|wake] [--wake-debounce 3000]
 //     [--wake-quiet 250] [--poll-ms 1500] [--settings '{"claudeTelemetry":false}'] [--keep]
+//     [--prewarm-ms 3000] [--idle-watch 600]
 //   npx tsx scripts/perf/captain-task-loop.ts [rounds] --mock     (fake-claude, no Captain: Box Yard's launch and turn end only)
 //   npx tsx scripts/perf/captain-task-loop.ts --summarize a.json b.json ...     (a table of saved runs, side by side)
 //
@@ -12,6 +13,11 @@
 // without it the script only prints what it would do. It runs its own server in a scratch data folder (never a live
 // one, never ~/.boxyard), with a bare file:// repo as the project's origin, so the turn-end push is real but has no
 // network in it. One warm-up round comes first and isn't counted: the first spawn and the first prompt cache write.
+//
+// With Settings › Warm Claude process on (the default), the Captain's turns after the warm-up run in its warm process,
+// as for an owner chatting with it. --prewarm-ms pings the Captain's warm-up (as opening its chat box does) that long
+// before each message. After the rounds it reads the resident memory of the idle warm process with its children (its
+// whole process group), then every 30 s for --idle-watch seconds.
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
@@ -84,6 +90,8 @@ interface Round {
   replyAt: number
   /** The Captain's first words after the message (its "started a task" line), or null. */
   firstReplyAt: number | null
+  /** Its first words streamed into the chat (a captain.delta), or null. */
+  firstStreamAt?: number | null
   /** The task row showed up for the owner (its SSE event). */
   taskSeenAt: number | null
   correct: boolean
@@ -97,6 +105,8 @@ interface Saved {
   at: string
   options: Record<string, unknown>
   rounds: Round[]
+  /** The Captain's warm process once idle after the rounds: its process group's resident memory, then over time. */
+  warm?: { pid: number; rssKb: number; processes: { pid: number; rssKb: number; command: string }[]; watch: { afterS: number; rssKb: number }[] } | null
 }
 
 const sum = (v: number[]) => v.reduce((a, b) => a + b, 0)
@@ -175,6 +185,8 @@ function phases(r: Round) {
     ttft: { c1: ttft(c1), task: ttft(task), c2: ttft(c2) },
     spans: { check: span("launch.check"), workspace: span("launch.workspace"), runner: span("launch.runner"), author: span("launch.author"), cli: span("launch.cli"), start: span("launch.start") },
     firstWords: r.firstReplyAt === null ? null : r.firstReplyAt - r.t0,
+    // The first words the owner sees: streamed, or the first stored reply.
+    firstShown: Math.min(r.firstStreamAt ?? Infinity, r.firstReplyAt ?? Infinity) - r.t0,
     taskSeen: r.taskSeenAt === null ? null : r.taskSeenAt - r.t0,
     taskStarted: task ? task.startedAt - r.t0 : null,
     // Captain turns nobody asked for: a wake-up that answered "(no update)" after the loop was already answered.
@@ -187,14 +199,14 @@ function summarize(files: string[]) {
   const out: string[] = []
   const base = runs[0]!
   const stat = (run: Saved, of: (p: ReturnType<typeof phases>) => number | null, p: number) => pct(run.rounds.map((r) => of(phases(r))), p)
-  out.push("| Variant | n | Total p50 | Total p90 | Model p50 | CLI p50 | Box Yard p50 | vs first | Task shown p50 | Task agent running p50 | $ / round | Extra Captain turns | Answered waiting | correct |")
-  out.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+  out.push("| Variant | n | Total p50 | Total p90 | Model p50 | CLI p50 | Box Yard p50 | vs first | First words p50 | First words p90 | Task shown p50 | Task agent running p50 | $ / round | Extra Captain turns | Answered waiting | correct |")
+  out.push("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
   const baseTotal = stat(base, (p) => p.total, 0.5)
   for (const run of runs) {
     const total = stat(run, (p) => p.total, 0.5)
     const delta = total !== null && baseTotal !== null && run !== base ? `${total <= baseTotal ? "−" : "+"}${sec(Math.abs(total - baseTotal))}` : "–"
     out.push(
-      `| ${run.label} | ${run.rounds.length} | ${sec(total)} | ${sec(stat(run, (p) => p.total, 0.9))} | ${sec(stat(run, (p) => p.model, 0.5))} | ${sec(stat(run, (p) => p.cli, 0.5))} | ${sec(stat(run, (p) => p.app, 0.5))} | ${delta} | ${sec(stat(run, (p) => p.taskSeen, 0.5))} | ${sec(stat(run, (p) => p.taskStarted, 0.5))} | $${(sum(run.rounds.map((r) => r.costUsd)) / Math.max(1, run.rounds.length)).toFixed(3)} | ${sum(run.rounds.map((r) => phases(r).extraTurns))} | ${run.rounds.filter((r) => phases(r).waited).length}/${run.rounds.length} | ${run.rounds.filter((r) => r.correct).length}/${run.rounds.length} |`,
+      `| ${run.label} | ${run.rounds.length} | ${sec(total)} | ${sec(stat(run, (p) => p.total, 0.9))} | ${sec(stat(run, (p) => p.model, 0.5))} | ${sec(stat(run, (p) => p.cli, 0.5))} | ${sec(stat(run, (p) => p.app, 0.5))} | ${delta} | ${sec(stat(run, (p) => p.firstShown, 0.5))} | ${sec(stat(run, (p) => p.firstShown, 0.9))} | ${sec(stat(run, (p) => p.taskSeen, 0.5))} | ${sec(stat(run, (p) => p.taskStarted, 0.5))} | $${(sum(run.rounds.map((r) => r.costUsd)) / Math.max(1, run.rounds.length)).toFixed(3)} | ${sum(run.rounds.map((r) => phases(r).extraTurns))} | ${run.rounds.filter((r) => phases(r).waited).length}/${run.rounds.length} | ${run.rounds.filter((r) => r.correct).length}/${run.rounds.length} |`,
     )
   }
   out.push("", `| Phase (p50) | kind | ${runs.map((r) => r.label).join(" | ")} |`, `|---|---|${runs.map(() => "---:").join("|")}|`)
@@ -227,6 +239,14 @@ function summarize(files: string[]) {
       }).join(" | ")} |`)
     }
   }
+  const warm = runs.filter((r) => r.warm)
+  if (warm.length) {
+    out.push("", "| Idle warm process | pid | RSS (process group) | processes | later |", "|---|---:|---:|---|---|")
+    for (const run of warm) {
+      const w = run.warm!
+      out.push(`| ${run.label} | ${w.pid} | ${(w.rssKb / 1024).toFixed(0)} MB | ${w.processes.map((p) => `${path.basename(p.command.split(" ")[0] ?? "")} ${(p.rssKb / 1024).toFixed(0)} MB`).join(", ")} | ${w.watch.map((x) => `${x.afterS} s: ${(x.rssKb / 1024).toFixed(0)} MB`).join(", ") || "–"} |`)
+    }
+  }
   console.log(out.join("\n"))
 }
 
@@ -254,6 +274,8 @@ const dataDir = path.resolve(opt("--data") ?? fs.mkdtempSync(path.join(os.tmpdir
 // "wait": the Captain may wait for the task in its turn (what it does for quick work). "wake": it's told to end its
 // turn, so the answer comes from the wake-up turn the task's update starts.
 const scenario = opt("--scenario") ?? "wait"
+const prewarmMs = Number(opt("--prewarm-ms") ?? 0)
+const idleWatchS = Number(opt("--idle-watch") ?? 0)
 const rounds = Number(args[0] ?? 5)
 if (!real && !mock) {
   console.log(`Would run ${rounds} round(s) (+1 warm-up) of Captain → task → reply on ${model} (${effort}) with the real claude CLI, in ${dataDir} on port ${port}. Pass --real to spend the tokens.`)
@@ -355,16 +377,35 @@ async function until<T>(fn: () => T | null | undefined | false, what: string, ms
   }
 }
 
-// When each task row first reached the owner's screen (the SSE event the UI lists it from).
+// When each task row first reached the owner's screen (the SSE event the UI lists it from), and the Captain's reply
+// its first streamed words.
 const taskSeen = new Map<string, number>()
+let firstStreamAt: number | null = null
 const broadcast = yard.hub.broadcast.bind(yard.hub)
-yard.hub.broadcast = ((event: { type: string; task?: { id: string } }) => {
+yard.hub.broadcast = ((event: { type: string; task?: { id: string }; text?: string }) => {
   if (event.type === "task") {
     const id = event.task?.id
     if (id && !taskSeen.has(id)) taskSeen.set(id, Date.now())
   }
+  if (event.type === "captain.delta" && event.text && firstStreamAt === null) firstStreamAt = Date.now()
   return broadcast(event as never)
 }) as typeof yard.hub.broadcast
+
+/** A process group's processes (a warm claude and the MCP servers it started) and their resident memory. */
+function groupRss(pgid: number): { pid: number; rssKb: number; command: string }[] {
+  const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,rss=,command="]).toString().trim().split("\n")
+  const all = rows.map((l) => {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/.exec(l)
+    return m ? { pid: Number(m[1]), ppid: Number(m[2]), pgid: Number(m[3]), rssKb: Number(m[4]), command: m[5]! } : null
+  }).filter((x): x is NonNullable<typeof x> => x !== null)
+  // Its group, and any descendant that left it.
+  const ids = new Set(all.filter((p) => p.pgid === pgid).map((p) => p.pid))
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const p of all) if (!ids.has(p.pid) && ids.has(p.ppid)) (ids.add(p.pid), (grew = true))
+  }
+  return all.filter((p) => ids.has(p.pid)).map((p) => ({ pid: p.pid, rssKb: p.rssKb, command: p.command.slice(0, 160) }))
+}
 
 let project = yard.store.listProjects().find((p) => p.name === "bench") as { id: string } | undefined
 if (!project) {
@@ -376,7 +417,7 @@ const projectId = project.id
 const captainIdle = () => !yard.captains.state(projectId)?.busy
 const quiet = () => captainIdle() && yard.store.listTaskRows().every((t) => !t.current_turn_id && !["queued", "starting", "working"].includes(t.status))
 
-const saved: Saved = { label, at: new Date().toISOString(), options: { scenario, model, effort, wakeDebounceMs: tuning.wakeDebounceMs, wakeQuietMs: tuning.wakeQuietMs, pollMs: c.pollMs, claude: mock ? "fake-claude" : execFileSync("claude", ["--version"]).toString().trim(), settings: settingsPatch ?? null, env: process.env.BOXYARD_BENCH_NOTE ?? null }, rounds: [] }
+const saved: Saved = { label, at: new Date().toISOString(), options: { scenario, prewarmMs, model, effort, wakeDebounceMs: tuning.wakeDebounceMs, wakeQuietMs: tuning.wakeQuietMs, pollMs: c.pollMs, claude: mock ? "fake-claude" : execFileSync("claude", ["--version"]).toString().trim(), settings: settingsPatch ?? null, env: process.env.BOXYARD_BENCH_NOTE ?? null }, rounds: [] }
 const save = () => jsonOut && fs.writeFileSync(jsonOut, JSON.stringify(saved, null, 2))
 
 try {
@@ -404,6 +445,12 @@ try {
       if (i > 0) saved.rounds.push(round)
       continue
     }
+    // The owner opens the chat box (its warm-up ping), then writes for a while.
+    if (prewarmMs > 0) {
+      await call("POST", `/api/projects/${projectId}/captain/warm`)
+      await new Promise((r) => setTimeout(r, prewarmMs))
+    }
+    firstStreamAt = null
     const t0 = Date.now()
     await call("POST", `/api/projects/${projectId}/captain/messages`, { content })
     const postedAt = Date.now()
@@ -433,6 +480,7 @@ try {
       noticeAt: notice.createdAt,
       replyAt: reply.createdAt,
       firstReplyAt: firstReply?.createdAt ?? null,
+      firstStreamAt,
       taskSeenAt: taskSeen.get(task.id) ?? null,
       correct: reply.content.includes(word),
       timings,
@@ -442,13 +490,29 @@ try {
     }
     const p = phases(round)
     process.stderr.write(
-      `round ${i}${i ? "" : " (warm-up)"}: total ${sec(p.total)} = model ${sec(p.model)} + CLI ${sec(p.cli)} + Box Yard ${sec(p.app)}; first words ${sec(p.firstWords)}; $${round.costUsd.toFixed(3)}; ${round.correct ? "correct" : `WRONG: ${reply.content.slice(0, 120)}`}\n`,
+      `round ${i}${i ? "" : " (warm-up)"}: total ${sec(p.total)} = model ${sec(p.model)} + CLI ${sec(p.cli)} + Box Yard ${sec(p.app)}; first words ${sec(p.firstShown)}${firstStreamAt ? " (streamed)" : ""}; $${round.costUsd.toFixed(3)}; ${round.correct ? "correct" : `WRONG: ${reply.content.slice(0, 120)}`}\n`,
     )
     if (process.env.BENCH_VERBOSE) for (const x of p.list) process.stderr.write(`    ${x.label}: ${sec(x.ms)}\n`)
     if (i > 0) saved.rounds.push(round)
     else fs.writeFileSync(path.join(dataDir, "warmup.json"), JSON.stringify(round, null, 2))
     save()
   }
+  // The idle warm process: its resident memory with its MCP servers, then over --idle-watch.
+  await until(quiet, "everything idle after the rounds", 60_000).catch(() => {})
+  await new Promise((r) => setTimeout(r, 3000))
+  const w = yard.captains.warmProcesses().find((x) => x.projectId === projectId)
+  if (w?.pid) {
+    const processes = groupRss(w.pid)
+    saved.warm = { pid: w.pid, rssKb: sum(processes.map((p) => p.rssKb)), processes, watch: [] }
+    process.stderr.write(`idle warm process ${w.pid}: ${(saved.warm.rssKb / 1024).toFixed(0)} MB in ${processes.length} process(es)\n`)
+    for (let s = 30; s <= idleWatchS; s += 30) {
+      await new Promise((r) => setTimeout(r, 30_000))
+      const now = yard.captains.warmProcesses().find((x) => x.projectId === projectId)
+      if (!now?.pid) break
+      saved.warm.watch.push({ afterS: s, rssKb: sum(groupRss(now.pid).map((p) => p.rssKb)) })
+      save()
+    }
+  } else saved.warm = null
 } finally {
   save()
   await until(quiet, "everything idle before stopping", 60_000).catch(() => {})
