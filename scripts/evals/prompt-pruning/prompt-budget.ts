@@ -16,9 +16,12 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { createBoxYard } from "../../../server/app.js"
 import { ALWAYS_LOAD, buildMcpServer, type McpCaller } from "../../../server/mcp.js"
 import { firstTurnPrompt, workerSystemPrompt } from "../../../server/prompts.js"
+import { IdentityDetector } from "../../../server/identity/detect.js"
+import { MachineStats } from "../../../server/machineStats.js"
 import { Uploads, uploadsDir } from "../../../server/uploads.js"
 import { testConfig } from "../../../test/helpers.js"
 import type { Project } from "../../../shared/types.js"
+import { readNotes } from "./notes-file.js"
 
 const args = process.argv.slice(2)
 const opt = (name: string) => {
@@ -34,17 +37,6 @@ if (!out) {
 }
 fs.mkdirSync(out, { recursive: true })
 const write = (name: string, text: string) => fs.writeFileSync(path.join(out, name), text)
-
-/** Notes as a prompt shows them: one "- (author) content" item per note, continuation lines kept with it. */
-function readNotes(file: string) {
-  const notes: { author: string; content: string }[] = []
-  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-    const m = /^- \(([^)]+)\) ([\s\S]*)$/.exec(line)
-    if (m) notes.push({ author: m[1]!, content: m[2]! })
-    else if (line.trim() && notes.length) notes[notes.length - 1]!.content += `\n${line}`
-  }
-  return notes
-}
 
 const config = { ...testConfig({ port: 0 }), defaultRunner: "local" as const }
 const yard = createBoxYard(config, { webDir: "/nonexistent" })
@@ -92,7 +84,27 @@ write("notes.only.md", notes.map((n) => `- (${n.author}) ${n.content}`).join("\n
 
 // ---------------------------------------------------------------- MCP tools
 async function toolsOf(caller: McpCaller) {
-  const deps = { store: yard.store, tasks: yard.tasks, hub: yard.hub, artifacts: null as never, publicUrl: () => "", scheduler: yard.scheduler, captains: yard.captains, settings: yard.settings, notes: yard.notes, uploads: new Uploads(uploadsDir(config.dataDir), 1024 * 1024) }
+  // Every optional group app.ts wires in (hooks, identities, connectors, machines, settings), so the lists are complete.
+  const deps = {
+    store: yard.store,
+    tasks: yard.tasks,
+    hub: yard.hub,
+    artifacts: null as never,
+    publicUrl: () => "",
+    scheduler: yard.scheduler,
+    captains: yard.captains,
+    settings: yard.settings,
+    settingsTools: yard.settingsTools,
+    hooks: yard.hooks,
+    notes: yard.notes,
+    identities: yard.identities,
+    identityDetector: new IdentityDetector({}),
+    threads: yard.threads,
+    machine: new MachineStats(),
+    connectors: yard.connectors.store,
+    machines: yard.machineActions,
+    uploads: new Uploads(uploadsDir(config.dataDir), 1024 * 1024),
+  }
   const mcp = buildMcpServer(deps, caller)
   const [a, b] = InMemoryTransport.createLinkedPair()
   await mcp.connect(a)

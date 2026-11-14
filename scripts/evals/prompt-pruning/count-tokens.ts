@@ -16,6 +16,7 @@ import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { cleanEnv } from "./cli-env.js"
 
 const args = process.argv.slice(2)
 const opt = (name: string) => {
@@ -42,16 +43,6 @@ interface Usage {
   costUsd: number
   ms: number
   apiMs: number
-}
-
-/**
- * The machine's own `claude` login, not the calling agent's: without the caller's CLAUDE_* session vars (a Box Yard
- * task's CLAUDE_CONFIG_DIR has no login of its own) and without GitHub tokens, which a count never needs.
- */
-export function cleanEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {}
-  for (const [k, v] of Object.entries(process.env)) if (!/^CLAUDE|^GH_|^GITHUB_|_TOKEN$|_API_KEY$/.test(k)) env[k] = v
-  return { ...env, DISABLE_TELEMETRY: "1" }
 }
 
 function run(cliArgs: string[], prompt = "Reply with just: ok"): Usage {
