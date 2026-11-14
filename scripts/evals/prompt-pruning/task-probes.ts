@@ -10,14 +10,16 @@
 //   npx tsx scripts/evals/prompt-pruning/task-probes.ts --summary <root>/probes.jsonl
 //
 // A variant is name=<notes file>[+<dir>]: the notes go in the first message; files in <dir> named like
-// web-CLAUDE.md are copied into the scratch repo as web/CLAUDE.md (Claude Code loads a nested CLAUDE.md only when
-// the agent reads files under it). An empty notes file means no notes. Notes can hold private names: keep them and
-// the scratch root out of the repo. Spends real money; sessions aren't saved, gh sees an empty config.
+// web-CLAUDE.md are copied into the scratch repo as web/CLAUDE.md. Claude Code loads a nested CLAUDE.md only once the
+// agent reads a file under it (with Read, or with a Bash command that names the file, like cat or sed; a grep from the
+// repo root doesn't), and the stream never shows it: scopedRead lists the folders whose files the agent touched. An
+// empty notes file means no notes. Notes can hold private names: keep them and the scratch root out of the repo.
+// Spends real money; sessions aren't saved, gh sees an empty config.
 import { execFileSync, spawn } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { firstTurnPrompt } from "../../../server/prompts.js"
-import { cleanEnv } from "./cli-env.js"
+import { cleanEnv, removeEmptyProjectDir } from "./cli-env.js"
 import { readNotes } from "./notes-file.js"
 
 interface Probe {
@@ -80,7 +82,8 @@ interface ProbeResult {
   pass: boolean
   failures: string[]
   changed: string[]
-  nestedLoaded: boolean
+  /** Folders with a scoped CLAUDE.md that the agent read or edited a file in, so Claude Code loaded that CLAUDE.md. */
+  scopedRead: string[]
   reply: string
   input: number
   cacheWrite: number
@@ -141,10 +144,14 @@ async function runOne(o: { root: string; system: string; tools: string; model: s
   fs.mkdirSync(work, { recursive: true })
   const repo = path.join(import.meta.dirname, "../../..")
   execFileSync("sh", ["-c", `git archive HEAD | tar -x -C '${work}'`], { cwd: repo })
+  const scoped: string[] = []
   if (v.dir)
     for (const f of fs.readdirSync(v.dir)) {
       const m = /^(.+)-CLAUDE\.md$/.exec(f)
-      if (m) fs.copyFileSync(path.join(v.dir, f), path.join(work, m[1]!, "CLAUDE.md"))
+      if (m) {
+        fs.copyFileSync(path.join(v.dir, f), path.join(work, m[1]!, "CLAUDE.md"))
+        scoped.push(m[1]!)
+      }
     }
   const git = (...a: string[]) => execFileSync("git", ["-c", "user.name=probe", "-c", "user.email=probe@example.com", ...a], { cwd: work, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
   git("init", "-q")
@@ -191,15 +198,22 @@ async function runOne(o: { root: string; system: string; tools: string; model: s
     })
   })
   fs.writeFileSync(path.join(dir, "stream.jsonl"), out.stdout)
+  removeEmptyProjectDir(work)
   let final: Record<string, any> | null = null
+  const touched: string[] = [] // file paths and Bash commands the agent ran
   for (const line of out.stdout.split("\n")) {
     try {
       const ev = JSON.parse(line)
       if (ev.type === "result") final = ev
+      if (ev.type === "assistant")
+        for (const b of ev.message?.content ?? []) if (b.type === "tool_use") touched.push(String(b.input?.file_path ?? b.input?.command ?? ""))
     } catch {
       /* not JSON */
     }
   }
+  // A path under a scoped folder at the repo root: absolute (Read, Edit) or relative in a Bash command (cat web/x.ts).
+  const roots = [work, fs.realpathSync(work)].map((w) => w + "/")
+  const scopedRead = scoped.filter((d) => touched.some((t) => roots.some((w) => t.includes(w + d + "/")) || new RegExp(`(^|[\\s'"=])(\\./)?${d}/\\S*\\.\\w+`).test(t)))
   git("add", "-A")
   const diff = git("diff", "--cached", "--", ".", ":(exclude)*/CLAUDE.md")
   fs.writeFileSync(path.join(dir, "diff.patch"), diff)
@@ -216,7 +230,7 @@ async function runOne(o: { root: string; system: string; tools: string; model: s
     pass: !error && failures.length === 0,
     failures,
     changed,
-    nestedLoaded: out.stdout.includes("These load when you work in"),
+    scopedRead,
     reply: reply.slice(0, 1500),
     input: u.input_tokens ?? 0,
     cacheWrite: u.cache_creation_input_tokens ?? 0,
@@ -262,7 +276,7 @@ async function main() {
       spent += r.costUsd
       fs.appendFileSync(outFile, JSON.stringify(r) + "\n")
       console.error(
-        `${r.pass ? "PASS" : "FAIL"} ${j.v.name} ${j.p.id} #${j.run} · ${r.turns} steps · ${(r.ms / 60000).toFixed(1)} min · $${r.costUsd.toFixed(3)} · total $${spent.toFixed(2)} · changed ${r.changed.join(",") || "nothing"}${r.nestedLoaded ? " · nested CLAUDE.md loaded" : ""}${r.pass ? "" : ` · ${r.failures.join("; ")}`}`,
+        `${r.pass ? "PASS" : "FAIL"} ${j.v.name} ${j.p.id} #${j.run} · ${r.turns} steps · ${(r.ms / 60000).toFixed(1)} min · $${r.costUsd.toFixed(3)} · total $${spent.toFixed(2)} · changed ${r.changed.join(",") || "nothing"}${r.scopedRead?.length ? ` · read ${r.scopedRead.join(",")}/CLAUDE.md` : ""}${r.pass ? "" : ` · ${r.failures.join("; ")}`}`,
       )
     }
   }

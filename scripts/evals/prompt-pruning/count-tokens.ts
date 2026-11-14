@@ -11,12 +11,13 @@
 //       input, cache write and read tokens, $ and time. --tools all/none loads or defers every MCP tool. --cwd runs it
 //       in a checkout, so a task's count includes the repo's CLAUDE.md / AGENTS.md as Claude Code loads them.
 //
-// It runs in a scratch folder with --no-session-persistence, so nothing lands in ~/.claude/projects.
+// It runs in a scratch folder with --no-session-persistence and removes the empty folder Claude Code still makes in
+// ~/.claude/projects, so nothing lands there.
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { cleanEnv } from "./cli-env.js"
+import { cleanEnv, removeEmptyProjectDir } from "./cli-env.js"
 
 const args = process.argv.slice(2)
 const opt = (name: string) => {
@@ -56,6 +57,7 @@ function run(cliArgs: string[], prompt = "Reply with just: ok"): Usage {
     maxBuffer: 64 << 20,
     env: cleanEnv(),
   })
+  removeEmptyProjectDir(cwd ?? scratch)
   const r = JSON.parse(raw)
   if (r.is_error) throw new Error(`claude: ${r.result}`)
   const u = r.usage ?? {}

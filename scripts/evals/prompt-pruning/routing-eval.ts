@@ -20,7 +20,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { CAPTAIN_TOOLS } from "../../../server/chatAgent.js"
 import { CASES, type Call, type CaptainCase } from "./captain-cases.js"
-import { cleanEnv } from "./cli-env.js"
+import { cleanEnv, removeEmptyProjectDir } from "./cli-env.js"
 
 const args = process.argv.slice(2)
 const opt = (name: string) => {
@@ -267,6 +267,7 @@ async function main() {
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker))
+  removeEmptyProjectDir(path.join(s.root, "captain"))
 }
 
 await main()
