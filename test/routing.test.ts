@@ -121,6 +121,24 @@ describe("routing instructions", () => {
     expect(text).toContain("effort chosen by you")
     expect(text).not.toMatch(/\bCody\b/)
   })
+
+  it("come short for a Captain: the same rules and config, the Cursor launch checks only when Cursor runs", () => {
+    const settings = { ...base, agentRoutingConfig: "defaults:\n  model: claude-sonnet-5-5\n", agentCli: "claude" as const, agentCodexModel: "gpt-x", ownerName: "Ana" }
+    const full = routingInstructions(tmpDir(), settings)
+    const short = routingInstructions(tmpDir(), settings, { compact: true })
+    expect(short.length).toBeLessThan(full.length / 2)
+    expect(short).toMatch(/omit model and effort unless a `rules` entry below matches the work or Ana asks/)
+    expect(short).toContain("routing_rule")
+    expect(short).toMatch(/claude-fable-5-2, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5 or an alias/)
+    expect(short).toMatch(/continue_task with the SAME task and an explicit agent; never create a replacement task/)
+    expect(short).toContain("Defaults (now claude, Codex model gpt-x) apply to new tasks only.")
+    expect(short).toContain("Settings › Box agents now: model claude-opus-5-5, effort high.")
+    expect(short).toContain("model: claude-sonnet-5-5")
+    expect(short).not.toMatch(/\bCody\b/)
+    expect(short).not.toContain("Cursor verification")
+    expect(routingInstructions(tmpDir(), settings, { compact: true, cursor: true })).toContain("get_task's model is the saved request, not launch proof")
+    expect(routingInstructions(tmpDir(), { ...settings, agentEffort: "orchestrator" }, { compact: true })).toMatch(/"Let the Coordinator decide": pass an effort/)
+  })
 })
 
 // loadRouting and the prompt's sources and warnings (#50).

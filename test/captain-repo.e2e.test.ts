@@ -111,7 +111,7 @@ describe("a Captain's read-only clone of its repo", () => {
     await say("status")
     expect(fs.existsSync(clone)).toBe(false)
     const turn = lines().find((l) => l.args.includes("--mcp-config"))!
-    expect(argOf(turn.args, "--append-system-prompt")).toContain(`Code questions: answer them yourself from your read-only clone of the repo at ${clone}, not with a task.`)
+    expect(argOf(turn.args, "--append-system-prompt")).toContain(`Code questions: answer them yourself from your read-only clone at ${clone}, not with a task: call repo_clone first`)
     expect(turn.prompt).toContain(`Repo: ${o.url} (main). Your read-only clone isn't made yet: repo_clone makes it.`)
 
     const answer = await say("How does the README greet people? [code]")

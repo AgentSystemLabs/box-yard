@@ -155,7 +155,8 @@ function steerDelivery(r: SteerResult): string {
 
 /**
  * The task tools' shared options (runs_on, priority, effort, model, agent, attachments) are explained once, in the
- * system prompts' TASK_OPTIONS (server/prompts.ts), so each parameter's own text stays short and points there.
+ * system prompts' Task options (TASK_OPTIONS for the Coordinator, CAPTAIN_TASK_OPTIONS for Captains, in server/prompts.ts),
+ * so each parameter's own text stays short and points there.
  */
 const attachmentsSchema = z.array(z.string()).optional().describe("Files for the agent: up_… ids or paths Cody attached, or art_… artifact ids or URLs (Task options)")
 
