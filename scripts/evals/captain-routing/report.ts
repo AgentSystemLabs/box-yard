@@ -355,13 +355,17 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
   }
 
   blocks.push({ h: 2, text: "Latency and cost" })
+  // Time in wait_for_tasks is the tasks' time, not the Captain's: show latency without it, when any run waited.
+  const waited = runs.some((r) => (r.waitMs ?? 0) > 0)
+  const noWait = (s: (typeof stats)[number]) => (waited ? [sec(s.p50NoWait), sec(s.p90NoWait)] : [])
   blocks.push({
     table: {
-      head: ["Effort", "Median latency", "p90 latency", "Median without wait_for_tasks", "p90 without wait_for_tasks", "Cache read tokens per case", "Cache write tokens per case", "Total $"],
-      align: ["l", "r", "r", "r", "r", "r", "r", "r"],
-      rows: stats.map((s) => [s.level, sec(s.p50), sec(s.p90), sec(s.p50NoWait), sec(s.p90NoWait), s.cacheRead.toFixed(0), s.cacheWrite.toFixed(0), `$${s.costTotal.toFixed(2)}`]),
+      head: ["Effort", "Median latency", "p90 latency", ...(waited ? ["Median without wait_for_tasks", "p90 without wait_for_tasks"] : []), "Cache read tokens per case", "Cache write tokens per case", "Total $"],
+      align: ["l", "r", "r", ...(waited ? (["r", "r"] as const) : []), "r", "r", "r"],
+      rows: stats.map((s) => [s.level, sec(s.p50), sec(s.p90), ...noWait(s), s.cacheRead.toFixed(0), s.cacheWrite.toFixed(0), `$${s.costTotal.toFixed(2)}`]),
     },
   })
+  if (!waited) blocks.push({ p: "No Captain called wait_for_tasks, so all of each turn's latency is the Captain's own." })
 
   // Per category.
   blocks.push({ h: 1, text: "By category" })
