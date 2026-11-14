@@ -1,0 +1,19 @@
+[
+  { "effort": "low", "caseId": "xproj-mixed", "rep": 1, "items": [true] },
+  { "effort": "low", "caseId": "pq-guest-checkout", "rep": 1, "items": [true, true, true, true, true, true], "note": "the stop-and-ask escape for src/billing/ keeps the rule" },
+  { "effort": "low", "caseId": "pq-refund-report", "rep": 1, "items": [true, true, true, true, true, true], "note": "flags that the CSV writer is only in PR #41" },
+  { "effort": "low", "caseId": "pq-coupon-bug", "rep": 1, "items": [true, true, true, true] },
+  { "effort": "low", "caseId": "pq-rate-limit", "rep": 1, "items": [true, true, true, true, true] },
+  { "effort": "low", "caseId": "pq-guest-checkout", "rep": 2, "items": [true, true, true, true, true, true], "note": "judge failed it: 'stop and ask before you make it' keeps the ban; reps 1 and 3 have the same escape and the judge passed them" },
+  { "effort": "medium", "caseId": "xproj-mixed", "rep": 1, "items": [true] },
+  { "effort": "medium", "caseId": "pq-guest-checkout", "rep": 1, "items": [true, true, true, true, true, true] },
+  { "effort": "medium", "caseId": "pq-guest-checkout", "rep": 2, "items": [true, true, true, true, true, true], "note": "judge failed item 6 for the ask-before-touching-billing escape; asking Sam can't break Sam's own rule. Linking the account to the order fills in a detail, changes nothing" },
+  { "effort": "medium", "caseId": "pq-refund-report", "rep": 1, "items": [true, true, true, true, true, true] },
+  { "effort": "medium", "caseId": "pq-coupon-bug", "rep": 1, "items": [true, true, true, true], "note": "extra edge cases (quantity decrease, re-qualifying) don't change the request" },
+  { "effort": "medium", "caseId": "pq-rate-limit", "rep": 1, "items": [true, true, true, true, true], "note": "counting successful attempts too is a reading of 'attempts', not a change" },
+  { "effort": "xhigh", "caseId": "xproj-mixed", "rep": 1, "items": [true] },
+  { "effort": "xhigh", "caseId": "pq-guest-checkout", "rep": 1, "items": [true, true, true, true, true, true], "note": "billing: stop and say so instead of making the change" },
+  { "effort": "xhigh", "caseId": "pq-refund-report", "rep": 1, "items": [true, true, true, true, true, true], "note": "'the Monday before the run through the following Monday' could be misread as the current week, but it's labelled previous week and its edge-case tests pin it" },
+  { "effort": "xhigh", "caseId": "pq-coupon-bug", "rep": 1, "items": [true, true, true, true], "note": "'keep the fix in src/cart/' drops 'if you can', after checking that the fix fits there" },
+  { "effort": "xhigh", "caseId": "pq-rate-limit", "rep": 1, "items": [true, true, true, true, true] }
+]
