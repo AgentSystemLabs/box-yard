@@ -102,6 +102,42 @@ type Block =
   | { table: { head: string[]; rows: string[][]; align?: ("l" | "r")[] } }
   | { details: { summary: string; blocks: Block[] } }
   | { pre: string }
+  /** HTML only (a chart); the markdown leaves it out, the table next to it carries the numbers. */
+  | { html: string }
+
+export interface DotRow {
+  label: string
+  value: number
+  lo: number
+  hi: number
+  /** The value label at the row's end, and the hover text. */
+  text: string
+  tip: string
+}
+
+/**
+ * A dot per row with a whisker (an interval, or median → p90): one series, so one hue and no legend; the title names
+ * it. Each row's group carries a native tooltip and its numbers as a direct label.
+ */
+export function dotChart(title: string, rows: DotRow[], domain: [number, number], tick: (x: number) => string, ticks: number[]): string {
+  const W = 680
+  const left = 84
+  const right = 230
+  const top = 28
+  const rowH = 34
+  const H = top + rows.length * rowH + 26
+  const x = (v: number) => left + ((Math.min(Math.max(v, domain[0]), domain[1]) - domain[0]) / (domain[1] - domain[0])) * (W - left - right)
+  const grid = ticks
+    .map((t) => `<line x1="${x(t)}" x2="${x(t)}" y1="${top - 6}" y2="${H - 22}" class="grid"/><text x="${x(t)}" y="${H - 6}" class="tick" text-anchor="middle">${esc(tick(t))}</text>`)
+    .join("")
+  const marks = rows
+    .map((r, i) => {
+      const y = top + i * rowH + rowH / 2
+      return `<g class="row"><title>${esc(r.tip)}</title><rect x="0" y="${y - rowH / 2}" width="${W}" height="${rowH}" class="hit"/><text x="${left - 12}" y="${y + 4}" class="label" text-anchor="end">${esc(r.label)}</text><line x1="${x(r.lo)}" x2="${x(r.hi)}" y1="${y}" y2="${y}" class="whisker"/><circle cx="${x(r.value)}" cy="${y}" r="5" class="dot"/><text x="${W - right + 14}" y="${y + 4}" class="value">${esc(r.text)}</text></g>`
+    })
+    .join("")
+  return `<figure class="viz-root"><figcaption>${esc(title)}</figcaption><svg viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="${esc(title)}">${grid}${marks}</svg></figure>`
+}
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 /** The little inline markdown the report uses (**bold**, `code`) as HTML. */
@@ -119,6 +155,7 @@ export function toMarkdown(blocks: Block[]): string {
         return [`| ${head.map(cell).join(" | ")} |`, `| ${head.map((_, i) => (align?.[i] === "r" ? "---:" : "---")).join(" | ")} |`, ...rows.map((r) => `| ${r.map(cell).join(" | ")} |`)].join("\n")
       }
       if ("details" in b) return `<details><summary>${esc(b.details.summary)}</summary>\n\n${toMarkdown(b.details.blocks)}\n\n</details>`
+      if ("html" in b) return ""
       return "```text\n" + b.pre.replace(/```/g, "ˋˋˋ") + "\n```"
     })
     .join("\n\n")
@@ -137,6 +174,7 @@ export function toHtml(title: string, blocks: Block[]): string {
           return `<div class="scroll"><table><thead><tr>${head.map((h, i) => td(h, i, "th")).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c, i) => td(c, i, "td")).join("")}</tr>`).join("")}</tbody></table></div>`
         }
         if ("details" in b) return `<details><summary>${inline(b.details.summary)}</summary>${render(b.details.blocks)}</details>`
+        if ("html" in b) return b.html
         return `<pre>${esc(b.pre)}</pre>`
       })
       .join("\n")
@@ -150,11 +188,23 @@ export function toHtml(title: string, blocks: Block[]): string {
   h1 { font-size: 26px; } h2 { margin-top: 36px; border-bottom: 1px solid var(--line); padding-bottom: 4px; } h3 { margin-top: 24px; }
   table { border-collapse: collapse; margin: 8px 0 16px; font-variant-numeric: tabular-nums; }
   th, td { border-bottom: 1px solid var(--line); padding: 4px 10px; text-align: left; vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; } .r { text-align: right; }
+  th { color: var(--muted); font-weight: 600; } .r { text-align: right; } td.r { white-space: nowrap; }
   .scroll { overflow-x: auto; }
   code, pre { background: var(--code); border-radius: 4px; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
   code { padding: 1px 4px; } pre { padding: 10px 12px; white-space: pre-wrap; word-break: break-word; }
   details { margin: 6px 0; } summary { cursor: pointer; }
+  .viz-root { --surface-1: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e; --grid: #e4e3df; --series-1: #2a78d6; margin: 12px 0 20px; }
+  @media (prefers-color-scheme: dark) { .viz-root { --surface-1: #1a1a19; --text-primary: #f0efec; --text-secondary: #c3c2b7; --grid: #34332f; --series-1: #3987e5; } }
+  .viz-root figcaption { font-weight: 600; margin-bottom: 4px; }
+  .viz-root svg { max-width: 100%; height: auto; font: 12.5px system-ui, sans-serif; }
+  .viz-root .grid { stroke: var(--grid); stroke-width: 1; }
+  .viz-root .tick { fill: var(--text-secondary); }
+  .viz-root .label { fill: var(--text-primary); font-weight: 600; }
+  .viz-root .value { fill: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .viz-root .whisker { stroke: var(--series-1); stroke-width: 2; stroke-linecap: round; }
+  .viz-root .dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
+  .viz-root .hit { fill: transparent; }
+  .viz-root .row:hover .hit { fill: var(--grid); fill-opacity: 0.45; }
 </style></head><body>
 <h1>${esc(title)}</h1>
 ${render(blocks)}
@@ -247,7 +297,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
   const reps = Math.max(0, ...runs.map((r) => r.rep))
 
   blocks.push({
-    p: `${runs.length} runs: ${CASES.length} cases × up to ${reps} reps × ${levels.length} effort levels (${levels.join(", ")}), Captain on ${model}. Each run is a fresh Captain session in a scratch Box Yard seeded with the same storefront project. Task agents are fake, so only the Captain's own turn is measured.`,
+    p: `${runs.length} runs: ${CASES.length} cases × up to ${reps} rep${reps === 1 ? "" : "s"} × ${levels.length} effort levels (${levels.join(", ")}), Captain on ${model}. Each run is a fresh Captain session in a scratch Box Yard seeded with the same storefront project. Task agents are fake, so only the Captain's own turn is measured.`,
   })
 
   blocks.push({ h: 1, text: "Summary" })
@@ -257,6 +307,27 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
       align: ["l", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r"],
       rows: stats.map((s) => [s.level, `${pct(s.rate)} (${s.passed}/${s.runs})`, ci(s.boot), ci(s.wilson), `${s.solid}/${s.cases}`, sec(s.p50), sec(s.p90), sec(s.modelP50), usd(s.costPerCase), s.outTokens.toFixed(0), String(s.turnErrors)]),
     },
+  })
+  const lo = Math.max(0, Math.floor((Math.min(...stats.map((x) => x.boot[0])) - 0.05) * 10) / 10)
+  const rateTicks = Array.from({ length: Math.round((1 - lo) * 10) + 1 }, (_, i) => Math.round((lo + i * 0.1) * 10) / 10)
+  blocks.push({
+    html: dotChart(
+      "Pass rate by effort, with its 95% interval (cases resampled)",
+      stats.map((x) => ({ label: x.level, value: x.rate, lo: x.boot[0], hi: x.boot[1], text: `${pct(x.rate)}  (${ci(x.boot)})`, tip: `${x.level}: ${x.passed}/${x.runs} runs passed, ${pct(x.rate)}; 95% CI ${ci(x.boot)} over cases, ${ci(x.wilson)} over runs` })),
+      [lo, 1],
+      (t) => `${Math.round(t * 100)}%`,
+      rateTicks,
+    ),
+  })
+  const maxLat = Math.ceil(Math.max(...stats.map((x) => x.p90 ?? 0)) / 5000) * 5000 || 5000
+  blocks.push({
+    html: dotChart(
+      "Captain turn latency by effort: median (dot) to p90 (whisker end)",
+      stats.map((x) => ({ label: x.level, value: x.p50 ?? 0, lo: x.p50 ?? 0, hi: x.p90 ?? 0, text: `median ${sec(x.p50)} · p90 ${sec(x.p90)}`, tip: `${x.level}: median ${sec(x.p50)}, p90 ${sec(x.p90)}, median model time ${sec(x.modelP50)}` })),
+      [0, maxLat],
+      (t) => `${t / 1000} s`,
+      Array.from({ length: maxLat / 5000 + 1 }, (_, i) => i * 5000),
+    ),
   })
   blocks.push({
     p: "Latency runs from posting the message to the Captain's result line. The cases interval resamples whole cases, because a case's reps aren't independent; the runs interval (Wilson) treats every run as independent and is narrower than it should be.",
