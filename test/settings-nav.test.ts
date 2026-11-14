@@ -91,4 +91,11 @@ describe("settings nav", () => {
     expect(savePatch(base, base)).not.toHaveProperty("slotsPerBox")
     expect(savePatch(base, base, ["slotsPerBox"])).toHaveProperty("slotsPerBox", base.slotsPerBox)
   })
+
+  it("sends Claude Code usage telemetry only when it was switched, so a saved value is a choice", () => {
+    const off = { ...base, claudeTelemetry: false }
+    expect(savePatch(off, off)).not.toHaveProperty("claudeTelemetry")
+    expect(savePatch({ ...off, claudeTelemetry: true }, off)).toHaveProperty("claudeTelemetry", true)
+    expect(savePatch(off, { ...off, claudeTelemetry: true })).toHaveProperty("claudeTelemetry", false)
+  })
 })
