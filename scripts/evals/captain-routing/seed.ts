@@ -8,6 +8,8 @@ export const REPO_FILES: Record<string, string> = {
 
 Acme's online store: product pages, cart, checkout and the admin area.
 
+- \`src/\` is the Express server and its JSON API; \`web/\` holds the pages it serves (plain HTML and scripts, one
+  shared layout with the header and footer).
 - \`npm run dev\` starts the server (see src/server.ts for the port).
 - \`npm test\` runs the unit tests, \`npm run lint\` the linter.
 `,
@@ -45,6 +47,7 @@ createApp().listen(port, () => console.log(\`storefront on :\${port}\`))
 import { cartRoutes } from "./cart/routes.js"
 import { checkoutRoutes } from "./checkout/routes.js"
 import { authRoutes } from "./auth/routes.js"
+import { pageRoutes } from "./pages.js"
 
 export function createApp() {
   const app = express()
@@ -52,8 +55,103 @@ export function createApp() {
   app.use("/api/cart", cartRoutes())
   app.use("/api/checkout", checkoutRoutes())
   app.use("/api", authRoutes())
+  app.use("/static", express.static("web/static"))
+  app.use(pageRoutes())
   return app
 }
+`,
+  "src/pages.ts": `import { readFileSync } from "node:fs"
+import { Router } from "express"
+
+const layout = readFileSync("web/layout.html", "utf8")
+const page = (name: string) => layout.replace("{{content}}", readFileSync(\`web/pages/\${name}.html\`, "utf8"))
+
+/** The storefront's pages: each one is web/pages/<name>.html inside web/layout.html. */
+export function pageRoutes() {
+  const r = Router()
+  r.get("/", (_req, res) => res.send(page("products")))
+  r.get("/products/:slug", (_req, res) => res.send(page("product")))
+  r.get("/cart", (_req, res) => res.send(page("cart")))
+  r.get("/checkout/address", (_req, res) => res.send(page("checkout-address")))
+  r.get("/orders/:id/confirmation", (_req, res) => res.send(page("order-confirmation")))
+  r.get("/account/settings", (_req, res) => res.send(page("account-settings")))
+  r.get("/contact", (_req, res) => res.send(page("contact")))
+  return r
+}
+`,
+  "web/layout.html": `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Acme Store</title>
+    <link rel="stylesheet" href="/static/site.css" />
+  </head>
+  <body>
+    <header><a href="/">Acme Store</a> <a href="/cart">Cart</a> <a href="/account/settings">Account</a></header>
+    <main>{{content}}</main>
+    <footer>
+      <p>© 2025 Acme Inc. All rights reserved.</p>
+      <nav><a href="/contact-us">Contact us</a> · <a href="/shipping">Shipping</a></nav>
+    </footer>
+  </body>
+</html>
+`,
+  "web/pages/products.html": `<h1>Products</h1>
+<div id="product-grid" class="grid"></div>
+<script type="module">
+  const grid = document.getElementById("product-grid")
+  const products = await fetch("/api/products").then((r) => r.json())
+  grid.innerHTML = products.map((p) => \`<a class="card" href="/products/\${p.slug}"><img src="\${p.image}" alt="" /><b>\${p.name}</b></a>\`).join("")
+</script>
+`,
+  "web/pages/product.html": `<article id="product">
+  <img id="product-image" src="/static/images/placeholder.jpg" alt="" />
+  <h1 id="product-name"></h1>
+  <p id="product-description"></p>
+  <button id="add-to-cart">Add to cart</button>
+</article>
+<script type="module" src="/static/product.js"></script>
+`,
+  "web/pages/cart.html": `<h1>Your cart</h1>
+<ul id="cart-lines"></ul>
+<p>Subtotal: <span id="subtotal"></span></p>
+<a class="button" href="/checkout/address">Procede to checkout</a>
+<script type="module" src="/static/cart.js"></script>
+`,
+  "web/pages/checkout-address.html": `<h1>Shipping address</h1>
+<form id="address-form">
+  <input name="name" required placeholder="Full name" />
+  <input name="line1" required placeholder="Address" />
+  <input name="postcode" required placeholder="Postcode" />
+  <button type="submit">Continue</button>
+</form>
+<script type="module">
+  const form = document.getElementById("address-form")
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault()
+    const body = Object.fromEntries(new FormData(form, e.submitter))
+    await fetch("/api/checkout/address", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+    location.href = "/checkout/shipping"
+  })
+</script>
+`,
+  "web/pages/order-confirmation.html": `<h1>Thanks for your order!</h1>
+<p>Your order number is <strong id="order-number"></strong>. We'll email you when it ships.</p>
+<script type="module">
+  document.getElementById("order-number").textContent = location.pathname.split("/")[2]
+</script>
+`,
+  "web/pages/account-settings.html": `<h1>Account settings</h1>
+<form id="profile"><input name="name" /><input name="email" /><button>Save</button></form>
+<form id="password"><input type="password" name="current" /><input type="password" name="next" /><button>Change password</button></form>
+<form id="notifications"><label><input type="checkbox" name="orderEmails" /> Order emails</label><button>Save</button></form>
+`,
+  "web/pages/contact.html": `<h1>Contact us</h1>
+<p>Email support@example.com and we'll get back to you within a day.</p>
+`,
+  "web/static/site.css": `body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 960px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+footer { margin-top: 48px; color: #666; }
 `,
   "src/auth/session.ts": `/** A login session lasts this long without activity; every request slides it forward. */
 export const SESSION_TTL_HOURS = 36

@@ -4,7 +4,7 @@
 // judge's verdicts and report.ts turns the files into the report.
 //
 //   npx tsx scripts/evals/captain-routing/run.ts --effort low --real [--reps 3] [--out results/low.jsonl] [--port 4701]
-//     [--cases id,id] [--category fan-out] [--budget 13] [--model claude-opus-5-5] [--data /tmp/dir] [--keep]
+//     [--cases id,id] [--category fan-out] [--budget 13] [--total-budget 38] [--model claude-opus-5-5] [--data /tmp/dir] [--keep]
 //   npx tsx scripts/evals/captain-routing/run.ts --fake-captain [--cases ...]     (fake-claude as the Captain: plumbing only, free)
 //
 // --real spends tokens on this computer's own `claude` login; without it (or --fake-captain) the script only says what
@@ -39,6 +39,8 @@ const model = opt("--model") ?? "claude-opus-5-5"
 const reps = Number(opt("--reps") ?? 3)
 const port = Number(opt("--port") ?? 4701)
 const budget = Number(opt("--budget") ?? 13)
+/** A cap on everything the result files next to --out have spent (parallel runs, one per effort level, share it). */
+const totalBudget = Number(opt("--total-budget") ?? Infinity)
 const only = opt("--cases")?.split(",").map((s) => s.trim()).filter(Boolean)
 const category = opt("--category")
 const out = path.resolve(opt("--out") ?? `scripts/evals/captain-routing/results/${fakeCaptain ? "fake" : effort}.jsonl`)
@@ -596,6 +598,25 @@ function removeSessionFolders() {
 
 let spent = 0
 let stopped: string | null = null
+/** What every result file in --out's folder has spent so far (this run's included). */
+function spentInFolder(): number {
+  const dir = path.dirname(out)
+  let total = 0
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith(".jsonl")) continue
+    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+      if (!line.trim()) continue
+      try {
+        total += Number((JSON.parse(line) as { costUsd?: number }).costUsd ?? 0)
+      } catch {
+        // A line another run is still writing.
+      }
+    }
+  }
+  return total
+}
+// Ctrl-C or kill: finish the case under way, then stop every agent and clean up (a killed run leaves detached fakes).
+for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => (stopped ??= sig))
 fs.mkdirSync(path.dirname(out), { recursive: true })
 try {
   console.error(`[eval] ${effort} on ${model}${fakeCaptain ? " (fake Captain)" : ""}: seeding in ${dataDir}`)
@@ -605,6 +626,12 @@ try {
   console.error(`[eval] seeded ${seeded.size} tasks; ${cases.length} case(s) × ${reps} rep(s)`)
   outer: for (let rep = 1; rep <= reps; rep++) {
     for (const kase of cases) {
+      if (stopped) break outer
+      const folder = spentInFolder()
+      if (folder >= totalBudget) {
+        stopped = `total budget: $${folder.toFixed(2)} spent by the runs in ${path.dirname(out)}, at or over $${totalBudget}`
+        break outer
+      }
       await reset(kase)
       const r = await runCase(kase, rep)
       const g = grade(kase, r)
