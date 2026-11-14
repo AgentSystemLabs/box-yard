@@ -888,6 +888,8 @@ export function createBoxYard(
     tasks.doneMergedResting()
     // New PR comments: another interval takes over now, and Off forgets the counts.
     tasks.prComments.reschedule()
+    // Warm Captain processes: off ends them, a new idle time applies to them now, and a new model or login restarts them.
+    captains.settingsChanged()
     return info
   }
   const saveRunpodSettings = (patch: unknown) => {
@@ -1412,6 +1414,13 @@ export function createBoxYard(
     const id = req.params.id!
     if (!store.getProject(id)) throw new BadRequestError("No such project")
     res.json(captains.restoreQueued(id, req.params.messageId!))
+  })
+  // The owner opened or is typing in a Captain's composer: its warm claude process starts now (Settings › Warm Claude process).
+  api.post("/projects/:id/captain/warm", (req, res) => {
+    const id = req.params.id!
+    if (!store.getProject(id)) throw new BadRequestError("No such project")
+    captains.ownerActive(id)
+    res.json({ ok: true })
   })
   // Stop the Captain's running turn (Captain.stopTurn). `stopped`: false when no turn was running.
   api.post("/projects/:id/captain/stop", (req, res) => {

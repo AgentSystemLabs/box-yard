@@ -701,6 +701,12 @@ export type UiEvent =
   | { type: "orchestrator.state"; state: OrchestratorState }
   | { type: "captain.message"; message: CaptainMessage }
   | { type: "captain.state"; state: CaptainState }
+  /**
+   * A Captain's reply as it's written (Settings › Stream Captain replies): `text` adds to what the chat shows, or with
+   * `reset` replaces it. It never holds "(no update)" or a hidden block (shared/captainStream.ts); the stored reply,
+   * a captain.message, takes its place.
+   */
+  | { type: "captain.delta"; projectId: string; text: string; reset?: boolean }
   | { type: "thread"; thread: SideThread }
   | { type: "thread.message"; message: SideThreadMessage }
   | { type: "thread.delta"; threadId: string; text: string }

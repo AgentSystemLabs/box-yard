@@ -48,6 +48,8 @@
 // [tail:<seconds>] waits that long after the last of those steps, before the result: a steer that comes in then runs
 // as one more turn in the same process, with a result of its own, as the real CLI runs a message that missed the turn.
 // The CLI exits once stdin ends.
+// FAKE_CLAUDE_DIE_ON_INPUT=1 (env): with `--input-format stream-json`, exits (code 3) on its first user message
+// without printing anything, as a warm process that crashed between turns would (server/warmClaude.ts).
 // FAKE_CLAUDE_GATE (env) holds each turn until a test says how it ends; see worker().
 // With no marker the worker writes a file, publishes it, and calls finish (it rests, ready for review: only Cody marks
 // a task done). [noop] calls finish with outcome "noop" (a quiet schedule run), even alongside [ask] or [fail].
@@ -118,6 +120,7 @@ if (streamInput) {
           continue
         }
         if (!inbox.first) {
+          if (msg.type === "user" && process.env.FAKE_CLAUDE_DIE_ON_INPUT) process.exit(3)
           inbox.first = msg
           resolve()
         } else if (msg.type === "user") inbox.steers.push(textOf(msg))
