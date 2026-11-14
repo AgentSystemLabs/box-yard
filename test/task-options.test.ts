@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { buildMcpServer, type McpDeps } from "../server/mcp.js"
-import { captainPrompt, ORCHESTRATOR_PROMPT, TASK_OPTIONS } from "../server/prompts.js"
+import { CAPTAIN_TASK_OPTIONS, captainPrompt, ORCHESTRATOR_PROMPT, TASK_OPTIONS } from "../server/prompts.js"
 import { withOwner } from "../shared/owner.js"
 import type { Project } from "../shared/types.js"
 
@@ -19,10 +19,15 @@ function tools(kind: "coordinator" | "captain"): Registered {
 describe("Task options", () => {
   it("are in the Coordinator's and every Captain's system prompt, once", () => {
     for (const ownerName of [undefined, "", " ", "Ana", "Cody Lee"]) {
-      const options = withOwner(TASK_OPTIONS, ownerName)
-      for (const text of [withOwner(ORCHESTRATOR_PROMPT, ownerName), captainPrompt(project, ownerName)]) expect(text.split(options)).toHaveLength(2)
+      expect(withOwner(ORCHESTRATOR_PROMPT, ownerName).split(withOwner(TASK_OPTIONS, ownerName))).toHaveLength(2)
+      // A Captain's are the short form (the Captain routing eval passed the same with it).
+      const captain = captainPrompt(project, ownerName)
+      expect(captain.split(withOwner(CAPTAIN_TASK_OPTIONS, ownerName))).toHaveLength(2)
+      expect(captain).not.toContain(withOwner(TASK_OPTIONS, ownerName))
     }
     for (const term of ["A reply's overridesDefault means a runs_on or agent you passed differs from the project's live defaults", '"local" = this computer', 'priority "high"', "low = one-command chores", "claude-opus-5-5", '"codex" (OpenAI Codex)', "attachments/"]) expect(TASK_OPTIONS).toContain(term)
+    for (const term of ["A reply's overridesDefault means", '"local" for "locally"', '"this_computer"', '"docker"', '"label:<label>"', "never retry on another runner", 'priority "high"', "low for one-command chores", '"Agent CLI" below', "stay_open_on_merge", "attachments", "related_tasks"])
+      expect(CAPTAIN_TASK_OPTIONS).toContain(term)
   })
 
   it("are what the task tools' shared parameters point to, for both callers", () => {

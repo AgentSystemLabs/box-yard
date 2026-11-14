@@ -242,7 +242,7 @@ describe("reopen_task (MCP)", () => {
     expect(runner).toContain('name: "finish"')
     const { y, a } = yard()
     const project = y.store.getProject(a.id)!
-    expect(captainPrompt(project)).toContain("prefer reopen_task with message over a new task")
+    expect(captainPrompt(project)).toContain("use reopen_task with message (and a reason), not a new task")
     expect(ORCHESTRATOR_PROMPT).toContain("reopen_task brings a done task back to Cody's lists")
   })
 })

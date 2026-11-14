@@ -1492,7 +1492,9 @@ class Captain {
   private systemPrompt(): string {
     const st = this.settings.get()
     const clone = st.captainCli === "claude" ? this.repo.dir : null
-    const base = `${captainPrompt(this.project, st.ownerName, noteBudgetOf(st, this.store.getProject(this.project.id)), this.statusOnly(), clone)}\n\n${routingInstructions(this.c.dataDir, st)}\n\n${compactionIndexPrompt(new CompactionIndex(this.store, `captain:${this.project.id}`, this.compactionsDir))}`
+    const project = this.store.getProject(this.project.id)
+    const cursor = ((project ?? this.project).agentCli ?? st.agentCli) === "cursor"
+    const base = `${captainPrompt(this.project, st.ownerName, noteBudgetOf(st, project), this.statusOnly(), clone)}\n\n${routingInstructions(this.c.dataDir, st, { compact: true, cursor })}\n\n${compactionIndexPrompt(new CompactionIndex(this.store, `captain:${this.project.id}`, this.compactionsDir))}`
     return st.captainCli === "codex" ? `${base}\n\n${codexManagerNote(st.ownerName)}` : base
   }
 
