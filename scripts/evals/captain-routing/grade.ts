@@ -193,9 +193,12 @@ export function grade(c: Case, r: RunRecord): Grade {
     const sent = routed.filter((s) => s.message)
     const problems: string[] = []
     if (e.message.all?.length && !sent.length) problems.push("no message sent")
-    for (const s of sent) {
-      for (const p of e.message.all ?? []) if (!re(p).test(s.message)) problems.push(`message to ${s.alias ?? s.ref} lacks /${p}/`)
-      for (const p of e.message.none ?? []) if (re(p).test(s.message)) problems.push(`message to ${s.alias ?? s.ref} has /${p}/`)
+    // What each task was told this turn, all its messages together: a follow-up may come in two (the change, then a steer).
+    const byTask = new Map<string, string[]>()
+    for (const s of sent) byTask.set(s.alias ?? s.ref, [...(byTask.get(s.alias ?? s.ref) ?? []), s.message])
+    for (const [to, texts] of byTask) {
+      for (const p of e.message.all ?? []) if (!re(p).test(texts.join("\n\n"))) problems.push(`messages to ${to} lack /${p}/`)
+      for (const p of e.message.none ?? []) if (texts.some((t) => re(p).test(t))) problems.push(`a message to ${to} has /${p}/`)
     }
     add("message", problems.length === 0, problems.length ? problems.join("; ") : sent.length ? "message keeps the key details" : "no message (none required)")
   }
