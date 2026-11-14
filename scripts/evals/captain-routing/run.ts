@@ -12,6 +12,7 @@
 // GH_CONFIG_DIR and a fake GitHub, and removes the Captain's session folders from ~/.claude/projects when it's done.
 import { execFileSync } from "node:child_process"
 import fs from "node:fs"
+import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 import type { Server } from "node:http"
@@ -53,6 +54,13 @@ if (!real && !fakeCaptain) {
   console.log(`Would run ${cases.length} case(s) × ${reps} rep(s) on ${model} at ${effort} effort with the real claude CLI, on port ${port}, writing ${out}. Pass --real to spend the tokens (budget $${budget}).`)
   process.exit(0)
 }
+// Another program on the port would answer this run's API calls (on macOS two servers can both bind it).
+const portTaken = await new Promise<boolean>((resolve) => {
+  const sock = net.connect(port, "127.0.0.1")
+  sock.once("connect", () => (sock.destroy(), resolve(true)))
+  sock.once("error", () => resolve(false))
+})
+if (portTaken) throw new Error(`Port ${port} is in use: pass a free one with --port`)
 
 // The server reads its config from the environment as it loads: nothing of the shell that started this (an agent's own
 // session, a live server's port or token) may reach it. The Captain runs on this computer's own `claude` login.
@@ -167,8 +175,9 @@ if (!fakeCaptain) (yard.captains as unknown as { c: Config }).c = { ...c, claude
 yard.tasks.requireRunner = async () => {}
 // Task updates never wake the Captain on their own: each case is the one turn its message (or its retro) starts.
 yard.captains.tuning.wakeDebounceMs = yard.captains.tuning.wakeQuietMs = 1e9
-const server = await new Promise<Server>((resolve) => {
+const server = await new Promise<Server>((resolve, reject) => {
   const s = yard.app.listen(port, "127.0.0.1", () => resolve(s))
+  s.once("error", reject)
 })
 await yard.start()
 const db = yard.store.db
