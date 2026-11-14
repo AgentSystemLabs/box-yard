@@ -43,6 +43,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/captain-settings.test.ts": "Full Box Yard server/task-manager fixture",
   "test/captain-voice.e2e.test.ts": "End-to-end runner/server integration",
   "test/captain-wake.e2e.test.ts": "End-to-end runner/server integration",
+  "test/captain-warm.test.ts": "Full Box Yard server/HTTP fixture with real claude processes (the fake)",
   "test/connector-sessions.e2e.test.ts": "End-to-end runner/server integration",
   "test/direct-message-digests.e2e.test.ts": "Full Box Yard server/HTTP/MCP fixture",
   "test/captains.test.ts": "Full Box Yard server/task-manager fixture",
