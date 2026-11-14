@@ -5,6 +5,7 @@
 //
 //   npx tsx scripts/evals/captain-routing/run.ts --effort low --real [--reps 3] [--out results/low.jsonl] [--port 4701]
 //     [--cases id,id] [--category fan-out] [--budget 13] [--total-budget 38] [--model claude-opus-5-5] [--data /tmp/dir] [--keep]
+//     [--label pruned-low]
 //   npx tsx scripts/evals/captain-routing/run.ts --fake-captain [--cases ...]     (fake-claude as the Captain: plumbing only, free)
 //
 // --real spends tokens on this computer's own `claude` login; without it (or --fake-captain) the script only says what
@@ -36,6 +37,8 @@ const real = flag("--real")
 const fakeCaptain = flag("--fake-captain")
 const keep = flag("--keep")
 const effort = opt("--effort") ?? "medium"
+/** Names this run's variant in the report when it differs by more than effort (a changed prompt, say). */
+const label = opt("--label")
 const model = opt("--model") ?? "claude-opus-5-5"
 const reps = Number(opt("--reps") ?? 3)
 const port = Number(opt("--port") ?? 4701)
@@ -44,7 +47,7 @@ const budget = Number(opt("--budget") ?? 13)
 const totalBudget = Number(opt("--total-budget") ?? Infinity)
 const only = opt("--cases")?.split(",").map((s) => s.trim()).filter(Boolean)
 const category = opt("--category")
-const out = path.resolve(opt("--out") ?? `scripts/evals/captain-routing/results/${fakeCaptain ? "fake" : effort}.jsonl`)
+const out = path.resolve(opt("--out") ?? `scripts/evals/captain-routing/results/${fakeCaptain ? "fake" : (label ?? effort)}.jsonl`)
 const dataArg = opt("--data")
 
 const cases = CASES.filter((c) => (!only || only.includes(c.id)) && (!category || c.category === category))
@@ -562,6 +565,7 @@ async function runCase(kase: Case, rep: number): Promise<RunRecord> {
   return {
     caseId: kase.id,
     effort: fakeCaptain ? "fake" : effort,
+    ...(label ? { label } : {}),
     rep,
     message,
     tools,
@@ -628,7 +632,7 @@ function spentInFolder(): number {
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => (stopped ??= sig))
 fs.mkdirSync(path.dirname(out), { recursive: true })
 try {
-  console.error(`[eval] ${effort} on ${model}${fakeCaptain ? " (fake Captain)" : ""}: seeding in ${dataDir}`)
+  console.error(`[eval] ${label ?? effort} on ${model}${fakeCaptain ? " (fake Captain)" : ""}: seeding in ${dataDir}`)
   await seed()
   await sleep(1500)
   snap = snapshot()
@@ -648,7 +652,7 @@ try {
       fs.appendFileSync(out, JSON.stringify({ ...r, grade: g }) + "\n")
       const failed = g.checks.filter((x) => !x.pass).map((x) => `${x.name}: ${x.detail}`)
       console.error(
-        `[eval] ${effort} rep ${rep} ${kase.id}: ${g.pass ? "PASS" : g.passDeterministic ? "pass (judge pending)" : "FAIL"} ${r.latencyMs === null ? "–" : `${(r.latencyMs / 1000).toFixed(1)} s`} $${r.costUsd.toFixed(3)} (total $${spent.toFixed(2)})${failed.length ? `\n         ${failed.join("\n         ")}` : ""}`,
+        `[eval] ${label ?? effort} rep ${rep} ${kase.id}: ${g.pass ? "PASS" : g.passDeterministic ? "pass (judge pending)" : "FAIL"} ${r.latencyMs === null ? "–" : `${(r.latencyMs / 1000).toFixed(1)} s`} $${r.costUsd.toFixed(3)} (total $${spent.toFixed(2)})${failed.length ? `\n         ${failed.join("\n         ")}` : ""}`,
       )
       if (spent > budget) {
         stopped = `budget: $${spent.toFixed(2)} spent, over this run's $${budget}`
