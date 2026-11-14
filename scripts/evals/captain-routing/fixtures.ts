@@ -424,8 +424,8 @@ export const CASES: Case[] = [
     id: "notes-owner-rule",
     category: "notes",
     message: "From now on, every PR in this project that changes UI needs before/after screenshots in its description.",
-    expect: { noteAdded: "screenshot", forbid: ["create_task", "create_tasks"] },
-    why: "A lasting rule from the owner becomes a project note.",
+    expect: { noteAdded: "screenshot", forbid: ["create_task", "create_tasks"], mayMessage: ["settings", "dark", "csv"] },
+    why: "A lasting rule from the owner becomes a project note. Running agents don't see new notes, so passing the rule on to the UI tasks (the settings redesign, the open UI PRs) is fine, not required.",
   },
   {
     id: "notes-not-a-rule",
