@@ -129,6 +129,14 @@ describe("the routing eval's grader", () => {
     expect(failed(c, run(c, guessed))).toEqual(expect.arrayContaining(["messaged", "no send_to_task"]))
   })
 
+  it("takes any plain 'that's another project' as handing other-project work off", () => {
+    const c = caseById("xproj-marketing")
+    const reply = (text: string) => failed(c, run(c, { replies: [text], finalText: text }))
+    expect(reply("The marketing site isn't part of this project. Send it to the project that holds the marketing site.")).toEqual([])
+    expect(reply("The marketing site is another project: ask the Coordinator.")).toEqual([])
+    expect(reply("I couldn't find a pricing page on the marketing site.")).toEqual(["reply"])
+  })
+
   it("reads a number and its unit however the prompt writes them", () => {
     const c = caseById("pq-rate-limit")
     const judge = { pass: true, items: [], verbatim: false, model: "m", costUsd: 0 }

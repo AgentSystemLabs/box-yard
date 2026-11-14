@@ -90,7 +90,7 @@ export interface Case {
 }
 
 /** A reply that tells the owner the work belongs to another project or the Coordinator. */
-const OTHER_PROJECT_REPLY = "coordinator|another project|other project|different project|outside (this|my) project|not (in )?this project|separate project|can't reach|only reach|my tools only|scoped to"
+const OTHER_PROJECT_REPLY = "coordinator|another project|other project|different project|outside (this|my) project|(not|isn.t) (in |part of )?this project|the project that (holds|owns|has)|separate project|can't reach|only reach|my tools only|scoped to"
 /** "Don't merge", in its usual phrasings. */
 const DONT_MERGE = "(do not|don't|dont|not to|never|without) merg|leave (it |the pr )?(open|unmerged)|no merg"
 
