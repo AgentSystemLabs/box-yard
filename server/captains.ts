@@ -56,11 +56,13 @@ import { codexModel, type ManagerCli } from "../shared/agentCli.js"
 import { TurnClock, turnTiming, type McpHandshakes } from "./turnTimings.js"
 import { perfMark } from "./perfTrace.js"
 import { captainReplyWakes, takeFyiMarker } from "./captainWake.js"
+import { WarmClaude, warmKey } from "./warmClaude.js"
+import { CaptainStreamer } from "../shared/captainStream.js"
 import { NO_PICKS, turnPicks, type TurnPicks } from "../shared/runTargets.js"
 import { pickNotes } from "./runTargets.js"
 import { CAPTAIN_STOPPED_REPLY, STOPPED_LINE, STOPPED_META, STOPPED_NOTE } from "./stoppedTurn.js"
 import { CaptainRepo, DEFAULT_REPO_TUNING, ago, captainsWithClones, cloneDenyRules, hasLeftoverClone, reposToRemove, type GitAuth, type RepoTuning } from "./captainRepo.js"
-import type { Attachment, CaptainCompaction, CaptainMessage, CaptainSource, CaptainState, CompactionRecord, CompactionTaskSnapshot, ContextUsage, Project, Task } from "../shared/types.js"
+import { CAPTAIN_WARM_IDLE_MINUTES, type Attachment, type CaptainCompaction, type CaptainMessage, type CaptainSource, type CaptainState, type CompactionRecord, type CompactionTaskSnapshot, type ContextUsage, type Project, type Task } from "../shared/types.js"
 
 const TURN_TIMEOUT_MS = 15 * 60_000
 const NO_UPDATE = "(no update)"
@@ -237,6 +239,8 @@ export interface CaptainTuning {
   loopGuard: LoopGuardOptions
   /** Its read-only clone of the project's repo (server/captainRepo.ts). */
   repo: RepoTuning
+  /** One minute of Settings › Warm process idle time, read live (tests shorten it). */
+  warmMinuteMs: number
 }
 
 /** How often disk cleanup looks at the Captains' clones (CaptainManager.sweepRepos). */
@@ -276,7 +280,7 @@ export class CaptainManager {
   /** A project's live defaults for new tasks, for its [Project now] (app.ts: TaskManager.projectDefaults). */
   projectDefaults: ((projectId: string) => ProjectDefaults | null) | null = null
   /** Read when a Captain is created; tests shorten these. */
-  readonly tuning: CaptainTuning = { wakeDebounceMs: 3000, wakeQuietMs: 250, loopGuard: { ...DEFAULT_LOOP_GUARD }, repo: { ...DEFAULT_REPO_TUNING } }
+  readonly tuning: CaptainTuning = { wakeDebounceMs: 3000, wakeQuietMs: 250, loopGuard: { ...DEFAULT_LOOP_GUARD }, repo: { ...DEFAULT_REPO_TUNING }, warmMinuteMs: 60_000 }
   private sweepTimer: NodeJS.Timeout | null = null
 
   constructor(
@@ -510,6 +514,27 @@ export class CaptainManager {
     for (const c of this.captains.values()) c.stop()
   }
 
+  /**
+   * The owner opened or is typing in a project's Captain composer: with Settings › Warm Claude process on, its claude
+   * process starts now, so the message's turn skips Claude Code's start-up.
+   */
+  ownerActive(projectId: string) {
+    this.get(projectId).ownerActive(true)
+  }
+
+  /** Settings were saved: every Captain's warm process follows them (Captain.settingsChanged). */
+  settingsChanged() {
+    for (const c of this.captains.values()) c.settingsChanged()
+  }
+
+  /** The warm claude processes running now, by project. */
+  warmProcesses(): { projectId: string; pid: number | null; turns: number; startedAt: number; usedAt: number; busy: boolean }[] {
+    return [...this.captains.values()].flatMap((c) => {
+      const w = c.warmProcess()
+      return w ? [{ projectId: c.projectId, ...w }] : []
+    })
+  }
+
   /** A project's Captain's read-only clone of its repo (server/captainRepo.ts): the repo_clone tool opens it. */
   repo(projectId: string): CaptainRepo {
     return this.get(projectId).repo
@@ -527,8 +552,9 @@ export class CaptainManager {
     }
   }
 
-  /** Its project was deleted: its Captain's clone goes (its compactions stay in the folder). */
+  /** Its project was deleted: its Captain's warm process and clone go (its compactions stay in the folder). */
   async projectDeleted(projectId: string) {
+    this.captains.get(projectId)?.dropWarm(true)
     await (this.captains.get(projectId)?.repo ?? this.detachedRepo(projectId)).remove()
   }
 
@@ -608,9 +634,17 @@ class Captain {
   /** Set by stop(): the database closes right after, so a turn still winding down must not touch it. */
   private stopped = false
   private readonly loopGuard: WakeLoopGuard
-  private child: ChildProcess | null = null
-  /** What `child` is running: only a turn can be stopped. */
+  /** Ends the run in progress (its process, or the warm one it runs in). */
+  private killRun: (() => void) | null = null
+  /** What the run in progress is: only a turn can be stopped. */
   private childKind: RunKind | null = null
+  /** Its warm claude process (Settings › Coordinator › Warm Claude process), between turns or running one. */
+  private warm: WarmClaude | null = null
+  /** A warm process being started ahead of a turn (prewarm): a turn waits for it rather than start another. */
+  private warming: Promise<void> | null = null
+  private warmTimer: NodeJS.Timeout | null = null
+  /** When the owner last chatted with this Captain: sent it a message, or opened or typed in its composer. */
+  private ownerActiveAt = 0
   /** Set by stopTurn() until the turn it stopped has ended, which is then recorded as stopped. */
   private stopping = false
   /** From a Stop until the next turn in this drain: the chats show the Captain idle while the stopped turn ends. */
@@ -721,6 +755,8 @@ class Captain {
     const meta = { ...extra, source, ...(tool ? { tool } : {}), ...(attachments.length ? { attachments } : {}), ...(this.running ? { queued: true } : {}) }
     const msg = this.store.addCaptainMessage(this.project.id, "user", content.trim(), meta, id)
     this.hub.broadcast({ type: "captain.message", message: msg })
+    // The owner writing here (not from a task's chat) is chatting with this Captain: its turn starts a warm process.
+    if (source === "cody" && !extra?.viaTask) this.ownerActiveAt = Date.now()
     this.pending = true
     // A hook is an automation, not Cody or the Coordinator stepping in: the loop guard keeps counting.
     if (source !== "hook") {
@@ -864,7 +900,8 @@ class Captain {
     if (this.wakeTimer) clearTimeout(this.wakeTimer)
     this.wakeTimer = null
     this.clearThrottleTimer()
-    this.child?.kill("SIGTERM")
+    this.killRun?.()
+    this.dropWarm(true)
   }
 
   /**
@@ -876,7 +913,7 @@ class Captain {
     if (!this.running || this.compacting || this.stopped) return false
     this.stopping = true
     this.wakeWanted = false
-    if (this.childKind === "turn") this.child?.kill("SIGTERM")
+    if (this.childKind === "turn") this.killRun?.()
     // Every open chat shows it stopped at once, not when the process has ended.
     this.stopShown = true
     this.publishState()
@@ -886,6 +923,157 @@ class Captain {
   private clearThrottleTimer() {
     if (this.throttleTimer) clearTimeout(this.throttleTimer)
     this.throttleTimer = null
+  }
+
+  // ---------- its warm claude process (Settings › Coordinator › Warm Claude process, server/warmClaude.ts) ----------
+
+  /**
+   * The owner is chatting with this Captain: they sent it a message, or opened or typed in its composer
+   * (`prewarm`: then a warm process starts now, so their message's turn needn't wait for Claude Code to start).
+   */
+  ownerActive(prewarm = false) {
+    this.ownerActiveAt = Date.now()
+    this.armWarmTimer()
+    if (prewarm) void this.prewarm()
+  }
+
+  /** Settings were saved: off ends its warm process, a new idle time applies to it now, and one for old settings starts again. */
+  settingsChanged() {
+    if (!this.warmOn()) return this.dropWarm()
+    this.armWarmTimer()
+    if (this.warm && !this.warm.busy) void this.prewarm()
+  }
+
+  /** Its warm process now, if any (the bench and the tests read it). */
+  warmProcess(): { pid: number | null; turns: number; startedAt: number; usedAt: number; busy: boolean } | null {
+    const w = this.warm
+    return w?.alive ? { pid: w.pid ?? null, turns: w.turns, startedAt: w.startedAt, usedAt: w.usedAt, busy: w.busy } : null
+  }
+
+  /** Settings › Warm Claude process is on for it: Claude Code Captains only (Codex has no stream-json input). */
+  private warmOn(): boolean {
+    return this.settings.get().captainWarmProcess && this.cli() === "claude" && !this.stopped
+  }
+
+  /** How long a warm process may wait for the owner: Settings › Warm Claude process › Idle time, read live. */
+  private warmIdleMs(): number {
+    const minutes = this.settings.get().captainWarmIdleMinutes
+    const m = Number.isFinite(minutes) ? Math.min(CAPTAIN_WARM_IDLE_MINUTES.max, Math.max(CAPTAIN_WARM_IDLE_MINUTES.min, minutes)) : CAPTAIN_WARM_IDLE_MINUTES.default
+    return m * this.tuning.warmMinuteMs
+  }
+
+  /** Its warm process may run now: the setting is on and the owner chatted with it within the idle time. */
+  private warmWanted(): boolean {
+    return this.warmOn() && Date.now() < this.ownerActiveAt + this.warmIdleMs()
+  }
+
+  /** A warm process may start now: no run is going (it would change the session under it) and no compaction. */
+  private mayStartWarm(): boolean {
+    return this.warmWanted() && !this.killRun && !this.compacting && !this.store.projectDeletionPending(this.project.id) && Boolean(this.store.getProject(this.project.id))
+  }
+
+  /** What a warm process must have been started with to run this launch: warmKey, with the MCP config it names. */
+  private launchKey(launch: ChatLaunch): string {
+    let mcp = ""
+    try {
+      mcp = fs.readFileSync(this.mcpConfigPath, "utf8")
+    } catch {}
+    return warmKey({ bin: launch.bin, args: launch.args, env: launch.env, cwd: this.workdir }, mcp)
+  }
+
+  /** `w` can run a turn of this launch on this session: same key, same session, and resumed only if the session has started. */
+  private fits(w: WarmClaude, key: string, sessionId: string, resume: boolean): boolean {
+    return w.alive && !w.busy && w.key === key && w.sessionId === sessionId && (w.turns > 0 || w.resumed === resume)
+  }
+
+  /**
+   * The warm process a run goes to, or null for a new process. Only a turn runs warm, in a process started for exactly
+   * this launch and session; a stale one goes, and a new one starts for the turn while the owner chats with this
+   * Captain. Any other run (a summary, /compact, /context, a cold turn) ends it: it changes the session on disk, which a
+   * process started before it wouldn't know.
+   */
+  private warmFor(kind: RunKind, launch: ChatLaunch, sessionId: string, resume: boolean): WarmClaude | null {
+    if (kind !== "turn" || launch.cli !== "claude" || !this.warmWanted()) {
+      this.dropWarm()
+      return null
+    }
+    const key = this.launchKey(launch)
+    if (this.warm && this.fits(this.warm, key, sessionId, resume)) return this.warm
+    this.dropWarm()
+    return this.startWarm(launch, key, sessionId, resume)
+  }
+
+  private startWarm(launch: ChatLaunch, key: string, sessionId: string, resume: boolean): WarmClaude | null {
+    let w: WarmClaude
+    try {
+      w = new WarmClaude({ bin: launch.bin, args: launch.args, env: launch.env, cwd: this.workdir }, key, sessionId, resume)
+    } catch (err) {
+      console.warn(`[captain ${this.project.id}] couldn't start a warm Claude process: ${(err as Error).message}`)
+      return null
+    }
+    this.warm = w
+    void w.exited().then(() => {
+      if (this.warm === w) this.dropWarm()
+    })
+    this.armWarmTimer()
+    return w
+  }
+
+  /**
+   * Start a warm process for the next turn now (the owner opened its composer, or settings changed), unless one for
+   * that launch is already running. The login is the one the turn will most likely pick (heldBy); if it picks another,
+   * the turn starts a new one.
+   */
+  private prewarm(): Promise<void> {
+    if (this.warming) return this.warming
+    if (!this.mayStartWarm()) return Promise.resolve()
+    const warming = (async () => {
+      const connectors = await this.sessionConnectors()
+      if (!this.mayStartWarm()) return
+      const s = this.session()
+      // A session Codex started can't be resumed: the turn starts over (runPrompt), with no warm process yet.
+      if (s.started && (this.store.getKv(sessionCliKey(this.project.id)) ?? "claude") !== "claude") return
+      const login = this.claudeLogin() ? null : (this.logins()?.heldBy(this.loginHolder, "claude") ?? null)
+      const launch = this.launch("turn", s.id, s.started, [], login, connectors)
+      const key = this.launchKey(launch)
+      if (this.warm && this.fits(this.warm, key, s.id, s.started)) return
+      this.dropWarm()
+      perfMark(`captain:${this.project.id}`, "warm.prestart")
+      this.startWarm(launch, key, s.id, s.started)
+    })()
+      .catch((err) => console.warn(`[captain ${this.project.id}] couldn't prepare a warm Claude process: ${(err as Error).message}`))
+      .finally(() => {
+        if (this.warming === warming) this.warming = null
+      })
+    this.warming = warming
+    return warming
+  }
+
+  /** Its warm process goes when the owner's idle time is up (read live, so a new Settings value applies to it too). */
+  private armWarmTimer() {
+    if (this.warmTimer) clearTimeout(this.warmTimer)
+    this.warmTimer = null
+    const w = this.warm
+    if (!w) return
+    const left = this.warmOn() ? this.ownerActiveAt + this.warmIdleMs() - Date.now() : 0
+    if (left <= 0) {
+      // A turn running in it ends first; its finish arms this again.
+      if (!w.busy) this.dropWarm()
+      return
+    }
+    this.warmTimer = setTimeout(() => this.armWarmTimer(), Math.min(left + 50, 2 ** 31 - 1))
+    this.warmTimer.unref?.()
+  }
+
+  /** End its warm process: after the turn it's running, or at once (`now`: Box Yard stops, the project goes). */
+  dropWarm(now = false) {
+    if (this.warmTimer) clearTimeout(this.warmTimer)
+    this.warmTimer = null
+    const w = this.warm
+    if (!w) return
+    this.warm = null
+    if (now) w.kill()
+    else w.close()
   }
 
   usage(): ContextUsage {
@@ -1474,6 +1662,8 @@ class Captain {
       CAPTAIN_TOOLS,
       // Only a turn may use them: with no allow rules, dontAsk denies every call.
       ...(kind === "turn" ? ["--allowedTools", ["mcp__boxyard", ...connectors.allowed, ...CHAT_ALLOWED_TOOLS, ...this.readRules()].join(",")] : []),
+      // Its reply shows in the chat as it's written (Settings › Coordinator › Stream Captain replies).
+      ...(kind === "turn" && st.captainStreamReplies ? ["--include-partial-messages"] : []),
       // Its clone is read-only whatever tools it has: no edit there.
       "--disallowedTools",
       cloneDenyRules(this.repo.dir).join(","),
@@ -1550,30 +1740,51 @@ class Captain {
   /** One run of the CLI, with the connectors it gets put together (and refreshed) first. */
   private async run(prompt: string, sessionId: string, resume: boolean, kind: RunKind = "turn", ask: RunAsk = {}): Promise<RunResult> {
     const connectors = await this.sessionConnectors()
+    // A warm process being started for the next turn (prewarm): this run takes it, or drops it, once it's there.
+    if (this.warming) await this.warming
     return this.spawnRun(prompt, sessionId, resume, kind, ask, connectors)
   }
 
-  private spawnRun(prompt: string, sessionId: string, resume: boolean, kind: RunKind, ask: RunAsk, connectors: SessionConnectors): Promise<RunResult> {
+  /**
+   * One run: a turn in its warm process when it has one for this launch (warmFor), else a new process. A warm process
+   * that ends before it has started the turn hands it to a new process (`cold`), with the login it already picked.
+   */
+  private spawnRun(
+    prompt: string,
+    sessionId: string,
+    resume: boolean,
+    kind: RunKind,
+    ask: RunAsk,
+    connectors: SessionConnectors,
+    retry: { cold: true; login: PickedLogin | null } | null = null,
+  ): Promise<RunResult> {
     return new Promise((resolve) => {
       // Codex compacts on its own and has no /context: doCompact starts a fresh session from the summary instead.
       if (this.cli() === "codex" && (kind === "compact" || kind === "context")) return resolve({ ok: true, error: "", text: "", raw: "", sessionId: null })
       // Stopped while it was still setting up: nothing to start.
       if (kind === "turn" && this.stopping) return resolve({ ok: false, stopped: true, error: withOwner(STOPPED_LINE, this.owner()), text: "", raw: "", sessionId: null })
-      const login = this.pickLogin(kind, resume)
+      const login = retry ? retry.login : this.pickLogin(kind, resume)
       const launch = this.launch(kind, sessionId, resume, ask.images ?? [], login, connectors)
       const cliName = launch.cli === "codex" ? `codex (${this.c.codexBin})` : `claude (${this.c.claudeBin})`
       const effort = this.settings.get().captainEffort
+      const warm = retry ? (this.dropWarm(), null) : this.warmFor(kind, launch, sessionId, resume)
+      // Its reply into the chat as it's written, without what the chat never shows (shared/captainStream.ts).
+      const streamer = kind === "turn" && launch.cli === "claude" && this.settings.get().captainStreamReplies ? new CaptainStreamer() : null
       const clock = new TurnClock()
 
-      let child: ChildProcess
-      perfMark(`captain:${this.project.id}`, `spawn.${kind}`)
-      try {
-        child = spawn(launch.bin, launch.args, { cwd: this.workdir, env: launch.env, stdio: ["pipe", "pipe", "pipe"] })
-      } catch (err) {
-        resolve({ ok: false, error: `Couldn't start ${launch.cli}: ${(err as Error).message}`, text: "", raw: "", sessionId: null, login })
-        return
+      let child: ChildProcess | null = null
+      perfMark(`captain:${this.project.id}`, `${warm ? "warm" : "spawn"}.${kind}`)
+      if (!warm) {
+        try {
+          child = spawn(launch.bin, launch.args, { cwd: this.workdir, env: launch.env, stdio: ["pipe", "pipe", "pipe"] })
+        } catch (err) {
+          resolve({ ok: false, error: `Couldn't start ${launch.cli}: ${(err as Error).message}`, text: "", raw: "", sessionId: null, login })
+          return
+        }
       }
-      this.child = child
+      const cold = child
+      const kill = warm ? () => warm.kill() : () => void cold!.kill("SIGTERM")
+      this.killRun = kill
       this.childKind = kind
       let stderr = ""
       let buf = ""
@@ -1591,7 +1802,7 @@ class Captain {
       let resultModel: string | null = null
       const startedAt = Date.now()
       const quiet = kind !== "turn"
-      const timer = setTimeout(() => child.kill("SIGTERM"), TURN_TIMEOUT_MS)
+      const timer = setTimeout(kill, TURN_TIMEOUT_MS)
       /** The turn's last reply, where the chat's timing chip goes. */
       let reply: CaptainMessage | null = null
 
@@ -1614,6 +1825,16 @@ class Captain {
         if (typeof msg.session_id === "string") seenSession = msg.session_id
         clock.line(msg)
         if (msg.type === "rate_limit_event") return void recordLimits(this.store, this.hub, launch.login, limitsOf(msg), typeof msg.at === "number" ? msg.at : Date.now())
+        if (msg.type === "stream_event") {
+          if (!streamer || msg.parent_tool_use_id) return
+          const ev = msg.event
+          if (ev?.type === "content_block_start" && ev.content_block?.type === "text") streamer.reset()
+          else if (ev?.type === "content_block_delta" && ev.delta?.type === "text_delta" && typeof ev.delta.text === "string") {
+            const chunk = streamer.push(ev.delta.text)
+            if (chunk) this.hub.broadcast({ type: "captain.delta", projectId: this.project.id, text: chunk.text, ...(chunk.reset ? { reset: true } : {}) })
+          }
+          return
+        }
         if (msg.type === "system" && msg.subtype === "init") {
           if (kind === "turn") {
             // Codex names its own thread: that's the session the next turn resumes.
@@ -1639,6 +1860,7 @@ class Captain {
           const parsed = parseNextSteps(marked.text)
           const text = parsed.content.trim()
           if (text) said = said ? `${said}\n\n${text}` : text
+          streamer?.reset()
           if (quiet) return
           if (text && text !== NO_UPDATE) {
             // The session line it came from: a side thread on this message forks the session there.
@@ -1681,24 +1903,21 @@ class Captain {
         }
       }
 
-      child.stdout!.on("data", (chunk: Buffer) => {
-        buf += chunk.toString("utf8")
-        const lines = buf.split("\n")
-        buf = lines.pop() ?? ""
-        if (kind === "context") raw += chunk.toString("utf8")
-        for (const line of lines) if (line.trim()) onLine(line)
-      })
-      child.stderr!.on("data", (chunk: Buffer) => {
-        stderr = (stderr + chunk.toString("utf8")).slice(-6000)
-      })
       const finish = (code: number | null, err?: Error) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
         if (buf.trim()) onLine(buf)
-        this.child = null
+        if (warm) {
+          if (!warm.alive && this.warm === warm) this.warm = null
+          stderr = warm.stderr
+        }
+        this.killRun = null
         this.childKind = null
         launch.after()
+        // A turn the owner asked for: they're reading its reply now, so the idle time starts over.
+        if (kind === "turn" && ask.trigger === "cody") this.ownerActiveAt = Math.max(this.ownerActiveAt, Date.now())
+        this.armWarmTimer()
         if (this.stopped) return resolve({ text: said, raw, sessionId: seenSession, ok: false, error: "Box Yard stopped." })
         // Captain runs get their own usage line and count toward the project's totals.
         if (resultUsage || resultSessionUsage || typeof resultCostUsd === "number" || typeof resultDurationMs === "number") {
@@ -1729,10 +1948,38 @@ class Captain {
         if (code === 0 && !resultError && (sawResult || launch.cli === "claude")) return resolve({ ...base, ok: true, error: "" })
         resolve({ ...base, ok: false, error: resultError ?? ((launch.cli === "codex" ? codexErrorText(stderr) : stderr.trim()) || `${launch.cli} exited with code ${code}${sawResult ? "" : " before answering"}`) })
       }
-      child.on("error", (err) => finish(null, err))
-      child.on("close", (code) => finish(code))
-      child.stdin!.on("error", () => {})
-      child.stdin!.end(prompt)
+      if (warm) {
+        void warm.run(prompt, onLine).then((end) => {
+          if (end.result) return finish(0)
+          // It ended before it started the turn (it crashed, or had exited unnoticed): a new process runs the turn.
+          if (!end.output && !settled && !this.stopping && !this.stopped) {
+            settled = true
+            clearTimeout(timer)
+            this.killRun = null
+            this.childKind = null
+            if (this.warm === warm) this.warm = null
+            console.warn(`[captain ${this.project.id}] its warm Claude process ended before the turn (${end.error?.message ?? `exit ${end.code}`}${warm.stderr.trim() ? `: ${warm.stderr.trim().slice(-300)}` : ""}); running it in a new one.`)
+            return resolve(this.spawnRun(prompt, sessionId, resume, kind, ask, connectors, { cold: true, login }))
+          }
+          finish(end.code, end.error)
+        })
+        return
+      }
+      const c = cold!
+      c.stdout!.on("data", (chunk: Buffer) => {
+        buf += chunk.toString("utf8")
+        const lines = buf.split("\n")
+        buf = lines.pop() ?? ""
+        if (kind === "context") raw += chunk.toString("utf8")
+        for (const line of lines) if (line.trim()) onLine(line)
+      })
+      c.stderr!.on("data", (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString("utf8")).slice(-6000)
+      })
+      c.on("error", (err) => finish(null, err))
+      c.on("close", (code) => finish(code))
+      c.stdin!.on("error", () => {})
+      c.stdin!.end(prompt)
     })
   }
 

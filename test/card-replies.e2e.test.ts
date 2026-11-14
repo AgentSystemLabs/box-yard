@@ -63,6 +63,9 @@ const untilQuiet = (r: Running, id: string) => waitFor(async () => (quiet(await 
 /** The task's first turn has run and the Coordinator has read its notices. */
 const settled = (r: Running, id: string) =>
   untilQuiet(r, id).then(() => waitFor(() => (!r.yard.store.hasUnseenNotices() && !r.yard.orchestrator.busy ? true : null), "coordinator to settle"))
+/** The project's Captain has answered its task's update: that answer is a notice in the Coordinator chat too. */
+const captainSettled = (r: Running, projectId: string) =>
+  waitFor(() => (!r.yard.store.unseenCaptainNoticeTasks(projectId).length && !r.yard.captains.anyBusy() ? true : null), "the Captain to settle")
 const fakeSession = (id: string) =>
   JSON.parse(fs.readFileSync(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".fake-claude"), "fake-sessions", `${id}.json`), "utf8")) as { turns: { prompt: string }[] }
 /** A thread's answers, once it has `n` and isn't busy. */
@@ -129,6 +132,7 @@ describe("reply in a card", () => {
     const p = await call<Project>(r, "POST", "/api/projects", { name: "demo" })
     const t = await call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Haiku", prompt: "write a haiku" })
     await settled(r, t.id)
+    await captainSettled(r, p.id)
     await call(r, "POST", "/api/chat", { content: "status one" })
     await waitFor(async () => ((await chat(r)).at(-1)?.role === "assistant" && !r.yard.orchestrator.busy ? true : null), "the Coordinator's reply")
     const before = await chat(r)

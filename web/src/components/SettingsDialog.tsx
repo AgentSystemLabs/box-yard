@@ -60,6 +60,7 @@ import {
   AUTOCOMPACT_MIN_TOKENS,
   BOX_CREATE_CONCURRENCY,
   BOX_SIZES,
+  CAPTAIN_WARM_IDLE_MINUTES,
   SUBTASK_MAX_CHILDREN,
   SUBTASK_MAX_DEPTH,
   DEFAULT_AUTOCOMPACT_TOKENS,
@@ -152,6 +153,57 @@ function AutoCompactControl({
           <option value="tokens">tokens</option>
         </Select>
       </div>
+    </div>
+  )
+}
+
+/** "30 minutes", "1 hour", "2 hours". */
+const idleTimeLabel = (minutes: number) => (minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}` : `${minutes} minute${minutes === 1 ? "" : "s"}`)
+
+/** Settings › Warm Claude process › Idle time: a preset, or Custom with its own whole minutes. */
+function WarmIdlePicker({ id, value, onChange, disabled, field }: { id: string; value: number; onChange: (minutes: number) => void; disabled: boolean; field: FieldProps }) {
+  const presets: readonly number[] = CAPTAIN_WARM_IDLE_MINUTES.presets
+  const [customPicked, setCustomPicked] = useState(false)
+  const custom = customPicked || !presets.includes(value)
+  return (
+    <div className="flex flex-col gap-2 @sm:flex-row @sm:items-center">
+      <Select
+        id={id}
+        className="w-full @sm:w-40"
+        disabled={disabled}
+        value={custom ? "custom" : String(value)}
+        onChange={(e) => {
+          if (e.target.value === "custom") return setCustomPicked(true)
+          setCustomPicked(false)
+          onChange(Number(e.target.value))
+        }}
+        data-testid="captain-warm-idle"
+      >
+        {presets.map((m) => (
+          <option key={m} value={m}>
+            {idleTimeLabel(m)}
+          </option>
+        ))}
+        <option value="custom">Custom…</option>
+      </Select>
+      {custom && (
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          <input
+            type="number"
+            min={CAPTAIN_WARM_IDLE_MINUTES.min}
+            max={CAPTAIN_WARM_IDLE_MINUTES.max}
+            step={1}
+            className={cx(inputClass, "w-28 disabled:opacity-50")}
+            disabled={disabled}
+            value={numberText(value)}
+            onChange={(e) => onChange(typedNumber(e.target.value, true))}
+            aria-label="Idle time in minutes"
+            data-testid="captain-warm-idle-minutes"
+            {...field}
+          />
+          minutes
+        </label>
+      )}
     </div>
   )
 }
@@ -790,6 +842,44 @@ export function SettingsDialog({
                       onChange={(v) => set("captainEffort", v as Settings["captainEffort"])}
                       testId="captain-effort"
                     />
+                  </Row>
+                  <Row
+                    id={fid("cwarm")}
+                    label="Warm Claude process"
+                    help="Keeps a claude process running for each Captain you're chatting with, so its turns skip Claude Code's start-up (about 0.6 s a turn, twice when a task's update wakes it). It starts when you open or type in a Captain's chat, or send it a message."
+                    more="One process per Captain you've chatted with within the idle time below, never one per task: about 150–230 MB each while it waits. It restarts by itself when the Captain's model, effort, login, env vars or connectors change, and stops with the server. Claude Code Captains only."
+                    {...row("captainWarmProcess")}
+                  >
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
+                      <input id={fid("cwarm")} type="checkbox" checked={s.captainWarmProcess ?? true} onChange={(e) => set("captainWarmProcess", e.target.checked)} data-testid="captain-warm-process" />
+                      <SearchHighlight text={(s.captainWarmProcess ?? true) ? "On: turns skip Claude Code's start-up" : "Off: every turn starts Claude Code"} />
+                    </label>
+                  </Row>
+                  <Row
+                    id={fid("cwidle")}
+                    label="Warm process idle time"
+                    help="How long a Captain's warm process waits after you last chatted with it before it shuts down. A change applies at once, to processes already running too."
+                    more="Measured over two weeks of real Captain use: with 30 minutes, about three in four of the owner's own turns found the process warm (half with 5 minutes), with fewer than one process alive on average."
+                    {...row("captainWarmIdleMinutes")}
+                  >
+                    <WarmIdlePicker
+                      id={fid("cwidle")}
+                      value={s.captainWarmIdleMinutes ?? CAPTAIN_WARM_IDLE_MINUTES.default}
+                      onChange={(v) => set("captainWarmIdleMinutes", v)}
+                      disabled={!(s.captainWarmProcess ?? true)}
+                      field={field("captainWarmIdleMinutes")}
+                    />
+                  </Row>
+                  <Row
+                    id={fid("cstream")}
+                    label="Stream Captain replies"
+                    help="Shows a Captain's reply in its chat as it's written, instead of all at once when it's done: its first words appear in under a second with a warm process, instead of about 4 s for a paragraph."
+                    {...row("captainStreamReplies")}
+                  >
+                    <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
+                      <input id={fid("cstream")} type="checkbox" checked={s.captainStreamReplies ?? true} onChange={(e) => set("captainStreamReplies", e.target.checked)} data-testid="captain-stream-replies" />
+                      <SearchHighlight text={(s.captainStreamReplies ?? true) ? "On: replies appear as they're written" : "Off: replies appear when done"} />
+                    </label>
                   </Row>
                   <Row
                     id={fid("cicon")}

@@ -28,6 +28,7 @@ import {
   useCaptainCompactions,
   useCaptainMessages,
   useCaptainState,
+  useCaptainStream,
   useChatTurnStop,
   useSendCaptainMessage,
 } from "../lib/queries"
@@ -77,6 +78,7 @@ import { ChatControls, PanelControls } from "./ColumnControls"
 import { useOpenSettings } from "./SettingsHost"
 import { EmptyCaptain } from "./EmptyCaptain"
 import { focusComposer, useComposerFocus } from "../lib/chatSwitch"
+import { useWarmCaptain } from "../lib/captainWarm"
 import { Loading } from "./Loading"
 import { SpendButton } from "./SpendBreakdown"
 import type { Attachment, CaptainCompaction, CaptainMessage, CaptainSource, CaptainState, Project } from "../../../shared/types"
@@ -137,6 +139,8 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
   const target = useMemo(() => ({ label: `the ${project.name} Captain`, color }), [project.name, color])
   // Picked in a chat switcher: the composer takes focus.
   useComposerFocus(project.id, box)
+  // About to write: its claude process starts now (Settings › Warm Claude process).
+  useWarmCaptain(project.id, box, centre)
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => setOpenGroups(new Set()), [project.id])
 
@@ -264,6 +268,7 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
                 {list.length === 0 && !messages.isLoading && <EmptyCaptain project={project} onPick={fill} />}
                 <CaptainTranscript rows={tail.visible} openGroups={openGroups} onToggle={toggleGroup} onFollowUp={followUp} centre={centre} newest={newest} />
                 <HistoryNavigation newer={!!tail.later || history.moreAfter} onNewer={tail.later ? tail.loadLater : history.later} browsing={history.browsing} loading={history.loading} onLatest={history.toLatest} handle={thread} />
+                {!history.browsing && <StreamingCaptainReply projectId={project.id} />}
                 {!history.browsing && busy && (
                   // Just the dots, like the Coordinator's (ChatPanel.tsx): the status line above says it in words. Still
                   // with reduced motion.
@@ -322,6 +327,20 @@ function CaptainChat({ project, scrollKey, centre, panel: side, onClose, backLab
         <SideThreadPane chat={project.id} panel={side} headerClassName={centre ? "min-h-14" : undefined} />
       </section>
     </ThreadChatProvider>
+  )
+}
+
+/**
+ * The Captain's reply as it's written (Settings › Stream Captain replies). Only this re-renders per streamed chunk, not
+ * the transcript above it. Drawn as the stored reply will be (ChatLine), which takes its place when it's written.
+ */
+function StreamingCaptainReply({ projectId }: { projectId: string }) {
+  const stream = useCaptainStream(projectId)
+  if (!stream.data) return null
+  return (
+    <div data-testid="captain-streaming" className="text-sm text-zinc-200">
+      <Markdown live>{stream.data}</Markdown>
+    </div>
   )
 }
 

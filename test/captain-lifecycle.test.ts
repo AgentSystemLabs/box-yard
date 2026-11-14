@@ -80,6 +80,8 @@ describe("Captain claude runs (#50)", () => {
     const lines = logFile()
     process.env.FAKE_CLAUDE_LOG_FULL = "1"
     const r = await start()
+    // Each turn in a process of its own, so each one's flags show; test/captain-warm.test.ts covers the warm process.
+    await call(r, "PUT", "/api/agent-settings", { captainWarmProcess: false })
     const { p, say } = await captain(r)
     await say("status")
     await say("status again")

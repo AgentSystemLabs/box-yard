@@ -6,6 +6,7 @@ import {
   AUTOCOMPACT_MIN_TOKENS,
   BOX_CREATE_CONCURRENCY,
   BOX_SIZES,
+  CAPTAIN_WARM_IDLE_MINUTES,
   CARDS_IDLE_HOURS,
   SUBTASK_MAX_CHILDREN,
   SUBTASK_MAX_DEPTH,
@@ -105,6 +106,9 @@ export const DEFAULT_SETTINGS: Settings = {
   captainCodexModel: "",
   captainEffort: DEFAULT_CAPTAIN_EFFORT,
   captainIcon: DEFAULT_CAPTAIN_ICON,
+  captainWarmProcess: true,
+  captainWarmIdleMinutes: CAPTAIN_WARM_IDLE_MINUTES.default,
+  captainStreamReplies: true,
   // "": each quick question runs on its chat's own model and effort, as it always did.
   quickQuestionModel: "",
   quickQuestionEffort: "",
@@ -273,6 +277,16 @@ export const settingsPatch = z
     captainModel: model,
     captainCodexModel: codexModelSetting,
     captainEffort: z.enum(CODEX_EFFORTS),
+    captainWarmProcess: z
+      .boolean()
+      .describe("Keep a claude process running for each Captain the owner is chatting with, so its turns skip Claude Code's start-up (Claude Code Captains only)"),
+    captainWarmIdleMinutes: z
+      .number()
+      .int("Whole minutes")
+      .min(CAPTAIN_WARM_IDLE_MINUTES.min, `At least ${CAPTAIN_WARM_IDLE_MINUTES.min} minute`)
+      .max(CAPTAIN_WARM_IDLE_MINUTES.max, `At most ${CAPTAIN_WARM_IDLE_MINUTES.max} minutes (a day)`)
+      .describe(`Minutes a Captain's warm process is kept after the owner last chatted with it (a message, its chat box opened or typed in) before it is shut down (${CAPTAIN_WARM_IDLE_MINUTES.min}–${CAPTAIN_WARM_IDLE_MINUTES.max}, default ${CAPTAIN_WARM_IDLE_MINUTES.default})`),
+    captainStreamReplies: z.boolean().describe("Show a Captain's reply in its chat as it is written"),
     captainIcon: captainIcon.describe("The icon every Captain shows unless its project picks one or has an image: an id from the Captain icon picker, e.g. captain-cap (default), helm, anchor, crown"),
     quickQuestionModel: z
       .union([z.literal(""), model.refine((m) => !isOpenAiModel(m), "Quick questions run on Claude: pick a Claude model (a chat on Codex keeps its own)")])

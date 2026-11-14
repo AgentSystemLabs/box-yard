@@ -701,6 +701,12 @@ export type UiEvent =
   | { type: "orchestrator.state"; state: OrchestratorState }
   | { type: "captain.message"; message: CaptainMessage }
   | { type: "captain.state"; state: CaptainState }
+  /**
+   * A Captain's reply as it's written (Settings › Stream Captain replies): `text` adds to what the chat shows, or with
+   * `reset` replaces it. It never holds "(no update)" or a hidden block (shared/captainStream.ts); the stored reply,
+   * a captain.message, takes its place.
+   */
+  | { type: "captain.delta"; projectId: string; text: string; reset?: boolean }
   | { type: "thread"; thread: SideThread }
   | { type: "thread.message"; message: SideThreadMessage }
   | { type: "thread.delta"; threadId: string; text: string }
@@ -898,6 +904,23 @@ export interface Settings {
   /** The icon every Captain shows (shared/captainIcons.ts) unless its project has an icon or image of its own. */
   captainIcon: CaptainIconId
   /**
+   * Keep one `claude` process running for each Captain the owner is chatting with (server/warmClaude.ts): started
+   * when the owner opens or types in its chat, kept between its turns, and handed each turn over stream-json, so a
+   * turn skips Claude Code's start-up. Claude Code Captains only; never a task's.
+   */
+  captainWarmProcess: boolean
+  /**
+   * How long a Captain's warm process is kept after the owner last chatted with it (their message, its chat box opened
+   * or typed in, the end of a turn they started) before it is shut down, in minutes (CAPTAIN_WARM_IDLE_MINUTES). Turns
+   * its tasks wake it for don't extend it. Read live: a change applies to processes already running.
+   */
+  captainWarmIdleMinutes: number
+  /**
+   * Show a Captain's reply in its chat as it is written. The hidden blocks (next steps, the Coordinator FYI line) and
+   * a bare "(no update)" never show (shared/captainStream.ts); the stored reply is the same either way.
+   */
+  captainStreamReplies: boolean
+  /**
    * Quick questions (side threads: a task's side questions, Reply and Ask in the Coordinator's and Captains' chats)
    * run on this Claude model; "" runs each on its chat's model, as before this setting. A chat on Codex keeps its own.
    */
@@ -1021,6 +1044,9 @@ export interface Settings {
   /** ...and at most about this many tokens of them. Over either, the Captain is told to prune. */
   notesMaxTokens: number
 }
+
+/** Settings › Coordinator › Warm Claude process: how long one may sit unused, in minutes, and the menu's presets. */
+export const CAPTAIN_WARM_IDLE_MINUTES = { default: 30, min: 1, max: 24 * 60, presets: [5, 15, 30, 60] } as const
 
 /** Settings › Coordinator › Idle after: its default and range, in hours. */
 export const CARDS_IDLE_HOURS = { default: 3, min: 0, max: 24 * 30 } as const
