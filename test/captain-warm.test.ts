@@ -174,6 +174,23 @@ describe("a Captain's warm claude process", () => {
     expect(warm()).toBeNull()
   })
 
+  it("ends with a turn stopped in it; the next turn starts a new one on the same session", async () => {
+    const r = await start()
+    const { p, say, warm } = await captain(r)
+    await say("status")
+    const first = warm()!
+    await call(r, "POST", `/api/projects/${p.id}/captain/messages`, { content: "a long job [hang]" })
+    await waitFor(() => r.turns().length === 2 || null, "the hanging turn")
+    expect(r.yard.captains.stopTurn(p.id)).toBe(true)
+    await waitFor(() => gone(first.pid!), "the warm process to end with its turn")
+    const reply = await say("status after the stop")
+    expect(reply.content).toBeTruthy()
+    expect(warm()!.pid).not.toBe(first.pid)
+    const session = (args: string[]) => (args.includes("--resume") ? argOf(args, "--resume") : argOf(args, "--session-id"))
+    expect(r.turns().at(-1)!.args).toContain("--resume")
+    expect(session(r.turns().at(-1)!.args)).toBe(session(r.turns()[0]!.args))
+  })
+
   it("hands a turn to a new process when the warm one dies on it", async () => {
     const r = await start()
     const { p, say, warm } = await captain(r)

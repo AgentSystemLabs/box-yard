@@ -168,7 +168,8 @@ describe("Captain tab: queued messages", () => {
     expect(t.action?.label).toBe("Undo")
     act(() => t.action!.onClick())
     await flush()
-    expect(calls.find((c) => c.method === "POST")?.path).toBe(`/api/projects/${project.id}/captain/messages/cap_queued0001/restore`)
+    // Besides the warm-up ping that typing in the box may send (lib/captainWarm.ts).
+    expect(calls.filter((c) => c.method === "POST" && !c.path.endsWith("/captain/warm")).map((c) => c.path)).toEqual([`/api/projects/${project.id}/captain/messages/cap_queued0001/restore`])
     expect(inbound()).toHaveLength(2)
     expect(inbound().at(-1)!.querySelector("[data-testid=queued-label]")).not.toBeNull()
     expect(messageBox().value).toBe("and the README")

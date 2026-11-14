@@ -73,7 +73,9 @@ function setup() {
     broadcast(ev)
   }
   const settings = new SettingsStore(store, config)
-  settings.update({ ownerName: "Sam" })
+  // This fake reads its prompt to stdin's end, so each turn is a process of its own: no warm Captain process
+  // (Stop on a warm turn is in captain-warm.test.ts).
+  settings.update({ ownerName: "Sam", captainWarmProcess: false })
   const project = store.createProject({ name: "Sam's project" })
   return { config, db, store, hub, settings, project, fake, events }
 }

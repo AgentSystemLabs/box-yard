@@ -99,7 +99,8 @@ describe("An empty Captain chat", () => {
     expect(document.activeElement).toBe(box)
     // Nothing went to the Captain: the chat is still empty and no message was posted.
     expect(qc.getQueryData<CaptainMessage[]>(keys.captainMessages("prj_demo01"))).toEqual([])
-    expect(fetches.filter((f) => f.startsWith("POST"))).toEqual([])
+    // (Focusing the box may ask for the Captain's warm process: that sends nothing to it.)
+    expect(fetches.filter((f) => f.startsWith("POST") && !f.includes("/captain/warm"))).toEqual([])
     expect(empty()).not.toBeNull()
   })
 
@@ -109,7 +110,8 @@ describe("An empty Captain chat", () => {
     expect(empty().querySelector("h2")!.textContent).toBe("Ask the demo Captain")
     click(button("Which tasks need me?")!)
     expect(host.querySelector("textarea")!.value).toBe("Which tasks need me?")
-    expect(fetches.filter((f) => f.startsWith("POST"))).toEqual([])
+    // (Focusing the box may ask for the Captain's warm process: that sends nothing to it.)
+    expect(fetches.filter((f) => f.startsWith("POST") && !f.includes("/captain/warm"))).toEqual([])
   })
 
   it("switches to the first step's wording if the task list arrives empty", async () => {
