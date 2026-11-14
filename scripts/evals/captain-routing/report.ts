@@ -146,6 +146,7 @@ const inline = (s: string) => esc(s).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</st
 export function toMarkdown(blocks: Block[]): string {
   const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, " ")
   return blocks
+    .filter((b) => !("html" in b))
     .map((b) => {
       if ("h" in b) return `${"#".repeat(b.h + 1)} ${b.text}`
       if ("p" in b) return b.p

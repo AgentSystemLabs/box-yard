@@ -181,6 +181,8 @@ describe("the routing eval's report and judge", () => {
 
   it("renders tables and gives the judge the request, the hand-off and the rubric", () => {
     expect(toMarkdown([{ table: { head: ["a", "b"], rows: [["1", "x|y"]], align: ["l", "r"] } }])).toBe("| a | b |\n| --- | ---: |\n| 1 | x\\|y |")
+    // A chart is HTML only: the markdown leaves it out without a gap.
+    expect(toMarkdown([{ p: "one" }, { html: "<svg></svg>" }, { p: "two" }])).toBe("one\n\ntwo")
     const input = judgeInput("Fix SPRING10.", "# Task\n\nFix it.", ["Keeps SPRING10.", "Adds nothing."])
     expect(input).toContain("Fix SPRING10.")
     expect(input).toContain("# Task")
