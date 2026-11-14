@@ -2,7 +2,7 @@
 // kept in step by test/settings-validation.test.ts), so a value it would refuse gets a message next to its field
 // instead of a failed Save, or a Save the browser blocks without saying where.
 import type { BoxSize, Settings } from "../../../shared/types"
-import { BOX_CREATE_CONCURRENCY, BOX_SIZES, CARDS_IDLE_HOURS, AUTOCOMPACT_MAX_TOKENS, AUTOCOMPACT_MIN_TOKENS, SUBTASK_MAX_CHILDREN, SUBTASK_MAX_DEPTH } from "../../../shared/types"
+import { BOX_CREATE_CONCURRENCY, BOX_SIZES, CAPTAIN_WARM_IDLE_MINUTES, CARDS_IDLE_HOURS, AUTOCOMPACT_MAX_TOKENS, AUTOCOMPACT_MIN_TOKENS, SUBTASK_MAX_CHILDREN, SUBTASK_MAX_DEPTH } from "../../../shared/types"
 import { NOTE_BUDGET_LIMITS } from "../../../shared/notes"
 import { LOCAL_AGENTS_LIMITS } from "../../../shared/runner"
 import { isOpenAiModel, isOpenCodeModel } from "../../../shared/agentCli"
@@ -46,6 +46,7 @@ export const NUMBER_RULES: Partial<Record<keyof Settings, NumberRule>> = {
   depCacheMaxMb: whole(100, 1_000_000),
   notesMaxCount: whole(NOTE_BUDGET_LIMITS.maxNotes.min, NOTE_BUDGET_LIMITS.maxNotes.max),
   notesMaxTokens: whole(NOTE_BUDGET_LIMITS.maxTokens.min, NOTE_BUDGET_LIMITS.maxTokens.max),
+  captainWarmIdleMinutes: whole(CAPTAIN_WARM_IDLE_MINUTES.min, CAPTAIN_WARM_IDLE_MINUTES.max),
 }
 
 /** Every dollar amount in Usage (limits and rates). */

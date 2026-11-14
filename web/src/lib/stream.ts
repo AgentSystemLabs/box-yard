@@ -94,6 +94,17 @@ export function useServerEvents(enabled: boolean): Connection {
             let text = ev.text
             while (events[i + 1]?.type === "chat.delta") text += (events[++i] as { text: string }).text
             apply({ type: "chat.delta", text })
+          } else if (ev.type === "captain.delta") {
+            // A reset starts the text over: the chunks after it add to it.
+            let { text, reset } = ev
+            while (events[i + 1]?.type === "captain.delta" && (events[i + 1] as { projectId: string }).projectId === ev.projectId) {
+              const next = events[++i] as { text: string; reset?: boolean }
+              if (next.reset) {
+                text = next.text
+                reset = true
+              } else text += next.text
+            }
+            apply({ ...ev, text, reset })
           } else if (ev.type === "thread.delta") {
             let text = ev.text
             while (events[i + 1]?.type === "thread.delta" && (events[i + 1] as { threadId: string }).threadId === ev.threadId) text += (events[++i] as { text: string }).text
@@ -274,9 +285,15 @@ export function useServerEvents(enabled: boolean): Connection {
             }
             return [...list, ev.message]
           })
+          // The reply it streamed is in the chat now (or a tool call or an error ended it).
+          if (ev.message.role === "assistant" || ev.message.role === "tool" || ev.message.role === "error") qc.setQueryData(keys.captainStream(ev.message.projectId), "")
           break
         case "captain.state":
           liveState(qc, keys.captain(ev.state.projectId), ev.state)
+          if (!ev.state.busy) qc.setQueryData(keys.captainStream(ev.state.projectId), "")
+          break
+        case "captain.delta":
+          qc.setQueryData<string>(keys.captainStream(ev.projectId), (prev) => (ev.reset ? ev.text : (prev ?? "") + ev.text))
           break
         case "logins":
           qc.setQueryData(keys.logins, ev.logins)

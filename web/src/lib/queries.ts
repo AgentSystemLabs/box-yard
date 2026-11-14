@@ -92,6 +92,8 @@ export const keys = {
   orchestrator: ["orchestrator"] as const,
   captain: (projectId: string) => ["captain", projectId] as const,
   captainMessages: (projectId: string) => ["captain-messages", projectId] as const,
+  /** A Captain's reply as it's written (the captain.delta event); empty between replies. */
+  captainStream: (projectId: string) => ["captain-stream", projectId] as const,
   captainCompactions: (projectId: string) => ["captain-compactions", projectId] as const,
   agentSettings: ["agent-settings"] as const,
   models: ["models"] as const,
@@ -617,6 +619,9 @@ export const useCloud = () =>
 
 export const useChatStream = () =>
   useQuery({ queryKey: keys.chatStream, queryFn: () => "", initialData: "", staleTime: Infinity, gcTime: Infinity })
+/** A Captain's reply as it's written (Settings › Stream Captain replies). */
+export const useCaptainStream = (projectId: string) =>
+  useQuery({ queryKey: keys.captainStream(projectId), queryFn: () => "", initialData: "", staleTime: Infinity, gcTime: Infinity })
 export const useChatBusy = () =>
   useQuery({
     queryKey: keys.chatBusy,
@@ -1833,8 +1838,10 @@ export function useStopChatTurn(projectId: string | null) {
     mutationFn: () => api<{ ok: boolean; stopped: boolean }>(projectId ? `/api/projects/${projectId}/captain/stop` : "/api/chat/stop", { method: "POST" }),
     onMutate: () => {
       void qc.cancelQueries({ queryKey: busyKey })
-      if (projectId) qc.setQueryData<CaptainState>(busyKey, (s) => s && { ...s, busy: false })
-      else {
+      if (projectId) {
+        qc.setQueryData<CaptainState>(busyKey, (s) => s && { ...s, busy: false })
+        qc.setQueryData(keys.captainStream(projectId), "")
+      } else {
         // As the server's chat.busy does (lib/stream.ts): the stopped turn's streamed text goes with it.
         qc.setQueryData(busyKey, false)
         qc.setQueryData(keys.chatStream, "")
