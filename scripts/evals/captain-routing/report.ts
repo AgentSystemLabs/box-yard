@@ -459,7 +459,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
         })
       }
       blocks.push({ h: 2, text: "Judge agreement with a hand check" })
-      blocks.push({ p: `On ${runTotal} hand-checked runs, the judge agreed with the hand check on ${agree}/${total} rubric items (${pct(total ? agree / total : 0)}) and on ${runAgree}/${runTotal} whole verdicts (${pct(runTotal ? runAgree / runTotal : 0)}).` })
+      blocks.push({ p: `On ${runTotal} hand-checked runs, the judge agreed with the hand check on ${agree}/${total} rubric items (${pct(total ? agree / total : 0)}) and on ${runAgree}/${runTotal} whole verdicts (${pct(runTotal ? runAgree / runTotal : 0)}). The sample (\`handcheck.json\`) is rep 1 at each level plus every run the judge failed, so it leans towards disagreements. Each hand verdict was written before reading the judge's reasons.` })
       if (misses.length) blocks.push({ list: misses })
     }
   }
