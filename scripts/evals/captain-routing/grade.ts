@@ -92,7 +92,8 @@ export interface Grade {
 const BOXYARD_EDITOR = "boxyard"
 const re = (p: string) => new RegExp(p, "i")
 const DONT_MERGE = /(do not|don't|dont|not to|never|without|no) merg|leave (it |the pr )?(open|unmerged)|hold off (on )?merg|before (you )?merg|until .{0,40}(review|look)/i
-const OPTION_KEYS = ["runs_on", "agent", "model", "effort", "priority"] as const
+const ASKS = /\?|\b(tell|let) me (know )?(which|what|who|where)\b|\bwhich (one|task|of these)\b.{0,80}\b(mean|meant|want)|\b(say|tell me) (which|what) you mean/i
+const OPTION_KEYS =["runs_on", "agent", "model", "effort", "priority"] as const
 type OptionKey = (typeof OPTION_KEYS)[number]
 const DEFAULT_OPTIONS: Partial<Record<OptionKey, string | null>> = { runs_on: null, agent: null, model: null, effort: null }
 const MESSAGING = new Set(["send_to_task", "reopen_task", "retry_task", "continue_task"])
@@ -212,7 +213,8 @@ export function grade(c: Case, r: RunRecord): Grade {
   }
 
   if (e.asks) {
-    const asked = /\?/.test(replyText)
+    // A question, or a request to clarify put as one ("Tell me which task you mean").
+    const asked = ASKS.test(replyText)
     add("asks", asked, asked ? "asks the owner" : "reply asks no question")
   }
 

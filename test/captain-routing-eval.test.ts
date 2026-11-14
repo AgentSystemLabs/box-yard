@@ -120,6 +120,15 @@ describe("the routing eval's grader", () => {
     expect(failed(c, run(c, { message: null, tools, suggestions: good, finalText: "Done: accepted one note.", replies: ["Done: accepted one note."] }))).toEqual(["no update"])
   })
 
+  it("takes a request to clarify as asking, with or without a question mark, as long as nothing starts", () => {
+    const c = caseById("ambig-fix-it")
+    expect(failed(c, run(c, { replies: ["Which task do you mean?"] }))).toEqual([])
+    expect(failed(c, run(c, { replies: ["I can't tell what \"it\" is. Tell me which task you mean and I'll start it."] }))).toEqual([])
+    expect(failed(c, run(c, { replies: ["Done: I fixed the flaky tests."] }))).toEqual(["asks"])
+    const guessed = { tools: [{ name: "mcp__boxyard__send_to_task", input: {} }], sends: [{ tool: "send_to_task", ref: "flaky", alias: "flaky" as const, message: "Fix it." }], replies: ["Is that the one?"] }
+    expect(failed(c, run(c, guessed))).toEqual(expect.arrayContaining(["messaged", "no send_to_task"]))
+  })
+
   it("counts a failed turn and a missing judge verdict as failures", () => {
     const c = caseById("pq-coupon-bug")
     const created = [{ id: "t1", title: "SPRING10", prompt: "SPRING10 stays below the $50 minimum. Reproduce it with a failing test first; keep the fix in src/cart/." }]
