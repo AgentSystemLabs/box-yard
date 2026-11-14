@@ -285,7 +285,7 @@ export const settingsPatch = z
       .int("Whole minutes")
       .min(CAPTAIN_WARM_IDLE_MINUTES.min, `At least ${CAPTAIN_WARM_IDLE_MINUTES.min} minute`)
       .max(CAPTAIN_WARM_IDLE_MINUTES.max, `At most ${CAPTAIN_WARM_IDLE_MINUTES.max} minutes (a day)`)
-      .describe(`Minutes a warm Captain process may sit unused before it is shut down (${CAPTAIN_WARM_IDLE_MINUTES.min}–${CAPTAIN_WARM_IDLE_MINUTES.max}, default ${CAPTAIN_WARM_IDLE_MINUTES.default})`),
+      .describe(`Minutes a Captain's warm process is kept after the owner last chatted with it (a message, its chat box opened or typed in) before it is shut down (${CAPTAIN_WARM_IDLE_MINUTES.min}–${CAPTAIN_WARM_IDLE_MINUTES.max}, default ${CAPTAIN_WARM_IDLE_MINUTES.default})`),
     captainStreamReplies: z.boolean().describe("Show a Captain's reply in its chat as it is written"),
     captainIcon: captainIcon.describe("The icon every Captain shows unless its project picks one or has an image: an id from the Captain icon picker, e.g. captain-cap (default), helm, anchor, crown"),
     quickQuestionModel: z

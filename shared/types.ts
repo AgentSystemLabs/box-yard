@@ -910,8 +910,9 @@ export interface Settings {
    */
   captainWarmProcess: boolean
   /**
-   * How long a warm Captain process may go unused (no turn, no sign of the owner in its chat) before it is shut down,
-   * in minutes (CAPTAIN_WARM_IDLE_MINUTES). Read live: a change applies to processes already running.
+   * How long a Captain's warm process is kept after the owner last chatted with it (their message, its chat box opened
+   * or typed in, the end of a turn they started) before it is shut down, in minutes (CAPTAIN_WARM_IDLE_MINUTES). Turns
+   * its tasks wake it for don't extend it. Read live: a change applies to processes already running.
    */
   captainWarmIdleMinutes: number
   /**
