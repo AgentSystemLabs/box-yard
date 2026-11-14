@@ -1139,13 +1139,13 @@ export function SettingsDialog({
                   <Row
                     id={fid("ctel")}
                     label="Claude Code usage telemetry"
-                    help="Claude Code sends Anthropic usage telemetry, and holds every run open about 0.6 s after its answer to flush it. Off: agents, Captains and the Coordinator run without it, so each turn ends that much sooner."
+                    help="Off by default. With it on, Claude Code sends Anthropic usage telemetry and holds every run open about 0.6 s after its answer to flush it. Off saves that on each turn of agents, Captains, the Coordinator and side threads. Box Yard's token and cost tracking reads the CLI's own result line, so it works either way."
                     more="Off sets DISABLE_TELEMETRY=1 and CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF=1 on Claude runs, so the CLI keeps the feature flags it last cached. It applies from the next turn. Codex, Cursor and OpenCode runs are unchanged."
                     {...row("claudeTelemetry")}
                   >
                     <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
-                      <input id={fid("ctel")} type="checkbox" checked={s.claudeTelemetry ?? true} onChange={(e) => set("claudeTelemetry", e.target.checked)} data-testid="claude-telemetry" />
-                      {(s.claudeTelemetry ?? true) ? "On: Claude Code's default" : "Off: turns end about 0.6 s sooner"}
+                      <input id={fid("ctel")} type="checkbox" checked={s.claudeTelemetry ?? false} onChange={(e) => set("claudeTelemetry", e.target.checked)} data-testid="claude-telemetry" />
+                      {(s.claudeTelemetry ?? false) ? "On: turns end about 0.6 s later" : "Off: turns end about 0.6 s sooner"}
                     </label>
                   </Row>
                   <Row

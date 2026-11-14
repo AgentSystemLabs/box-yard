@@ -73,6 +73,8 @@ const withoutRetired = (json: unknown): unknown => {
 const CLOUD_LIMIT_UPGRADE_KEY = "settings_upgrade_cloud_limit"
 /** Set once upgradeGpuDefault has run. */
 const GPU_DEFAULT_UPGRADE_KEY = "settings_upgrade_gpu_default"
+/** Set once upgradeTelemetryDefault has run. */
+const TELEMETRY_DEFAULT_UPGRADE_KEY = "settings_upgrade_telemetry_off"
 
 export const DEFAULT_SETTINGS: Settings = {
   ownerName: DEFAULT_OWNER_NAME,
@@ -85,7 +87,8 @@ export const DEFAULT_SETTINGS: Settings = {
   subtaskMaxChildren: SUBTASK_MAX_CHILDREN.default,
   // On, as before this setting: a merged PR already moved a pr_ready task to done; this adds idle ones.
   autoDoneOnMerge: true,
-  claudeTelemetry: true,
+  // Off: each Claude run ends about 0.6 s sooner. Box Yard's token and cost tracking reads the CLI's own result line.
+  claudeTelemetry: false,
   // On: Map 4's PRs merge into an epic branch, where GitHub doesn't close "Fixes #N" issues itself.
   closeIssuesOnMerge: true,
   // Every 5 minutes: about 12 GitHub points an hour per 100 open PRs, of a token's 5,000 (server/prComments.ts).
@@ -568,6 +571,27 @@ export class SettingsStore {
     if (!cloud || this.saved().gpuProvider) return null
     this.update({ gpuProvider: cloud })
     return cloud
+  }
+
+  /**
+   * Once per install, for Claude Code usage telemetry turning off by default: a saved "on" goes, so the new default
+   * applies. Builds before this one saved every setting on each Save, so a saved "on" was the old default carried
+   * along, not a choice; a saved "off" stays. From this build Save sends it only when changed (savePatch), so an "on"
+   * picked from now on is kept. Returns whether it dropped one.
+   */
+  upgradeTelemetryDefault(): boolean {
+    if (this.store.getKv(TELEMETRY_DEFAULT_UPGRADE_KEY)) return false
+    this.store.setKv(TELEMETRY_DEFAULT_UPGRADE_KEY, String(Date.now()))
+    let raw: Record<string, unknown>
+    try {
+      raw = JSON.parse(this.store.getKv(KEY) ?? "{}")
+    } catch {
+      return false
+    }
+    if (!raw || typeof raw !== "object" || raw.claudeTelemetry !== true) return false
+    delete raw.claudeTelemetry
+    this.store.setKv(KEY, JSON.stringify(raw))
+    return true
   }
 
   /** Forget saved values (all, or the named ones) so env vars and defaults apply again. */

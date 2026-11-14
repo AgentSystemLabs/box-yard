@@ -737,10 +737,11 @@ async function worker(mcp, prompt) {
   if (/\[print-env\]/i.test(prompt)) await say(`My env: GITHUB_TOKEN=${process.env.GITHUB_TOKEN ?? ""} ${Object.entries(process.env).filter(([k]) => /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)$/.test(k)).map(([k, v]) => `${k}=${v}`).join(" ")}`)
   if (noop) await markNoop()
   else if (!/\[(ask|preview|pr)\]/i.test(prompt) && !/^Message from agent/m.test(prompt)) {
-    await useTool(mcp, "finish", { summary: "The mock agent wrote box-yard-demo.md." })
+    await useTool(mcp, "finish", { summary: process.env.FAKE_CLAUDE_WORKER_REPLY || "The mock agent wrote box-yard-demo.md." })
   }
   await fold()
-  const reply = ["Done for now. I wrote box-yard-demo.md.", ...captainNotes.map((r) => `message_captain: ${r}`)].join("\n\n")
+  // FAKE_CLAUDE_WORKER_REPLY: what the worker says it did instead (the Captain routing eval wants a plausible report).
+  const reply = [process.env.FAKE_CLAUDE_WORKER_REPLY || "Done for now. I wrote box-yard-demo.md.", ...captainNotes.map((r) => `message_captain: ${r}`)].join("\n\n")
   await say(withNextSteps(reply, ["Review the mock result", "Run a broader check", "Ask for a PR-ready summary"]))
   return reply
 }

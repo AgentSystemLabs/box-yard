@@ -11,6 +11,14 @@ import { mergedHeadsScript, parseMergedHeads } from "../server/branchNames.js"
 import { ALWAYS_LOAD, buildMcpServer, settle, type McpCaller } from "../server/mcp.js"
 import { claudeTelemetryEnv, serverClaudeEnv } from "../server/turnCredentials.js"
 import { testConfig, tmpDir } from "./helpers.js"
+import { openDb } from "../server/db.js"
+import { Store } from "../server/store.js"
+import { SettingsStore } from "../server/settings.js"
+
+const memSettings = () => {
+  const store = new Store(openDb(tmpDir(), ":memory:"))
+  return { store, settings: new SettingsStore(store, { orchestratorModel: "", workerModel: "", captainModel: "", captainEffort: "" }) }
+}
 
 const yards: BoxYard[] = []
 afterEach(() => yards.splice(0).forEach((y) => y.stop()))
@@ -162,20 +170,41 @@ describe("a Captain's wake-up delay", () => {
 })
 
 describe("Claude Code usage telemetry", () => {
-  it("is the CLI's own default unless Settings turns it off", () => {
+  it("is off unless Settings turns it on, which leaves the CLI's own default", () => {
     expect(claudeTelemetryEnv(true)).toEqual({})
-    expect(serverClaudeEnv(null, {}).DISABLE_TELEMETRY).toBe(process.env.DISABLE_TELEMETRY)
-    const off = serverClaudeEnv(null, {}, false)
+    expect(serverClaudeEnv(null, {}, true).DISABLE_TELEMETRY).toBe(process.env.DISABLE_TELEMETRY)
+    const off = serverClaudeEnv(null, {})
     expect(off.DISABLE_TELEMETRY).toBe("1")
     // The CLI keeps its cached feature flags, so a run has the same tools as one with telemetry on.
     expect(off.CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF).toBe("1")
   })
 
-  it("defaults to on, and saves off", () => {
+  it("defaults to off, and saves on", () => {
     const yard = start()
-    expect(yard.settings.get().claudeTelemetry).toBe(true)
-    yard.settings.update({ claudeTelemetry: false })
     expect(yard.settings.get().claudeTelemetry).toBe(false)
+    yard.settings.update({ claudeTelemetry: true })
+    expect(yard.settings.get().claudeTelemetry).toBe(true)
+  })
+
+  it("drops, once, the 'on' older builds saved with every Save, and keeps a saved 'off' and a later 'on'", () => {
+    const old = memSettings()
+    old.store.setKv("settings", JSON.stringify({ claudeTelemetry: true, ownerName: "Sam" }))
+    expect(old.settings.upgradeTelemetryDefault()).toBe(true)
+    expect(old.settings.info()).toMatchObject({ settings: { claudeTelemetry: false, ownerName: "Sam" }, sources: { claudeTelemetry: "default" } })
+    // Once: an "on" chosen after the upgrade stays.
+    old.settings.update({ claudeTelemetry: true })
+    expect(old.settings.upgradeTelemetryDefault()).toBe(false)
+    expect(old.settings.get().claudeTelemetry).toBe(true)
+
+    const chose = memSettings()
+    chose.store.setKv("settings", JSON.stringify({ claudeTelemetry: false }))
+    expect(chose.settings.upgradeTelemetryDefault()).toBe(false)
+    expect(chose.settings.info().sources.claudeTelemetry).toBe("ui")
+  })
+
+  it("runs that upgrade when the server starts", () => {
+    const yard = start()
+    expect(yard.store.getKv("settings_upgrade_telemetry_off")).toBeTruthy()
   })
 })
 
