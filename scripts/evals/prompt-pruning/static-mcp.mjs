@@ -3,10 +3,10 @@
 // refuses every call, so a token count or eval sees exactly the tools a Coordinator, Captain or task gets without a
 // running Box Yard.
 //
-//   node scripts/evals/static-mcp.mjs tools.captain.json [--all-loaded] [--none-loaded]
+//   node scripts/evals/prompt-pruning/static-mcp.mjs tools.captain.json [--all-loaded] [--none-loaded] [--ok]
 //
 // --all-loaded marks every tool always loaded (what a turn would cost without the CLI's tool search);
-// --none-loaded defers every one.
+// --none-loaded defers every one; --ok answers every call with {"ok":true} instead of refusing it.
 import fs from "node:fs"
 import readline from "node:readline"
 
@@ -24,7 +24,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (req.method === "initialize")
     return send({ jsonrpc: "2.0", id: req.id, result: { protocolVersion: req.params?.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "boxyard", version: "0" } } })
   if (req.method === "tools/list") return send({ jsonrpc: "2.0", id: req.id, result: { tools } })
-  if (req.method === "tools/call") return send({ jsonrpc: "2.0", id: req.id, result: { content: [{ type: "text", text: "Not available in this measurement." }], isError: true } })
+  if (req.method === "tools/call")
+    return send({
+      jsonrpc: "2.0",
+      id: req.id,
+      result: flags.includes("--ok") ? { content: [{ type: "text", text: '{"ok":true}' }] } : { content: [{ type: "text", text: "Not available in this measurement." }], isError: true },
+    })
   if (req.method === "ping") return send({ jsonrpc: "2.0", id: req.id, result: {} })
   send({ jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Method not found: ${req.method}` } })
 })

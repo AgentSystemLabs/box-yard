@@ -9,6 +9,9 @@
 //       [--runs 3] [--model claude-opus-5-5] [--effort high] [--concurrency 3] [--out results.jsonl] [--max-usd 40]
 //   npx tsx scripts/evals/prompt-pruning/routing-eval.ts --summary results.jsonl
 //
+// The summary grades every stored run again with the current graders (from its saved tool calls and reply), so a
+// grader fix doesn't need new runs; it says how many verdicts changed.
+//
 // Spends real money: every run is a model call on the machine's Claude login. --max-usd stops starting new runs once
 // the results file's total passes it. Sessions aren't saved (--no-session-persistence), gh sees an empty config
 // (GH_CONFIG_DIR), and nothing reaches a Box Yard server.
@@ -62,7 +65,14 @@ const readResults = (file: string): Result[] =>
 
 // ---------------------------------------------------------------- summary
 function summary(file: string) {
-  const rows = readResults(file)
+  let changed = 0
+  const rows = readResults(file).map((r) => {
+    const c = CASES.find((x) => x.id === r.case)
+    if (!c || r.error) return r
+    const failures = c.grade({ calls: r.calls, reply: r.reply })
+    if ((failures.length === 0) !== r.pass) changed++
+    return { ...r, failures, pass: failures.length === 0 }
+  })
   const variants = [...new Set(rows.map((r) => r.variant))]
   const cases = [...new Set(rows.map((r) => r.case))]
   const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)}%` : "-")
@@ -91,6 +101,7 @@ function summary(file: string) {
   console.log(`| seconds / run | ${variants.map((v) => (stat(v, (r) => r.ms) / 1000).toFixed(1)).join(" | ")} |`)
   console.log(`| $ / run | ${variants.map((v) => stat(v, (r) => r.costUsd).toFixed(3)).join(" | ")} |`)
   console.log(`\nTotal spend: $${rows.reduce((n, r) => n + r.costUsd, 0).toFixed(2)} over ${rows.length} runs`)
+  if (changed) console.log(`Regraded with the current graders: ${changed} verdict${changed === 1 ? "" : "s"} changed.`)
   const failed = rows.filter((r) => !r.pass)
   if (failed.length) {
     console.log("\nFailures:")
