@@ -568,6 +568,8 @@ export function createBoxYard(
     fetch: opts.daytonaFetch,
   })
   // Settings' Default GPU cloud replaces the clouds' old "Use for GPU projects" checkboxes: once, their choice moves over.
+  // Claude Code usage telemetry is off by default now: once, the "on" older builds saved with every Save goes.
+  settings.upgradeTelemetryDefault()
   settings.upgradeGpuDefault({ vast: vastService.store.get().defaultForGpu, daytona: daytonaService.store.get().defaultForGpu })
   // Docker containers on this computer, for projects that run on "Docker container" (docs/docker.md). Docker is only
   // asked when one is needed; in mock mode the containers are folders.
