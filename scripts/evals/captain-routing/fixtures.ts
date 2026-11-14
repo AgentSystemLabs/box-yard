@@ -497,7 +497,7 @@ export const CASES: Case[] = [
       "Rate-limit POST /api/login: at most 5 attempts per IP per 15 minutes, then answer 429 with a Retry-After header. Add tests, and don't use Redis for this, an in-memory store is fine for now.",
     expect: {
       created: 1,
-      prompt: { all: ["/api/login", "\\b5\\b|five", "15 ?min", "429", "retry-after", "redis"] },
+      prompt: { all: ["/api/login", "\\b5\\b|five", "15[ -]?min", "429", "retry-after", "redis"] },
       judge: [
         "At most 5 attempts per IP per 15 minutes on POST /api/login.",
         "Over the limit: 429 with a Retry-After header.",

@@ -129,6 +129,14 @@ describe("the routing eval's grader", () => {
     expect(failed(c, run(c, guessed))).toEqual(expect.arrayContaining(["messaged", "no send_to_task"]))
   })
 
+  it("reads a number and its unit however the prompt writes them", () => {
+    const c = caseById("pq-rate-limit")
+    const judge = { pass: true, items: [], verbatim: false, model: "m", costUsd: 0 }
+    const prompt = (window: string) => `Rate-limit POST /api/login: at most 5 attempts per IP per ${window}, then 429 with Retry-After. In-memory, no Redis.`
+    for (const w of ["15 minutes", "15-minute window", "15min"]) expect(failed(c, run(c, { created: [{ id: "t1", title: "Rate limit", prompt: prompt(w) }], judge })), w).toEqual([])
+    expect(failed(c, run(c, { created: [{ id: "t1", title: "Rate limit", prompt: prompt("hour") }], judge }))).toEqual(["prompt"])
+  })
+
   it("counts a failed turn and a missing judge verdict as failures", () => {
     const c = caseById("pq-coupon-bug")
     const created = [{ id: "t1", title: "SPRING10", prompt: "SPRING10 stays below the $50 minimum. Reproduce it with a failing test first; keep the fix in src/cart/." }]
