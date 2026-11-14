@@ -846,8 +846,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("cwarm")}
                     label="Warm Claude process"
-                    help="Keeps a claude process running for each Captain you're chatting with, so its turns skip Claude Code's start-up. It starts when you open or type in a Captain's chat box, or send it a message."
-                    more="One process per Captain you've chatted with within the idle time below, never one per task. It restarts by itself when its model, effort, login, env vars or connectors change, and goes when Box Yard stops. Claude Code Captains only."
+                    help="Keeps a claude process running for each Captain you're chatting with, so its turns skip Claude Code's start-up (about 0.6 s a turn, twice when a task's update wakes it). It starts when you open or type in a Captain's chat box, or send it a message."
+                    more="One process per Captain you've chatted with within the idle time below, never one per task: about 150–230 MB each while it waits. It restarts by itself when its model, effort, login, env vars or connectors change, and goes when Box Yard stops. Claude Code Captains only."
                     {...row("captainWarmProcess")}
                   >
                     <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
@@ -858,7 +858,8 @@ export function SettingsDialog({
                   <Row
                     id={fid("cwidle")}
                     label="Warm process idle time"
-                    help="How long a Captain's warm process waits for you before it shuts down. A change applies at once, to processes already running too."
+                    help="How long a Captain's warm process waits after you last chatted with it before it shuts down. A change applies at once, to processes already running too."
+                    more="With 30 minutes, about three in four of your own Captain turns found the process warm in two weeks of real use (half with 5 minutes), with fewer than one process alive on average."
                     {...row("captainWarmIdleMinutes")}
                   >
                     <WarmIdlePicker
@@ -872,7 +873,7 @@ export function SettingsDialog({
                   <Row
                     id={fid("cstream")}
                     label="Stream Captain replies"
-                    help="Shows a Captain's reply in its chat as it's written, instead of all at once when it's done."
+                    help="Shows a Captain's reply in its chat as it's written, instead of all at once when it's done: its first words appear in under a second with a warm process, instead of about 4 s for a paragraph."
                     {...row("captainStreamReplies")}
                   >
                     <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-300">
