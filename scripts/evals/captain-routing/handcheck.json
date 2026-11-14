@@ -4,6 +4,7 @@
   { "effort": "low", "caseId": "pq-refund-report", "rep": 1, "items": [true, true, true, true, true, true], "note": "flags that the CSV writer is only in PR #41" },
   { "effort": "low", "caseId": "pq-coupon-bug", "rep": 1, "items": [true, true, true, true] },
   { "effort": "low", "caseId": "pq-rate-limit", "rep": 1, "items": [true, true, true, true, true] },
+  { "effort": "low", "caseId": "pq-guest-checkout", "rep": 2, "items": [true, true, true, true, true, true], "note": "judge failed it: 'stop and ask before you make it' keeps the ban; reps 1 and 3 have the same escape and the judge passed them" },
   { "effort": "medium", "caseId": "xproj-mixed", "rep": 1, "items": [true] },
   { "effort": "medium", "caseId": "pq-guest-checkout", "rep": 1, "items": [true, true, true, true, true, true] },
   { "effort": "medium", "caseId": "pq-refund-report", "rep": 1, "items": [true, true, true, true, true, true] },

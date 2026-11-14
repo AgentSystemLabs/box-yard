@@ -414,11 +414,12 @@ export const CASES: Case[] = [
     setup: { retro: true },
     expect: {
       require: [["list_notes"], ["resolve_suggestion"]],
-      suggestions: { db: ["accepted", "merged"], log: ["rejected"], dup: ["merged", "rejected"], conv: ["rejected"] },
+      // The seeded repo has no compose file or DB tests, so a Captain that checks may reject the DB gotcha as unverifiable.
+      suggestions: { db: ["accepted", "merged", "rejected"], log: ["rejected"], dup: ["merged", "rejected"], conv: ["rejected"] },
       noUpdate: true,
       created: [0, 1],
     },
-    why: "A notes retro: list_notes, then resolve every suggestion itself (keep the env gotcha, reject the run log, don't duplicate a note, send the code convention to AGENTS.md), then (no update).",
+    why: "A notes retro: list_notes, then resolve every suggestion itself (keep the env gotcha or reject it as unverifiable, reject the run log, don't duplicate a note, send the code convention to AGENTS.md), then (no update).",
   },
   {
     id: "notes-owner-rule",
