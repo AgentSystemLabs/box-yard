@@ -189,6 +189,21 @@ export interface WaitFor {
 export type WaitFix = "raise-cloud-limit" | "cloud-settings" | "allow-boxes" | "box-settings"
 export const WAIT_FIXES: readonly WaitFix[] = ["raise-cloud-limit", "cloud-settings", "allow-boxes", "box-settings"]
 
+/** Task.turnModel: the model and effort a task's agent runs on (shared/modelName.ts names them). */
+export interface TaskModel {
+  /** A model id, alias or harness label; null when the harness picks its own and hasn't said which. */
+  model: string | null
+  effort: Effort | null
+  /**
+   * "ran": the CLI named the model its latest turn runs on (Claude's init line, Codex's thread, Cursor's init);
+   * "asked": what that turn asked for, as the CLI didn't say; "next": no turn yet, what the first will ask for
+   * (the task's pins, else routing, else Settings).
+   */
+  from: "ran" | "asked" | "next"
+  /** What the turn asked for (the task's pin, routing's or Settings' model): an alias like "opus" when the CLI ran it as an id. */
+  asked: string | null
+}
+
 export interface Task {
   id: string
   projectId: string
@@ -255,6 +270,11 @@ export interface Task {
   model: string | null
   /** Effort currently selected for subsequent turns, when routing or the orchestrator overrode the global effort. */
   effort: Effort | null
+  /**
+   * The model and effort its agent runs on, for its details: its latest turn's (the model as the CLI named it once it
+   * started, else what the turn asked for), or before its first turn what that will ask for. Null when none is known.
+   */
+  turnModel?: TaskModel | null
   /** Claude Code cost recorded for this task's turns. */
   claudeCostUsd: number
   /** Claude Code tokens recorded for this task's turns. */

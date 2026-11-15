@@ -12,6 +12,7 @@ import { cx } from "./ui"
 import { Loading } from "./Loading"
 import { formatMs, TURN_STAGES, type TurnStageKey, type TurnTiming } from "../../../shared/turnTimings"
 import { loginName } from "../../../shared/agentLogins"
+import { modelEffortLine } from "../../../shared/modelName"
 
 /** The turn_timings id and total a message's meta carries, or null when it has none. */
 export function timingOf(meta: Record<string, unknown> | null | undefined): { id: string; ms: number | null } | null {
@@ -168,7 +169,7 @@ export function TimingDetail({ t }: { t: TurnTiming }) {
     toolMs: `${t.toolCalls} call${t.toolCalls === 1 ? "" : "s"}${tools.length === 1 ? ` · ${tools[0]!.name ?? "?"}` : ""}`,
   }
   const rows = (["queueMs", "setupMs", "startupMs", "firstTokenMs", "modelMs", "toolMs", "tailMs"] as const).filter((k) => t[k] !== null && !(k === "toolMs" && !t.toolCalls))
-  const who = [t.role === "task" ? "Task turn" : t.role === "captain" ? "Captain turn" : "Coordinator turn", t.trigger && `from ${t.trigger}`, t.model, t.effort && `${t.effort} effort`, t.resumed && "resumed", t.login && `on ${loginName(t.login)}`].filter(Boolean).join(" · ")
+  const who = [t.role === "task" ? "Task turn" : t.role === "captain" ? "Captain turn" : "Coordinator turn", t.trigger && `from ${t.trigger}`, modelEffortLine(t.model, t.effort), t.resumed && "resumed", t.login && `on ${loginName(t.login)}`].filter(Boolean).join(" · ")
   return (
     <div className="flex flex-col gap-2.5">
       <div className="text-zinc-500">{who}</div>

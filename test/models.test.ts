@@ -60,6 +60,10 @@ describe("mergeCliModels", () => {
     expect(findModel(merged, "opus")?.note).toBe("Opus 5.5 now")
     expect(findModel(merged, "fable")?.note).toBe("Fable 5.2 now")
     expect(findModel(merged, "best")?.note).toBe("Fable where your account has it, else Opus (Fable 5.2 now)")
+    // Each alias keeps the id it runs on, so a task's details can name it (shared/modelName.ts).
+    expect(findModel(merged, "opus")?.runsOn).toBe("claude-opus-5-5")
+    expect(findModel(merged, "best")?.runsOn).toBe("claude-fable-5-2")
+    expect(findModel(merged, "claude-opus-5-5")?.runsOn).toBeUndefined()
     expect(findModel(merged, "haiku")?.efforts).toEqual(["low", "medium", "high"])
     expect(merged).toHaveLength(BUILTIN_MODELS.length)
     // The built-in list isn't changed.
@@ -75,7 +79,7 @@ describe("mergeCliModels", () => {
     expect(merged.filter((m) => m.group === "latest").map((m) => m.id)).toEqual(["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-sonnet-6", "claude-haiku-6"])
     expect(findModel(merged, "claude-sonnet-6")).toMatchObject({ label: "Sonnet 6", efforts: all })
     expect(findModel(merged, "claude-haiku-6")).toMatchObject({ label: "Haiku 6", efforts: [] })
-    expect(findModel(merged, "turbo")).toMatchObject({ group: "alias", note: "Opus 5.5 now", efforts: all })
+    expect(findModel(merged, "turbo")).toMatchObject({ group: "alias", note: "Opus 5.5 now", efforts: all, runsOn: "claude-opus-5-5" })
     expect(findModel(merged, "sonnet")?.note).toBe("Sonnet 6 now")
   })
 

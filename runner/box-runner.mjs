@@ -723,6 +723,8 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
     let buf = ""
     // The model this CLI said it doesn't recognize, once the turn is being stopped for it (unrecognizedModelIn).
     let unknownModel = null
+    // The model its init line named (the "model" event).
+    let ranModel = null
     let unknownModelKill = null
     const watchModel = model && !OWN_WINDOW_ENV.some((k) => env[k]) ? model : null
     // Every model this CLI said it doesn't recognize, on a turn that goes on too: its window for one is a guess.
@@ -748,6 +750,11 @@ function runClaude({ turn, sessionId, resume, prompt, mcpConfigFile }) {
         if (msg.type === "result") {
           result = addResult(result, msg)
           steers?.close()
+        }
+        // The model the CLI runs, by id: what an alias ("opus", "best") or Settings' pick turned out to be.
+        if (!ranModel && msg.type === "system" && msg.subtype === "init" && !msg.parent_tool_use_id && typeof msg.model === "string" && msg.model.trim()) {
+          ranModel = msg.model.trim()
+          queue(() => emit({ t: "model", model: ranModel }))
         }
         clock.line(msg)
         const tokens = msg.type === "assistant" && msg.message?.model !== "<synthetic>" ? contextTokensOf(msg.message?.usage) : null
@@ -1362,6 +1369,8 @@ async function runCodex({ turn, sessionId, resume, prompt }) {
     const response = await rpc(resume ? "thread/resume" : "thread/start", { ...options, ...(resume ? { threadId: sessionId } : {}) })
     thread = response.thread.id; state.threadId = thread; writeCodexDelivery(state)
     queue({ t: "session", sessionId: thread })
+    // The model the thread runs: Codex's own default when the turn named none.
+    if (typeof response.model === "string" && response.model.trim()) queue({ t: "model", model: response.model.trim() })
     activeInterrupt = () => nativeTurn ? rpc("turn/interrupt", { threadId: thread, turnId: nativeTurn }, 4000).catch(() => child.kill("SIGTERM")) : Promise.resolve(child.kill("SIGTERM"))
     if (stopping) await activeInterrupt()
     else {
@@ -1685,7 +1694,11 @@ function runCursor({ turn, sessionId, resume, prompt }) {
       }
       if (ev.type === "system" && ev.subtype === "init") {
         sawInit = true
-        if (typeof ev.model === "string" && ev.model) modelLabel = ev.model
+        if (typeof ev.model === "string" && ev.model) {
+          modelLabel = ev.model
+          const ran = clip(ev.model, 200)
+          queue(() => emit({ t: "model", model: ran }))
+        }
         // The init names the model by its label ("Claude Opus 5.5 1M High"), which may state its window.
         const m = /\b(\d+(?:\.\d+)?)\s*([KM])\b/i.exec(String(ev.model ?? ""))
         const n = m ? Number(m[1]) * (m[2].toUpperCase() === "M" ? 1_000_000 : 1_000) : 0

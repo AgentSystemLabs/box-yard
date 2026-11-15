@@ -4,6 +4,7 @@
 import { useId, useMemo, type MouseEvent } from "react"
 import { ChevronRight } from "lucide-react"
 import { AGENT_CLI_LABEL } from "../../../shared/agentCli"
+import { modelName } from "../../../shared/modelName"
 import { placementView } from "../../../shared/placement"
 import type { Project } from "../../../shared/types"
 import { isPlainClick } from "../lib/filePreview"
@@ -95,7 +96,9 @@ export function PrAgents({ prUrl, onOpenTask, currentTaskId, className }: { prUr
 function AgentFacts({ row, project }: { row: PrAgentRow; project: Project | undefined }) {
   const { task } = row
   const place = placementView(task, project?.runner)
-  const harness = [AGENT_CLI_LABEL[task.agentCli ?? "claude"], row.model].filter(Boolean).join(" · ")
+  // The model its latest turn ran on, by name, else the one its usage was logged under.
+  const model = task.turnModel?.model ?? row.model
+  const harness = [AGENT_CLI_LABEL[task.agentCli ?? "claude"], model && modelName(model, task.agentCli)].filter(Boolean).join(" · ")
   return (
     <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-400">
       {row.roles.length > 0 && <span className="text-zinc-300">{rolesText(row.roles)}</span>}

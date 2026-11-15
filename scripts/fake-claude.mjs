@@ -196,6 +196,14 @@ const WINDOW = Number(process.env.FAKE_CLAUDE_WINDOW || 200_000)
 // The --model this CLI doesn't know (FAKE_CLAUDE_UNKNOWN_MODELS), or null.
 const UNKNOWN_MODEL = (process.env.FAKE_CLAUDE_UNKNOWN_MODELS ?? "").split(",").includes(flag("--model") ?? "") ? flag("--model") : null
 const PER_TURN = Number(process.env.FAKE_CLAUDE_TOKENS_PER_TURN || 3000)
+// What the init line names, as the real CLI does: an alias as the model it runs now, no --model as its default.
+const FAKE_ALIASES = { opus: "claude-opus-5-5", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5", fable: "claude-fable-5-2", best: "claude-fable-5-2" }
+const RAN_MODEL = (() => {
+  const m = flag("--model")
+  if (!m) return "claude-opus-5-5"
+  const [, base, window = ""] = /^(.*?)(\[[^\]]*\])?$/.exec(m)
+  return `${FAKE_ALIASES[base] ?? base}${window}`
+})()
 // The summary lists the live tasks Box Yard gave it, like a real one would.
 const liveTasks = (prompt) => /Live task state from Box Yard[^\n]*\n((?:- .*\n?)+)/.exec(prompt)?.[1]?.trim()
 const fmt = (n) => (n >= 1e6 ? `${n / 1e6}m` : n >= 1e3 ? `${Math.round(n / 100) / 10}k` : String(n))
@@ -910,7 +918,7 @@ async function turn(prompt, started) {
       ? "Not logged in · Please run /login"
       : null
   if (loginError) {
-    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: "fake" })
+    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: RAN_MODEL })
     out({ type: "result", subtype: "success", is_error: true, result: loginError, session_id: session.id })
     process.exit(1)
   }
@@ -933,11 +941,11 @@ async function turn(prompt, started) {
   try {
     mcp = loadMcp()
     await mcp?.init().catch((err) => {
-      out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: "fake", mcp_servers: [{ name: "boxyard", status: "failed" }] })
+      out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: RAN_MODEL, mcp_servers: [{ name: "boxyard", status: "failed" }] })
       throw err
     })
     // Like the real CLI: init comes once the MCP servers are connected (turn timings read start-up off it).
-    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: "fake", mcp_servers: mcp ? [{ name: "boxyard", status: "connected" }] : [] })
+    out({ type: "system", subtype: "init", session_id: session.id, tools: [], model: RAN_MODEL, mcp_servers: mcp ? [{ name: "boxyard", status: "connected" }] : [] })
     const isOrchestrator = mcp?.kind === "orchestrator"
     if (/\[autocompact\]/i.test(prompt)) {
       out({ type: "system", subtype: "compact_boundary", session_id: session.id, uuid: randomUUID(), compact_metadata: { trigger: "auto", pre_tokens: session.tokens } })

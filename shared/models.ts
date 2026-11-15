@@ -16,6 +16,8 @@ export interface ClaudeModel {
   efforts: readonly Effort[]
   /** One line for the picker: what an alias runs on, long context, retirement. */
   note?: string
+  /** An alias's model now, by id ("opus" → "claude-opus-5-5"), as the installed CLI said (mergeCliModels). */
+  runsOn?: string
 }
 
 /** Where the picker's list came from: the installed CLI, or the table below when the CLI couldn't be asked. */
@@ -110,12 +112,19 @@ export interface CliModelInfo {
 }
 
 const cliEfforts = (r: CliModelInfo): Effort[] => (r.supportsEffort ? EFFORTS.filter((e) => (r.supportedEffortLevels ?? EFFORTS).includes(e)) : [])
-const labelOf = (id: string) =>
-  id
-    .replace(/^claude-/, "")
-    .replace(/-(\d+)-(\d+)$/, " $1.$2")
-    .replace(/-(\d+)$/, " $1")
-    .replace(/^\w/, (c) => c.toUpperCase())
+
+/**
+ * A Claude model id read as its name, for one the list doesn't have yet: "claude-opus-5-6" is "Opus 5.6",
+ * "claude-sonnet-6-20270101" "Sonnet 6", "claude-opus-5-6[1m]" "Opus 5.6 [1m]". Null for anything else (an alias, another
+ * vendor's id, the older "claude-3-5-sonnet" order).
+ */
+export function claudeIdLabel(id: string): string | null {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[[^\]]*\])?$/i.exec(id.trim())
+  if (!m) return null
+  const [, family, major, minor, window] = m
+  return `${family![0]!.toUpperCase()}${family!.slice(1).toLowerCase()} ${major}${minor ? `.${minor}` : ""}${window ? ` ${window.toLowerCase()}` : ""}`
+}
+const labelOf = (id: string) => claudeIdLabel(id) ?? id
 
 /**
  * The built-in list with what the installed CLI says on top: the effort levels it reports for each alias and the
@@ -137,10 +146,11 @@ export function mergeCliModels(builtin: readonly ClaudeModel[], rows: readonly C
     const known = findModel(out, r.value)
     if (known) {
       known.efforts = efforts
+      if (resolved && known.group === "alias") known.runsOn = resolved
       if (runsOn && known.group === "alias") known.note = !known.note || known.note.startsWith("The latest") ? `${runsOn} now` : `${known.note} (${runsOn} now)`
     } else {
       const isId = r.value.startsWith("claude-")
-      add({ id: r.value, label: isId ? labelOf(r.value) : r.value, group: isId ? "latest" : "alias", efforts, note: runsOn ? `${runsOn} now` : undefined })
+      add({ id: r.value, label: isId ? labelOf(r.value) : r.value, group: isId ? "latest" : "alias", efforts, note: runsOn ? `${runsOn} now` : undefined, ...(resolved && !isId ? { runsOn: resolved } : {}) })
     }
     if (resolved && !target) add({ id: resolved, label: labelOf(resolved), group: "latest", efforts })
   }
