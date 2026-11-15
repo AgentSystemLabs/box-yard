@@ -3,7 +3,7 @@
 import type { SettingSource } from "./types.js"
 import type { DefaultProvider, Runner, SetupRunner } from "./runner.js"
 
-export const CREDENTIAL_KEYS = ["upstashBoxApiKey", "claudeOauthToken", "anthropicApiKey", "codexAuthJson", "codexApiKey", "cursorApiKey", "opencodeAuthJson", "githubToken", "runpodApiKey", "vastApiKey", "daytonaApiKey"] as const
+export const CREDENTIAL_KEYS = ["upstashBoxApiKey", "boxdApiKey", "claudeOauthToken", "anthropicApiKey", "codexAuthJson", "codexApiKey", "cursorApiKey", "opencodeAuthJson", "githubToken", "runpodApiKey", "vastApiKey", "daytonaApiKey"] as const
 export type CredentialKey = (typeof CREDENTIAL_KEYS)[number]
 
 /**
@@ -200,6 +200,13 @@ export const CREDENTIAL_INFO: Record<
     placeholder: "Paste your Box API key",
     help: "The isolated cloud boxes your agents work in.",
     link: { href: "https://console.upstash.com", label: "Create one in the Upstash console" },
+  },
+  boxdApiKey: {
+    label: "boxd API key",
+    env: "BOXD_API_KEY",
+    placeholder: "bxd_…",
+    help: "Cloud machines from boxd.sh your agents work in, with Claude Code and Codex preinstalled (docs/boxd.md).",
+    link: { href: "https://app.boxd.sh/keys", label: "Create one in the boxd console" },
   },
   claudeOauthToken: {
     label: "Claude subscription token",

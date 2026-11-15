@@ -969,6 +969,15 @@ export function UpstashPanel({ fid, children }: { fid: (k: string) => string; ch
         Upstash boxes are ready: pick Upstash box in a project's Settings › Runs on, or change the default in Box providers.
       </p>}
     </Row>}
+    {!s ? <Loading count={1} label="Loading the boxd key" /> : <Row id={fid("cred-boxdApiKey")} label={CREDENTIAL_INFO.boxdApiKey.label} help={<>
+      {optional && "Optional: boxd machines instead of Upstash boxes, once a boxd key is set. "}
+      <CredentialHelp k="boxdApiKey" />
+    </>}>
+      <CredentialField k="boxdApiKey" section="upstash" status={s.credentials.boxdApiKey} id={fid("cred-boxdApiKey")} />
+      {optional && s.credentials.boxdApiKey.state === "set" && <p className="text-xs leading-relaxed text-zinc-500" data-testid="boxd-ready">
+        boxd machines are ready: with BOX_PROVIDER unset (and no Upstash key), new boxes are boxd machines; set BOX_PROVIDER=boxd to force it.
+      </p>}
+    </Row>}
     {children}
   </Panel>
 }

@@ -34,6 +34,7 @@ import { Auth } from "./auth.js"
 import { Redis } from "./redis.js"
 import { LocalProvider, LocalRunnerProvider, LocalRunnerRouter } from "./providers/local.js"
 import { UpstashProvider } from "./providers/upstash.js"
+import { BoxdProvider } from "./providers/boxd.js"
 import { AutoProvider } from "./providers/auto.js"
 import type { BoxProvider } from "./providers/types.js"
 import { redact, type CredentialStore } from "./credentials.js"
@@ -383,8 +384,14 @@ function parse<T extends z.ZodTypeAny>(schema: T, body: unknown): z.infer<T> {
  */
 export function makeProvider(c: Config, credentials?: CredentialStore): BoxProvider {
   if (c.provider === "upstash") return new UpstashProvider(c, credentials)
+  if (c.provider === "boxd") return new BoxdProvider(c, credentials)
   const local = new LocalProvider(path.join(c.dataDir, "local-boxes"), c.claudeBin)
   if (!credentials || c.mock || c.boxProvider === "local") return local
+  // Auto: boxd machines once a boxd key is saved (env or Settings › Credentials), else Upstash boxes once an
+  // Upstash key is. Boxes a provider made before the switch keep going to it only when it's still the cloud one.
+  if (c.boxdApiKey || credentials.get("boxdApiKey")) {
+    return new AutoProvider(local, new BoxdProvider(c, credentials), () => Boolean(credentials.get("boxdApiKey")))
+  }
   return new AutoProvider(local, new UpstashProvider(c, credentials), () => Boolean(credentials.get("upstashBoxApiKey")))
 }
 
