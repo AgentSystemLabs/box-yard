@@ -82,13 +82,13 @@ describe("a PR's details say which tasks worked on it", () => {
     expect(section().querySelector("h2")!.textContent).toBe("Worked on by 2")
     expect(first!.getAttribute("href")).toBe("/?session=task_pr001")
     expect(first!.textContent).toContain("Opened it · Asked to merge it")
-    expect(first!.textContent).toContain("Claude Code · claude-opus-5-5")
+    expect(first!.textContent).toContain("Claude Code · Opus 5.5")
     expect(first!.textContent).toContain("Upstash · small")
     expect(first!.textContent).toContain("PR ready")
     // Found by its branch: the dialog's own grouping by PR URL never had it.
     expect(second!.textContent).toContain("Fix the flaky sign-in test on phones")
     expect(second!.textContent).toContain("Worked on its branch")
-    expect(second!.textContent).toContain("Codex · gpt-6.1-sol")
+    expect(second!.textContent).toContain("Codex · GPT-6.1 Sol")
     expect(second!.textContent).toContain("This computer")
     expect(second!.textContent).toContain("Working")
     // The title has the row to itself; the facts are on the line below.

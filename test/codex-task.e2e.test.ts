@@ -69,11 +69,14 @@ describe("task agents on Codex", () => {
     const t = await r.call<Task>("POST", "/api/tasks", { projectId: p.id, title: "Legacy choices", prompt: "Say hi" })
     await resting(r, t.id)
     expect(runs()[0]).toMatchObject({ model: null, config: { model_reasoning_effort: "low" } })
+    // The details name the model Codex picked for itself, from its thread's answer.
+    expect((await r.call<Task>("GET", `/api/tasks/${t.id}`)).turnModel).toEqual({ model: "gpt-fake", effort: "low", from: "ran", asked: null })
     r.yard.settings.update({ agentCodexModel: "gpt-6-luna", agentCodexEffort: "max", agentRoutingConfig: `projects:\n  ${p.id}:\n    model: gpt-6.1-sol\n    effort: medium` })
     await r.call("POST", `/api/tasks/${t.id}/messages`, { content: "Say hi again" })
     await waitFor(() => runs().length === 2, "the project-routed turn")
     await resting(r, t.id)
     expect(runs()[1]).toMatchObject({ model: "gpt-6.1-sol", config: { model_reasoning_effort: "medium" } })
+    expect((await r.call<Task>("GET", `/api/tasks/${t.id}`)).turnModel).toEqual({ model: "gpt-6.1-sol", effort: "medium", from: "ran", asked: "gpt-6.1-sol" })
   })
 
   it("routes saved Codex choices through the runner, keeps task overrides, and retains a task's harness after switching", async () => {

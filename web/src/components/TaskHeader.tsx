@@ -17,7 +17,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react"
-import { useAgentSettings, useDeleteTask, useIdentities, useReopenTask, useRetryTask, useSetStayOpenOnMerge, useStopTask } from "../lib/queries"
+import { useAgentSettings, useCursorModels, useDeleteTask, useIdentities, useModels, useReopenTask, useRetryTask, useSetStayOpenOnMerge, useStopTask } from "../lib/queries"
 import { ContinueTask } from "./ContinueTask"
 import { api } from "../lib/api"
 import { primaryAction, readyForReview } from "../lib/taskActions"
@@ -33,6 +33,7 @@ import type { Artifact, PreviewLink, Project, Schedule, Task } from "../../../sh
 import { RUNNER_LABEL } from "../../../shared/runner"
 import { gpuPickLabel } from "../../../shared/gpuCatalog"
 import { AGENT_CLI_LABEL } from "../../../shared/agentCli"
+import { taskModelLine } from "../../../shared/modelName"
 import { confirmDialog } from "../lib/confirm"
 import { useMarkDone } from "../lib/markDone"
 import { copyIdOnClick } from "../lib/breadcrumb"
@@ -649,11 +650,7 @@ function TaskMenu({
                     {AGENT_CLI_LABEL[task.agentCli ?? "claude"]}
                   </span>
                 </Detail>
-                {(task.model || task.effort) && (
-                  <Detail label="Model">
-                    <span className="min-w-0 wrap-anywhere text-zinc-300">{[task.model, task.effort ? `${task.effort} effort` : ""].filter(Boolean).join(" · ")}</span>
-                  </Detail>
-                )}
+                <ModelDetail task={task} />
                 {project && <IdentityDetail identityId={project.identityId} onOpen={() => setOpen(false)} />}
                 {(task.routingRule || task.routingReason) && (
                   <Detail label="Route" top>
@@ -695,6 +692,21 @@ function PushDetail({ push }: { push: NonNullable<Task["pushState"]> }) {
     <Detail label="Git" top>
       <span className="min-w-0 py-0.5 leading-snug wrap-anywhere" data-testid="push-state">
         <span className={line.tone === "ok" ? "text-zinc-300" : line.tone === "warn" ? "text-amber-300" : undefined}>{line.text}</span> · <TimeAgo ts={push.at} />
+      </span>
+    </Detail>
+  )
+}
+
+/** The model and effort its agent runs on, by name ("Opus 5.5 · xhigh effort"); the tooltip says where that came from. */
+function ModelDetail({ task }: { task: Task }) {
+  const claude = useModels()
+  const cursor = useCursorModels(task.agentCli === "cursor").data?.models
+  const line = taskModelLine(task, { claude, cursor })
+  if (!line) return null
+  return (
+    <Detail label="Model">
+      <span className="min-w-0 wrap-anywhere text-zinc-300" title={line.title} data-testid="task-model">
+        {line.text}
       </span>
     </Detail>
   )
