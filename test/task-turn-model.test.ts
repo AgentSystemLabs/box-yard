@@ -31,6 +31,11 @@ describe("a task's model in its details", () => {
     // The list reads the same.
     const listed = y.store.listTasks().find((t) => t.id === fromRoute.id)!
     expect(listed.turnModel).toEqual({ model: "claude-fable-5-2", effort: "max", from: "next", asked: "claude-fable-5-2" })
+    // A done task that never ran keeps its pins, and with none, says nothing.
+    y.store.updateTask(fromSettings.id, { status: "done" })
+    y.store.updateTask(pinned.id, { status: "done" })
+    expect(y.store.getTask(fromSettings.id)!.turnModel).toBeNull()
+    expect(y.store.getTask(pinned.id)!.turnModel).toEqual({ model: "opus", effort: "xhigh", from: "next", asked: "opus" })
   })
 
   it("is what its latest turn asked for, then the model the CLI says that turn runs on", async () => {

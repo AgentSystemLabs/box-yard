@@ -1664,7 +1664,8 @@ export class Store {
     }
     let next: Pick<TaskModel, "model" | "effort"> | null = null
     try {
-      next = this.nextTurnModel?.(row) ?? null
+      // A done task that never ran keeps its pins: it starts no turn, and every list read would resolve it again.
+      if (row.status !== "done") next = this.nextTurnModel?.(row) ?? null
     } catch {
       // A model the harness refuses: the turn will fail with it; the task's own pins say what it asked for.
     }
