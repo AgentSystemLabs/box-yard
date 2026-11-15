@@ -1564,11 +1564,12 @@ export class Store {
           .all(arg) as ({ task_id: string } & typeof NO_SPEND)[]
       ).map(({ task_id, ...s }) => [task_id, s]),
     )
-    // The latest turn's row (SQLite takes a bare column from the MAX row), from the task_turns_task index.
+    // The latest turn's row (SQLite takes bare columns from the MAX row), from the task_turns_task index. `*`, not a
+    // column list, so a store on a database migrated part way (a test seeding old rows) reads it before ran_model exists.
     const lastTurn = new Map(
       (
-        this.db.prepare(`SELECT task_id, model, effort, ran_model, MAX(started_at) FROM task_turns WHERE ${scope} GROUP BY task_id`).all(arg) as ({ task_id: string } & LastTurn)[]
-      ).map(({ task_id, model, effort, ran_model }) => [task_id, { model, effort, ran_model }]),
+        this.db.prepare(`SELECT *, MAX(started_at) FROM task_turns WHERE ${scope} GROUP BY task_id`).all(arg) as ({ task_id: string } & Partial<LastTurn>)[]
+      ).map(({ task_id, model, effort, ran_model }) => [task_id, { model: model ?? null, effort: effort ?? null, ran_model: ran_model ?? null }]),
     )
     let activity: ReturnType<DB["prepare"]> | undefined
     const runners = new Map<string, Runner>()
