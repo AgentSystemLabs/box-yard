@@ -7,7 +7,8 @@ already installed**, so a box is ready in seconds instead of installing anything
 ## Set up
 
 1. Create an API key at <https://app.boxd.sh/keys> (`boxd auth keys create my-yard` works too).
-2. Add it in Settings › Box providers (the "boxd API key" field), or put it in `.env`:
+2. Add it in Settings › Box providers (the "boxd API key" field — its Test button lists the account's
+   machines), or put it in `.env`:
 
    ```
    BOXD_API_KEY=bxd_...
@@ -15,7 +16,11 @@ already installed**, so a box is ready in seconds instead of installing anything
 
 No restart needed for a key saved in Settings. With no Upstash key and no `BOX_PROVIDER`, new
 boxes become boxd machines once the key is set; `BOX_PROVIDER=boxd` forces it either way (and
-`BOX_PROVIDER=local` keeps every box in folders on this machine).
+`BOX_PROVIDER=local` keeps every box in folders on this machine). Saving an Upstash key later
+moves new boxes back to Upstash, the same as before.
+
+`npm run smoke:boxd` checks the provider end to end against the real API (it spends a few cents:
+one 1 vCPU machine for a few minutes, deleted at the end).
 
 ## How it maps
 
@@ -24,7 +29,10 @@ boxes become boxd machines once the key is set; `BOX_PROVIDER=boxd` forces it ei
 - **Names**: machines are named `byard-<random>` (names are unique across all of boxd), which is
   also how Box Yard finds its own machines for cleanup — keep other machines out of that prefix.
 - **Snapshots**: boxd snapshots are named org-wide; the snapshot id Box Yard shows is that name.
-- **Public URLs**: a task's preview port gets a `p<port>` subdomain proxy on the machine.
+- **Public URLs**: a task's preview port gets a `p<port>` subdomain proxy on the machine. The
+  machine's main address is never used for previews: boxd's bot protection answers non-browser
+  clients there with a challenge page, while subdomain proxies are never checked. A new proxy's
+  certificate takes a few seconds to come up.
 - **Idle**: boxd hibernates a machine after 4 hours with no traffic (disk-only billing), and
   Box Yard's janitor still deletes idle boxes per its own settings.
 - **`usage`**: boxd bills active vCPU only and exposes no per-machine compute totals, so the

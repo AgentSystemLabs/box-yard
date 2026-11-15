@@ -387,12 +387,13 @@ export function makeProvider(c: Config, credentials?: CredentialStore): BoxProvi
   if (c.provider === "boxd") return new BoxdProvider(c, credentials)
   const local = new LocalProvider(path.join(c.dataDir, "local-boxes"), c.claudeBin)
   if (!credentials || c.mock || c.boxProvider === "local") return local
-  // Auto: boxd machines once a boxd key is saved (env or Settings › Credentials), else Upstash boxes once an
-  // Upstash key is. Boxes a provider made before the switch keep going to it only when it's still the cloud one.
-  if (c.boxdApiKey || credentials.get("boxdApiKey")) {
-    return new AutoProvider(local, new BoxdProvider(c, credentials), () => Boolean(credentials.get("boxdApiKey")))
+  // Auto: cloud boxes once a key is saved in Settings, with no restart. Upstash first, so saving a boxd key never
+  // moves an Upstash install's new boxes; a boxd key picks the boxd provider only with no Upstash key. Either way
+  // boxes keep going to the provider that made them while it is the cloud one.
+  if (credentials.get("upstashBoxApiKey")) {
+    return new AutoProvider(local, new UpstashProvider(c, credentials), () => Boolean(credentials.get("upstashBoxApiKey")))
   }
-  return new AutoProvider(local, new UpstashProvider(c, credentials), () => Boolean(credentials.get("upstashBoxApiKey")))
+  return new AutoProvider(local, new BoxdProvider(c, credentials), () => Boolean(credentials.get("boxdApiKey")))
 }
 
 /** The local runner: agents of "Runs on: This computer" projects, in `<localDir>/<task_id>` (BOXYARD_LOCAL_DIR). */

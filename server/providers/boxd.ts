@@ -122,6 +122,7 @@ export class BoxdProvider implements BoxProvider {
       const m = await this.machine(boxId)
       if (m.status === "destroyed") return "gone"
       if (m.status === "failed") return "error"
+      if (m.status === "migrating") return "unknown"
       // Suspended (standby), hibernated (on disk) and stopped all come back with wake.
       if (m.status === "suspended" || m.status === "hibernated" || m.status === "stopped") return "paused"
       return "running"
@@ -190,17 +191,23 @@ export class BoxdProvider implements BoxProvider {
 
   async publicUrl(boxId: string, port: number): Promise<string> {
     const boxd = this.api()
-    const label = `p${port}`
-    try {
-      await boxd.machines.proxies.create(boxId, label, port)
-    } catch (err) {
-      // Same port twice keeps the first proxy: reuse it below.
-      if (!/exist|duplicate|already|conflict/i.test(errorMessage(err))) throw err
+    // A preview URL must be a subdomain proxy: the machine's main address answers non-browser clients (Box
+    // Yard's own checks, uptime probes) with a bot-protection challenge page, and subdomain proxies are never
+    // checked (docs.boxd.sh/guides/bot-protection.md). A port can be asked for twice (re-shared, or a turn
+    // after a restart): reuse its proxy instead of making a second one.
+    const sub = (routes: { domain: string; port: number; isDefault?: boolean }[]) => {
+      const domain = routes.find((r) => r.port === port && !r.isDefault)?.domain
+      return domain ? (domain.startsWith("http") ? domain : `https://${domain}`) : null
     }
-    const routes = await retry(() => boxd.machines.proxies.list(boxId))
-    const route = routes.find((r) => r.port === port)
-    if (!route?.domain) throw new Error(`boxd made no proxy for port ${port}`)
-    return route.domain.startsWith("http") ? route.domain : `https://${route.domain}`
+    const existing = sub(await retry(() => boxd.machines.proxies.list(boxId)))
+    if (existing) return existing
+    // The proxy's name is its subdomain label, and a proxy is pinned to its port: p<port>. The subdomain's
+    // certificate takes a few seconds to come up; Box Yard only hands the URL out, and the first browser
+    // or probe that follows it arrives later.
+    await boxd.machines.proxies.create(boxId, `p${port}`, port)
+    const made = sub(await retry(() => boxd.machines.proxies.list(boxId)))
+    if (!made) throw new Error(`boxd made no proxy for port ${port}`)
+    return made
   }
 
   async snapshot(boxId: string, name: string): Promise<BoxSnapshotInfo> {

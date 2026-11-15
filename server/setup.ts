@@ -7,6 +7,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Box } from "@upstash/box"
+import { Boxd } from "@boxd-sh/sdk"
 import type { Config } from "./config.js"
 import { BadRequestError, type Store } from "./store.js"
 import { credentialValueFor, redact, type CodexLogin, type CredentialStore } from "./credentials.js"
@@ -36,8 +37,9 @@ export interface SetupDeps {
   settings: SettingsStore
   /** Where new boxes are made right now. */
   provider: () => string
-  /** Stand-ins for tests: the Upstash Box API, the Anthropic API, GitHub's API. */
+  /** Stand-ins for tests: the Upstash Box API, the boxd API, the Anthropic API, GitHub's API. */
   listBoxes?: (apiKey: string) => Promise<{ status?: string }[]>
+  listBoxdMachines?: (apiKey: string) => Promise<{ status?: string }[]>
   fetch?: typeof fetch
   githubFetch?: typeof fetch
   anthropicBaseUrl?: string
@@ -344,6 +346,7 @@ export class Setup {
 
   private check(key: CredentialKey, value: string): Promise<string> {
     if (key === "upstashBoxApiKey") return this.checkBoxes(value)
+    if (key === "boxdApiKey") return this.checkBoxd(value)
     if (key === "anthropicApiKey") return this.checkAnthropic(value)
     if (key === "claudeOauthToken") return this.checkClaude({ CLAUDE_CODE_OAUTH_TOKEN: value })
     if (key === "codexAuthJson") return this.checkCodex({ kind: "chatgpt", auth: value })
@@ -384,6 +387,33 @@ export class Setup {
       if (status === 401 || status === 403) throw new Error(`Upstash rejected the key (HTTP ${status}): ${message}`)
       if (status) throw new Error(`Upstash answered HTTP ${status}: ${message}`)
       throw new Error(/didn't answer/.test(message) ? message : `Can't reach Upstash: ${causeOf(err)}`)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** List the account's machines (boxd, docs/boxd.md): free, and it needs the same read access worker boxes do. */
+  private async checkBoxd(apiKey: string): Promise<string> {
+    const list = this.d.listBoxdMachines ?? (async (k: string) => {
+      const boxd = new Boxd({ apiKey: k })
+      try {
+        return (await boxd.machines.list()).map((m) => ({ status: m.status }))
+      } finally {
+        await boxd.close().catch(() => {})
+      }
+    })
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`boxd didn't answer within ${Math.round(this.timeoutMs / 1000)} s.`)), this.timeoutMs)
+    })
+    try {
+      const machines = await Promise.race([list(apiKey), timeout])
+      const live = machines.filter((m) => m?.status !== "destroyed").length
+      return `Works: boxd accepted the key and listed ${live} machine${live === 1 ? "" : "s"} on the account.`
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err)
+      if (/\b401\b|\b403\b|authenticat/i.test(message)) throw new Error(`boxd rejected the key: ${message}`)
+      throw new Error(/didn't answer/.test(message) ? message : `Can't reach boxd: ${message}`)
     } finally {
       clearTimeout(timer)
     }
