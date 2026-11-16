@@ -36,10 +36,10 @@ describe("a Captain's clone of its repo", () => {
   })
 
   it("puts the clone in a Captain's prompt only when it has a repo and file tools", () => {
-    const line = /Code questions: answer them yourself from your read-only clone of the repo at \/d\/captains\/prj_demo01\/repo, not with a task\. Call repo_clone first/
+    const line = /Code questions: answer them yourself from your read-only clone at \/d\/captains\/prj_demo01\/repo, not with a task: call repo_clone first/
     const withClone = captainPrompt(project("acme/demo"), "Cody", undefined, false, "/d/captains/prj_demo01/repo")
     expect(withClone).toMatch(line)
-    expect(withClone).toContain("create a task only for work that needs running code, builds or edits")
+    expect(withClone).toContain("You can't edit, commit, push or run anything, so create a task only for work that needs that.")
     // Codex (no file tools) and projects with no repo don't get it.
     expect(captainPrompt(project("acme/demo"), "Cody")).not.toMatch(/Code questions/)
     expect(captainPrompt(project(null), "Cody", undefined, false, "/d/captains/prj_demo01/repo")).not.toMatch(/Code questions/)

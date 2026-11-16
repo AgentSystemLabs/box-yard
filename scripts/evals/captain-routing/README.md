@@ -46,8 +46,10 @@ npx tsx scripts/evals/captain-routing/judge.ts scripts/evals/captain-routing/res
 npx tsx scripts/evals/captain-routing/report.ts
 ```
 
-Other options: `--cases id,id`, `--category fan-out`, `--model`, `--budget` (this run's own cap) and `--keep` (keep
-the scratch data folder). Ctrl-C finishes the case under way, then stops every agent and cleans up. Killing the
+Other options: `--cases id,id`, `--category fan-out`, `--model`, `--budget` (this run's own cap), `--keep` (keep
+the scratch data folder) and `--label pruned-low` (a variant that differs by more than effort, such as a changed system
+prompt: the report groups runs by label, or else by effort, and `report.ts --reference low` picks the group the paired
+differences compare against). Ctrl-C finishes the case under way, then stops every agent and cleans up. Killing the
 process outright would leave the fake agents running.
 
 `results/` is git-ignored: the runs hold whole transcripts.
