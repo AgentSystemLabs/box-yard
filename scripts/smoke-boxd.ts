@@ -1,23 +1,24 @@
 /**
  * Smoke test the boxd provider against the real API, using BOXD_API_KEY from the env or .env
  * (docs/boxd.md). Spends money: one 1 vCPU machine (about $0.047/hr) for a few minutes, deleted
- * at the end. Machines are named byard-smoke-<n> so earlier leftovers can be swept.
+ * at the end. Machines carry the `smoke` label (and the byard- name prefix), so earlier leftovers
+ * can be swept and a live install's leftover sweep never touches them.
  *
  *   npx tsx scripts/smoke-boxd.ts          # start a machine, check everything, delete it
  *   npx tsx scripts/smoke-boxd.ts --keep   # leave the machine up and print its id
  *
  * Checks: the key lists machines, a machine of the yard's small size starts ready with node, git,
- * Claude Code and Codex already installed, commands run in a login shell, file write/read, streamed
- * output with stderr apart, a command longer than two minutes, a detached process outliving the
- * command that started it, a pause/wake round trip, a snapshot a new machine restores from, a server
- * reachable on the port's proxy URL, and the delete.
+ * Claude Code and Codex already installed, commands run in a plain shell with the tools on PATH,
+ * file write/read, streamed output with stderr apart, a command longer than two minutes, a detached
+ * process outliving the command that started it, a pause/wake round trip, a snapshot a new machine
+ * restores from, a server reachable on the port's proxy URL, and the delete.
  */
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { config } from "../server/config.js"
-import { BoxdProvider } from "../server/providers/boxd.js"
+import { BoxdProvider, boxdMachineId } from "../server/providers/boxd.js"
 import { Boxd } from "@boxd-sh/sdk"
 
 const keep = process.argv.includes("--keep")
@@ -45,20 +46,20 @@ async function sh(cmd: string) {
 }
 
 const snapName = `byard-smoke-${randomUUID().slice(0, 8)}`
-const name = `byard-smoke-${randomUUID().slice(0, 8)}`
 let box = ""
 
 try {
   box = await p.create({ labels: ["smoke"] })
+  const machine = boxdMachineId(box)
   await check("key", async () => {
     const live = (await raw.machines.list()).filter((m) => m.name.startsWith("byard-") && m.status !== "destroyed")
     return `lists machines (${live.length} byard one${live.length === 1 ? "" : "s"} on the account)`
   })
   await check("machine starts ready", async () => {
-    await raw.machines.waitUntilReady(box)
-    return `${box} at 1 vCPU / 4 GiB with node, git, claude and codex built in`
+    await raw.machines.waitUntilReady(machine)
+    return `${machine} at 1 vCPU / 4 GiB, isolated, with node, git, claude and codex built in`
   })
-  await check("tools in a login shell", () => sh("node --version && git --version && claude --version | head -1 && codex --version | head -1"))
+  await check("tools on the PATH", () => sh("node --version && git --version && claude --version | head -1 && codex --version | head -1"))
   await check("file write/read", async () => {
     await p.writeFile(box, "/home/boxd/yard/smoke/x.txt", "hello")
     const back = (await p.readFile(box, "/home/boxd/yard/smoke/x.txt")).toString("utf8")
@@ -107,7 +108,7 @@ try {
       }
       return (await p.health(box)) === want
     }
-    await raw.machines.pause(box)
+    await raw.machines.pause(machine)
     if (!(await until("paused"))) throw new Error(`health after pause: ${await p.health(box)}`)
     await p.wake(box)
     if (!(await until("running"))) throw new Error(`health after wake: ${await p.health(box)}`)
@@ -140,14 +141,14 @@ try {
   })
 } finally {
   if (keep) {
-    console.log(`\nKept the machine: ${box}. Delete it in the boxd console or with: boxd machine remove ${name}`)
+    console.log(`\nKept the machine: ${box}. Delete it in the boxd console or with: boxd machine remove ${boxdMachineId(box)}`)
   } else {
     if (box) await p.destroy(box).catch((e) => console.log(`✗ delete: ${(e as Error).message}. Delete it in the boxd console.`))
     if (snapName) await p.deleteSnapshot(snapName).catch(() => {})
-    // Any other smoke machine (a start that failed half way) goes too.
-    for (const m of await raw.machines.list().catch(() => [])) {
-      if (m.name.startsWith("byard-smoke-") && m.status !== "destroyed") {
-        await p.destroy(m.id).catch((e) => console.log(`✗ delete ${m.id}: ${(e as Error).message}`))
+    // Any other smoke machine (a start that failed half way) goes too: the ones the smoke label marks.
+    for (const m of await raw.machines.list({ labels: ["smoke"] }).catch(() => [])) {
+      if (m.status !== "destroyed") {
+        await raw.machines.delete(m.id).catch((e) => console.log(`✗ delete ${m.id}: ${(e as Error).message}`))
       }
     }
   }
