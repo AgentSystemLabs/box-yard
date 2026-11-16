@@ -1,7 +1,7 @@
-import { Boxd } from "@boxd-sh/sdk"
 import fs from "node:fs"
 import path from "node:path"
 import { randomUUID } from "node:crypto"
+import type { Boxd } from "@boxd-sh/sdk"
 import type { Config } from "../config.js"
 import type { WorkerSize } from "../../shared/types.js"
 import { errorMessage, retry } from "../util/retry.js"
@@ -12,16 +12,49 @@ import { claudeCliFloorScript } from "../../shared/claudeCli.js"
 
 /**
  * Worker boxes that are boxd machines (https://boxd.sh, docs/boxd.md): persistent hardware-isolated Linux
- * VMs with node, git, claude and codex already installed. Machine names start with byard- so listIds can
- * tell ours from the org's other machines; box ids are boxd's machine ids (UUIDs).
+ * VMs with node, git, Claude Code and codex already installed. Every machine is made isolated (no metadata
+ * endpoint, no in-VM boxd CLI, no place on the org network), so a box never holds anything that could reach
+ * the boxd account its siblings live on. Box ids carry the `boxd-` prefix on the machine id (like
+ * LocalProvider's local-), so providers/auto.ts routes each box to the provider that made it by id alone,
+ * whatever keys are set now. The SDK loads lazily, on the first call that needs a client: a Box Yard that
+ * never uses boxd never loads its gRPC stack.
  */
 
 const ROOT = "/home/boxd/yard"
 const NAME_PREFIX = "byard-"
-/** boxd snapshots are addressed by name org-wide: the snapshot "id" this provider hands out is that name. */
+/** boxd snapshots are addressed by name org-wide: the snapshot "id" this provider hands out is `boxd-<name>`. */
 const SNAPSHOT_WAIT_MS = 10 * 60_000
 
-/** Box Yard's worker sizes onto boxd's (1 vCPU/4 GiB, 2 vCPU/8 GiB, 4 vCPU/16 GiB). */
+/** The boxd API this provider uses: the SDK's own class, as a type only so importing this module loads nothing. */
+export type BoxdClient = Pick<Boxd, "machines" | "snapshots" | "close">
+
+export const BOXD_BOX_PREFIX = "boxd-"
+/** A boxd box id: `boxd-<machine id>`, like LocalProvider's `local-<id>` folder ids. */
+export const isBoxdBox = (id: string) => id.startsWith(BOXD_BOX_PREFIX)
+/** The machine id (or snapshot name) inside a boxd id; a bare one passes through, for callers that hold machine ids. */
+export const boxdMachineId = (id: string) => (isBoxdBox(id) ? id.slice(BOXD_BOX_PREFIX.length) : id)
+
+/**
+ * The string labels a box carries at Upstash ("boxyard", "by-<install>", "p-<project>" — tasks.ts boxLabels)
+ * become boxd's key=value labels: the part before the first dash is the key, the whole label the value
+ * ("by-a1b2" → { by: "by-a1b2" }). listIds(label) asks for the same pair, so the leftover sweep only ever
+ * sees machines that carry this install's label — never another Box Yard's on the same account.
+ */
+export function boxdLabelPairs(labels: string[]): Record<string, string> {
+  const pairs: Record<string, string> = {}
+  for (const label of labels) {
+    const key = (label.split("-")[0] ?? "").replace(/[^a-z0-9._/-]/g, "")
+    // Keys are 1-63 chars of a-z 0-9 . _ / - and must start and end with a letter or digit; values max 256, no control chars.
+    if (/^[a-z0-9](?:[a-z0-9._/-]{0,61}[a-z0-9])?$/.test(key)) pairs[key] = label.slice(0, 256).replace(/[^\x20-\x7e]/g, "")
+  }
+  return pairs
+}
+
+/**
+ * Box Yard's worker sizes onto boxd's size classes: 1 vCPU/4 GiB, 2 vCPU/8 GiB, 4 vCPU/16 GiB, every machine
+ * a 100 GB disk. Not BOX_SIZE_SPECS: those are Upstash's sizes (a small box there is 2 vCPU); this is this
+ * provider's own translation of the same three worker sizes.
+ */
 const SIZES: Record<WorkerSize, { vcpu: number; memory: string }> = {
   small: { vcpu: 1, memory: "4G" },
   medium: { vcpu: 2, memory: "8G" },
@@ -59,25 +92,43 @@ export class BoxdProvider implements BoxProvider {
   /** Each boxd machine is its own VM with its own kernel, so its cgroup CPU counter is its own. */
   readonly ownCgroup = true
   /** One client per key: a new key (Settings, env) drops the old connection. */
-  private client: { key: string; boxd: Boxd } | null = null
+  private client: { key: string; boxd: BoxdClient } | null = null
+  private connecting: { key: string; client: Promise<BoxdClient> } | null = null
 
-  /** `creds` reads the boxd API key on each use (Settings › Credentials, env wins); without it, the env value at startup. */
+  /**
+   * `creds` reads the boxd API key on each use (Settings › Credentials, env wins); without it, the env value
+   * at startup. `makeClient` stands in for the SDK in tests; the default loads @boxd-sh/sdk lazily.
+   */
   constructor(
     private readonly c: Config,
     private readonly creds?: Pick<CredentialStore, "get">,
+    private readonly makeClient: (apiKey: string) => Promise<BoxdClient> = async (apiKey) =>
+      new (await import("@boxd-sh/sdk")).Boxd({ apiKey }),
   ) {}
 
   private get apiKey() {
     return this.creds ? this.creds.get("boxdApiKey") : this.c.boxdApiKey
   }
 
-  private api(): Boxd {
+  /** The client for the key in effect, made once per key; concurrent callers share one connect, a failed one is retried. */
+  private async api(): Promise<BoxdClient> {
     const key = this.apiKey
-    if (this.client?.key !== key) {
-      this.client?.boxd.close().catch(() => {})
-      this.client = { key, boxd: new Boxd({ apiKey: key }) }
+    if (this.client?.key === key) return this.client.boxd
+    if (this.connecting?.key !== key) {
+      const old = this.client
+      this.client = null
+      const client = this.makeClient(key)
+      this.connecting = { key, client }
+      void old?.boxd.close().catch(() => {})
+      // A failed connect isn't kept: the next call that needs this key tries again.
+      client.catch(() => {
+        if (this.connecting?.client === client) this.connecting = null
+      })
     }
-    return this.client.boxd
+    const boxd = await this.connecting!.client
+    // The key may have changed while connecting: never clobber the newer client with this one.
+    if (this.apiKey === key && this.client?.key !== key) this.client = { key, boxd }
+    return this.client?.key === key ? this.client.boxd : boxd
   }
 
   root() {
@@ -85,36 +136,42 @@ export class BoxdProvider implements BoxProvider {
   }
 
   snapshotDirs() {
-    // boxd machines ship tools in ~/.local/bin, which login shells put on PATH.
+    // boxd machines ship tools in ~/.local/bin, which the shell() PATH export below puts on PATH.
     return { home: "/home/boxd", tmp: "/tmp" }
   }
 
   async create(opts: { labels: string[]; size?: WorkerSize; snapshotId?: string }): Promise<string> {
     // Names are unique across all of boxd, so ours are generated; a collision is a retried create.
     const name = `${NAME_PREFIX}${randomUUID().slice(0, 8)}`
-    const boxd = this.api()
-    // A machine from a snapshot resumes as captured (its size, env and image are the snapshot's), and create
-    // refuses env/sizing beside it; a cold machine gets the yard's size and the usual sandbox env.
+    const boxd = await this.api()
+    const labels = boxdLabelPairs(opts.labels)
+    // A machine from a snapshot resumes as captured (its size, env and image are the snapshot's), with the
+    // labels merged over the ones it carries; a cold machine gets the yard's size and the usual sandbox env.
+    // Both are isolated, and a restore re-isolates even a snapshot that wasn't.
     const machine = opts.snapshotId
-      ? await boxd.machines.create({ name, fromSnapshot: opts.snapshotId })
+      ? await boxd.machines.create({ name, fromSnapshot: boxdMachineId(opts.snapshotId), isolated: true, labels })
       : await boxd.machines.create({
           name,
+          isolated: true,
+          labels,
           env: { DISABLE_AUTOUPDATER: "1", IS_SANDBOX: "1" },
           config: SIZES[opts.size ?? this.c.workerSize] ?? SIZES.medium,
         })
+    const boxId = `${BOXD_BOX_PREFIX}${machine.id}`
     try {
       await boxd.machines.waitUntilReady(machine.id)
-      const setup = await this.exec(machine.id, boxdWorkerSetupScript())
+      const setup = await this.exec(boxId, boxdWorkerSetupScript())
       if (setup.exitCode !== 0) throw new Error(`worker setup failed: ${(setup.stderr || setup.stdout).slice(-1500)}`)
     } catch (err) {
-      await this.destroy(machine.id).catch(() => {})
+      await this.destroy(boxId).catch(() => {})
       throw err
     }
-    return machine.id
+    return boxId
   }
 
   private async machine(boxId: string) {
-    return retry(() => this.api().machines.get(boxId))
+    const id = boxdMachineId(boxId)
+    return retry(() => this.api().then((boxd) => boxd.machines.get(id)))
   }
 
   async health(boxId: string): Promise<BoxHealth> {
@@ -134,17 +191,28 @@ export class BoxdProvider implements BoxProvider {
 
   async wake(boxId: string) {
     const health = await this.health(boxId)
-    if (health === "paused") await retry(() => this.api().machines.wake(boxId))
+    const id = boxdMachineId(boxId)
+    if (health === "paused") await retry(() => this.api().then((boxd) => boxd.machines.wake(id)))
+  }
+
+  /**
+   * `bash -c` with the machine's preinstalled tools (~/.local/bin) on PATH, like Upstash's plain shells: no
+   * profile runs, so no stray output lands in what Box Yard parses.
+   */
+  private shell(command: string): string[] {
+    return ["bash", "-c", `PATH="$HOME/.local/bin:$PATH"; ${command}`]
   }
 
   async exec(boxId: string, command: string): Promise<ExecResult> {
-    // A login shell, so ~/.local/bin (claude, codex) is on PATH like an SSH session.
-    const r = await retry(() => this.api().machines.exec(boxId, { command: ["bash", "-lc", command] }))
+    const id = boxdMachineId(boxId)
+    const argv = this.shell(command)
+    const r = await retry(() => this.api().then((boxd) => boxd.machines.exec(id, { command: argv })))
     return { exitCode: r.exitCode ?? (r.success ? 0 : 1), stdout: r.stdout ?? "", stderr: r.stderr ?? "" }
   }
 
   async execStream(boxId: string, command: string, onOutput: (chunk: string) => void): Promise<{ exitCode: number }> {
-    const stream = this.api().machines.streamExec(boxId, { command: ["bash", "-lc", command] })
+    const boxd = await this.api()
+    const stream = boxd.machines.streamExec(boxdMachineId(boxId), { command: this.shell(command) })
     const decode = (chunk: unknown) => (typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString("utf8"))
     const pumps = [stream, (stream as { stderr?: AsyncIterable<unknown> }).stderr].filter(
       (s): s is AsyncIterable<unknown> => Boolean(s),
@@ -159,7 +227,8 @@ export class BoxdProvider implements BoxProvider {
 
   async hold(boxId: string, command: string, signal: AbortSignal): Promise<void> {
     try {
-      const stream = this.api().machines.streamExec(boxId, { command: ["bash", "-lc", command] })
+      const boxd = await this.api()
+      const stream = boxd.machines.streamExec(boxdMachineId(boxId), { command: this.shell(command) })
       const onAbort = () => stream.close()
       signal.addEventListener("abort", onAbort, { once: true })
       try {
@@ -173,24 +242,28 @@ export class BoxdProvider implements BoxProvider {
   }
 
   async writeFile(boxId: string, filePath: string, content: string | Buffer) {
+    const id = boxdMachineId(boxId)
     await retry(() => this.exec(boxId, `mkdir -p ${q(path.posix.dirname(filePath))}`))
     const data = Buffer.isBuffer(content) ? new Uint8Array(content) : content
-    await retry(() => this.api().machines.files.upload(boxId, filePath, data))
+    await retry(() => this.api().then((boxd) => boxd.machines.files.upload(id, filePath, data)))
   }
 
   async readFile(boxId: string, filePath: string): Promise<Buffer> {
-    const bytes = await retry(() => this.api().machines.files.download(boxId, filePath))
+    const id = boxdMachineId(boxId)
+    const bytes = await retry(() => this.api().then((boxd) => boxd.machines.files.download(id, filePath)))
     return Buffer.from(bytes)
   }
 
   async uploadFile(boxId: string, localPath: string, destination: string) {
     if (!fs.existsSync(localPath)) throw new Error(`upload: ${localPath} does not exist`)
+    const id = boxdMachineId(boxId)
     await retry(() => this.exec(boxId, `mkdir -p ${q(path.posix.dirname(destination))}`))
-    await retry(() => this.api().machines.files.upload(boxId, destination, { fromPath: localPath }))
+    await retry(() => this.api().then((boxd) => boxd.machines.files.upload(id, destination, { fromPath: localPath })))
   }
 
   async publicUrl(boxId: string, port: number): Promise<string> {
-    const boxd = this.api()
+    const id = boxdMachineId(boxId)
+    const boxd = await this.api()
     // A preview URL must be a subdomain proxy: the machine's main address answers non-browser clients (Box
     // Yard's own checks, uptime probes) with a bot-protection challenge page, and subdomain proxies are never
     // checked (docs.boxd.sh/guides/bot-protection.md). A port can be asked for twice (re-shared, or a turn
@@ -199,29 +272,29 @@ export class BoxdProvider implements BoxProvider {
       const domain = routes.find((r) => r.port === port && !r.isDefault)?.domain
       return domain ? (domain.startsWith("http") ? domain : `https://${domain}`) : null
     }
-    const existing = sub(await retry(() => boxd.machines.proxies.list(boxId)))
+    const existing = sub(await retry(() => boxd.machines.proxies.list(id)))
     if (existing) return existing
     // The proxy's name is its subdomain label, and a proxy is pinned to its port: p<port>. The subdomain's
     // certificate takes a few seconds to come up; Box Yard only hands the URL out, and the first browser
     // or probe that follows it arrives later.
-    await boxd.machines.proxies.create(boxId, `p${port}`, port)
-    const made = sub(await retry(() => boxd.machines.proxies.list(boxId)))
+    await boxd.machines.proxies.create(id, `p${port}`, port)
+    const made = sub(await retry(() => boxd.machines.proxies.list(id)))
     if (!made) throw new Error(`boxd made no proxy for port ${port}`)
     return made
   }
 
   async snapshot(boxId: string, name: string): Promise<BoxSnapshotInfo> {
     // Not retried: a second call would make a second snapshot.
-    const boxd = this.api()
-    await boxd.snapshots.create(boxId, name)
-    return { id: name, bytes: await this.snapshotBytes(name) }
+    const boxd = await this.api()
+    await boxd.snapshots.create(boxdMachineId(boxId), name)
+    return { id: `${BOXD_BOX_PREFIX}${name}`, bytes: await this.snapshotBytes(name) }
   }
 
   /** Wait for the capture to finish, then read its size; a boxd snapshot of a young disk is quick. */
   private async snapshotBytes(name: string): Promise<number | null> {
     const until = Date.now() + SNAPSHOT_WAIT_MS
     while (Date.now() < until) {
-      const snap = await this.api().snapshots.get(name).catch(() => undefined)
+      const snap = await this.api().then((boxd) => boxd.snapshots.get(name)).catch(() => undefined)
       if (!snap) return null
       if (snap.status === "failed") throw new Error(`boxd snapshot ${name} failed`)
       if (snap.status === "ready") return snap.sizeBytes ?? null
@@ -233,25 +306,29 @@ export class BoxdProvider implements BoxProvider {
   async deleteSnapshot(snapshotId: string): Promise<void> {
     if (!snapshotId.trim()) throw new Error("deleteSnapshot needs a snapshot id")
     try {
-      await this.api().snapshots.delete(snapshotId)
+      await retry(() => this.api().then((boxd) => boxd.snapshots.delete(boxdMachineId(snapshotId))))
     } catch (err) {
       // Already gone (deleted in the console, or by an earlier try): that's what was asked for.
       if (!boxdIsGone(err)) throw err
     }
   }
 
-  private async ours(): Promise<{ id: string; status: string }[]> {
-    // boxd has no box labels on plain machines, so ours are the ones our prefix names; the label arg is ignored.
-    const all = await retry(() => this.api().machines.list())
-    return all.filter((m) => m.name.startsWith(NAME_PREFIX) && m.status !== "destroyed").map((m) => ({ id: m.id, status: m.status }))
+  /** The machines this Box Yard made, by name prefix: any install of it on the account, labeled or not. */
+  private async ours(): Promise<{ id: string; name: string; status: string }[]> {
+    const all = await retry(() => this.api().then((boxd) => boxd.machines.list()))
+    return all.filter((m) => m.name.startsWith(NAME_PREFIX) && m.status !== "destroyed")
   }
 
-  async listIds(_label: string): Promise<string[]> {
-    return (await this.ours()).map((m) => m.id)
+  /** Machines carrying this install's label ("by-…"), as box ids: the leftover sweep's list, and no other install's. */
+  async listIds(label: string): Promise<string[]> {
+    const pairs = boxdLabelPairs([label])
+    if (!Object.keys(pairs).length) return []
+    const machines = await retry(() => this.api().then((boxd) => boxd.machines.list({ labels: pairs })))
+    return machines.filter((m) => m.status !== "destroyed").map((m) => `${BOXD_BOX_PREFIX}${m.id}`)
   }
 
   async liveIds(): Promise<string[]> {
-    return (await this.ours()).map((m) => m.id)
+    return (await this.ours()).map((m) => `${BOXD_BOX_PREFIX}${m.id}`)
   }
 
   private async diskBytes(boxId: string): Promise<number | null> {
@@ -271,12 +348,14 @@ export class BoxdProvider implements BoxProvider {
 
   /** Change a machine's size in place, keeping its disk; boxd reboots it to apply. */
   async resize(boxId: string, size: WorkerSize): Promise<void> {
-    await retry(() => this.api().machines.resize(boxId, { vcpu: (SIZES[size] ?? SIZES.medium).vcpu }))
+    const id = boxdMachineId(boxId)
+    await retry(() => this.api().then((boxd) => boxd.machines.resize(id, { vcpu: (SIZES[size] ?? SIZES.medium).vcpu })))
   }
 
   async destroy(boxId: string) {
+    const id = boxdMachineId(boxId)
     try {
-      await retry(() => this.api().machines.delete(boxId))
+      await retry(() => this.api().then((boxd) => boxd.machines.delete(id)))
     } catch (err) {
       // Already gone (deleted in the console, or by an earlier try): that's what was asked for.
       if (!boxdIsGone(err)) throw err

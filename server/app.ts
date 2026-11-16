@@ -378,22 +378,32 @@ function parse<T extends z.ZodTypeAny>(schema: T, body: unknown): z.infer<T> {
 }
 
 /**
- * BOX_PROVIDER, or UPSTASH_BOX_API_KEY in the env, fixes where boxes are made, as before. With neither (a first run),
- * boxes are folders on this machine until an Upstash key is saved in Settings › Box providers › Upstash boxes, then Upstash boxes,
- * with no restart. Without `credentials` (scripts), only the env counts.
+ * BOX_PROVIDER, or UPSTASH_BOX_API_KEY in the env, fixes where boxes are made, as before. With neither (a first
+ * run), boxes are folders on this machine until an Upstash or boxd key is saved in Settings › Box providers, then
+ * that cloud's boxes — Upstash's when both are saved — with no restart: the choice is asked for on every call,
+ * not made once at boot. Without `credentials` (scripts), only the env counts. Either way a box keeps going to
+ * the provider that made it: box ids carry their provider's mark (local- folders, boxd- machines), and every
+ * other id is an Upstash box.
  */
 export function makeProvider(c: Config, credentials?: CredentialStore): BoxProvider {
   if (c.provider === "upstash") return new UpstashProvider(c, credentials)
   if (c.provider === "boxd") return new BoxdProvider(c, credentials)
   const local = new LocalProvider(path.join(c.dataDir, "local-boxes"), c.claudeBin)
   if (!credentials || c.mock || c.boxProvider === "local") return local
-  // Auto: cloud boxes once a key is saved in Settings, with no restart. Upstash first, so saving a boxd key never
-  // moves an Upstash install's new boxes; a boxd key picks the boxd provider only with no Upstash key. Either way
-  // boxes keep going to the provider that made them while it is the cloud one.
-  if (credentials.get("upstashBoxApiKey")) {
-    return new AutoProvider(local, new UpstashProvider(c, credentials), () => Boolean(credentials.get("upstashBoxApiKey")))
-  }
-  return new AutoProvider(local, new BoxdProvider(c, credentials), () => Boolean(credentials.get("boxdApiKey")))
+  // Auto: cloud boxes once a key is saved in Settings, with no restart. Both cloud providers stand ready
+  // (neither connects until one of its boxes is made), and where new boxes come from is asked for on each
+  // call, Upstash first, so saving a boxd key never moves an Upstash install's new boxes — and saving an
+  // Upstash key on a boxd install moves it right back.
+  const upstash = new UpstashProvider(c, credentials)
+  const boxd = new BoxdProvider(c, credentials)
+  const key = (k: "upstashBoxApiKey" | "boxdApiKey") => Boolean(credentials.get(k))
+  return new AutoProvider(
+    local,
+    upstash,
+    boxd,
+    () => (key("upstashBoxApiKey") ? upstash : key("boxdApiKey") ? boxd : local),
+    () => [key("upstashBoxApiKey") ? upstash : null, key("boxdApiKey") ? boxd : null].flatMap((p) => (p ? [p] : [])),
+  )
 }
 
 /** The local runner: agents of "Runs on: This computer" projects, in `<localDir>/<task_id>` (BOXYARD_LOCAL_DIR). */
