@@ -3411,9 +3411,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     {
       description:
         "Resize a worker box up or down (small 2 vCPU/4 GB RAM/10 GB disk, medium 4/8/20, large 8/16/30; pool_status shows each box's size and disk). " +
-        (tasks?.resizeMode() === "in-place"
-          ? "The provider resizes the box in place, keeping its disk. "
-          : "Upstash can't change a box's size in place, so Box Yard makes a new box of that size, archives every workspace, moves the tasks and projects to it and deletes the old box; workspaces restore from their archive on each task's next turn. ") +
+        "The box's provider resizes it in place when it can (boxd machines), else Box Yard makes a new box of that size, archives every workspace, moves the tasks and projects to it and deletes the old box; workspaces restore from their archive on each task's next turn. " +
         "Refused while agents are running on the box (wait until it's idle; never stop agents for this), for a scale-down whose disk in use wouldn't fit, and when Cody's Settings don't allow it or the size is above the maximum set there. " +
         "Runs in the background; Cody, the Coordinator and the box's Captains get a notice with your reason when it finishes." +
         (scopeId ? " As a Captain you can only resize a box your project's tasks live on." : ""),
