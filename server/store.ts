@@ -70,6 +70,7 @@ import type {
   SideThreadMessage,
   SideThreadRole,
   Task,
+  TaskModel,
   WaitFor,
   TaskCompactionRecord,
   TaskMessage,
@@ -299,6 +300,8 @@ export interface TaskTurnRow {
   login_id: string | null
   /** The box it ran on; null for turns from before it was recorded. */
   box_id: string | null
+  /** The model its CLI said it runs on (an alias's real model, a harness's default); null until it says. */
+  ran_model: string | null
 }
 
 interface ScheduleRunRow {
@@ -864,7 +867,10 @@ interface TaskLookups {
   /** Its card line when it has no summary (shared/activity.ts). */
   activity(taskId: string): string | null
   runner(projectId: string): Runner
+  /** Its latest turn's model and effort (Task.turnModel); null before its first turn. */
+  lastTurn(taskId: string): LastTurn | null
 }
+type LastTurn = Pick<TaskTurnRow, "model" | "effort" | "ran_model">
 const NO_PENDING = { n: 0, v: 0, d: 0, t: 0 }
 const NO_SPEND = { costUsd: 0, totalTokens: 0 }
 /** A task's latest assistant and tool lines, newest first: the first that makes a card line is its activity. */
@@ -1558,9 +1564,17 @@ export class Store {
           .all(arg) as ({ task_id: string } & typeof NO_SPEND)[]
       ).map(({ task_id, ...s }) => [task_id, s]),
     )
+    // The latest turn's row (SQLite takes bare columns from the MAX row), from the task_turns_task index. `*`, not a
+    // column list, so a store on a database migrated part way (a test seeding old rows) reads it before ran_model exists.
+    const lastTurn = new Map(
+      (
+        this.db.prepare(`SELECT *, MAX(started_at) FROM task_turns WHERE ${scope} GROUP BY task_id`).all(arg) as ({ task_id: string } & Partial<LastTurn>)[]
+      ).map(({ task_id, model, effort, ran_model }) => [task_id, { model: model ?? null, effort: effort ?? null, ran_model: ran_model ?? null }]),
+    )
     let activity: ReturnType<DB["prepare"]> | undefined
     const runners = new Map<string, Runner>()
     return {
+      lastTurn: (id) => lastTurn.get(id) ?? null,
       pending: (id) => pending.get(id) ?? NO_PENDING,
       spend: (id) => spend.get(id) ?? NO_SPEND,
       activity: (id) => activityOf((activity ??= this.db.prepare(ACTIVITY_SQL)).all(id)),
@@ -1613,6 +1627,7 @@ export class Store {
       agentCli: taskAgentCli(row),
       model: row.model ?? null,
       effort: row.effort ?? null,
+      turnModel: this.turnModelOf(row, lookups.lastTurn(row.id)),
       claudeCostUsd: usage.costUsd,
       claudeTokens: usage.totalTokens,
       routingRule: row.routing_rule ?? null,
@@ -1637,6 +1652,35 @@ export class Store {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }
+  }
+
+  /**
+   * Task.turnModel: its latest turn's model as the CLI named it, else as the turn asked for it; before its first turn,
+   * what that will ask for (nextTurnModel, from the task's pins, routing and Settings), else its own pins.
+   */
+  private turnModelOf(row: TaskRow, last: LastTurn | null): TaskModel | null {
+    if (last) {
+      const asked = last.model || null
+      return { model: last.ran_model || asked, effort: last.effort ?? null, from: last.ran_model ? "ran" : "asked", asked }
+    }
+    let next: Pick<TaskModel, "model" | "effort"> | null = null
+    try {
+      // A done task that never ran keeps its pins: it starts no turn, and every list read would resolve it again.
+      if (row.status !== "done") next = this.nextTurnModel?.(row) ?? null
+    } catch {
+      // A model the harness refuses: the turn will fail with it; the task's own pins say what it asked for.
+    }
+    const model = next ? next.model : (row.model ?? null)
+    const effort = next ? next.effort : (row.effort ?? null)
+    return model || effort ? { model, effort, from: "next", asked: model } : null
+  }
+
+  /** What a task's next turn asks for (TaskManager.agentSettings), set by TaskManager; null leaves it to the task's pins. */
+  nextTurnModel: ((row: TaskRow) => Pick<TaskModel, "model" | "effort"> | null) | null = null
+
+  /** A turn's CLI said which model it runs on (the runner's "model" event): Task.turnModel shows it. False for another task's turn. */
+  setTurnRanModel(taskId: string, turnId: string, model: string): boolean {
+    return this.db.prepare("UPDATE task_turns SET ran_model = ? WHERE id = ? AND task_id = ? AND ran_model IS NOT ?").run(model, turnId, taskId, model).changes > 0
   }
 
   /** A box as Task.placement shows it: its kind, and for worker boxes who made it and its size. */

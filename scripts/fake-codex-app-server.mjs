@@ -14,7 +14,8 @@ async function receive(msg) {
   if (msg.method === "initialize") return answer({ userAgent: "fake-codex" })
   if (msg.method === "initialized") return
   if (msg.method === "thread/start" || msg.method === "thread/resume") {
-    options = p; thread = p.threadId ?? randomUUID(); return answer({ thread: { id: thread, turns: [] } })
+    // Like Codex: the answer names the thread's model, its own default when the request named none.
+    options = p; thread = p.threadId ?? randomUUID(); return answer({ thread: { id: thread, turns: [] }, model: p.model || "gpt-fake" })
   }
   if (msg.method === "turn/start") {
     turn = randomUUID(); items = []

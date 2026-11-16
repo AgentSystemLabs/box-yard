@@ -810,6 +810,13 @@ export class TaskManager {
     this.c = deps.config
     this.cursorModels = new CursorModels({ bin: this.c.cursorBin, dataDir: this.c.dataDir, key: () => this.settings.credentials.get("cursorApiKey") })
     this.store = deps.store
+    // Before a task's first turn, its details say what that turn will run on, resolved as the turn will be.
+    this.store.nextTurnModel = (row) => {
+      const project = this.store.getProject(row.project_id)
+      if (!project) return null
+      const { model, effort } = this.agentSettings(row, project)
+      return { model, effort }
+    }
     this.provider = deps.provider
     this.environment = new TaskEnvironment(this.store, this.provider)
     this.hub = deps.hub
@@ -7447,6 +7454,13 @@ export class TaskManager {
         recordLimits(this.store, this.hub, this.turnLogin(row, harness), limitsOf(ev), typeof ev.at === "number" && ev.at > 0 ? ev.at : Date.now())
         return
       }
+      case "model": {
+        // The CLI named the model the turn runs on (box-runner.mjs): an alias's real model, or the harness's default.
+        const model = typeof ev.model === "string" ? ev.model.trim().slice(0, 200) : ""
+        const turnId = typeof ev.turnId === "string" ? ev.turnId : row.current_turn_id
+        if (!model || !turnId || !this.store.setTurnRanModel(taskId, turnId, model)) return
+        return this.emitTask(taskId)
+      }
       case "usage": {
         if (row.compacting || typeof ev.tokens !== "number") return
         this.store.updateTask(taskId, { contextTokens: ev.tokens, ...(typeof ev.window === "number" ? { contextWindow: ev.window } : {}) })
@@ -7819,7 +7833,8 @@ export class TaskManager {
         projectId: row.project_id,
         taskId: row.id,
         sessionId: typeof ev.sessionId === "string" ? ev.sessionId : row.session_id,
-        model: launch?.model ?? row.model ?? null,
+        // The model the CLI said it ran ("opus" runs as claude-opus-5-5), else the one the turn asked for.
+        model: this.store.getTaskTurn(turnId)?.ran_model ?? launch?.model ?? row.model ?? null,
         effort: launch?.effort ?? null,
         trigger: launch?.trigger ?? null,
         resumed: typeof ev.resumed === "boolean" ? ev.resumed : (launch?.resumed ?? false),

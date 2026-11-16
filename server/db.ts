@@ -1324,6 +1324,12 @@ export const MIGRATIONS: string[] = [
   );
   ALTER TABLE tasks ADD COLUMN pr_new_comments INTEGER;
   `,
+  `
+  -- The model a turn's CLI said it runs on (Claude Code's init line, Codex's thread, Cursor's init): the real model
+  -- behind an alias ("opus" → "claude-opus-5-5") or a harness's own default. model stays what the turn asked for.
+  -- NULL until the CLI says, and on every older turn (Task.turnModel then shows what it asked for).
+  ALTER TABLE task_turns ADD COLUMN ran_model TEXT;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

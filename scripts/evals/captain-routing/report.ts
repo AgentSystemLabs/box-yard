@@ -3,6 +3,7 @@
 // intervals, failures with transcript excerpts, latency, tokens, cost and the judge's agreement with a hand check.
 //
 //   npx tsx scripts/evals/captain-routing/report.ts [scripts/evals/captain-routing/results] [--handcheck scripts/evals/captain-routing/handcheck.json]
+//     [--reference low]   the group the paired differences compare against (default: the last effort level)
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -12,6 +13,8 @@ import { grade, type Grade, type RunRecord } from "./grade.js"
 export type Run = RunRecord & { grade: Grade; verbatim?: boolean | null }
 
 const LEVEL_ORDER = ["low", "medium", "high", "xhigh", "max"]
+/** The group a run is reported in: its run.ts --label (a prompt variant, say), or else its effort level. */
+export const groupOf = (r: Pick<RunRecord, "effort" | "label">) => r.label ?? r.effort
 
 // ---------------------------------------------------------------- statistics
 
@@ -247,7 +250,7 @@ export interface LevelStats {
 }
 
 export function levelStats(level: string, runs: Run[]): LevelStats {
-  const mine = runs.filter((r) => r.effort === level)
+  const mine = runs.filter((r) => groupOf(r) === level)
   const ids = [...new Set(mine.map((r) => r.caseId))]
   const byCase = new Map(ids.map((id) => [id, mine.filter((r) => r.caseId === id)]))
   const caseRate = (id: string) => {
@@ -290,15 +293,15 @@ interface HandCheck {
   note?: string
 }
 
-export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks: Block[]; stats: LevelStats[] } {
-  const levels = [...new Set(runs.map((r) => r.effort))].sort((a, b) => LEVEL_ORDER.indexOf(a) - LEVEL_ORDER.indexOf(b))
+export function buildReport(runs: Run[], handcheck: HandCheck[] = [], reference?: string): { blocks: Block[]; stats: LevelStats[] } {
+  const levels = [...new Set(runs.map(groupOf))].sort((a, b) => LEVEL_ORDER.indexOf(a) - LEVEL_ORDER.indexOf(b))
   const stats = levels.map((l) => levelStats(l, runs))
   const blocks: Block[] = []
   const model = "claude-opus-5-5"
   const reps = Math.max(0, ...runs.map((r) => r.rep))
 
   blocks.push({
-    p: `${runs.length} runs: ${CASES.length} cases × up to ${reps} rep${reps === 1 ? "" : "s"} × ${levels.length} effort levels (${levels.join(", ")}), Captain on ${model}. Each run is a fresh Captain session in a scratch Box Yard seeded with the same storefront project. Task agents are fake, so only the Captain's own turn is measured.`,
+    p: `${runs.length} runs: ${CASES.length} cases × up to ${reps} rep${reps === 1 ? "" : "s"} × ${levels.length} ${runs.some((r) => r.label) ? "variants" : "effort levels"} (${levels.join(", ")}), Captain on ${model}. Each run is a fresh Captain session in a scratch Box Yard seeded with the same storefront project. Task agents are fake, so only the Captain's own turn is measured.`,
   })
 
   blocks.push({ h: 1, text: "Summary" })
@@ -336,12 +339,12 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
 
   // Paired: the same cases at each level.
   if (levels.length > 1) {
-    const ref = levels.at(-1)!
+    const ref = reference && levels.includes(reference) ? reference : levels.at(-1)!
     const rows: string[][] = []
-    for (const l of levels.slice(0, -1)) {
-      const ids = [...new Set(runs.map((r) => r.caseId))].filter((id) => runs.some((r) => r.caseId === id && r.effort === l) && runs.some((r) => r.caseId === id && r.effort === ref))
+    for (const l of levels.filter((x) => x !== ref)) {
+      const ids = [...new Set(runs.map((r) => r.caseId))].filter((id) => runs.some((r) => r.caseId === id && groupOf(r) === l) && runs.some((r) => r.caseId === id && groupOf(r) === ref))
       const rate = (lev: string, id: string) => {
-        const rs = runs.filter((r) => r.caseId === id && r.effort === lev)
+        const rs = runs.filter((r) => r.caseId === id && groupOf(r) === lev)
         return rs.filter((r) => r.grade.pass).length / rs.length
       }
       const diff = (s: string[]) => mean(s.map((id) => rate(l, id) - rate(ref, id)))
@@ -380,7 +383,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
           cat,
           String(ids.length),
           ...levels.map((l) => {
-            const rs = runs.filter((r) => r.effort === l && ids.includes(r.caseId))
+            const rs = runs.filter((r) => groupOf(r) === l && ids.includes(r.caseId))
             const k = rs.filter((r) => r.grade.pass).length
             return rs.length ? `${pct(k / rs.length)} (${ci(wilson(k, rs.length))})` : "–"
           }),
@@ -393,7 +396,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
   blocks.push({ h: 1, text: "Failure types" })
   const typeCounts = (l: string) => {
     const counts = new Map<string, number>()
-    for (const r of runs.filter((x) => x.effort === l && !x.grade.pass)) {
+    for (const r of runs.filter((x) => groupOf(x) === l && !x.grade.pass)) {
       const cat = CASES.find((c) => c.id === r.caseId)!.category
       for (const t of new Set(r.grade.checks.filter((c) => !c.pass).map((c) => failureType(c.name, cat)))) counts.set(t, (counts.get(t) ?? 0) + 1)
     }
@@ -418,7 +421,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
         c.id,
         c.category,
         ...levels.map((l) => {
-          const rs = runs.filter((r) => r.effort === l && r.caseId === c.id)
+          const rs = runs.filter((r) => groupOf(r) === l && r.caseId === c.id)
           return rs.length ? `${rs.filter((r) => r.grade.pass).length}/${rs.length}` : "–"
         }),
       ]),
@@ -434,9 +437,9 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
         head: ["Effort", "Judged runs", "Judge pass", "Rubric items kept", "Prompts quoting the request word for word"],
         align: ["l", "r", "r", "r", "r"],
         rows: levels.map((l) => {
-          const js = judged.filter((r) => r.effort === l)
+          const js = judged.filter((r) => groupOf(r) === l)
           const items = js.flatMap((r) => r.judge!.items)
-          const withTasks = runs.filter((r) => r.effort === l && r.created.length && r.message && typeof r.verbatim === "boolean")
+          const withTasks = runs.filter((r) => groupOf(r) === l && r.created.length && r.message && typeof r.verbatim === "boolean")
           return [l, String(js.length), js.length ? pct(js.filter((r) => r.judge!.pass).length / js.length) : "–", items.length ? pct(items.filter((i) => i.pass).length / items.length) : "–", withTasks.length ? `${pct(withTasks.filter((r) => r.verbatim).length / withTasks.length)} of ${withTasks.length}` : "–"]
         }),
       },
@@ -450,7 +453,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
       let runTotal = 0
       const misses: string[] = []
       for (const h of handcheck) {
-        const r = judged.find((x) => x.effort === h.effort && x.caseId === h.caseId && x.rep === h.rep)
+        const r = judged.find((x) => groupOf(x) === h.effort && x.caseId === h.caseId && x.rep === h.rep)
         if (!r) continue
         runTotal++
         if (r.judge!.pass === h.items.every(Boolean)) runAgree++
@@ -471,7 +474,7 @@ export function buildReport(runs: Run[], handcheck: HandCheck[] = []): { blocks:
   // Failures.
   blocks.push({ h: 1, text: "Failures" })
   for (const l of levels) {
-    const failed = runs.filter((r) => r.effort === l && !r.grade.pass).sort((a, b) => CASES.findIndex((c) => c.id === a.caseId) - CASES.findIndex((c) => c.id === b.caseId) || a.rep - b.rep)
+    const failed = runs.filter((r) => groupOf(r) === l && !r.grade.pass).sort((a, b) => CASES.findIndex((c) => c.id === a.caseId) - CASES.findIndex((c) => c.id === b.caseId) || a.rep - b.rep)
     blocks.push({ h: 2, text: `${l}: ${failed.length} failed run${failed.length === 1 ? "" : "s"}` })
     for (const r of failed) blocks.push(failureBlock(r, CASES.find((c) => c.id === r.caseId)!))
   }
@@ -504,14 +507,16 @@ function failureBlock(r: Run, c: Case): Block {
 async function main() {
   const args = process.argv.slice(2)
   const hi = args.indexOf("--handcheck")
+  const ri = args.indexOf("--reference")
   const here = path.dirname(fileURLToPath(import.meta.url))
   const handPath = hi >= 0 ? args[hi + 1]! : path.join(here, "handcheck.json")
-  const dir = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--handcheck") ?? path.join(here, "results")
+  const reference = ri >= 0 ? args[ri + 1] : undefined
+  const dir = args.find((a, i) => !a.startsWith("--") && args[i - 1] !== "--handcheck" && args[i - 1] !== "--reference") ?? path.join(here, "results")
   const runs = loadRuns(dir)
   if (!runs.length) throw new Error(`No runs in ${dir}`)
   const handcheck = fs.existsSync(handPath) ? (JSON.parse(fs.readFileSync(handPath, "utf8")) as HandCheck[]) : []
-  const { blocks, stats } = buildReport(runs, handcheck)
-  const title = "Captain routing eval: Opus 5.5 at low, medium and xhigh effort"
+  const { blocks, stats } = buildReport(runs, handcheck, reference)
+  const title = runs.some((r) => r.label) ? `Captain routing eval: ${stats.map((s) => s.level).join(" vs ")}` : "Captain routing eval: Opus 5.5 at low, medium and xhigh effort"
   fs.writeFileSync(path.join(dir, "report.md"), `# ${title}\n\n${toMarkdown(blocks)}\n`)
   fs.writeFileSync(path.join(dir, "report.html"), toHtml(title, blocks))
   fs.writeFileSync(path.join(dir, "summary.json"), JSON.stringify(stats, null, 2))

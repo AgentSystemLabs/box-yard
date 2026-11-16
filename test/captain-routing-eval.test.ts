@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { CASES, CATEGORIES, type Case } from "../scripts/evals/captain-routing/fixtures.js"
 import { grade, type RunRecord } from "../scripts/evals/captain-routing/grade.js"
 import { judgeInput } from "../scripts/evals/captain-routing/judge.js"
-import { bootstrapCases, failureType, quantile, toMarkdown, wilson } from "../scripts/evals/captain-routing/report.js"
+import { bootstrapCases, buildReport, failureType, groupOf, quantile, toMarkdown, wilson, type Run } from "../scripts/evals/captain-routing/report.js"
 import { RETRO_SUGGESTIONS, SEED_TASKS } from "../scripts/evals/captain-routing/seed.js"
 
 // The Captain routing eval (scripts/evals/captain-routing) runs a real Captain, so it isn't a test. These check what it
@@ -187,5 +187,20 @@ describe("the routing eval's report and judge", () => {
     expect(input).toContain("Fix SPRING10.")
     expect(input).toContain("# Task")
     expect(input).toMatch(/1\. Keeps SPRING10\.\n2\. Adds nothing\./)
+  })
+
+  it("reports a labelled run (a prompt variant) as its own group, compared against --reference", () => {
+    const [a, b] = CASES
+    const r = (c: Case, label: string | undefined, pass: boolean): Run => ({ ...run(c, label ? { label } : {}), grade: { pass, passDeterministic: pass, checks: [] } })
+    expect(groupOf({ effort: "low" })).toBe("low")
+    expect(groupOf({ effort: "low", label: "pruned-low" })).toBe("pruned-low")
+    const runs = [r(a!, undefined, true), r(b!, undefined, true), r(a!, "pruned-low", true), r(b!, "pruned-low", false)]
+    const { blocks, stats } = buildReport(runs, [], "low")
+    expect(stats.map((s) => [s.level, s.passed, s.runs])).toEqual([
+      ["pruned-low", 1, 2],
+      ["low", 2, 2],
+    ])
+    const paired = blocks.find((x) => "table" in x && x.table.head[0] === "Levels") as { table: { rows: string[][] } }
+    expect(paired.table.rows).toEqual([["pruned-low − low", "-50.0 pts", expect.any(String), "1", "0"]])
   })
 })

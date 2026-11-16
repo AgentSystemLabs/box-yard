@@ -180,6 +180,20 @@ describe("model and effort reach the claude CLI", () => {
   })
 })
 
+describe("the model a task's details name", () => {
+  it("is the one the CLI said it ran: an alias as its id, and Settings' pick when the task pins none", { timeout: 60_000 }, async () => {
+    const r = await start()
+    await call(r, "PUT", "/api/agent-settings", { agentModel: "claude-sonnet-5-5", agentEffort: "low" })
+    const p = await call<Project>(r, "POST", "/api/projects", { name: "named", runner: "local" })
+    const [aliased, unpinned] = await Promise.all([
+      call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Aliased", prompt: "write a haiku", model: "best", effort: "xhigh" }),
+      call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Unpinned", prompt: "write a haiku" }),
+    ])
+    expect((await done(r, aliased.id)).turnModel).toEqual({ model: "claude-fable-5-2", effort: "xhigh", from: "ran", asked: "best" })
+    expect((await done(r, unpinned.id)).turnModel).toEqual({ model: "claude-sonnet-5-5", effort: "low", from: "ran", asked: "claude-sonnet-5-5" })
+  })
+})
+
 async function threadReply(r: Running, id: string, projectId?: string) {
   await waitFor(async () => {
     const list = await call<SideThreadMessage[]>(r, "GET", `/api/threads/${id}/messages`)

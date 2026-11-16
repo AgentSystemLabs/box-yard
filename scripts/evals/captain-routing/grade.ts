@@ -33,6 +33,8 @@ export interface Send {
 export interface RunRecord {
   caseId: string
   effort: string
+  /** run.ts --label: names a variant other than the effort level (a different prompt, say); the report groups by it. */
+  label?: string
   rep: number
   /** The message as sent, with {alias.*} filled in. */
   message: string | null

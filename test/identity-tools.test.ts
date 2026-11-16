@@ -247,8 +247,10 @@ describe("identity guidance in the prompts", () => {
     for (const text of [withOwner(ORCHESTRATOR_PROMPT, "Ada"), captainPrompt(r.projects.app, "Ada")]) {
       expect(text).toMatch(/401, 403 or 404[\s\S]*detect_identities/)
       expect(text).toMatch(/in one message[\s\S]*(after Ada says yes|for each one Ada says yes to)/)
-      expect(text).toMatch(/by reference only \(gh:<login>, file:~\/\.ssh\/<key>, agent:<fingerprint>\)/)
+      expect(text).toMatch(/Never ask Ada to paste a token or key/)
       expect(text).not.toMatch(/Cody/)
     }
+    // A Captain gets the reference forms from its identity tools' parameters; the Coordinator's prompt keeps them.
+    expect(withOwner(ORCHESTRATOR_PROMPT, "Ada")).toMatch(/by reference only \(gh:<login>, file:~\/\.ssh\/<key>, agent:<fingerprint>\)/)
   })
 })

@@ -274,7 +274,7 @@ describe("notes budget", () => {
     r.yard.captains.tuning.wakeDebounceMs = 50
     await call(r, "POST", `/api/projects/${a.id}/captain/messages`, { content: "status" })
     await waitFor(() => (fs.existsSync(log) && fs.readFileSync(log, "utf8").includes("You are the Box Yard Captain") && !r.yard.captains.anyBusy()) || null, "the Captain's turn", 30_000)
-    expect(fs.readFileSync(log, "utf8")).toContain("Their budget is 2 notes or about 1k tokens (Max notes in the owner's Settings, or this project's own)")
+    expect(fs.readFileSync(log, "utf8")).toContain("budget: 2 notes or about 1k tokens")
 
     // Cleared, it's Settings' budget again; out of range is refused.
     expect(await call<Project>(r, "PATCH", `/api/projects/${a.id}`, { notesMaxCount: null, notesMaxTokens: null })).toMatchObject({ notesMaxCount: null, notesMaxTokens: null })

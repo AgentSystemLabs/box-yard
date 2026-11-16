@@ -366,7 +366,7 @@ describe("TaskHeader", () => {
     await act(async () => void trigger.click())
     const panel = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.textContent?.includes("Task details"))!
     const text = panel.textContent!
-    for (const s of ["Generic hook system (Coordinator/Captain automations on task events)", "task_head000001", "boxyard/hooks", "pleasing-shepherd-27426", "claude-opus-5-5 · xhigh effort", "big-features", "Multi-file feature", "Active", "Created", "Copy link"]) {
+    for (const s of ["Generic hook system (Coordinator/Captain automations on task events)", "task_head000001", "boxyard/hooks", "pleasing-shepherd-27426", "Opus 5.5 · xhigh effort", "big-features", "Multi-file feature", "Active", "Created", "Copy link"]) {
       expect(text).toContain(s)
     }
     expect(panel.querySelector('button[aria-label="Copy task id"]')).not.toBeNull()
@@ -376,6 +376,23 @@ describe("TaskHeader", () => {
     expect(panel.textContent).not.toContain("58%")
     expect(panel.textContent).not.toContain("Compact queued")
     expect([...panel.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Compact")).toBe(false)
+  })
+
+  it("names the model next to the effort: the one the latest turn ran, an alias by what the CLI ran it as", async () => {
+    const model = async (t: Task) => {
+      render(t)
+      if (!document.querySelector('[data-testid="task-model"]')) await openMenu()
+      return document.querySelector<HTMLElement>('[data-testid="task-model"]')!
+    }
+    // Only the effort was pinned (Cody's report): the model is the one Settings picked for the turn.
+    let el = await model(task({ model: null, effort: "xhigh", turnModel: { model: "claude-opus-5-5", effort: "xhigh", from: "asked", asked: "claude-opus-5-5" } }))
+    expect(el.textContent).toBe("Opus 5.5 · xhigh effort")
+    expect(el.title).toBe("The model its latest turn asked for: claude-opus-5-5")
+    el = await model(task({ model: "best", effort: "xhigh", turnModel: { model: "claude-fable-5-2", effort: "xhigh", from: "ran", asked: "best" } }))
+    expect(el.textContent).toBe("Fable 5.2 · xhigh effort")
+    expect(el.title).toBe("The model its latest turn ran on, as the CLI said: claude-fable-5-2 (it asked for best)")
+    el = await model(task({ model: null, effort: null, turnModel: { model: "claude-sonnet-5-5", effort: "high", from: "next", asked: "claude-sonnet-5-5" } }))
+    expect(el.textContent).toBe("Sonnet 5.5 · high effort")
   })
 
   const header = (t: Task, runner: "box" | "local" | "gpu") =>
