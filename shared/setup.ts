@@ -72,7 +72,7 @@ export interface SetupStatus {
     /** What this install started with: "local" (this computer) on a fresh install unless BOXYARD_DEFAULT_RUNNER says otherwise; null on older installs. */
     installDefault?: SetupRunner | null
   }
-  /** Projects can pick "Upstash box": an Upstash key is set (or boxes are local folders: mock, BOX_PROVIDER=local). */
+  /** Projects can pick "Upstash box" as their runner: a cloud box key is set (Upstash or boxd, docs/boxd.md), or boxes are local folders (mock, BOX_PROVIDER=local). */
   upstash: { available: boolean }
   /** What this computer has for local agents. Null until "This computer" is chosen. */
   local: LocalCheck | null

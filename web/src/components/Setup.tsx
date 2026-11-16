@@ -754,7 +754,7 @@ export function SetupCard({ status, className }: { status: SetupStatus; classNam
           </Step>
         )}
         {choice === "box" && status.boxes.required && (
-          <Step n={++n} done={set("upstashBoxApiKey")} title={CREDENTIAL_INFO.upstashBoxApiKey.label} help={<CredentialHelp k="upstashBoxApiKey" />}>
+          <Step n={++n} done={set("upstashBoxApiKey") || set("boxdApiKey")} title={CREDENTIAL_INFO.upstashBoxApiKey.label} help={<CredentialHelp k="upstashBoxApiKey" />}>
             <CredentialField k="upstashBoxApiKey" status={status.credentials.upstashBoxApiKey} id={`${id}-box`} />
           </Step>
         )}
