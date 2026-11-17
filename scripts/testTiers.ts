@@ -94,6 +94,8 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/limits.e2e.test.ts": "End-to-end runner/server integration",
   "test/local-onboarding.e2e.test.ts": "End-to-end runner/server integration",
   "test/local-runner.e2e.test.ts": "End-to-end runner/server integration",
+  "test/local-turn-cap.e2e.test.ts": "End-to-end runner/server integration",
+  "test/local-turn-cap.test.ts": "Full Box Yard task-manager fixture with inert provider dispatch",
   "test/low-disk.e2e.test.ts": "End-to-end runner/server integration",
   "test/machine-stats.test.ts": "Full Box Yard server/task-manager fixture",
   "test/machines-ssh.test.ts": "SSH registry/probe subprocess integration",
