@@ -47,6 +47,7 @@ import { DismissButton, Modal, modalDepth } from "./Modal"
 import { TaskCrumbs } from "./TreeNav"
 import { SidebarMenuButton } from "./Sidebar"
 import { SIDEBAR_INLINE, useMinWidth } from "../lib/sidebar"
+import { usePreviewCheck } from "../lib/previewCheck"
 
 /**
  * The task's header, in the task panel (`onBack`: an h2 with a back button before it) and the task page (an h1
@@ -102,6 +103,8 @@ export function TaskHeader({
   const [details, setDetails] = useState(false)
   const phone = !useMinWidth(SIDEBAR_INLINE)
   const ready = readyForReview(task.status)
+  // A preview's chip goes once its server stops answering: the server looks while this page shows one.
+  usePreviewCheck(task.id, task.previews.length > 0)
   // Its PR, files or a preview: chips that share the header with the title.
   const crowded = Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0
   const chips = (

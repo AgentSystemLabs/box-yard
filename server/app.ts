@@ -1563,6 +1563,12 @@ export function createBoxYard(
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new BadRequestError("port must be 1-65535")
     res.json(await tasks.previewUrl(req.params.id!, port))
   })
+  // The task's page is open and shows a preview: look whether its server still answers (a stopped one leaves the task
+  // through a task update). Rate-limited per task, and never wakes a sleeping box (server/previewWatch.ts).
+  api.post("/tasks/:id/previews/check", (req, res) => {
+    tasks.checkPreviews(req.params.id!)
+    res.status(202).json({ ok: true })
+  })
   api.delete("/tasks/:id", async (req, res) => {
     if (req.query.ifResting !== undefined && req.query.ifResting !== "1") throw new BadRequestError("ifResting must be 1")
     const queued = req.query.discardQueued
