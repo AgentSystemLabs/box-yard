@@ -110,6 +110,18 @@ describe("a task's previews follow their servers", () => {
     expect(check.mock.calls).toEqual([[working, "working"]])
   })
 
+  it("never asks a box that's being deleted, even at a turn's end", async () => {
+    const { y, project } = yard()
+    y.store.upsertBox({ id: "box-going1", provider: "upstash", status: "deleting", created_at: Date.now(), last_used_at: Date.now(), size: "small", keep_alive: 1, usage_source: "estimated" })
+    const t = y.store.createTask({ projectId: project.id, title: "Going", prompt: "x" })
+    y.store.updateTask(t.id, { status: "idle", boxId: "box-going1", previews: [preview(4870)] })
+    const exec = vi.spyOn((y.tasks as unknown as { provider: BoxProvider }).provider, "exec")
+    await y.tasks.previewWatch.check(t.id, "turn_end")
+    await y.tasks.previewWatch.check(t.id, "confirm")
+    expect(exec).not.toHaveBeenCalled()
+    expect(previewsOf(y, t.id)).toEqual([preview(4870)])
+  })
+
   it("an open page asks through the API; a box that may be asleep isn't looked at", async () => {
     const { y, project } = yard()
     const port = await freePort()

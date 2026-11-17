@@ -9645,6 +9645,9 @@ export class TaskManager {
   /** Which of `ports` something listens on, on the box; null when the box couldn't say. */
   private async probePorts(boxId: string, ports: number[]): Promise<Set<number> | null> {
     if (this.stopped || !ports.length) return null
+    // A box being deleted, or lost, isn't asked anything (its tasks' previews go when they leave it).
+    const box = this.store.getBox(boxId)
+    if (box && box.status !== "ready") return null
     try {
       const res = await this.provider.exec(boxId, portProbeCommand(providerOf(this.provider, boxId).nodeBin, ports))
       return parsePortProbe(res.exitCode, res.stdout)
@@ -9657,16 +9660,14 @@ export class TaskManager {
    * Whether a routine preview check may run on this box: it's up without being woken or started for it. This computer,
    * its folder boxes and the SSH machines are; a box running a turn is held up (holdOpen); a Docker container is while
    * it runs (asking Docker would start a stopped one); an Upstash box that may be asleep (or a GPU pod) only when it's
-   * kept alive. A box being deleted or lost never is.
+   * kept alive. (A box being deleted or lost is never asked: probePorts.)
    */
   private previewBoxAwake(boxId: string): boolean {
     if (this.stopped) return false
-    const box = this.store.getBox(boxId)
-    if (box && box.status !== "ready") return false
     if (isLocalRunnerBox(boxId) || isLocalBox(boxId) || isMachineBox(boxId)) return true
     if (this.store.listTaskRows({ boxId }).some((r) => r.current_turn_id)) return true
     if (isDockerBox(boxId)) return this.docker?.provider.cached().some((c) => c.boxId === boxId && c.state === "running") ?? false
-    return Boolean(box?.keep_alive)
+    return Boolean(this.store.getBox(boxId)?.keep_alive)
   }
 
   private absoluteUrl(url: string) {
