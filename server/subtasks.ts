@@ -12,7 +12,7 @@ import { BUILTIN_MODELS, MAX_MODEL_NAME, MODEL_NAME, checkEffort } from "../shar
 import { RUNNERS, type Runner } from "../shared/runner.js"
 import type { Effort, TaskStatus } from "../shared/types.js"
 
-/** Where spawn_subtasks may run a sub-task: a runner of its inherited physical environment type, or "same" (sharing its parent's slot). */
+/** Where spawn_subtasks may run a sub-task: a runner of its inherited physical environment type, or "same" (where its parent runs: in its slot on a box, in a Local agents slot of its own on this computer). */
 export type SubtaskRunsOn = Runner | "same"
 
 export interface SubtaskAsk {

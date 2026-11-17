@@ -8261,7 +8261,7 @@ export class TaskManager {
   /** Tree position and current physical provider support, refreshed when launching the turn. */
   private subtaskPromptInfo(row: TaskRow, boxId: string): SubtaskPromptInfo {
     const parent = row.parent_task_id ? this.store.getTaskRow(row.parent_task_id) : null
-    return { ...this.subtaskLimits(), depth: row.subtask_depth ?? 0, parent: parent ? { id: parent.id, title: parent.title } : null, spawnUnsupported: subtaskProviderProblem(this.environment.physical(boxId)) }
+    return { ...this.subtaskLimits(), depth: row.subtask_depth ?? 0, parent: parent ? { id: parent.id, title: parent.title } : null, spawnUnsupported: subtaskProviderProblem(this.environment.physical(boxId)), ...(isLocalRunnerBox(boxId) ? { ownSlots: true } : {}) }
   }
 
   /**
