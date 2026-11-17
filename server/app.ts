@@ -28,6 +28,7 @@ import { mcpHandler } from "./mcp.js"
 import { McpHandshakes, timingReport } from "./turnTimings.js"
 import { TURN_ROLES, type TurnRole } from "../shared/turnTimings.js"
 import { MachineStats, type MachineReaders } from "./machineStats.js"
+import { ComputerOpener } from "./openOnComputer.js"
 import { ProjectNotes, MAX_NOTE_CHARS } from "./notes.js"
 import { NotesRetro, retroSuggestionIds } from "./retro.js"
 import { Auth } from "./auth.js"
@@ -468,6 +469,8 @@ export function createBoxYard(
     connectorFetch?: typeof globalThis.fetch
     /** A made-up computer for machine_stats to read instead of this one (tests). */
     machine?: MachineReaders
+    /** Stands in for open_on_computer's opener (tests: a fake spawn, never the real `open`). */
+    opener?: ComputerOpener
     /** Stands in for the npx launcher's IPC channel (tests); null for none. Default: this process's, when it has one. */
     updateChannel?: UpdateChannel | null
   } = {},
@@ -495,6 +498,8 @@ export function createBoxYard(
   const identityDetector = new IdentityDetector({ ...opts.detect, github: opts.github?.fetch })
   /** This computer's memory, swap and load for machine_stats, sampled once a minute from start(). */
   const machine = new MachineStats(opts.machine)
+  /** open_on_computer: macOS `open` (or xdg-open) for what Cody asks to see on this computer. */
+  const opener = opts.opener ?? new ComputerOpener()
   /** The Coordinator's own env vars (Settings › Coordinator › Env vars): names out, values only ever in. */
   const coordinatorEnv = new CoordinatorEnv(store)
   /** Every credential value in effect: no transcript keeps one, and no error shows one. */
@@ -955,7 +960,7 @@ export function createBoxYard(
   app.all(
     "/mcp",
     mcpHandler(
-      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
+      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, opener, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
       mcpToken,
       handshakes,
     ),
