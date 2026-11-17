@@ -63,6 +63,7 @@ import { layerSource, type DefaultSource, type ProjectDefaults } from "./project
 import { NEXT_STEPS_META_KEY, parseNextSteps } from "../shared/nextSteps.js"
 import { isQuietRun, noopBlockers, type RunEvidence } from "../shared/quiet.js"
 import { memoryPressure, type BoxMemory, type MemoryPolicy } from "../shared/memory.js"
+import { DEFAULT_AGENT_BYTES } from "./machineStats.js"
 import { cleanupSummary, dfCommand, diskLine, formatBytes, isOutOfSpace, parseDf, requiredFreeBytes, rootLow, type BoxCleanup, type CleanupStepKey, type DiskSpace } from "../shared/disk.js"
 import { BoxJanitor, DEPS_DIR, cleanOutput, pushedCheck, pushedVerdict } from "./janitor.js"
 import { branchEvidenceScript, branchName, mergedHeadsScript, parseBranchEvidence, parseMergedHeads } from "./branchNames.js"
@@ -187,6 +188,16 @@ const SLEEP_WAKE_GRACE_MS = 15 * 60_000
 const RUNNER_SLEEP_MIN_MS = 20_000
 /** A local task waits with this while every Settings › Tasks running at once on this computer slot is taken. */
 const LOCAL_SLOT_WAIT = "Waiting for a free slot on this computer (Settings › Tasks running at once on this computer)"
+/** A runner's wait_for_subtasks wait id (box-runner.mjs parkSlot), or null when it isn't one. */
+const parkWaitId = (id: unknown): string | null => (typeof id === "string" && /^[A-Za-z0-9_-]{6,64}$/.test(id) ? id : null)
+/** The file in a task's folder that gives a parked turn its slot back (box-runner.mjs slotBack). */
+const slotBackFile = (waitId: string) => `slot-${waitId}.json`
+/** How long a turn just started here counts at LOCAL_AGENT_BYTES in the memory guard: about how long an agent takes to grow. */
+const LOCAL_START_GROWTH_MS = 60_000
+/** What one more agent here takes (claude and what it starts), for the memory guard: machine_stats' default guess. */
+const LOCAL_AGENT_BYTES = DEFAULT_AGENT_BYTES
+/** How soon a local task waiting for memory looks again. */
+const LOCAL_MEMORY_RECHECK_MS = 15_000
 
 /** Why a task waits (the text, without "Waiting" for a box's) and the tasks it names as holding it back (Task.waitFor). */
 interface Wait {
@@ -317,6 +328,18 @@ export interface TaskManagerDeps {
   identities: Identities
   /** Several Claude and Codex logins, spread round robin over new sessions (server/agentLogins.ts). */
   logins?: AgentLogins | null
+  /**
+   * This computer's memory now (MachineStats.memory), for the memory guard on new local turns (Settings › Memory and
+   * load). Left out: local turns aren't held back for memory.
+   */
+  localMemory?: (() => Promise<LocalMemory | null>) | null
+}
+
+/** This computer's memory as the local memory guard reads it. */
+export interface LocalMemory {
+  totalBytes: number
+  /** In use, without what the OS can hand back at once (macOS: Activity Monitor's Memory Used). */
+  usedBytes: number
 }
 
 /** What TaskManager needs of the SSH machines (server/machines/service.ts). */
@@ -670,6 +693,12 @@ export class TaskManager {
   private createStarts: number[] = []
   /** A pass to run when the pace lets the next create start. */
   private paceTimer: NodeJS.Timeout | null = null
+  /** This computer's memory as machine_stats reads it, for the memory guard on new local turns (localMemoryWait). */
+  private localMemory: (() => Promise<LocalMemory | null>) | null
+  /** When each turn started here in the last LOCAL_START_GROWTH_MS: the memory guard counts them at an agent's size. */
+  private localStarts: number[] = []
+  /** A pass to run when a local turn waits for memory (recheckMemorySoon). */
+  private memoryTimer: NodeJS.Timeout | null = null
   /** New boxes the queue wants past the hour's free ones (they wait on allowMoreBoxes), what they'd cost, and when the question was last posted. */
   private fanout = { wanted: 0, upToHourlyUsd: 0, noticedAt: 0 }
   /** Tasks that wait for those boxes: their wait reason says so, with the "allow-boxes" fix. */
@@ -821,6 +850,7 @@ export class TaskManager {
     this.machines = deps.machines ?? null
     this.identities = deps.identities
     this.logins = deps.logins ?? null
+    this.localMemory = deps.localMemory ?? null
     this.c = deps.config
     this.cursorModels = new CursorModels({ bin: this.c.cursorBin, dataDir: this.c.dataDir, key: () => this.settings.credentials.get("cursorApiKey") })
     this.store = deps.store
@@ -1043,6 +1073,7 @@ export class TaskManager {
     if (this.emitBoxesTimer) clearTimeout(this.emitBoxesTimer)
     if (this.directoryTimer) clearTimeout(this.directoryTimer)
     if (this.paceTimer) clearTimeout(this.paceTimer)
+    if (this.memoryTimer) clearTimeout(this.memoryTimer)
     if (this.warmTimer) clearTimeout(this.warmTimer)
     for (const h of this.holds.values()) h.abort()
     this.holds.clear()
@@ -2378,6 +2409,8 @@ export class TaskManager {
       agentsRunning: this.runningTotal(),
       localAgents: this.slotsFor(LOCAL_BOX_ID),
       localAgentsRunning: this.runningOn(LOCAL_BOX_ID),
+      // Turns here that wait for their sub-tasks: they hold no slot meanwhile (parkForSubtasks), but their agents stay up.
+      localAgentsWaitingOnSubtasks: this.store.parkedTurns(LOCAL_BOX_ID),
       boxesCreating: this.boxCreation(),
     }
   }
@@ -3707,11 +3740,23 @@ export class TaskManager {
       .listTaskRows()
       .filter((r) => this.wantsTurn(r))
       .sort((a, b) => queueOrder(queueEntry(a), queueEntry(b)))
+    // Turns on this computer that gave up their slot while they waited for their sub-tasks (parkForSubtasks) and want
+    // it back now: in the same queue, placed by when their turn started, since it came in before the sub-tasks it
+    // waited for.
+    const back = this.store.slotBackWanted()
+    const slotBack = new Set(back.map((r) => r.id))
+    const entry = (r: TaskRow): QueueEntry =>
+      slotBack.has(r.id) ? { priority: parsePriority(r.priority), queuedAt: this.store.turnStartedAt(r.current_turn_id!) ?? r.parked_at ?? r.last_active_at } : queueEntry(r)
+    const queue = [...waiting, ...back].sort((a, b) => queueOrder(entry(a), entry(b)))
 
     this.wantsBox.clear()
     const live = new Set(this.store.listTaskRows().map((r) => r.current_turn_id).filter(Boolean))
     for (const id of this.claimedSlots.keys()) if (!live.has(id)) this.claimedSlots.delete(id)
-    for (const listed of waiting) {
+    for (const listed of queue) {
+      if (slotBack.has(listed.id)) {
+        this.giveSlotBack(listed)
+        continue
+      }
       // Over the total agent cap: wait without growing the pool. Running work is never stopped. Tasks that run on
       // this computer (their own runs_on, else their project's) only count against Settings › Local agents (place).
       const cap = this.limits().maxAgents
@@ -3750,8 +3795,10 @@ export class TaskManager {
       const turnId = randomUUID()
       // Check and take the slot in one transaction: placement awaited, and nothing else may have taken the last
       // slot meanwhile (another start, another server on this database). Lost it: wait for the next pass.
-      // A sub-task with runs_on "same" runs in its parent's slot, so a parent waiting on it can't hold up its start.
-      const shared = this.parentBox(row) === boxId
+      // A sub-task with runs_on "same" runs in its parent's slot on a box, so a parent waiting on it can't hold up its
+      // start. Not on this computer: one cap (Settings › Local agents) covers every turn here, at any depth, and a
+      // parent waiting on its sub-tasks gives up its slot to them instead (parkForSubtasks).
+      const shared = !isLocalRunnerBox(boxId) && this.parentBox(row) === boxId
       const slots = shared ? Infinity : this.slotsFor(boxId)
       const claimed = this.store.claimTurnSlot(row.id, boxId, slots, {
         status: "starting",
@@ -3781,6 +3828,7 @@ export class TaskManager {
         continue
       }
       if (!shared) this.claimedSlots.set(turnId, slots)
+      if (isLocalRunnerBox(boxId)) this.localStarts.push(Date.now())
       // A workspace about to be made here takes disk the next placement mustn't count on.
       if (row.box_id !== boxId) this.reserve(boxId, row.id, this.cloneBytes(row) ?? 0)
       this.store.touchBox(boxId)
@@ -4016,10 +4064,11 @@ export class TaskManager {
       return null
     }
     // A sub-task with runs_on "same" goes where its parent is, in its parent's slot (schedulePass), while it's there.
+    // On this computer it takes a Local agents slot of its own, like any turn here (localSlot).
     const withParent = this.parentBox(row)
-    if (withParent) {
-      if (row.box_id === withParent) return withParent
-      if (!row.box_id) return this.assign(row.id, withParent)
+    if (withParent && (row.box_id === withParent || !row.box_id)) {
+      if (isLocalRunnerBox(withParent)) return this.localSlot(row)
+      return row.box_id === withParent ? withParent : this.assign(row.id, withParent)
     }
     // The task's runs_on, else its project's "Runs on": it moves to (or off) this computer, its GPU pod or its Docker
     // container when nothing would be lost.
@@ -4405,7 +4454,7 @@ export class TaskManager {
           this.noteOnce(row.id, `${row.id}:${box.id}:local`, `${row.runs_on ? "It was asked to run on this computer" : "Its project runs on this computer now"}, but its workspace stays on box ${box.id}: it can't move safely (${block}).`)
           return "stay"
         }
-        if (!this.localRoom(row)) return null
+        if (!(await this.localRoom(row))) return null
         this.store.updateTask(row.id, { boxId: null, portBase: null, previews: [] })
         void this.removeTaskDir(box.id, row.id).catch(() => {})
         this.addEvent(row.id, `Moved from box ${box.id} to this computer: ${row.runs_on ? "it was asked to run here" : "its project runs its agents here now"}.`)
@@ -4442,17 +4491,60 @@ export class TaskManager {
     return this.assign(row.id, other)
   }
 
-  /** This computer for a local task's next turn, or null (with the reason) while its Local agents slots are taken. */
-  private localSlot(row: TaskRow): string | null {
-    if (!this.localRoom(row)) return null
+  /**
+   * This computer for a local task's next turn, or null (with the reason) while its Local agents slots are taken or
+   * its memory is short (`localRoom`).
+   */
+  private async localSlot(row: TaskRow): Promise<string | null> {
+    if (!(await this.localRoom(row))) return null
     return isLocalRunnerBox(row.box_id) ? LOCAL_BOX_ID : this.assign(row.id, LOCAL_BOX_ID)
   }
 
-  /** A free Local agents slot that the projects' limits let this task take (`localWait`); else false, with the reason. */
-  private localRoom(row: TaskRow): boolean {
-    const wait = this.localWait(row)
+  /**
+   * A free Local agents slot that the projects' limits let this task take (`localWait`), on a computer with the
+   * memory for another agent (`localMemoryWait`); else false, with the reason.
+   */
+  private async localRoom(row: TaskRow): Promise<boolean> {
+    const wait = this.localWait(row) ?? (await this.localMemoryWait(row))
+    if (this.stopped) return false
     if (wait) this.setWaitReason(row.id, wait.text, null, wait.by)
     return !wait
+  }
+
+  /**
+   * Settings › Memory and load on this computer: why a new turn here waits for memory, or null. It reads the
+   * computer's memory as machine_stats does (macOS: Activity Monitor's Memory Used), with every turn started here in
+   * the last LOCAL_START_GROWTH_MS counted at an agent's usual size, since a just-started agent hasn't grown yet.
+   * Only while another turn here holds a slot: memory no turn holds won't free up by waiting, and so one turn always
+   * goes on (a turn parked for its sub-tasks doesn't count, so they can't wait on each other). Load isn't checked here:
+   * Cody's own apps make it, and the slots already bound what Box Yard adds.
+   */
+  private async localMemoryWait(row: TaskRow): Promise<Wait | null> {
+    const s = this.settings.get()
+    const policy: MemoryPolicy = { maxUsedPercent: s.memoryMaxUsedPercent, minFreeMb: s.memoryMinFreeMb, maxLoadPerCpu: 0 }
+    if (!this.localMemory || (!policy.maxUsedPercent && !policy.minFreeMb)) return null
+    if (!this.store.slotsInUse(LOCAL_BOX_ID, row.id)) return null
+    const mem = await this.localMemory().catch(() => null)
+    if (!mem || mem.totalBytes <= 0) return null
+    const now = Date.now()
+    this.localStarts = this.localStarts.filter((at) => now - at < LOCAL_START_GROWTH_MS)
+    const starting = this.localStarts.length
+    const usedBytes = Math.min(mem.totalBytes, mem.usedBytes + starting * LOCAL_AGENT_BYTES)
+    const why = memoryPressure({ totalBytes: mem.totalBytes, usedBytes, load1: 0, cpus: 1 }, policy)
+    if (!why) return null
+    this.recheckMemorySoon()
+    const counting = starting ? `, counting ${starting === 1 ? "a task that just started" : `${starting} tasks that just started`} at about ${formatBytes(LOCAL_AGENT_BYTES)} each` : ""
+    return { text: `Waiting for memory on this computer: ${why}${counting} (Settings › Memory and load)`, by: [] }
+  }
+
+  /** A task waits for memory here: look again in a moment, since memory can free up without any turn ending. */
+  private recheckMemorySoon() {
+    if (this.memoryTimer || this.stopped) return
+    this.memoryTimer = setTimeout(() => {
+      this.memoryTimer = null
+      this.schedule()
+    }, LOCAL_MEMORY_RECHECK_MS)
+    this.memoryTimer.unref()
   }
 
   /**
@@ -4560,7 +4652,7 @@ export class TaskManager {
     }
     let to: string | null
     if (runner === "local") {
-      if (!this.localRoom(row)) return null
+      if (!(await this.localRoom(row))) return null
       to = LOCAL_BOX_ID
     } else if (runner === "gpu") {
       to = await this.gpuTarget(row)
@@ -6291,6 +6383,8 @@ export class TaskManager {
           notes: notes.map((n) => ({ author: n.author, content: n.content })),
           recap: recapPrompt(this.store.getTask(taskId)!, this.store.listTaskMessages(taskId, 60), { handoff: handoff ?? undefined }),
           ...(this.depCache(project) ? { deps: { npm: true, dir: `${this.provider.root(boxId)}/${DEPS_DIR}`, maxMb: this.settings.get().depCacheMaxMb } } : {}),
+          // On this computer, wait_for_subtasks gives the turn's slot to its sub-tasks while it waits (parkForSubtasks).
+          ...(isLocalRunnerBox(boxId) ? { parkOnWait: true } : {}),
         }),
       )
 
@@ -7558,6 +7652,10 @@ export class TaskManager {
         return this.spawnSubtasks(row, ev)
       case "subtask_reports_taken":
         return this.subtaskReportsTaken(row, ev)
+      case "subtask_wait":
+        return this.parkForSubtasks(row, ev)
+      case "subtask_wait_end":
+        return this.wantSlotBack(row, ev)
       case "message_parent": {
         if (!row.parent_task_id) return say("event", "message_parent: this task has no parent task.", { kind: "subtasks" })
         return this.deliverAgentMessage(row, row.parent_task_id, String(ev.message ?? ""), false, ev.fyi === true)
@@ -8163,7 +8261,7 @@ export class TaskManager {
   /** Tree position and current physical provider support, refreshed when launching the turn. */
   private subtaskPromptInfo(row: TaskRow, boxId: string): SubtaskPromptInfo {
     const parent = row.parent_task_id ? this.store.getTaskRow(row.parent_task_id) : null
-    return { ...this.subtaskLimits(), depth: row.subtask_depth ?? 0, parent: parent ? { id: parent.id, title: parent.title } : null, spawnUnsupported: subtaskProviderProblem(this.environment.physical(boxId)) }
+    return { ...this.subtaskLimits(), depth: row.subtask_depth ?? 0, parent: parent ? { id: parent.id, title: parent.title } : null, spawnUnsupported: subtaskProviderProblem(this.environment.physical(boxId)), ...(isLocalRunnerBox(boxId) ? { ownSlots: true } : {}) }
   }
 
   /**
@@ -8300,6 +8398,43 @@ export class TaskManager {
       this.emitTask(row.id)
       this.syncSubtasks(row.id)
     }
+  }
+
+  /**
+   * wait_for_subtasks started waiting on this computer (the runner parks only where turn.json says parkOnWait): the
+   * turn gives up its Local agents slot until its wait is over (Store.parkTurn), so its sub-tasks can take it. A parent
+   * waiting on 20 sub-tasks under a cap of 3 would otherwise hold a slot they need, and a tree of waiting parents
+   * could hold all of them. Its agent process stays up, idle, meanwhile.
+   */
+  private parkForSubtasks(row: TaskRow, ev: WorkerEvent) {
+    const waitId = parkWaitId(ev.id)
+    if (!waitId || !row.current_turn_id || ev.turnId !== row.current_turn_id || !isLocalRunnerBox(row.box_id)) return
+    if (this.store.parkTurn(row.id, row.current_turn_id, waitId)) this.schedule()
+  }
+
+  /**
+   * Its wait for its sub-tasks is over: a parked turn asks for its slot back and goes on once it has it (giveSlotBack,
+   * in queue order). One that isn't parked (it never was, or has its slot back already) goes on at once. The runner asks
+   * again every so often while it waits, so a lost event or file doesn't hold it up for good.
+   */
+  private async wantSlotBack(row: TaskRow, ev: WorkerEvent) {
+    const waitId = parkWaitId(ev.id)
+    if (!waitId) return
+    if (this.store.wantSlotBack(row.id, waitId)) return this.schedule()
+    await this.writeTaskFile(row.id, slotBackFile(waitId), { waitId, at: Date.now() })
+  }
+
+  /** A parked turn whose wait is over takes its slot here again when one is free; else it waits, and its log says so once. */
+  private giveSlotBack(row: TaskRow) {
+    const boxId = row.box_id
+    const waitId = row.park_wait_id
+    if (!boxId || !waitId) return
+    if (this.store.claimParkedSlot(row.id, boxId, this.slotsFor(boxId))) {
+      void this.writeTaskFile(row.id, slotBackFile(waitId), { waitId, at: Date.now() })
+      return
+    }
+    const wait = isLocalRunnerBox(boxId) ? (this.localWait(row)?.text ?? LOCAL_SLOT_WAIT) : `Waiting for a free slot on ${boxId}`
+    this.noteOnce(row.id, `${row.id}:${waitId}:slot-back`, `${wait}, to go on after its sub-tasks.`)
   }
 
   /** cancel_subtasks: close these sub-tasks of the task (all its live ones without ids), and theirs. */

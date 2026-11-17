@@ -135,6 +135,8 @@ export interface SubtaskPromptInfo {
   parent: { id: string; title: string } | null
   /** Server-resolved physical providers that cannot create sub-tasks. */
   spawnUnsupported?: string | null
+  /** It runs on this computer: its sub-tasks take Local agents slots of their own, and wait_for_subtasks lends them its own. */
+  ownSlots?: boolean
 }
 
 /** The sub-task tools in a worker's system prompt (server/subtasks.ts). */
@@ -153,7 +155,7 @@ function subtaskLines(info: SubtaskPromptInfo | undefined, ownerName?: string): 
     lines.push(own(`- ${info.spawnUnsupported} If asked to use sub-agents, explain this limitation to Cody and do the work yourself.`))
   } else if (canSpawn) {
     lines.push(
-      own(`- spawn_subtasks: split your work across sub-agents. Each sub-task is a task of its own (its own session and transcript; Cody sees it nested under yours) and reports back to you when it finishes. Use it when the work splits into independent parts, or when you're asked to use N sub-agents: then start exactly that many in one call. At most ${info?.maxChildren ?? 10} per task, nesting ${maxDepth - depth} more level${maxDepth - depth === 1 ? "" : "s"} below you. Give each a title and a self-contained prompt. runs_on "same" (the default) runs it where you run, sharing your slot; or name a runner of the same physical environment type (box, local, docker, gpu, ssh). Every descendant keeps the original type; the server rejects other environments. Each runs on your agent, model and effort unless it names its own (agent: claude, codex, cursor or opencode; model, e.g. claude-sonnet-5-5, claude-opus-5-5 or claude-fable-5-2; effort: low to max, ultra on Codex only, none on Cursor or OpenCode), and keeps them for its later turns.`),
+      own(`- spawn_subtasks: split your work across sub-agents. Each sub-task is a task of its own (its own session and transcript; Cody sees it nested under yours) and reports back to you when it finishes. Use it when the work splits into independent parts, or when you're asked to use N sub-agents: then start exactly that many in one call. At most ${info?.maxChildren ?? 10} per task, nesting ${maxDepth - depth} more level${maxDepth - depth === 1 ? "" : "s"} below you. Give each a title and a self-contained prompt. runs_on "same" (the default) runs it where you run, ${info?.ownSlots ? "in a slot of its own (wait_for_subtasks lends them yours while you wait)" : "sharing your slot"}; or name a runner of the same physical environment type (box, local, docker, gpu, ssh). Every descendant keeps the original type; the server rejects other environments. Each runs on your agent, model and effort unless it names its own (agent: claude, codex, cursor or opencode; model, e.g. claude-sonnet-5-5, claude-opus-5-5 or claude-fable-5-2; effort: low to max, ultra on Codex only, none on Cursor or OpenCode), and keeps them for its later turns.`),
       `  Then call wait_for_subtasks to wait for their reports (or end your turn: they arrive as your next message), and write your answer from them, linking each sub-task. cancel_subtasks stops ones you no longer need. Don't call finish while sub-tasks still run.`,
     )
   }

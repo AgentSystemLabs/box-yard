@@ -1330,6 +1330,17 @@ export const MIGRATIONS: string[] = [
   -- NULL until the CLI says, and on every older turn (Task.turnModel then shows what it asked for).
   ALTER TABLE task_turns ADD COLUMN ran_model TEXT;
   `,
+  `
+  -- A turn on this computer that waits for its sub-tasks in wait_for_subtasks gives its slot to them meanwhile
+  -- (TaskManager.parkForSubtasks), so a parent can't hold the slots its sub-tasks need. parked_turn_id: that turn
+  -- while it waits (it holds no slot while it equals current_turn_id, so a value left from an ended turn never
+  -- counts); park_wait_id: the runner's wait, named in the file that hands the slot back; parked_at: when it started
+  -- waiting; park_resume 1: its wait is over and it asks for a slot back.
+  ALTER TABLE tasks ADD COLUMN parked_turn_id TEXT;
+  ALTER TABLE tasks ADD COLUMN park_wait_id TEXT;
+  ALTER TABLE tasks ADD COLUMN parked_at INTEGER;
+  ALTER TABLE tasks ADD COLUMN park_resume INTEGER NOT NULL DEFAULT 0;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {
