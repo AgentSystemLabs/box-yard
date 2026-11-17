@@ -483,7 +483,8 @@ describe("TaskHeader", () => {
       qc = new QueryClient()
       posts = []
       vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
-        if (init?.method === "POST") posts.push(url)
+        // The header's own ask whether its preview still answers (usePreviewCheck) isn't one of these actions.
+        if (init?.method === "POST" && !url.endsWith("/previews/check")) posts.push(url)
         return new Promise(() => {})
       })
     })
@@ -580,7 +581,8 @@ describe("TaskHeader", () => {
       posts = []
       answers = {}
       vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
-        if (init?.method !== "POST") return new Promise(() => {})
+        // The header's own ask whether its preview still answers (usePreviewCheck) isn't one of these actions.
+        if (init?.method !== "POST" || url.endsWith("/previews/check")) return new Promise(() => {})
         posts.push(url)
         const answer = answers[url.split("/").at(-1)!]
         return answer ? Promise.resolve(new Response(JSON.stringify(answer), { status: 200, headers: { "Content-Type": "application/json" } })) : new Promise(() => {})
