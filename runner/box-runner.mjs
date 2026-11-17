@@ -2581,12 +2581,24 @@ async function waitForSubtasks(args) {
   const timeout = Math.max(0, Math.min(1800, Math.round(Number(args.timeout_seconds ?? 600)) || 0))
   const deadline = Date.now() + timeout * 1000
   const seen = new Set(readJson(subtasksSeenFile, []))
+  // On this computer the turn gives its slot to its sub-tasks while it waits (parkSlot), and takes one back after.
+  const parks = readJson(path.join(taskDir, "turn.json"), {}).parkOnWait === true
+  let parked = null
   for (;;) {
     const kids = subtaskState().children.filter((c) => !ids || ids.includes(c.id))
-    if (!kids.length) return text(ids ? "None of those are your sub-tasks (yet: a just-started one shows within a few seconds)." : "You have no sub-tasks.")
+    if (!kids.length) {
+      if (parked) await slotBack(parked)
+      return text(ids ? "None of those are your sub-tasks (yet: a just-started one shows within a few seconds)." : "You have no sub-tasks.")
+    }
     const fresh = kids.filter((c) => c.report && !c.report.delivered && !seen.has(c.report.inputId))
     const live = kids.filter((c) => LIVE_SUBTASK.includes(c.status))
     if (!live.length || (any && fresh.length) || Date.now() >= deadline) {
+      if (parked) {
+        // Its slot back first (its sub-tasks or others may hold every one), then the answer as things stand by then.
+        await slotBack(parked)
+        parked = null
+        continue
+      }
       if (fresh.length) {
         fs.writeFileSync(subtasksSeenFile, JSON.stringify([...seen, ...fresh.map((c) => c.report.inputId)].slice(-500)))
         await emit({ t: "subtask_reports_taken", inputIds: fresh.map((c) => c.report.inputId) })
@@ -2598,7 +2610,37 @@ async function waitForSubtasks(args) {
         : `All ${kids.length} have reported.`
       return text([head, "", ...state, ...(reports.length ? ["", "New reports:", "", reports.join("\n\n")] : [])].join("\n"))
     }
+    if (parks && !parked) parked = await parkSlot()
     await sleep(1000)
+  }
+}
+
+/** While a wait waits for its slot back, it asks again this often, so a lost event or file can't hold it for good. */
+const SLOT_BACK_ASK_MS = 30_000
+
+/**
+ * A wait on this computer (turn.json parkOnWait) gives the turn's slot to its sub-tasks: the server stops counting it
+ * against Settings › Local agents until the wait is over (server/tasks.ts parkForSubtasks). Returns the wait's id.
+ */
+async function parkSlot() {
+  const id = `park_${randomUUID().replace(/-/g, "").slice(0, 12)}`
+  await emit({ t: "subtask_wait", id })
+  return id
+}
+
+/** The wait is over: ask for a slot back and hold until the server gives one (slot-<id>.json), in queue order. */
+async function slotBack(id) {
+  const file = path.join(taskDir, `slot-${id}.json`)
+  for (;;) {
+    await emit({ t: "subtask_wait_end", id })
+    const until = Date.now() + SLOT_BACK_ASK_MS
+    while (Date.now() < until) {
+      if (fs.existsSync(file)) {
+        fs.rmSync(file, { force: true })
+        return
+      }
+      await sleep(250)
+    }
   }
 }
 

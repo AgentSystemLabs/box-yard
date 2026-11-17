@@ -633,7 +633,7 @@ export function createBoxYard(
   const thumbs = new Thumbs()
   // Read the running commit now, before a `git pull` can move HEAD under this process.
   buildInfo()
-  const tasks = new TaskManager({ config: c, store, provider, hub, redis, artifacts, uploads, settings, github: opts.github, gpu, vast, daytona, docker, machines, identities, logins })
+  const tasks = new TaskManager({ config: c, store, provider, hub, redis, artifacts, uploads, settings, github: opts.github, gpu, vast, daytona, docker, machines, identities, logins, localMemory: () => machine.memory() })
   const githubReferences = new GithubReferences({
     project: (id) => store.getProject(id),
     token: opts.github?.token ?? ((id) => c.mock ? null : tasks.githubToken(id) || null),

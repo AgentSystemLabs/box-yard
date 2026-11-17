@@ -255,8 +255,16 @@ export interface TaskRow {
   root_task_id?: string | null
   /** How deep in its tree: 0 top level, 1 a parent's child, and so on. */
   subtask_depth?: number
-  /** 1: runs where its parent runs and shares its parent's slot (runs_on "same"). */
+  /** 1: runs where its parent runs (runs_on "same"); on a box it shares its parent's slot, on this computer it takes its own. */
   with_parent?: number
+  /** The turn that waits for its sub-tasks and gave up its slot on this computer meanwhile (Store.parkTurn); counts only while it equals current_turn_id. */
+  parked_turn_id?: string | null
+  /** The runner's wait_for_subtasks wait that parked it: the slot comes back in slot-<id>.json. */
+  park_wait_id?: string | null
+  /** When it parked. */
+  parked_at?: number | null
+  /** 1: its wait is over and it asks for a slot back (Store.wantSlotBack). */
+  park_resume?: number
   /** The owner's place for it among its siblings in the sidebar (Store.orderTasks); null: the automatic order. */
   sort_order?: number | null
   /** What Mark done closed it from (DoneFrom, as JSON), for Reopen; null once it leaves done another way. */
@@ -665,6 +673,14 @@ type TaskPatch = Partial<{
   doneFrom: DoneFrom | null
   reopenedMergedPr: string | null
 }>
+
+/** SQL (tasks as `t`): its turn is parked while it waits for its sub-tasks (Store.parkTurn), holding no slot. */
+const PARKED = "t.parked_turn_id IS NOT NULL AND t.parked_turn_id IS t.current_turn_id"
+/**
+ * SQL (tasks as `t`): it holds an agent slot where it is: a turn id, or starting or working (a turn id that isn't
+ * written yet, or a launch that outlived it, still runs an agent), unless that turn is parked.
+ */
+const HOLDS_SLOT = `(t.current_turn_id IS NOT NULL OR t.status IN ('starting', 'working')) AND NOT (${PARKED})`
 
 const TASK_COLUMNS: Record<keyof TaskPatch, string> = {
   agentCli: "agent_cli",
@@ -2067,19 +2083,63 @@ export class Store {
   }
 
   slotsInUse(boxId: string, except?: string): number {
-    const row = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE box_id = ? AND id != ? AND (current_turn_id IS NOT NULL OR status IN ('starting', 'working'))`)
-      .get(boxId, except ?? "") as { n: number }
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM tasks t WHERE t.box_id = ? AND t.id != ? AND ${HOLDS_SLOT}`).get(boxId, except ?? "") as { n: number }
     return row.n
   }
 
-  /** The agents running on a box (or this computer), oldest task first, with their projects' limits (server/agentLimits.ts). */
+  /**
+   * The agents running on a box (or this computer), oldest task first, with their projects' limits (server/agentLimits.ts).
+   * A turn parked while it waits for its sub-tasks (parkTurn) isn't one: its slot is theirs meanwhile.
+   */
   boxAgents(boxId: string, except?: string): BoxAgent[] {
-    return this.boxAgentRows(
-      "t.box_id = ? AND t.id != ? AND (t.current_turn_id IS NOT NULL OR t.status IN ('starting', 'working')) ORDER BY t.created_at ASC, t.rowid ASC",
-      boxId,
-      except ?? "",
-    )
+    return this.boxAgentRows(`t.box_id = ? AND t.id != ? AND ${HOLDS_SLOT} ORDER BY t.created_at ASC, t.rowid ASC`, boxId, except ?? "")
+  }
+
+  /** Turns on a box (this computer) parked while they wait for their sub-tasks (parkTurn). */
+  parkedTurns(boxId: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM tasks t WHERE t.box_id = ? AND ${PARKED}`).get(boxId) as { n: number }
+    return row.n
+  }
+
+  /**
+   * A turn on this computer waits for its sub-tasks (wait_for_subtasks): it gives up its slot, so they can take it, until
+   * its wait is over and it gets one back (claimParkedSlot). False when `turnId` isn't its running turn.
+   */
+  parkTurn(taskId: string, turnId: string, waitId: string, now = Date.now()): boolean {
+    const res = this.db
+      .prepare("UPDATE tasks SET parked_turn_id = ?, park_wait_id = ?, parked_at = ?, park_resume = 0 WHERE id = ? AND current_turn_id = ?")
+      .run(turnId, waitId, now, taskId, turnId)
+    return res.changes > 0
+  }
+
+  /** Its wait `waitId` is over: the parked turn asks for a slot back. False when that wait isn't parked (any more). */
+  wantSlotBack(taskId: string, waitId: string): boolean {
+    const res = this.db
+      .prepare("UPDATE tasks SET park_resume = 1 WHERE id = ? AND park_wait_id = ? AND parked_turn_id IS NOT NULL AND parked_turn_id IS current_turn_id")
+      .run(taskId, waitId)
+    return res.changes > 0
+  }
+
+  /** Parked turns whose wait is over, asking for their slot back (claimParkedSlot). */
+  slotBackWanted(): TaskRow[] {
+    return this.db.prepare(`SELECT * FROM tasks t WHERE ${PARKED} AND t.park_resume = 1`).all() as TaskRow[]
+  }
+
+  /**
+   * A parked turn takes a slot on its box (this computer) again, like claimTurnSlot: in one write transaction, only
+   * while one is free (`slots`) and the projects' own limits let it. Refused (false) when there's none, or it isn't
+   * parked and asking any more; nothing changes then.
+   */
+  claimParkedSlot(taskId: string, boxId: string, slots: number): boolean {
+    return this.db.transaction(() => {
+      const row = this.db.prepare(`SELECT t.id FROM tasks t WHERE t.id = ? AND t.box_id = ? AND ${PARKED} AND t.park_resume = 1`).get(taskId, boxId)
+      if (!row) return false
+      const agent = this.boxAgent(taskId)
+      const running = this.boxAgents(boxId, taskId)
+      if (!agent || running.length >= slots || limitBlock(agent, running)) return false
+      this.db.prepare("UPDATE tasks SET parked_turn_id = NULL, park_wait_id = NULL, parked_at = NULL, park_resume = 0 WHERE id = ?").run(taskId)
+      return true
+    }).immediate()
   }
 
   /** A task as server/agentLimits.ts weighs it, wherever it is now. */
@@ -2112,7 +2172,8 @@ export class Store {
       // The box's slots (Settings › Local agents on this computer), and the projects' own limits (server/agentLimits.ts).
       const agent = this.boxAgent(taskId)
       const running = this.boxAgents(boxId, taskId)
-      // Infinity: a sub-task in its parent's slot (TaskManager.parentBox), which no box or project limit holds back.
+      // Infinity: a sub-task in its parent's slot on a box (TaskManager.parentBox), which no box or project limit holds
+      // back. Never on this computer: every turn there takes one of Settings › Local agents' slots.
       if (!agent || (slots !== Infinity && (running.length >= slots || limitBlock(agent, running)))) return false
       this.updateTask(taskId, { ...patch, boxId })
       return true
