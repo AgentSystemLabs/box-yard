@@ -84,6 +84,8 @@ import { DOCKER_MAX_TASKS, DOCKER_NEEDS_CLAUDE_KEY, DOCKER_NEEDS_CODEX_KEY, DOCK
 import { isMachineBox, labelPhrase, machineBoxId, machineLabel, machineMatches, machineOfBox, normalizeLabel, pickMachine, type Machine, type MachineCandidate, type MachinePick } from "../shared/machines.js"
 import type { DockerContainerState } from "./providers/docker.js"
 import { SleepWatch, sleepLength } from "./sleep.js"
+import { PreviewWatch, parsePortProbe, portProbeCommand } from "./previewWatch.js"
+import { isLocalBox } from "./providers/auto.js"
 import { CLAUDE_CREDENTIAL_VARS, claudeTelemetryEnv, CODEX_CREDENTIAL_VARS, CURSOR_CREDENTIAL_VARS, GIT_AUTHOR_VARS, GLOBAL_CREDENTIALS, codexTurnLogin, credentialSet, cursorTurnLogin, openCodeTurnLogin, identityHomeEnv, ownGithubToken, splitCredentialSet, turnEnv, withBoxConnectors, type CodexTurnLogin, type CursorTurnLogin, type TurnEnv } from "./turnCredentials.js"
 import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sessions.js"
 import type { SessionRef } from "./connectors/connectors.js"
@@ -585,6 +587,16 @@ const usageObject = (u: unknown) => {
   return Object.values(out).some((n) => n > 0) ? out : null
 }
 
+/** A task row's previews (previews_json); none when it doesn't read. */
+const parsePreviews = (json: string | null | undefined): PreviewLink[] => {
+  try {
+    const list = JSON.parse(json || "[]") as unknown
+    return Array.isArray(list) ? (list as PreviewLink[]) : []
+  } catch {
+    return []
+  }
+}
+
 const slugify = (s: string) =>
   s
     .toLowerCase()
@@ -618,6 +630,8 @@ export class TaskManager {
   readonly issues: IssueCloser
   /** When this computer slept: local-runner turns and starts that sleep broke resume instead of failing (#104). */
   readonly sleep: SleepWatch
+  /** Drops a task's previews once nothing answers on their ports, and brings them back when something does. */
+  readonly previewWatch: PreviewWatch
 
   private timers: NodeJS.Timeout[] = []
   private warmTimer?: NodeJS.Timeout
@@ -826,6 +840,22 @@ export class TaskManager {
     this.uploads = deps.uploads
     this.reader = new EventReader(deps.provider, deps.redis)
     this.sleep = new SleepWatch()
+    this.previewWatch = new PreviewWatch({
+      task: (id) => {
+        const row = this.store.getTaskRow(id)
+        return row ? { boxId: row.box_id, previews: parsePreviews(row.previews_json) } : null
+      },
+      probe: (boxId, ports) => this.probePorts(boxId, ports),
+      awake: (boxId) => this.previewBoxAwake(boxId),
+      relink: async (boxId, link) => ({ ...link, url: await this.provider.publicUrl(boxId, link.port) }),
+      update: (taskId, previews, { down, back }) => {
+        if (!this.store.db.open || !this.store.getTaskRow(taskId)) return
+        this.store.updateTask(taskId, { previews }, { touch: false })
+        for (const p of down) this.addEvent(taskId, `Preview on port ${p.port} is down: nothing answers there, so its link is hidden until something does.`)
+        for (const p of back) this.addEvent(taskId, `Preview on port ${p.port} is back: ${p.url}`)
+        this.emitTask(taskId)
+      },
+    })
     const githubFetch = deps.github?.fetch ?? (this.c.mock ? null : fetch)
     this.githubFetch = githubFetch
     this.githubAuthors = githubFetch ? new GithubAuthors(githubFetch) : null
@@ -1008,6 +1038,7 @@ export class TaskManager {
     this.prs.stop()
     this.prComments.stop()
     this.sleep.stop()
+    this.previewWatch.stop()
     for (const t of this.timers) clearInterval(t)
     if (this.emitBoxesTimer) clearTimeout(this.emitBoxesTimer)
     if (this.directoryTimer) clearTimeout(this.directoryTimer)
@@ -2141,6 +2172,7 @@ export class TaskManager {
     this.store.setKv(`branch_naming:${row.id}`, null)
     this.store.setKv(harnessHandoffKey(row.id), null)
     this.logins?.release(row.id)
+    this.previewWatch.forget(row.id)
     this.store.deleteTask(row.id)
     this.hub.broadcast({ type: "task.deleted", taskId: row.id })
     this.publishDirectory()
@@ -7679,6 +7711,8 @@ export class TaskManager {
     if (ev.turnId && row.current_turn_id && ev.turnId !== row.current_turn_id) return // stale event from an older turn
     if (!row.current_turn_id) return
     perfMark(row.id, "turn.end")
+    // The agent may have stopped (or started) a preview's server: its runner is up now to say.
+    void this.previewWatch.check(row.id, "turn_end")
     this.captainWaits.delete(row.id)
     // A Captain reply handed to a wait the agent didn't take: queued (and editable) again, for the next turn.
     this.store.releaseInputs(handoffClaim(row.current_turn_id))
@@ -9161,6 +9195,10 @@ export class TaskManager {
         void this.probeDisk(box.id, 60_000).catch(() => null)
     }
     const active = this.store.listTaskRows({ status: ["working", "starting"] })
+    // A running turn's previews, once a minute (PreviewWatch): the agent may stop a server without saying so.
+    for (const row of active) {
+      if (row.status === "working" && row.current_turn_id && row.box_id && (parsePreviews(row.previews_json).length || this.previewWatch.hasDropped(row.id))) void this.previewWatch.check(row.id, "working")
+    }
     const checkedBoxes = new Map<string, Awaited<ReturnType<BoxProvider["health"]>>>()
     const health = async (boxId: string) => {
       if (!checkedBoxes.has(boxId)) checkedBoxes.set(boxId, await this.provider.health(boxId).catch(() => "unknown" as const))
@@ -9588,9 +9626,47 @@ export class TaskManager {
   private upsertPreview(taskId: string, link: PreviewLink) {
     const task = this.store.getTask(taskId)
     if (!task) return
+    const boxId = this.store.getTaskRow(taskId)?.box_id
+    if (boxId) this.previewWatch.reported(taskId, boxId, link.port)
     const previews = [...task.previews.filter((p) => p.port !== link.port), link].sort((a, b) => a.port - b.port)
     this.store.updateTask(taskId, { previews })
     this.emitTask(taskId)
+  }
+
+  /**
+   * The task's page is open (POST /api/tasks/:id/previews/check, every minute or so while it shows a preview): look
+   * whether its previews' servers still answer, if its runner is up (PreviewWatch). The answer comes as a task update.
+   */
+  checkPreviews(taskId: string) {
+    this.requireRow(taskId)
+    void this.previewWatch.check(taskId, "viewer")
+  }
+
+  /** Which of `ports` something listens on, on the box; null when the box couldn't say. */
+  private async probePorts(boxId: string, ports: number[]): Promise<Set<number> | null> {
+    if (this.stopped || !ports.length) return null
+    try {
+      const res = await this.provider.exec(boxId, portProbeCommand(providerOf(this.provider, boxId).nodeBin, ports))
+      return parsePortProbe(res.exitCode, res.stdout)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Whether a routine preview check may run on this box: it's up without being woken or started for it. This computer,
+   * its folder boxes and the SSH machines are; a box running a turn is held up (holdOpen); a Docker container is while
+   * it runs (asking Docker would start a stopped one); an Upstash box that may be asleep (or a GPU pod) only when it's
+   * kept alive. A box being deleted or lost never is.
+   */
+  private previewBoxAwake(boxId: string): boolean {
+    if (this.stopped) return false
+    const box = this.store.getBox(boxId)
+    if (box && box.status !== "ready") return false
+    if (isLocalRunnerBox(boxId) || isLocalBox(boxId) || isMachineBox(boxId)) return true
+    if (this.store.listTaskRows({ boxId }).some((r) => r.current_turn_id)) return true
+    if (isDockerBox(boxId)) return this.docker?.provider.cached().some((c) => c.boxId === boxId && c.state === "running") ?? false
+    return Boolean(box?.keep_alive)
   }
 
   private absoluteUrl(url: string) {
