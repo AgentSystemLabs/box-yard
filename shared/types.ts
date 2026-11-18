@@ -320,7 +320,7 @@ export interface Task {
   rootTaskId?: string | null
   /** How deep in its tree: 0 at the top, 1 a child, 2 a grandchild. */
   subtaskDepth?: number
-  /** Runs where its parent runs and shares its parent's slot (spawn_subtasks' runs_on "same"). */
+  /** Runs where its parent runs (spawn_subtasks' runs_on "same"): in its parent's slot on a box, in a Local agents slot of its own on this computer. */
   withParent?: boolean
   /**
    * The owner's place for it among its siblings in the sidebar (PUT /api/projects/:id/tasks/order): lower is higher

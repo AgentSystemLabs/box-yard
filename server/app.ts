@@ -28,6 +28,7 @@ import { mcpHandler } from "./mcp.js"
 import { McpHandshakes, timingReport } from "./turnTimings.js"
 import { TURN_ROLES, type TurnRole } from "../shared/turnTimings.js"
 import { MachineStats, type MachineReaders } from "./machineStats.js"
+import { ComputerOpener } from "./openOnComputer.js"
 import { ProjectNotes, MAX_NOTE_CHARS } from "./notes.js"
 import { NotesRetro, retroSuggestionIds } from "./retro.js"
 import { Auth } from "./auth.js"
@@ -486,6 +487,8 @@ export function createBoxYard(
     connectorFetch?: typeof globalThis.fetch
     /** A made-up computer for machine_stats to read instead of this one (tests). */
     machine?: MachineReaders
+    /** Stands in for open_on_computer's opener (tests: a fake spawn, never the real `open`). */
+    opener?: ComputerOpener
     /** Stands in for the npx launcher's IPC channel (tests); null for none. Default: this process's, when it has one. */
     updateChannel?: UpdateChannel | null
   } = {},
@@ -513,6 +516,8 @@ export function createBoxYard(
   const identityDetector = new IdentityDetector({ ...opts.detect, github: opts.github?.fetch })
   /** This computer's memory, swap and load for machine_stats, sampled once a minute from start(). */
   const machine = new MachineStats(opts.machine)
+  /** open_on_computer: macOS `open` (or xdg-open) for what Cody asks to see on this computer. */
+  const opener = opts.opener ?? new ComputerOpener()
   /** The Coordinator's own env vars (Settings › Coordinator › Env vars): names out, values only ever in. */
   const coordinatorEnv = new CoordinatorEnv(store)
   /** Every credential value in effect: no transcript keeps one, and no error shows one. */
@@ -651,7 +656,7 @@ export function createBoxYard(
   const thumbs = new Thumbs()
   // Read the running commit now, before a `git pull` can move HEAD under this process.
   buildInfo()
-  const tasks = new TaskManager({ config: c, store, provider, hub, redis, artifacts, uploads, settings, github: opts.github, gpu, vast, daytona, docker, machines, identities, logins })
+  const tasks = new TaskManager({ config: c, store, provider, hub, redis, artifacts, uploads, settings, github: opts.github, gpu, vast, daytona, docker, machines, identities, logins, localMemory: () => machine.memory() })
   const githubReferences = new GithubReferences({
     project: (id) => store.getProject(id),
     token: opts.github?.token ?? ((id) => c.mock ? null : tasks.githubToken(id) || null),
@@ -973,7 +978,7 @@ export function createBoxYard(
   app.all(
     "/mcp",
     mcpHandler(
-      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
+      { store, tasks, hub, artifacts, publicUrl, scheduler, uploads, settings, settingsTools, captains, hooks, notes, coordinatorCompactionsDir: orchestrator.compactionsDir, defaultRunner: () => setup.defaultRunner(), defaultGpuProvider: () => setup.defaultGpuProvider(), identities, identityDetector, threads, machine, opener, connectors: connectors.store, machines: machineActions, turnPicks: (caller) => (caller.kind === "captain" ? captains.turnPicks(caller.projectId) : orchestrator.turnPicks) },
       mcpToken,
       handshakes,
     ),
@@ -1580,6 +1585,12 @@ export function createBoxYard(
     const port = Number((req.body as { port?: unknown })?.port)
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new BadRequestError("port must be 1-65535")
     res.json(await tasks.previewUrl(req.params.id!, port))
+  })
+  // The task's page is open and shows a preview: look whether its server still answers (a stopped one leaves the task
+  // through a task update). Rate-limited per task, and never wakes a sleeping box (server/previewWatch.ts).
+  api.post("/tasks/:id/previews/check", (req, res) => {
+    tasks.checkPreviews(req.params.id!)
+    res.status(202).json({ ok: true })
   })
   api.delete("/tasks/:id", async (req, res) => {
     if (req.query.ifResting !== undefined && req.query.ifResting !== "1") throw new BadRequestError("ifResting must be 1")

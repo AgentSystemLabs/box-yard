@@ -18,6 +18,7 @@ import { ALWAYS_LOAD, buildMcpServer, type McpCaller } from "../../../server/mcp
 import { firstTurnPrompt, workerSystemPrompt } from "../../../server/prompts.js"
 import { IdentityDetector } from "../../../server/identity/detect.js"
 import { MachineStats } from "../../../server/machineStats.js"
+import { ComputerOpener } from "../../../server/openOnComputer.js"
 import { Uploads, uploadsDir } from "../../../server/uploads.js"
 import { testConfig } from "../../../test/helpers.js"
 import type { Project } from "../../../shared/types.js"
@@ -101,6 +102,7 @@ async function toolsOf(caller: McpCaller) {
     identityDetector: new IdentityDetector({}),
     threads: yard.threads,
     machine: new MachineStats(),
+    opener: new ComputerOpener(),
     connectors: yard.connectors.store,
     machines: yard.machineActions,
     uploads: new Uploads(uploadsDir(config.dataDir), 1024 * 1024),

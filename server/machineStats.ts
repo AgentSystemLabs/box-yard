@@ -446,6 +446,8 @@ export const SAMPLE_INTERVAL_MS = 60_000
 export const HISTORY_SAMPLES = 15
 /** ps runs at most this often (machine_stats calls in a row share it). */
 export const PROCESS_CACHE_MS = 15_000
+/** How old a reading the local memory guard takes (MachineStats.memory). */
+export const MEMORY_CACHE_MS = 5_000
 /** A measured footprint stands in for this long once no local task runs. */
 export const FOOTPRINT_TTL_MS = 6 * 3600_000
 
@@ -458,6 +460,9 @@ export class MachineStats {
   private sampling: Promise<void> | null = null
   private procs: { at: number; rows: ProcessRow[] | null } | null = null
   private footprint: { bytes: number; at: number; tasks: number } | null = null
+  /** memory()'s last reading, and the one on its way. */
+  private latest: MachineSample | null = null
+  private reading: Promise<MachineSample | null> | null = null
 
   constructor(
     private readonly readers: MachineReaders = nodeReaders(),
@@ -491,6 +496,23 @@ export class MachineStats {
 
   samples(): MachineSample[] {
     return this.history.list()
+  }
+
+  /**
+   * This computer's memory now, for the memory guard on new local turns (TaskManager.localMemoryWait): a reading at
+   * most MEMORY_CACHE_MS old (the background sample when it's that fresh), so a queue looking often costs one vm_stat
+   * every few seconds. Null when it can't be read.
+   */
+  async memory(): Promise<{ totalBytes: number; usedBytes: number } | null> {
+    const now = this.now()
+    const last = [this.latest, this.samples().at(-1)].reduce<MachineSample | null>((a, b) => (b && (!a || b.at > a.at) ? b : a), null)
+    if (last && now - last.at < MEMORY_CACHE_MS) return { totalBytes: last.totalBytes, usedBytes: last.usedBytes }
+    this.reading ??= readSample(this.readers, now)
+      .then((s) => (this.latest = s))
+      .catch(() => null)
+      .finally(() => (this.reading = null))
+    const s = await this.reading
+    return s && s.totalBytes > 0 ? { totalBytes: s.totalBytes, usedBytes: s.usedBytes } : null
   }
 
   private async processes(): Promise<ProcessRow[] | null> {
