@@ -1,5 +1,5 @@
-import type { Store, TaskRow } from "./store.js"
-import type { PrState, TaskStatus } from "../shared/types.js"
+import { githubSlug, type Store, type TaskRow } from "./store.js"
+import type { PrState, PushState, TaskStatus } from "../shared/types.js"
 import { errorMessage } from "./util/retry.js"
 
 /**
@@ -17,6 +17,12 @@ import { errorMessage } from "./util/retry.js"
  * back off exponentially up to 15 minutes, and polling pauses until the reset when fewer than
  * RATE_FLOOR points are left (agents push and open PRs with the same token). One project's broken or
  * rate-limited token never holds back another project's PRs.
+ *
+ * Finding PRs (discover): an agent may open its PR without create_pull_request (`gh pr create`, which the runner
+ * also reads, the API, a browser), and Cody may open one by hand. So tasks with a branch and no PR are looked up by
+ * branch on GitHub: their own task when a turn ends, and every PR_DISCOVER_MS the ones active in the last
+ * PR_DISCOVER_MAX_AGE_MS. That is one more batched query per token (PR_BATCH branches each, about 1 point), sharing
+ * the same token health, so a paused or backing-off token isn't asked.
  */
 
 export const PR_POLL_MS = 60_000
@@ -31,6 +37,14 @@ export const PR_LIVE_FRESH_MS = 30_000
 export const PR_REPORT_FRESH_MS = 2 * 60_000
 /** How long an MCP tool waits for that answer before it reports the last known state, marked unverified. */
 export const PR_REPORT_TIMEOUT_MS = 5_000
+/** How often the poll also looks up PRs by branch for tasks Box Yard knows no PR for (discover). */
+export const PR_DISCOVER_MS = 5 * 60_000
+/** A scheduled lookup asks only about tasks active this recently; a turn's end always asks about its own task. */
+export const PR_DISCOVER_MAX_AGE_MS = 14 * 24 * 60 * 60_000
+/** At most this many tasks a scheduled lookup, newest first. */
+export const PR_DISCOVER_MAX_TASKS = 200
+/** GitHub's clock and this server's may differ: a PR opened this long before its task still counts as the task's. */
+export const PR_DISCOVER_SLACK_MS = 60_000
 
 export interface PrInfo {
   state: PrState
@@ -47,6 +61,55 @@ export interface PrChange {
   info: PrInfo
   /** The task's new status when the PR moved it (pr_ready → done or idle). */
   status: TaskStatus | null
+}
+
+/** A PR GitHub has on the branch of a task Box Yard knew no PR for (discover). It is saved on the task already. */
+export interface FoundPr {
+  taskId: string
+  url: string
+  /** The PR's head branch. */
+  branch: string
+  info: PrInfo
+}
+
+/** A PR on a branch, as a lookup by branch found it. */
+export interface BranchPr {
+  url: string
+  headRefName: string
+  createdAt: number
+  info: PrInfo
+}
+
+/** The branch a task's last turn-end push found its workspace on, or null. */
+function pushedBranch(row: Pick<TaskRow, "push_state_json">): string | null {
+  try {
+    const branch = row.push_state_json ? (JSON.parse(row.push_state_json) as PushState).branch : null
+    return typeof branch === "string" && branch ? branch : null
+  } catch {
+    return null
+  }
+}
+
+/** The branches a PR-less task may have a PR on: the one its workspace was on at its last turn end, and its own. */
+export function taskBranches(row: Pick<TaskRow, "branch" | "push_state_json">, baseBranch: string): string[] {
+  return [...new Set([pushedBranch(row), row.branch])].filter((b): b is string => Boolean(b) && b !== baseBranch && b !== "HEAD")
+}
+
+/**
+ * The task's PR among those on its branches, or null. A branch name can come back (a deleted branch, a name someone
+ * else used too), so a PR counts only when it was opened after the task started or the task's workspace was on its
+ * branch at its last turn end; a merged one also has to have merged after the task started. An open PR beats a merged
+ * one, and the newest wins.
+ */
+export function pickBranchPr(row: Pick<TaskRow, "created_at" | "push_state_json">, prs: BranchPr[]): BranchPr | null {
+  const since = row.created_at - PR_DISCOVER_SLACK_MS
+  const worked = pushedBranch(row)
+  const ours = (pr: BranchPr) => pr.createdAt >= since || pr.headRefName === worked
+  const newest = (list: BranchPr[]) => list.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
+  return (
+    newest(prs.filter((pr) => (pr.info.state === "open" || pr.info.state === "draft") && ours(pr))) ??
+    newest(prs.filter((pr) => pr.info.state === "merged" && ours(pr) && (pr.info.mergedAt ?? 0) >= since))
+  )
 }
 
 /** A task's PR as a turn starts (PrTracker.live), for the PR line in the turn's prompt. */
@@ -93,6 +156,10 @@ export interface PrTrackerDeps {
   intervalMs?: number
   /** After a task's PR state changed (and maybe its status); the task is already saved. */
   onChange?: (change: PrChange) => void
+  /** A lookup by branch found a PR for a task that had none, and saved it on the task (its state follows, as a change). */
+  onFound?: (found: FoundPr) => void
+  /** How often the poll also looks up PRs by branch (discover); default PR_DISCOVER_MS. */
+  discoverMs?: number
   /**
    * Whether a merge moves this resting task to done (Done when its PR merges: Settings, its project's, its own opt-out,
    * and nothing queued for it). Default on, as when it wasn't a setting.
@@ -204,6 +271,29 @@ interface GqlPr {
   labels?: { nodes?: ({ name?: string } | null)[] | null } | null
 }
 
+/** A PR a lookup by branch returns. */
+interface GqlBranchPr extends GqlPr {
+  url?: string
+  createdAt?: string
+  headRefName?: string
+  headRepository?: { nameWithOwner?: string } | null
+}
+
+interface GqlBranchRepo {
+  nameWithOwner?: string
+  pullRequests?: { nodes?: (GqlBranchPr | null)[] | null } | null
+  /** The repo a fork came from: a fork's PRs usually go there. */
+  parent?: { pullRequests?: { nodes?: (GqlBranchPr | null)[] | null } | null } | null
+}
+
+/** One branch of one repo to look up, and the tasks that may have their PR on it. */
+interface BranchLookup {
+  owner: string
+  name: string
+  branch: string
+  rows: TaskRow[]
+}
+
 const toInfo = (pr: GqlPr): PrInfo | null => {
   const state: PrState | null =
     pr.state === "MERGED" ? "merged" : pr.state === "CLOSED" ? "closed" : pr.state === "OPEN" ? (pr.isDraft ? "draft" : "open") : null
@@ -225,6 +315,9 @@ export class PrTracker {
   private readonly fetch: typeof fetch
   private readonly now: () => number
   private readonly intervalMs: number
+  private readonly discoverMs: number
+  /** When the scheduled lookup by branch last ran (discover). */
+  private discoveredAt = -Infinity
   private timer: NodeJS.Timeout | null = null
   private soonTimer: NodeJS.Timeout | null = null
   private soon = new Set<string>()
@@ -245,6 +338,7 @@ export class PrTracker {
     this.fetch = deps.fetch ?? ((...args) => fetch(...args))
     this.now = deps.now ?? (() => Date.now())
     this.intervalMs = deps.intervalMs ?? PR_POLL_MS
+    this.discoverMs = deps.discoverMs ?? PR_DISCOVER_MS
   }
 
   /** Backfill right away (existing tasks), then poll every interval. */
@@ -290,9 +384,45 @@ export class PrTracker {
     this.timer = setTimeout(() => {
       this.timer = null
       // Every interval: a token that is backing off or paused is skipped inside the round, the others are asked.
-      void this.pollAll().finally(() => this.arm(this.intervalMs))
+      void this.pollAll()
+        .then(() => this.discoverDue())
+        .finally(() => this.arm(this.intervalMs))
     }, delay)
     this.timer.unref?.()
+  }
+
+  /** The scheduled lookup by branch, when PR_DISCOVER_MS passed since the last (and at start, for PRs opened meanwhile). */
+  private async discoverDue() {
+    if (this.stopped || this.now() - this.discoveredAt < this.discoverMs) return
+    this.discoveredAt = this.now()
+    await this.discover().catch(() => 0)
+  }
+
+  /**
+   * Look up PRs by branch for tasks Box Yard knows no PR for: these tasks, or every one active within
+   * PR_DISCOVER_MAX_AGE_MS (newest PR_DISCOVER_MAX_TASKS). A PR found is saved on its task (onFound, then its state
+   * as any change). Returns how many it found. A scheduled round (no ids) skips a token that is backing off.
+   */
+  discover(taskIds?: string[]): Promise<number> {
+    const scheduled = !taskIds
+    return this.exclusive(() =>
+      this.lookup(
+        this.store.listPrlessBranchRows(taskIds ? { ids: taskIds } : { since: this.now() - PR_DISCOVER_MAX_AGE_MS, limit: PR_DISCOVER_MAX_TASKS }),
+        scheduled,
+      ),
+    )
+  }
+
+  /**
+   * A turn of a task with no PR ended: look up its branch, so a PR its agent opened some other way (or Cody opened)
+   * shows. Waits at most timeoutMs and never throws.
+   */
+  async discoverTask(taskId: string, opts: { timeoutMs?: number } = {}): Promise<void> {
+    if (this.stopped) return
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<void>((resolve) => (timer = setTimeout(resolve, opts.timeoutMs ?? PR_LIVE_TIMEOUT_MS)))
+    await Promise.race([this.discover([taskId]).catch(() => 0), timeout])
+    clearTimeout(timer)
   }
 
   /** One round over every PR that may still change. Merged and closed PRs are never asked about again. */
@@ -436,25 +566,144 @@ export class PrTracker {
             this.logged.delete(row.id)
             this.apply(row.id, row.pr_url!, info)
           })
-          if (h.failures) this.deps.log?.("[box-yard] PR status checks are working again.")
-          h.failures = 0
-          h.retryAt = 0
+          this.worked(h)
         } catch (err) {
           for (const row of batch) this.missed(row, errorMessage(err))
-          if (err instanceof RateLimited) {
-            if (h.pausedUntil < err.until) this.deps.log?.(`[box-yard] PR status checks paused for one token: ${errorMessage(err)}`)
-            h.pausedUntil = Math.max(h.pausedUntil, err.until)
-          } else {
-            if (h.failures === 0) this.deps.log?.(`[box-yard] PR status check failed, backing off: ${errorMessage(err)}`)
-            h.failures++
-            h.retryAt = this.now() + backoffMs(this.intervalMs, h.failures)
-          }
+          this.failed(h, err)
           // This token's other batches wait for its next try; other tokens go on.
           for (const row of list.slice(i + PR_BATCH)) this.missed(row, errorMessage(err))
           break
         }
       }
     }
+  }
+
+  /** A request with this token got an answer: its backoff is over. */
+  private worked(h: TokenHealth) {
+    if (h.failures) this.deps.log?.("[box-yard] PR status checks are working again.")
+    h.failures = 0
+    h.retryAt = 0
+  }
+
+  /** A request with this token failed: pause it until GitHub's reset (rate limit), or back off. */
+  private failed(h: TokenHealth, err: unknown) {
+    if (err instanceof RateLimited) {
+      if (h.pausedUntil < err.until) this.deps.log?.(`[box-yard] PR status checks paused for one token: ${errorMessage(err)}`)
+      h.pausedUntil = Math.max(h.pausedUntil, err.until)
+    } else {
+      if (h.failures === 0) this.deps.log?.(`[box-yard] PR status check failed, backing off: ${errorMessage(err)}`)
+      h.failures++
+      h.retryAt = this.now() + backoffMs(this.intervalMs, h.failures)
+    }
+  }
+
+  /**
+   * Look up these PR-less tasks' branches, one batched query per token (tasks on the same repo and branch share one
+   * lookup), and save each task's PR (pickBranchPr). Tasks of projects with no GitHub repo or token are left alone.
+   */
+  private async lookup(rows: TaskRow[], scheduled: boolean): Promise<number> {
+    if (this.stopped || !rows.length) return 0
+    const byToken = new Map<string, Map<string, BranchLookup>>()
+    const projects = new Map<string, ReturnType<Store["getProject"]>>()
+    for (const row of rows) {
+      if (!projects.has(row.project_id)) projects.set(row.project_id, this.store.getProject(row.project_id))
+      const project = projects.get(row.project_id)
+      const slug = githubSlug(project?.repo ?? null)
+      if (!project || !slug) continue
+      const token = this.deps.token(row.project_id)
+      if (!token) continue
+      const [owner, name] = slug.split("/") as [string, string]
+      const lookups = byToken.get(token) ?? new Map<string, BranchLookup>()
+      byToken.set(token, lookups)
+      for (const branch of taskBranches(row, project.baseBranch)) {
+        const key = `${slug.toLowerCase()}#${branch}`
+        const l = lookups.get(key) ?? { owner, name, branch, rows: [] }
+        l.rows.push(row)
+        lookups.set(key, l)
+      }
+    }
+    let found = 0
+    for (const [token, lookups] of byToken) {
+      const h = this.tokenHealth(token)
+      if (this.now() < h.pausedUntil || (scheduled && this.now() < h.retryAt)) continue
+      const list = [...lookups.values()]
+      for (let i = 0; i < list.length && !this.stopped; i += PR_BATCH) {
+        const batch = list.slice(i, i + PR_BATCH)
+        let answers: BranchPr[][]
+        try {
+          answers = await this.queryBranches(token, h, batch)
+          this.worked(h)
+        } catch (err) {
+          this.failed(h, err)
+          break
+        }
+        const byRow = new Map<string, { row: TaskRow; prs: BranchPr[] }>()
+        batch.forEach((l, j) => {
+          for (const row of l.rows) {
+            const entry = byRow.get(row.id) ?? { row, prs: [] }
+            entry.prs.push(...(answers[j] ?? []))
+            byRow.set(row.id, entry)
+          }
+        })
+        for (const { row, prs } of byRow.values()) {
+          const pr = pickBranchPr(row, prs)
+          if (pr && this.found(row.id, pr)) found++
+        }
+      }
+    }
+    return found
+  }
+
+  /** One GraphQL request for a batch of branches; entry i is the PRs on branch i whose head is that repo's own branch. */
+  private async queryBranches(token: string, h: TokenHealth, lookups: BranchLookup[]): Promise<BranchPr[][]> {
+    const variables: Record<string, string | number> = {}
+    const defs: string[] = []
+    const fields: string[] = []
+    lookups.forEach((l, i) => {
+      Object.assign(variables, { [`o${i}`]: l.owner, [`n${i}`]: l.name, [`b${i}`]: l.branch })
+      defs.push(`$o${i}: String!, $n${i}: String!, $b${i}: String!`)
+      const prs = `pullRequests(headRefName: $b${i}, states: [OPEN, MERGED], first: 5, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...pr } }`
+      fields.push(`d${i}: repository(owner: $o${i}, name: $n${i}) { nameWithOwner ${prs} parent { ${prs} } }`)
+    })
+    const query = `query(${defs.join(", ")}) { rateLimit { remaining resetAt } ${fields.join(" ")} }
+fragment pr on PullRequest { url state isDraft createdAt mergedAt mergedBy { login } headRefName headRefOid headRepository { nameWithOwner } }`
+
+    this.requests++
+    const { data, rate } = await githubGraphql<Record<string, GqlBranchRepo | null>>(this.fetch, token, query, variables, this.now)
+    if (rate.remaining !== null && rate.remaining < RATE_FLOOR && rate.resetAt !== null) h.pausedUntil = rate.resetAt
+    // A repo the token can't see comes back null (with an error for it): no PR found there.
+    return lookups.map((l, i) => {
+      const repo = data[`d${i}`]
+      // The head has to be this repo's branch: a PR from someone else's fork with a branch of the same name isn't the task's.
+      const heads = new Set([`${l.owner}/${l.name}`, repo?.nameWithOwner ?? ""].filter(Boolean).map((s) => s.toLowerCase()))
+      const nodes = [...(repo?.pullRequests?.nodes ?? []), ...(repo?.parent?.pullRequests?.nodes ?? [])]
+      return nodes.flatMap((n): BranchPr[] => {
+        if (!n?.url || !parsePrUrl(n.url) || n.headRefName !== l.branch || !heads.has(n.headRepository?.nameWithOwner?.toLowerCase() ?? "")) return []
+        const info = toInfo(n)
+        const createdAt = Date.parse(n.createdAt ?? "")
+        return info && Number.isFinite(createdAt) ? [{ url: n.url, headRefName: n.headRefName, createdAt, info }] : []
+      })
+    })
+  }
+
+  /**
+   * Save a PR found on a task's branch: it opens on the task (a resting idle task is ready for review now), then its
+   * state applies as any change does, so a merged one moves the task as a merge seen live would. False when the task
+   * got a PR meanwhile.
+   */
+  private found(taskId: string, pr: BranchPr): boolean {
+    const row = this.store.getTaskRow(taskId)
+    if (!row || row.pr_url || row.status === "done") return false
+    const ready = !row.current_turn_id && row.status === "idle"
+    this.store.updateTask(
+      row.id,
+      { prUrl: pr.url, branch: pr.headRefName, prState: "open", prMergedAt: null, prMergedBy: null, prLabels: [], prHeadSha: pr.info.headSha ?? null, ...(ready ? { status: "pr_ready" as const } : {}) },
+      { quiet: true },
+    )
+    this.checks.set(row.id, { checkedAt: this.now(), error: null })
+    this.deps.onFound?.({ taskId: row.id, url: pr.url, branch: pr.headRefName, info: pr.info })
+    this.apply(row.id, pr.url, pr.info)
+    return true
   }
 
   /** One GraphQL request for a batch of PRs; entry i is PR i's state, or why GitHub didn't return it. */

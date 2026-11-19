@@ -1797,6 +1797,22 @@ export class Store {
     return ids ? rows.filter((r) => ids.includes(r.id)) : rows
   }
 
+  /**
+   * Tasks with no PR that may have one on GitHub (PrTracker.discover): they have a branch (their own, or the one their
+   * turn-end push found checked out) and aren't done. `ids`: only these; else those updated since `since`, newest
+   * first, at most `limit`.
+   */
+  listPrlessBranchRows(opts: { ids?: string[]; since?: number; limit?: number } = {}): TaskRow[] {
+    const where = "(pr_url IS NULL OR pr_url = '') AND status != 'done' AND ((branch IS NOT NULL AND branch != '') OR push_state_json IS NOT NULL)"
+    if (opts.ids) {
+      if (!opts.ids.length) return []
+      return this.db.prepare(`SELECT * FROM tasks WHERE ${where} AND id IN (${opts.ids.map(() => "?").join(", ")})`).all(...opts.ids) as TaskRow[]
+    }
+    return this.db
+      .prepare(`SELECT * FROM tasks WHERE ${where} AND updated_at >= ? ORDER BY updated_at DESC LIMIT ?`)
+      .all(opts.since ?? 0, opts.limit ?? -1) as TaskRow[]
+  }
+
   /** A PR was opened from Box Yard at `at` (`key`: prViewKey). A later view never moves it back. */
   recordPrView(key: string, at: number) {
     this.db.prepare("INSERT INTO pr_views (pr_key, viewed_at) VALUES (?, ?) ON CONFLICT(pr_key) DO UPDATE SET viewed_at = MAX(viewed_at, excluded.viewed_at)").run(key, at)
