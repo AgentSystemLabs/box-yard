@@ -113,6 +113,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/own-cleanup.test.ts": "Real Git repositories/configuration or archive/bundle operations",
   "test/placement.e2e.test.ts": "End-to-end runner/server integration",
   "test/pr-assets.test.ts": "Real Git repositories/configuration or archive/bundle operations",
+  "test/pr-detect.e2e.test.ts": "End-to-end runner/server integration",
   "test/pr-freshness.e2e.test.ts": "End-to-end runner/server integration",
   "test/preview-liveness.test.ts": "Full Box Yard server/HTTP fixture with real listening ports",
   "test/priority.e2e.test.ts": "End-to-end runner/server integration",
