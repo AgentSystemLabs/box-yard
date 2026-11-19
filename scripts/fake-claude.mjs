@@ -54,6 +54,8 @@
 // With no marker the worker writes a file, publishes it, and calls finish (it rests, ready for review: only Cody marks
 // a task done). [noop] calls finish with outcome "noop" (a quiet schedule run), even alongside [ask] or [fail].
 // [pr] ends the turn without finish, like an agent that opened a PR and waits for review.
+// [gh-pr:<owner>/<repo>#<n>] opens that PR from the shell as `gh pr create` does (a Bash call whose result is the PR's
+// URL), and [gh-pr-exists:<owner>/<repo>#<n>] runs into it ("already exists", exit 1); either then ends like [pr].
 // Sub-tasks (server/subtasks.ts): "spawn subtasks: A | B > B1, B2 | C" starts A, B and C with spawn_subtasks (B's
 // prompt starts B1 and B2 of its own; "C {hang}" gives C's prompt the [hang] marker; "D {model=claude-sonnet-5-5} {effort=high}"
 // asks for D's own model and effort, and {agent=codex} its own harness); "use N sub agents" (as Cody would say it) starts N on angles of the topic, the
@@ -685,6 +687,16 @@ async function worker(mcp, prompt) {
   await say("Looking at the task. (mock Claude)")
   out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t0", name: "Bash", input: { command: "ls" } }] } })
   await fold()
+  const ghPr = prompt.match(/\[gh-pr(-exists)?:([\w.-]+)\/([\w.-]+)#(\d+)\]/i)
+  if (ghPr) {
+    const url = `https://github.com/${ghPr[2]}/${ghPr[3]}/pull/${ghPr[4]}`
+    const exists = Boolean(ghPr[1])
+    out({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "tpr", name: "Bash", input: { command: 'git push -u origin HEAD && gh pr create --title "Mock change" --body "Made by the mock agent."' } }] } })
+    // What gh prints without a terminal: the URL alone on stdout, or the existing PR's after "already exists" on stderr.
+    const content = exists ? `Exit code 1\na pull request for branch "mock" into branch "main" already exists:\n${url}` : `${url}\n`
+    out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tpr", content, ...(exists ? { is_error: true } : {}) }] } })
+    await fold()
+  }
 
   const merge = prompt.match(/Merge your pull request #(\d+)/i)
   if (merge && process.env.FAKE_GH_STATE) {
@@ -744,7 +756,7 @@ async function worker(mcp, prompt) {
   // An agent that prints its credentials (the transcript keeps "[redacted]" instead, test/identities.e2e.test.ts).
   if (/\[print-env\]/i.test(prompt)) await say(`My env: GITHUB_TOKEN=${process.env.GITHUB_TOKEN ?? ""} ${Object.entries(process.env).filter(([k]) => /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)$/.test(k)).map(([k, v]) => `${k}=${v}`).join(" ")}`)
   if (noop) await markNoop()
-  else if (!/\[(ask|preview|pr)\]/i.test(prompt) && !/^Message from agent/m.test(prompt)) {
+  else if (!/\[(ask|preview|pr)\]|\[gh-pr(-exists)?:/i.test(prompt) && !/^Message from agent/m.test(prompt)) {
     await useTool(mcp, "finish", { summary: process.env.FAKE_CLAUDE_WORKER_REPLY || "The mock agent wrote box-yard-demo.md." })
   }
   await fold()

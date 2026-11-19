@@ -71,12 +71,26 @@ const uuid = sessionID.slice(4).replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, "$1-$
 const child = spawn(process.execPath, [fakeClaude, "-p", "--output-format", "stream-json", "--verbose", resume ? "--resume" : "--session-id", uuid, "--strict-mcp-config", "--mcp-config", mcpFile, ...(instructions ? ["--append-system-prompt", instructions[1]] : [])], { env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome, FAKE_CLAUDE_LOGIN: "", FAKE_CLAUDE_LOG: "" }, stdio: ["pipe", "pipe", "pipe"] })
 process.on("SIGTERM", () => child.kill("SIGTERM"))
 let buf = "", index = 0
+// Like OpenCode, a shell call's part comes once it finished, with its output: held until fake-claude's tool_result
+// (or the turn's end, for one that never gets one).
+const shells = new Map()
+const toolPart = (b, extra = {}) => ({ part: { id: b.id, type: "tool", tool: b.name.replace(/^mcp__boxyard__/, "boxyard_"), state: { status: "completed", input: b.input, ...extra } } })
 function translate(msg) {
   if (msg.type === "assistant") for (const b of msg.message?.content || []) {
     if (b.type === "text") emit("text", { part: { id: `part${index++}`, type: "text", text: b.text, time: { end: Date.now() } } })
-    if (b.type === "tool_use") emit("tool_use", { part: { id: b.id, type: "tool", tool: b.name.replace(/^mcp__boxyard__/, "boxyard_"), state: { status: "completed", input: b.input } } })
+    if (b.type === "tool_use" && b.name === "Bash") shells.set(b.id, b)
+    else if (b.type === "tool_use") emit("tool_use", toolPart(b))
+  }
+  if (msg.type === "user") for (const b of msg.message?.content || []) {
+    const call = b.type === "tool_result" ? shells.get(b.tool_use_id) : null
+    if (!call) continue
+    shells.delete(b.tool_use_id)
+    const output = typeof b.content === "string" ? b.content : (b.content || []).map((c) => c?.text ?? "").join("")
+    emit("tool_use", toolPart({ ...call, name: "bash" }, { output, metadata: { output, exit: b.is_error ? 1 : 0 } }))
   }
   if (msg.type === "result") {
+    for (const call of shells.values()) emit("tool_use", toolPart({ ...call, name: "bash" }, { output: "" }))
+    shells.clear()
     if (msg.is_error) emit("error", { error: { name: "APIError", data: { message: msg.result } } })
     emit("step_finish", { part: { id: `step${index++}`, type: "step-finish", reason: "stop", cost: 0.125, tokens: { input: 100, output: 20, reasoning: 5, cache: { read: 30, write: 10 } } } })
   }
