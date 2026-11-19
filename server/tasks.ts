@@ -53,7 +53,7 @@ import { claudeCliTooOld, minClaudeCliFor, unrecognizedModelError, windowSetByHa
 import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
 import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
-import { AUTO_DONE_FROM, PrTracker, prNumber, restingStatus, type PrChange } from "./prs.js"
+import { AUTO_DONE_FROM, PrTracker, parsePrUrl, prNumber, restingStatus, type FoundPr, type PrChange } from "./prs.js"
 import { PrDetailsSource } from "./prDetails.js"
 import { PrCommentTracker } from "./prComments.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
@@ -897,6 +897,7 @@ export class TaskManager {
       token: this.githubTokenFor,
       fetch: deps.github?.fetch,
       onChange: (change) => this.prChanged(change),
+      onFound: (found) => this.prFound(found),
       autoDone: (row) => this.autoDoneOnMerge(row) && !this.mergeDoneBlocker(row),
       log: (msg) => console.warn(msg),
     })
@@ -7681,7 +7682,12 @@ export class TaskManager {
         return
       }
       case "pr": {
-        const url = String(ev.url ?? "")
+        // create_pull_request's PR, or one the runner read in a `gh pr create`'s output ("shell"): only a github.com PR
+        // URL from there, without anything after its number.
+        const shell = ev.source === "shell"
+        const parsed = shell ? parsePrUrl(String(ev.url ?? "")) : null
+        if (shell && !parsed) return
+        const url = parsed ? `https://github.com/${parsed.owner}/${parsed.name}/pull/${parsed.number}` : String(ev.url ?? "")
         const first = row.pr_url !== url
         const headSha = typeof ev.headSha === "string" && /^[0-9a-f]{7,64}$/i.test(ev.headSha) ? ev.headSha : null
         const branch = String(ev.branch ?? row.branch ?? "") || row.branch
@@ -7695,7 +7701,7 @@ export class TaskManager {
           ...(headSha ? { prHeadSha: headSha } : first ? { prHeadSha: null } : {}),
         })
         // The branch too, so a PR's details still find the tasks on its branch once this task moves on (server/prTasks.ts).
-        say("event", `${first ? "Opened" : "Updated"} pull request: ${url}`, { kind: "pr", url, branch })
+        say("event", `${first ? "Opened" : "Updated"} pull request: ${url}`, { kind: "pr", url, branch, ...(shell ? { source: "shell" } : {}) })
         if (first) this.notice(`🔀 **${row.title}** opened a pull request: ${url}`, { taskId })
         this.prs.refresh(taskId)
         return this.emitTask(taskId)
@@ -7752,8 +7758,12 @@ export class TaskManager {
         await this.reconcileCodexDelivery(row)
         await this.takeBackCodexAuth(row)
         if (!this.store.db.open) return
+        // No PR yet: the agent may have opened one some other way (`gh pr create --web`, the API, a browser), or Cody
+        // did; look its branch up on GitHub.
+        if (!row.pr_url && row.current_turn_id) await this.prs.discoverTask(taskId)
+        if (!this.store.db.open) return
         // The agent may have merged or closed its PR during the turn; ask GitHub.
-        const pr = row.pr_url && row.current_turn_id ? await this.prs.check(taskId) : null
+        const pr = row.pr_url && row.current_turn_id ? await this.prs.check(taskId) : (this.store.getTaskRow(taskId)?.pr_state ?? null)
         if (!this.store.db.open) return
         // A failed turn on an Upstash box: read the box now, so a process its cgroup killed for memory counts (auto-sizing).
         if (!ev.ok && !ev.stopped && row.box_id && row.current_turn_id && providerOf(this.provider, row.box_id).ownCgroup) await this.probeDisk(row.box_id, 0).catch(() => null)
@@ -7763,6 +7773,22 @@ export class TaskManager {
       default:
         return
     }
+  }
+
+  /**
+   * A lookup by branch found a PR for a task that had none (PrTracker.discover; the tracker saved it): its agent opened
+   * it without create_pull_request, or Cody opened it on GitHub. Said as create_pull_request's PR is, and a turn
+   * that ends with it counts as one that opened a PR.
+   */
+  private prFound({ taskId, url, branch }: FoundPr) {
+    const row = this.store.getTaskRow(taskId)
+    if (!row) return
+    if (row.current_turn_id) this.store.updateTask(taskId, { turnFlags: { ...this.store.turnFlags(row), sawPr: true } }, { quiet: true, touch: false })
+    this.addEvent(taskId, `Found pull request #${prNumber(url) ?? "?"} on GitHub, on its branch ${branch}: ${url}`, { kind: "pr", url, branch, source: "github" })
+    this.notice(`🔀 **${row.title}** opened a pull request: ${url}`, { taskId })
+    // Its labels, for hooks: the lookup by branch doesn't read them.
+    this.prs.refresh(taskId)
+    this.emitTask(taskId)
   }
 
   /** The tracker saw a PR change state (and maybe moved the task off pr_ready): tell the transcript and the UI. */

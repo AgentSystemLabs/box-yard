@@ -946,6 +946,36 @@ function steerInbox(child, turnId, queue) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Pull requests an agent opens from its shell (`gh pr create`, or its alias `gh pr new`) instead of with
+// create_pull_request. gh prints the PR's URL: on stdout when it opens one, and on stderr after "already exists" when
+// the branch has one. Every harness hands the command's output back in its tool result, so the runner reads it there
+// and reports the PR as create_pull_request does. The server also looks up PRs by the task's branch on GitHub
+// (server/prs.ts discover), which catches a PR opened any other way.
+
+const GH_PR_CREATE = /(?:^|[\s;&|(`'"/])gh\s+pr\s+(?:create|new)\b/
+const GITHUB_PR_URL = /https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d+/gi
+
+/** The PR a finished `gh pr create` printed (the last PR URL in its output), or null for any other command. */
+function shellPrUrl(command, output) {
+  if (!GH_PR_CREATE.test(String(command ?? ""))) return null
+  const urls = String(output ?? "").match(GITHUB_PR_URL)
+  return urls?.length ? urls[urls.length - 1] : null
+}
+
+/** The `pr` event for a PR the agent opened from its shell, with the branch its workspace is on now. */
+function shellPrEvent(url) {
+  let branch = ""
+  try {
+    // Empty on a detached HEAD: the server keeps the task's own branch then.
+    branch = execFileSync("git", ["symbolic-ref", "--short", "-q", "HEAD"], { cwd: path.join(taskDir, "work"), env: turnBaseEnv(), stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).toString().trim()
+  } catch {}
+  return { t: "pr", url, source: "shell", ...(branch ? { branch } : {}) }
+}
+
+/** Claude's shell commands by tool_use id, until their results come back (translate). */
+const claudeShellCalls = new Map()
+
 /** Turn one Claude stream-json message into zero or more compact events. */
 function translate(msg) {
   const out = []
@@ -955,14 +985,18 @@ function translate(msg) {
       // Box Yard's own tools emit their own, richer events.
       if (block.type === "tool_use" && !String(block.name).startsWith("mcp__boxyard__")) {
         out.push({ t: "tool", name: block.name, input: clip(block.input, 400) })
+        if (block.name === "Bash" && block.id) claudeShellCalls.set(block.id, String(block.input?.command ?? ""))
       }
     }
   } else if (msg.type === "user" && Array.isArray(msg.message?.content)) {
     for (const block of msg.message.content) {
-      if (block.type === "tool_result" && block.is_error) {
-        const text = Array.isArray(block.content) ? block.content.map((c) => c.text ?? "").join("") : block.content
-        out.push({ t: "tool_error", text: clip(text, 400) })
-      }
+      if (block.type !== "tool_result") continue
+      const text = Array.isArray(block.content) ? block.content.map((c) => c.text ?? "").join("") : block.content
+      if (block.is_error) out.push({ t: "tool_error", text: clip(text, 400) })
+      const command = claudeShellCalls.get(block.tool_use_id)
+      claudeShellCalls.delete(block.tool_use_id)
+      const url = command === undefined ? null : shellPrUrl(command, text)
+      if (url) out.push(shellPrEvent(url))
     }
   } else if (msg.type === "rate_limit_event" && msg.rate_limit_info && typeof msg.rate_limit_info === "object") {
     // A subscription's limits (server/loginLimits.ts): the server knows which login the turn had.
@@ -1303,6 +1337,7 @@ async function runCodex({ turn, sessionId, resume, prompt }) {
       const normalized = normalize(item), tool = codexTool(normalized)
       if (tool && !seen.has(item.id)) { seen.add(item.id); queue({ t: "tool", name: tool.name, input: clip(tool.input, 400) }) }
       if (finished) { const error = codexToolError(normalized); if (error) queue({ t: "tool_error", text: clip(error, 400) }) }
+      if (finished && normalized.type === "command_execution") { const url = shellPrUrl(normalized.command, normalized.aggregated_output); if (url) queue(shellPrEvent(url)) }
     } else if (msg.method === "thread/tokenUsage/updated") {
       const total = p.tokenUsage?.total
       if (total) {
@@ -1717,6 +1752,12 @@ function runCursor({ turn, sessionId, resume, prompt }) {
         const tool = cursorTool(ev.tool_call)
         const error = tool ? cursorToolError(ev.tool_call) : null
         if (error) queue(() => emit({ t: "tool_error", text: clip(error, 400) }))
+        const shell = ev.tool_call?.shellToolCall
+        if (shell) {
+          const r = shell.result?.success ?? shell.result?.failure
+          const url = shellPrUrl(shell.args?.command, [r?.stdout, r?.stderr, r?.interleavedOutput].filter(Boolean).join("\n"))
+          if (url) queue(() => emit(shellPrEvent(url)))
+        }
       } else if (ev.type === "usage" && ev.usage) {
         // One model call: what it read (cached or not) and wrote is the context now.
         const u = cursorUsageOf(ev.usage)
@@ -1882,6 +1923,10 @@ async function runOpenCode({ turn, sessionId, resume, prompt }) {
           const names = { bash: "Bash", read: "Read", write: "Write", edit: "Edit", apply_patch: "Edit", glob: "Glob", grep: "Grep", webfetch: "WebFetch" }
           queue({ t: "tool", name: names[part.tool] || part.tool, input: clip(clean(JSON.stringify(part.state?.input ?? {})), 400) })
           if (part.state?.status === "error") queue({ t: "tool_error", text: clip(clean(part.state.error || "Tool failed"), 400) })
+          if (part.tool === "bash") {
+            const url = shellPrUrl(part.state?.input?.command, [part.state?.output, part.state?.metadata?.output, part.state?.error].filter((s) => typeof s === "string").join("\n"))
+            if (url) queue(shellPrEvent(url))
+          }
         }
       } else if (ev.type === "error") {
         failure = clean(ev.error?.data?.message || ev.error?.message || ev.error?.name || "OpenCode reported an error")
