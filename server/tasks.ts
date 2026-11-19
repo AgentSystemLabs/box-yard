@@ -2866,9 +2866,13 @@ export class TaskManager {
 
   // ------------------------------------------------------------------ resize
 
-  /** In place when the provider can change a box's size, else by moving the box's work to a new box. */
-  resizeMode(): ResizeMode {
-    return this.provider.resize ? "in-place" : "migration"
+  /**
+   * In place when the box's provider can change a box's size (boxd machines), else by moving the box's work to
+   * a new box. Without a box, the provider new boxes come from answers (pool_status's resize_box.how).
+   */
+  resizeMode(boxId?: string): ResizeMode {
+    const p = boxId ? providerOf(this.provider, boxId) : this.provider
+    return p.resize ? "in-place" : "migration"
   }
 
   /** The running resize of a box, or its last one. */
@@ -2919,7 +2923,7 @@ export class TaskManager {
       boxId,
       from,
       to,
-      mode: this.resizeMode(),
+      mode: this.resizeMode(boxId),
       running: rows.filter((r) => r.current_turn_id).map((r) => ({ id: r.id, title: r.title })),
       tasks: rows.length,
       fit,
@@ -2969,7 +2973,7 @@ export class TaskManager {
     const refusal = this.resizeRefusal(boxId, to, fit)
     if (refusal) throw this.boxOperation(boxId) ? new ConflictError(refusal) : new BadRequestError(refusal)
     this.claimBox(boxId, "resize", Boolean(opts.stopAgents))
-    const mode = this.resizeMode()
+    const mode = this.resizeMode(boxId)
     const running = this.runningOn(boxId)
     const step = (key: ResizeStep["key"], label: string, skip = false): ResizeStep => ({ key, label, status: skip ? "skipped" : "pending", detail: null })
     const r: BoxResize = {
@@ -3026,7 +3030,7 @@ export class TaskManager {
 
   private async resizeInPlace(r: BoxResize) {
     await this.resizeStep(r, "resize", async () => {
-      await this.provider.resize!(r.boxId, r.to)
+      await providerOf(this.provider, r.boxId).resize!(r.boxId, r.to)
       this.store.meterBox(r.boxId, { size: r.to })
       this.diskCache.delete(r.boxId)
       this.lowBoxes.delete(r.boxId)

@@ -36,8 +36,9 @@ export interface SetupDeps {
   settings: SettingsStore
   /** Where new boxes are made right now. */
   provider: () => string
-  /** Stand-ins for tests: the Upstash Box API, the Anthropic API, GitHub's API. */
+  /** Stand-ins for tests: the Upstash Box API, the boxd API, the Anthropic API, GitHub's API. */
   listBoxes?: (apiKey: string) => Promise<{ status?: string }[]>
+  listBoxdMachines?: (apiKey: string) => Promise<{ status?: string }[]>
   fetch?: typeof fetch
   githubFetch?: typeof fetch
   anthropicBaseUrl?: string
@@ -198,7 +199,17 @@ export class Setup {
       return cursorKey ? null : noCursorKey
     }
     if (runner === "box") {
-      if (c.boxProvider !== "local" && creds.upstashBoxApiKey.state !== "set") return "Upstash boxes aren't set up: add an Upstash Box API key in Settings › Box providers › Upstash boxes"
+      // Whichever cloud the install uses needs its key: the one BOX_PROVIDER pins, or either one in the auto
+      // path. BOX_PROVIDER=local's "boxes" are folders on this computer, which need no key at all.
+      const pinned = c.boxProvider === "boxd" || c.boxProvider === "upstash" ? c.boxProvider : null
+      const upstash = creds.upstashBoxApiKey.state === "set"
+      const boxd = creds.boxdApiKey.state === "set"
+      const ok = c.boxProvider === "local" || (pinned === "boxd" ? boxd : pinned === "upstash" ? upstash : upstash || boxd)
+      if (!ok) {
+        return pinned === "boxd"
+          ? "boxd machines aren't set up: add a boxd API key in Settings › Box providers › boxd machines (docs/boxd.md)"
+          : "Cloud boxes aren't set up: add an Upstash Box API key or a boxd API key in Settings › Box providers"
+      }
       // BOX_PROVIDER=local's "boxes" are folders on this computer, where its own cursor-agent login works.
       return cursorKey || c.boxProvider === "local" ? null : noCursorKey
     }
@@ -249,8 +260,11 @@ export class Setup {
     const provider = this.defaultProvider()
     const onComputer = provider === "local"
     const local = this.localCheck()
-    // Only Upstash boxes need an Upstash key: "This computer", Docker containers on it, Daytona and SSH machines need no box.
+    // Only cloud boxes need a cloud key: "This computer", Docker containers on it, Daytona and SSH machines need no box.
     const boxesRequired = !mock && c.boxProvider !== "local" && (provider === "box" || provider === null)
+    // The cloud the install pinned (BOX_PROVIDER), or either one in the auto path.
+    const pinnedCloud = c.boxProvider === "boxd" || c.boxProvider === "upstash" ? c.boxProvider : null
+    const cloudKey = pinnedCloud === "boxd" ? set("boxdApiKey") : pinnedCloud === "upstash" ? set("upstashBoxApiKey") : set("upstashBoxApiKey") || set("boxdApiKey")
     // A container can't use this computer's `claude` login: Docker needs a key.
     const claudeSet = set("claudeOauthToken") || set("anthropicApiKey") || Boolean(this.d.addedLogin?.("claude")) || (onComputer && local?.claudeLogin === true)
     // The Coordinator runs on this server, so the server's own `codex login` works for it wherever agents run.
@@ -259,13 +273,21 @@ export class Setup {
     const coordinatorCli = this.d.settings.get().orchestratorCli
     const missing: string[] = []
     // Before the choice, a box key isn't the only way: "This computer" needs none.
-    if (boxesRequired && !set("upstashBoxApiKey")) missing.push(provider === null ? NO_RUNNER_CHOICE : CREDENTIAL_INFO.upstashBoxApiKey.label)
+    if (boxesRequired && !cloudKey) {
+      missing.push(
+        provider === null
+          ? NO_RUNNER_CHOICE
+          : pinnedCloud === "boxd"
+            ? CREDENTIAL_INFO.boxdApiKey.label
+            : `${CREDENTIAL_INFO.upstashBoxApiKey.label} or a ${CREDENTIAL_INFO.boxdApiKey.label}`,
+      )
+    }
     if (onComputer && !mock && local && coordinatorCli === "claude" && !local.tools.find((t) => t.key === "claude")?.found) missing.push("Claude Code on this computer")
     if (!mock && coordinatorCli === "claude" && !claudeSet) missing.push("Claude sign-in")
     if (!mock && coordinatorCli === "codex" && !codexSet) missing.push("Codex sign-in")
     const restart: string[] = []
-    if (c.boxProvider === "local" && !mock && set("upstashBoxApiKey")) {
-      restart.push("BOX_PROVIDER=local keeps every box on the server's machine. Unset it and restart Box Yard to use Upstash boxes.")
+    if (c.boxProvider === "local" && !mock && (set("upstashBoxApiKey") || set("boxdApiKey"))) {
+      restart.push("BOX_PROVIDER=local keeps every box on the server's machine. Unset it and restart Box Yard to use cloud boxes.")
     }
     const info = this.d.settings.info()
     return {
@@ -289,7 +311,7 @@ export class Setup {
       github: { state: creds.githubToken.state },
       owner: { name: info.settings.ownerName, source: info.sources.ownerName },
       runner: { choice, provider, default: this.defaultRunner(), installDefault: this.installDefault() },
-      upstash: { available: mock || c.boxProvider === "local" || set("upstashBoxApiKey") },
+      upstash: { available: mock || c.boxProvider === "local" || set("upstashBoxApiKey") || set("boxdApiKey") },
       local,
       restart,
       authorFallbacks: authorFallbacks(this.d.store).flatMap((r) => {
@@ -344,6 +366,7 @@ export class Setup {
 
   private check(key: CredentialKey, value: string): Promise<string> {
     if (key === "upstashBoxApiKey") return this.checkBoxes(value)
+    if (key === "boxdApiKey") return this.checkBoxd(value)
     if (key === "anthropicApiKey") return this.checkAnthropic(value)
     if (key === "claudeOauthToken") return this.checkClaude({ CLAUDE_CODE_OAUTH_TOKEN: value })
     if (key === "codexAuthJson") return this.checkCodex({ kind: "chatgpt", auth: value })
@@ -384,6 +407,35 @@ export class Setup {
       if (status === 401 || status === 403) throw new Error(`Upstash rejected the key (HTTP ${status}): ${message}`)
       if (status) throw new Error(`Upstash answered HTTP ${status}: ${message}`)
       throw new Error(/didn't answer/.test(message) ? message : `Can't reach Upstash: ${causeOf(err)}`)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** List the account's machines (boxd, docs/boxd.md): free, and it needs the same read access worker boxes do. */
+  private async checkBoxd(apiKey: string): Promise<string> {
+    const list = this.d.listBoxdMachines ?? (async (k: string) => {
+      // Loaded here, not at the top of the file: a Box Yard that never uses boxd never loads its gRPC stack.
+      const { Boxd } = await import("@boxd-sh/sdk")
+      const boxd = new Boxd({ apiKey: k })
+      try {
+        return (await boxd.machines.list()).map((m) => ({ status: m.status }))
+      } finally {
+        await boxd.close().catch(() => {})
+      }
+    })
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`boxd didn't answer within ${Math.round(this.timeoutMs / 1000)} s.`)), this.timeoutMs)
+    })
+    try {
+      const machines = await Promise.race([list(apiKey), timeout])
+      const live = machines.filter((m) => m?.status !== "destroyed").length
+      return `Works: boxd accepted the key and listed ${live} machine${live === 1 ? "" : "s"} on the account.`
+    } catch (err) {
+      const message = (err as Error)?.message ?? String(err)
+      if (/\b401\b|\b403\b|authenticat/i.test(message)) throw new Error(`boxd rejected the key: ${message}`)
+      throw new Error(/didn't answer/.test(message) ? message : `Can't reach boxd: ${message}`)
     } finally {
       clearTimeout(timer)
     }

@@ -83,6 +83,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     allowOpen: false,
     provider: "local",
     upstashBoxApiKey: "",
+    boxdApiKey: "",
     redisUrl: "",
     redisToken: "",
     claudeOauthToken: "",

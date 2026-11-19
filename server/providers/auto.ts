@@ -1,28 +1,36 @@
 import type { WorkerSize } from "../../shared/types.js"
+import { errorMessage } from "../util/retry.js"
+import { isBoxdBox } from "./boxd.js"
 import type { BoxHealth, BoxProvider, BoxSnapshotInfo, BoxUsageProbe, ExecResult } from "./types.js"
 
-/** Local boxes are folders named local-<id> (LocalProvider.create); every other id is an Upstash box. */
+/** Local boxes are folders named local-<id> (LocalProvider.create), boxd boxes boxd-<machine id>; every other id is an Upstash box. */
 export const isLocalBox = (boxId: string) => boxId.startsWith("local-")
 
 /**
- * The provider when BOX_PROVIDER isn't set and the env has no UPSTASH_BOX_API_KEY: new boxes are Upstash boxes
- * once a key is saved in Settings › Credentials, and folders on this machine until then, with no restart. Every
- * box keeps going to the provider that made it, so saving or removing the key never strands a box.
+ * The provider when BOX_PROVIDER isn't set and the env has no cloud key: new boxes are folders on this machine
+ * until a key is saved in Settings › Credentials, then that cloud's boxes — Upstash's when both are saved —
+ * with no restart, because the cloud is asked for on every call. Every box keeps going to the provider that
+ * made it (local- folder ids, boxd- machine ids, anything else an Upstash box), so saving or removing a key
+ * never strands a box.
  */
 export class AutoProvider implements BoxProvider {
   constructor(
     private readonly local: BoxProvider,
     private readonly upstash: BoxProvider,
-    private readonly useUpstash: () => boolean,
+    private readonly boxd: BoxProvider,
+    /** Where new boxes come from right now: local folders, or a cloud with a saved key (Upstash first). */
+    private readonly cloud: () => BoxProvider,
+    /** The clouds with a saved key, where leftovers are swept: possibly both, whatever `cloud` picks for new boxes. */
+    private readonly clouds: () => BoxProvider[],
   ) {}
 
   /** Where new boxes come from right now. */
   private get active(): BoxProvider {
-    return this.useUpstash() ? this.upstash : this.local
+    return this.cloud()
   }
 
   of(boxId: string): BoxProvider {
-    return isLocalBox(boxId) ? this.local : this.upstash
+    return isLocalBox(boxId) ? this.local : isBoxdBox(boxId) ? this.boxd : this.upstash
   }
 
   get name() {
@@ -57,7 +65,7 @@ export class AutoProvider implements BoxProvider {
     return p.snapshot(boxId, name)
   }
   async deleteSnapshot(snapshotId: string): Promise<void> {
-    const p = isLocalBox(snapshotId) ? this.local : this.upstash
+    const p = isLocalBox(snapshotId) ? this.local : isBoxdBox(snapshotId) ? this.boxd : this.upstash
     if (p.deleteSnapshot) await p.deleteSnapshot(snapshotId)
   }
   snapshotDirs(boxId: string) {
@@ -93,9 +101,20 @@ export class AutoProvider implements BoxProvider {
   destroy(boxId: string) {
     return this.of(boxId).destroy(boxId)
   }
-  /** Leftover boxes are only looked for on Upstash, and only once there's a key to look with. */
+  /** Leftovers are looked for on every cloud with a key, and only a cloud's own provider can list there. */
   async listIds(label: string): Promise<string[]> {
-    return this.useUpstash() && this.upstash.listIds ? this.upstash.listIds(label) : []
+    const ids: string[] = []
+    for (const p of this.clouds()) {
+      if (!p.listIds) continue
+      // One cloud failing (network, 5xx) shouldn't stop the other's sweep; cleanupOrphanBoxes logs the rest.
+      ids.push(
+        ...(await p.listIds(label).catch((err: unknown) => {
+          console.warn(`[box-yard] leftover sweep skipped (${p.name}): ${errorMessage(err)}`)
+          return []
+        })),
+      )
+    }
+    return ids
   }
   async usage(boxId: string): Promise<BoxUsageProbe> {
     const p = this.of(boxId)

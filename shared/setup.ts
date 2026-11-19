@@ -3,7 +3,7 @@
 import type { SettingSource } from "./types.js"
 import type { DefaultProvider, Runner, SetupRunner } from "./runner.js"
 
-export const CREDENTIAL_KEYS = ["upstashBoxApiKey", "claudeOauthToken", "anthropicApiKey", "codexAuthJson", "codexApiKey", "cursorApiKey", "opencodeAuthJson", "githubToken", "runpodApiKey", "vastApiKey", "daytonaApiKey"] as const
+export const CREDENTIAL_KEYS = ["upstashBoxApiKey", "boxdApiKey", "claudeOauthToken", "anthropicApiKey", "codexAuthJson", "codexApiKey", "cursorApiKey", "opencodeAuthJson", "githubToken", "runpodApiKey", "vastApiKey", "daytonaApiKey"] as const
 export type CredentialKey = (typeof CREDENTIAL_KEYS)[number]
 
 /**
@@ -72,7 +72,7 @@ export interface SetupStatus {
     /** What this install started with: "local" (this computer) on a fresh install unless BOXYARD_DEFAULT_RUNNER says otherwise; null on older installs. */
     installDefault?: SetupRunner | null
   }
-  /** Projects can pick "Upstash box": an Upstash key is set (or boxes are local folders: mock, BOX_PROVIDER=local). */
+  /** Projects can pick "Upstash box" as their runner: a cloud box key is set (Upstash or boxd, docs/boxd.md), or boxes are local folders (mock, BOX_PROVIDER=local). */
   upstash: { available: boolean }
   /** What this computer has for local agents. Null until "This computer" is chosen. */
   local: LocalCheck | null
@@ -200,6 +200,13 @@ export const CREDENTIAL_INFO: Record<
     placeholder: "Paste your Box API key",
     help: "The isolated cloud boxes your agents work in.",
     link: { href: "https://console.upstash.com", label: "Create one in the Upstash console" },
+  },
+  boxdApiKey: {
+    label: "boxd API key",
+    env: "BOXD_API_KEY",
+    placeholder: "bxd_…",
+    help: "Cloud machines from boxd.sh your agents work in, with Claude Code and Codex preinstalled (docs/boxd.md).",
+    link: { href: "https://app.boxd.sh/keys", label: "Create one in the boxd console" },
   },
   claudeOauthToken: {
     label: "Claude subscription token",
