@@ -1475,7 +1475,7 @@ const WaitingOnYou = memo(function WaitingOnYou({ rows, total, hidden, mixed, as
                   <div aria-hidden className={cx("grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5 px-2 text-xs leading-4 text-zinc-400", i ? "pt-1.5" : "pt-1")}>
                     {/* The project's square, as under More projects: a round dot here would read as a task's state. */}
                     <span className="grid place-items-center"><span style={projectColorStyle(project.color)} className="h-2 w-2 rounded-[2px] bg-(--pc)" /></span>
-                    <span className="min-w-0 truncate">{project.name}</span>
+                    <span title={project.name} className="min-w-0 truncate">{project.name}</span>
                   </div>
                 )}
                 <TaskRow row={r} spot="waiting" selected={selection.selected === taskKey(r.task.id, "waiting")} onPick={onPick} project={project} />

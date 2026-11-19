@@ -5,17 +5,28 @@ import { ResizeHandle, useElementWidth, useResizable } from "../lib/resize"
 import { THREAD_CHAT_ROOM } from "../lib/layout"
 import { cx } from "./ui"
 
-/** The column's width: w-64 by default, saved under `key` once dragged. */
-export const SIDEBAR_WIDTH = { key: "box-yard:sidebar-width", defaultWidth: 256, min: 200, max: 480 } as const
+/**
+ * The column's width: w-64 by default, saved under `key` once dragged. Wide enough at `max` for a long task title
+ * (TASK_TITLE_MAX) to show whole; the row caps it further (SIDEBAR_SHARE, THREAD_CHAT_ROOM).
+ */
+export const SIDEBAR_WIDTH = { key: "box-yard:sidebar-width", defaultWidth: 256, min: 200, max: 960 } as const
 
-/** The drag's cap in a row `container` px wide: the chat beside it keeps THREAD_CHAT_ROOM. */
-export const sidebarLimit = (container: number) => Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, container - THREAD_CHAT_ROOM))
+/** The most of the row the column may take: the chat beside it keeps the rest (40%). */
+export const SIDEBAR_SHARE = 0.6
 
 /**
- * The column's CSS width for a saved width: the container caps it too (100cqw), so a window that shrinks after a
- * drag squeezes the sidebar instead of the chat, without overwriting what was saved.
+ * The drag's cap in a row `container` px wide: SIDEBAR_SHARE of it, and the chat beside it keeps THREAD_CHAT_ROOM
+ * at least. In px, so 125% zoom keeps the same split.
  */
-export const sidebarWidthCss = (width: number) => `max(${SIDEBAR_WIDTH.min}px, min(${width}px, calc(100cqw - ${THREAD_CHAT_ROOM}px)))`
+export const sidebarLimit = (container: number) =>
+  Math.max(SIDEBAR_WIDTH.min, Math.min(SIDEBAR_WIDTH.max, Math.floor(container * SIDEBAR_SHARE), container - THREAD_CHAT_ROOM))
+
+/**
+ * The column's CSS width for a saved width, capped like sidebarLimit by the container (cqw), so a window that shrinks
+ * after a drag squeezes the sidebar instead of the chat, without overwriting what was saved.
+ */
+export const sidebarWidthCss = (width: number) =>
+  `max(${SIDEBAR_WIDTH.min}px, min(${width}px, ${SIDEBAR_SHARE * 100}cqw, calc(100cqw - ${THREAD_CHAT_ROOM}px)))`
 
 /** The drag state lives here, so moving the edge re-renders neither App nor the sidebar's list (`children`). */
 export function SidebarPane({ rail, children }: { rail: boolean; children: ReactNode }) {

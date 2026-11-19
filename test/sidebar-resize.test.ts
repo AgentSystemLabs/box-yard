@@ -4,7 +4,7 @@ import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { App } from "../web/src/App.js"
-import { SIDEBAR_WIDTH, SidebarPane, sidebarLimit, sidebarWidthCss } from "../web/src/components/SidebarPane.js"
+import { SIDEBAR_SHARE, SIDEBAR_WIDTH, SidebarPane, sidebarLimit, sidebarWidthCss } from "../web/src/components/SidebarPane.js"
 import { keys } from "../web/src/lib/queries.js"
 import { closeSidebarDrawer, setSidebarCollapsed } from "../web/src/lib/sidebar.js"
 import { openThread, closeThread, COORDINATOR_CHAT } from "../web/src/lib/threads.js"
@@ -65,39 +65,72 @@ it("drags the sidebar's right edge within its limits and restores the saved widt
   root = createRoot(host)
   mount()
   expect(widthCss()).toBe(sidebarWidthCss(350))
+  // At 1440px the drag stops at 60% of the row (864px), well past the old 480px cap.
   drag(350, 2000)
-  expect(widthCss()).toBe(sidebarWidthCss(480))
-  drag(480, -1000)
+  expect(widthCss()).toBe(sidebarWidthCss(864))
+  expect(handle()!.getAttribute("aria-valuemax")).toBe("864")
+  drag(864, -1000)
   expect(widthCss()).toBe(sidebarWidthCss(200))
 })
 
 it("clamps invalid saved widths and resets the preference on double-click", () => {
   localStorage.setItem(SIDEBAR_WIDTH.key, "5000")
   mount()
-  expect(widthCss()).toBe(sidebarWidthCss(480))
+  expect(widthCss()).toBe(sidebarWidthCss(SIDEBAR_WIDTH.max))
+  expect(handle()!.getAttribute("aria-valuenow")).toBe("864")
   act(() => void handle()!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })))
   expect(widthCss()).toBe(sidebarWidthCss(256))
   expect(localStorage.getItem(SIDEBAR_WIDTH.key)).toBeNull()
 })
 
 it("caps the display and the next drag to leave room for the centre without losing the preference on window resize", () => {
-  localStorage.setItem(SIDEBAR_WIDTH.key, "480")
+  localStorage.setItem(SIDEBAR_WIDTH.key, "800")
   mount()
+  expect(handle()!.getAttribute("aria-valuenow")).toBe("800")
+  container = 1100
+  act(() => resized())
+  expect(handle()!.getAttribute("aria-valuemax")).toBe("660")
+  expect(handle()!.getAttribute("aria-valuenow")).toBe("660")
   container = 768
   act(() => resized())
   expect(handle()!.getAttribute("aria-valuemax")).toBe("448")
   expect(handle()!.getAttribute("aria-valuenow")).toBe("448")
-  expect(widthCss()).toBe(sidebarWidthCss(480)) // CSS caps the displayed width; the saved preference survives.
-  expect(localStorage.getItem(SIDEBAR_WIDTH.key)).toBe("480")
+  expect(widthCss()).toBe(sidebarWidthCss(800)) // CSS caps the displayed width; the saved preference survives.
+  expect(localStorage.getItem(SIDEBAR_WIDTH.key)).toBe("800")
   container = 1440
   act(() => resized())
-  expect(handle()!.getAttribute("aria-valuenow")).toBe("480")
+  expect(handle()!.getAttribute("aria-valuenow")).toBe("800")
   container = 768
   act(() => resized())
   drag(448, 400)
   expect(widthCss()).toBe(sidebarWidthCss(400))
   expect(localStorage.getItem(SIDEBAR_WIDTH.key)).toBe("400")
   expect(sidebarLimit(0)).toBe(200)
+})
+
+it("caps the sidebar at 60% of the row, the chat's room, and 960px, never under its minimum", () => {
+  expect(SIDEBAR_SHARE).toBe(0.6)
+  expect(SIDEBAR_WIDTH.max).toBe(960)
+  // Narrow desktops: the chat's 320px room is the cap.
+  expect(sidebarLimit(768)).toBe(448)
+  expect(sidebarLimit(800)).toBe(480)
+  // Wider rows: 60% of the row, so the chat keeps 40%.
+  expect(sidebarLimit(1024)).toBe(614)
+  expect(sidebarLimit(1152)).toBe(691) // 1440px at 125% zoom
+  expect(sidebarLimit(1440)).toBe(864)
+  // Past 1600px, the 960px cap.
+  expect(sidebarLimit(1600)).toBe(960)
+  expect(sidebarLimit(1920)).toBe(960)
+  expect(sidebarLimit(3840)).toBe(960)
+  // A row too narrow for both keeps the sidebar's minimum.
+  expect(sidebarLimit(400)).toBe(SIDEBAR_WIDTH.min)
+  for (const row of [768, 800, 1024, 1152, 1280, 1440, 1600, 1920, 2560]) {
+    const cap = sidebarLimit(row)
+    expect(cap).toBeLessThanOrEqual(row * SIDEBAR_SHARE)
+    expect(row - cap).toBeGreaterThanOrEqual(320)
+  }
+  // The CSS applies the same caps to a saved width, against the row it's in (cqw).
+  expect(sidebarWidthCss(700)).toBe("max(200px, min(700px, 60cqw, calc(100cqw - 320px)))")
 })
 
 it("keeps the folded rail fixed, with no handle, and restores the expanded width", () => {
