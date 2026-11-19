@@ -1,11 +1,27 @@
 import { describe, expect, it, vi } from "vitest"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
-import { PR_BATCH, PR_MAX_BACKOFF_MS, PR_REPORT_FRESH_MS, PrTracker, RATE_FLOOR, parsePrUrl, type PrChange } from "../server/prs.js"
+import {
+  PR_BATCH,
+  PR_DISCOVER_SLACK_MS,
+  PR_MAX_BACKOFF_MS,
+  PR_REPORT_FRESH_MS,
+  PrTracker,
+  RATE_FLOOR,
+  parsePrUrl,
+  pickBranchPr,
+  taskBranches,
+  type BranchPr,
+  type FoundPr,
+  type PrChange,
+} from "../server/prs.js"
 import type { TaskStatus } from "../shared/types.js"
 import { tmpDir } from "./helpers.js"
 
 type Gh = { state: "OPEN" | "CLOSED" | "MERGED"; isDraft?: boolean; mergedAt?: string | null; mergedBy?: { login: string } | null }
+
+/** A PR as a lookup by branch sees it: `base` is the repo it targets ("owner/name"), `headRepository` the one its branch is on. */
+type BranchNode = Gh & { base: string; number: number; createdAt: string; headRefName: string; headRefOid?: string; headRepository: { nameWithOwner: string } | null }
 
 /** A fake GitHub GraphQL endpoint: PRs by "owner/name#number", plus a log of what each request asked for. */
 function fakeGithub() {
@@ -17,8 +33,38 @@ function fakeGithub() {
   const failFor = new Map<string, Response>()
   /** Repos ("owner/name") a token can't see: GitHub answers NOT_FOUND for them. */
   const hidden = new Map<string, Set<string>>()
+  /** PRs a lookup by branch finds, and repos by "owner/name" (lower case): GitHub's own spelling and the fork's parent. */
+  const branchPrs: BranchNode[] = []
+  const repos = new Map<string, { nameWithOwner: string; parent?: string }>()
+  const onBranch = (repo: string, branch: string) => ({
+    nodes: branchPrs
+      .filter((pr) => pr.base.toLowerCase() === repo.toLowerCase() && pr.headRefName === branch)
+      .map(({ base, number, ...pr }) => ({ ...pr, url: `https://github.com/${base}/pull/${number}` })),
+  })
   const fetch = (async (_url: string, init: RequestInit) => {
     const { variables } = JSON.parse(String(init.body)) as { query: string; variables: Record<string, string | number> }
+    const branches = Object.keys(variables).filter((k) => /^b\d+$/.test(k)).length
+    if (branches) {
+      // A lookup by branch (discover): d<i> is repository(o<i>/n<i>) with its PRs (and its parent's) on branch b<i>.
+      const asked = Array.from({ length: branches }, (_, i) => `${variables[`o${i}`]}/${variables[`n${i}`]}@${variables[`b${i}`]}`)
+      const token = String((init.headers as Record<string, string>).Authorization)
+      calls.push({ token, asked })
+      if (fail) return fail.clone()
+      if (failFor.has(token)) return failFor.get(token)!.clone()
+      const data: Record<string, unknown> = { rateLimit: { remaining, resetAt: new Date(Date.now() + 30 * 60_000).toISOString() } }
+      const errors: unknown[] = []
+      asked.forEach((key, i) => {
+        const [slug, branch] = key.split("@") as [string, string]
+        if (hidden.get(token)?.has(slug)) {
+          data[`d${i}`] = null
+          errors.push({ type: "NOT_FOUND", path: [`d${i}`], message: `Could not resolve to a Repository with the name '${slug}'.` })
+          return
+        }
+        const repo = repos.get(slug.toLowerCase()) ?? { nameWithOwner: slug }
+        data[`d${i}`] = { nameWithOwner: repo.nameWithOwner, pullRequests: onBranch(slug, branch), parent: repo.parent ? { pullRequests: onBranch(repo.parent, branch) } : null }
+      })
+      return new Response(JSON.stringify({ data, ...(errors.length ? { errors } : {}) }), { status: 200, headers: { "content-type": "application/json" } })
+    }
     const n = Object.keys(variables).filter((k) => k.startsWith("p")).length
     const asked = Array.from({ length: n }, (_, i) => `${variables[`o${i}`]}/${variables[`n${i}`]}#${variables[`p${i}`]}`)
     const token = String((init.headers as Record<string, string>).Authorization)
@@ -38,6 +84,8 @@ function fakeGithub() {
   }) as unknown as typeof globalThis.fetch
   return {
     prs,
+    branchPrs,
+    repos,
     calls,
     fetch,
     hidden,
@@ -52,14 +100,24 @@ function setup(opts: { token?: (projectId: string) => string | null; now?: () =>
   const gh = fakeGithub()
   const changes: PrChange[] = []
   const logs: string[] = []
+  const found: FoundPr[] = []
   const project = store.createProject({ name: "site" })
-  const tracker = new PrTracker({ store, token: opts.token ?? (() => "tok"), fetch: gh.fetch, now: opts.now, autoDone: opts.autoDone, onChange: (c) => changes.push(c), log: (m) => logs.push(m) })
+  const tracker = new PrTracker({
+    store,
+    token: opts.token ?? (() => "tok"),
+    fetch: gh.fetch,
+    now: opts.now,
+    autoDone: opts.autoDone,
+    onChange: (c) => changes.push(c),
+    onFound: (f) => found.push(f),
+    log: (m) => logs.push(m),
+  })
   const task = (n: number, status: TaskStatus = "pr_ready", extra: Parameters<Store["updateTask"]>[1] = {}) => {
     const t = store.createTask({ projectId: project.id, title: `Task ${n}`, prompt: "p" })
     store.updateTask(t.id, { status, prUrl: `https://github.com/acme/site/pull/${n}`, ...extra }, { quiet: true })
     return t.id
   }
-  return { store, gh, changes, tracker, task, project, logs }
+  return { store, gh, changes, found, tracker, task, project, logs }
 }
 
 describe("parsePrUrl", () => {
@@ -403,5 +461,232 @@ describe("ensureFresh (before a PR state is reported)", () => {
     await hung.ensureFresh([stuck], { timeoutMs: 50 })
     expect(Date.now() - started).toBeLessThan(1000)
     expect(hung.prCheck(stuck).checkedAt).toBeNull()
+  })
+})
+
+describe("finding a task's PR by its branch (discover)", () => {
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const DAY = 24 * 60 * 60_000
+
+  /** setup() with the project on github.com/acme/site, and PR-less tasks on a branch. */
+  function discoverSetup(opts: Parameters<typeof setup>[0] & { repo?: string } = {}) {
+    const s = setup(opts)
+    s.store.updateProject(s.project.id, { repo: opts.repo ?? "https://github.com/acme/site" })
+    const onBranch = (branch: string, status: TaskStatus = "idle", extra: Parameters<Store["updateTask"]>[1] = {}, projectId = s.project.id) => {
+      const t = s.store.createTask({ projectId, title: `On ${branch}`, prompt: "p", branch })
+      s.store.updateTask(t.id, { status, ...extra }, { quiet: true })
+      return t.id
+    }
+    /** A PR on GitHub, from acme/site's own branch unless said otherwise, opened now. */
+    const pr = (number: number, headRefName: string, extra: Partial<BranchNode> = {}) =>
+      s.gh.branchPrs.push({ base: "acme/site", number, state: "OPEN", createdAt: iso(Date.now()), headRefName, headRefOid: `sha${number}`, headRepository: { nameWithOwner: "acme/site" }, ...extra })
+    return { ...s, onBranch, pr }
+  }
+
+  it("saves an open PR on a resting task's branch, readies the task for review and says so once", async () => {
+    const { store, gh, tracker, onBranch, pr, found } = discoverSetup()
+    const id = onBranch("fix-lights")
+    pr(4, "fix-lights")
+    expect(await tracker.discover()).toBe(1)
+    expect(gh.calls.map((c) => c.asked)).toEqual([["acme/site@fix-lights"]])
+    expect(store.getTask(id)).toMatchObject({ status: "pr_ready", prUrl: "https://github.com/acme/site/pull/4", prState: "open", branch: "fix-lights" })
+    expect(store.getTaskRow(id)!.pr_head_sha).toBe("sha4")
+    expect(found).toEqual([expect.objectContaining({ taskId: id, url: "https://github.com/acme/site/pull/4", branch: "fix-lights" })])
+    expect(tracker.prCheck(id).checkedAt).not.toBeNull()
+
+    // The task has its PR now: the next round has nothing to look up, and the poll follows the PR from here.
+    expect(await tracker.discover()).toBe(0)
+    expect(gh.calls).toHaveLength(1)
+    gh.prs.set("acme/site#4", { state: "MERGED", mergedBy: { login: "cody" } })
+    await tracker.pollAll()
+    expect(store.getTask(id)).toMatchObject({ status: "done", prState: "merged" })
+  })
+
+  it("a task whose turn runs, or that waits on Cody, gets its PR but keeps its status; a draft stays a draft", async () => {
+    const { store, tracker, onBranch, pr } = discoverSetup()
+    const working = onBranch("a", "working", { currentTurnId: "turn_1" })
+    const asking = onBranch("b", "needs_input")
+    pr(1, "a", { isDraft: true })
+    pr(2, "b")
+    expect(await tracker.discover()).toBe(2)
+    expect(store.getTask(working)).toMatchObject({ status: "working", prUrl: "https://github.com/acme/site/pull/1", prState: "draft" })
+    expect(store.getTask(asking)).toMatchObject({ status: "needs_input", prUrl: "https://github.com/acme/site/pull/2", prState: "open" })
+  })
+
+  it("a PR merged before Box Yard saw it moves the task to done, with the merge notification", async () => {
+    const { store, tracker, onBranch, pr, changes, found } = discoverSetup()
+    const id = onBranch("quick-fix")
+    pr(8, "quick-fix", { state: "MERGED", mergedAt: iso(Date.now()), mergedBy: { login: "cody" } })
+    expect(await tracker.discover()).toBe(1)
+    expect(store.getTask(id)).toMatchObject({ status: "done", prState: "merged", prMergedBy: "cody", prUrl: "https://github.com/acme/site/pull/8" })
+    expect(found).toHaveLength(1)
+    expect(changes).toEqual([expect.objectContaining({ taskId: id, prev: "open", status: "done" })])
+    expect(store.listNotifications().map((n) => n.summary)).toEqual(["PR #8 merged by cody"])
+  })
+
+  it("ignores a same-named branch on someone else's fork and an older PR whose branch name came back", async () => {
+    const { store, gh, tracker, onBranch, pr } = discoverSetup()
+    const id = onBranch("patch-1")
+    pr(30, "patch-1", { headRepository: { nameWithOwner: "stranger/site" } })
+    pr(31, "patch-1", { headRepository: null })
+    // A branch of the same name, used and merged a month ago, and one still open from then.
+    pr(10, "patch-1", { state: "MERGED", createdAt: iso(Date.now() - 31 * DAY), mergedAt: iso(Date.now() - 30 * DAY) })
+    pr(11, "patch-1", { createdAt: iso(Date.now() - 30 * DAY) })
+    expect(await tracker.discover()).toBe(0)
+    expect(gh.calls).toHaveLength(1)
+    expect(store.getTask(id)).toMatchObject({ status: "idle", prUrl: null })
+
+    // Its workspace was on that branch at its last turn end, though: the old open PR is the one it works on.
+    store.updateTask(id, { pushState: { status: "pushed", at: Date.now(), branch: "patch-1", head: "abc", wip: null, reason: null } }, { quiet: true })
+    expect(await tracker.discover()).toBe(1)
+    expect(store.getTask(id)!.prUrl).toBe("https://github.com/acme/site/pull/11")
+  })
+
+  it("finds the PR on the parent repo when the project is a fork, and matches repo names in any case", async () => {
+    const fork = discoverSetup({ repo: "https://github.com/acme-fork/site" })
+    fork.gh.repos.set("acme-fork/site", { nameWithOwner: "acme-fork/site", parent: "acme/site" })
+    const id = fork.onBranch("fix-lights")
+    fork.pr(9, "fix-lights", { headRepository: { nameWithOwner: "acme-fork/site" } })
+    expect(await fork.tracker.discover()).toBe(1)
+    expect(fork.store.getTask(id)!.prUrl).toBe("https://github.com/acme/site/pull/9")
+
+    // The project spells the repo Acme/Site; GitHub says acme/site.
+    const cased = discoverSetup({ repo: "https://github.com/Acme/Site" })
+    cased.gh.repos.set("acme/site", { nameWithOwner: "acme/site" })
+    const other = cased.onBranch("tidy")
+    cased.pr(3, "tidy")
+    expect(await cased.tracker.discover()).toBe(1)
+    expect(cased.store.getTask(other)!.prUrl).toBe("https://github.com/acme/site/pull/3")
+  })
+
+  it("looks up the branch the workspace was pushed from as well as the task's own", async () => {
+    const { store, gh, tracker, onBranch, pr } = discoverSetup()
+    const id = onBranch("task-branch", "idle", { pushState: { status: "pushed", at: Date.now(), branch: "agent-renamed", head: "abc", wip: null, reason: null } })
+    pr(5, "agent-renamed")
+    expect(await tracker.discover()).toBe(1)
+    expect(gh.calls[0]!.asked.sort()).toEqual(["acme/site@agent-renamed", "acme/site@task-branch"])
+    expect(store.getTask(id)).toMatchObject({ prUrl: "https://github.com/acme/site/pull/5", branch: "agent-renamed" })
+  })
+
+  it("asks nothing about tasks with a PR, done tasks, the base branch, or projects with no GitHub repo or token", async () => {
+    let noToken = ""
+    const { store, gh, tracker, onBranch, pr, project } = discoverSetup({ token: (projectId) => (projectId === noToken ? null : "tok") })
+    const local = store.createProject({ name: "local", repo: null })
+    noToken = store.createProject({ name: "tokenless", repo: "https://github.com/acme/other" }).id
+    onBranch("has-pr", "pr_ready", { prUrl: "https://github.com/acme/site/pull/1" })
+    onBranch("finished", "done")
+    onBranch("main")
+    onBranch("HEAD")
+    onBranch("elsewhere", "idle", {}, local.id)
+    onBranch("tokenless", "idle", {}, noToken)
+    for (const [n, b] of [[1, "has-pr"], [2, "finished"], [3, "main"], [4, "elsewhere"], [5, "tokenless"]] as const) pr(n, b)
+    expect(await tracker.discover()).toBe(0)
+    expect(gh.calls).toEqual([])
+    expect(project.baseBranch).toBe("main")
+  })
+
+  it("asks once per repo and branch, PR_BATCH branches a request", async () => {
+    const { gh, tracker, onBranch, store } = discoverSetup()
+    const ids = Array.from({ length: PR_BATCH + 1 }, (_, i) => onBranch(`b${i}`))
+    // Two tasks on one branch share its lookup.
+    const twin = onBranch("b0")
+    gh.branchPrs.push({ base: "acme/site", number: 77, state: "OPEN", createdAt: iso(Date.now()), headRefName: "b0", headRepository: { nameWithOwner: "acme/site" } })
+    expect(await tracker.discover()).toBe(2)
+    expect(gh.calls.map((c) => c.asked.length)).toEqual([PR_BATCH, 1])
+    expect([ids[0], twin].map((id) => store.getTask(id!)!.prUrl)).toEqual(["https://github.com/acme/site/pull/77", "https://github.com/acme/site/pull/77"])
+  })
+
+  it("a scheduled round skips a token that backs off, a turn's own lookup still asks, and a rate-limited token asks nothing", async () => {
+    let now = 1_000_000
+    const { store, gh, tracker, onBranch, pr, logs } = discoverSetup({ now: () => now })
+    const id = onBranch("fix-lights")
+    gh.failWith(new Response("boom", { status: 502 }))
+    expect(await tracker.discover()).toBe(0)
+    expect(logs.some((l) => l.includes("backing off"))).toBe(true)
+    gh.failWith(null)
+    pr(4, "fix-lights")
+    expect(await tracker.discover()).toBe(0)
+    expect(gh.calls).toHaveLength(1)
+    await tracker.discoverTask(id)
+    expect(gh.calls).toHaveLength(2)
+    expect(store.getTask(id)!.prUrl).toBe("https://github.com/acme/site/pull/4")
+
+    const other = onBranch("next")
+    pr(5, "next")
+    gh.setRemaining(RATE_FLOOR - 1)
+    // Low budget: this answer still counts, then the token pauses until GitHub's reset.
+    await tracker.discoverTask(other)
+    expect(store.getTask(other)!.prUrl).toBe("https://github.com/acme/site/pull/5")
+    const third = onBranch("later")
+    now += 60_000
+    await tracker.discoverTask(third)
+    expect(gh.calls).toHaveLength(3)
+  })
+
+  it("discoverTask never waits longer than its timeout", async () => {
+    const s = discoverSetup()
+    const hung = new PrTracker({ store: s.store, token: () => "tok", fetch: (() => new Promise(() => {})) as unknown as typeof fetch })
+    const id = s.onBranch("fix-lights")
+    const started = Date.now()
+    await hung.discoverTask(id, { timeoutMs: 50 })
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(s.store.getTask(id)!.prUrl).toBeNull()
+  })
+
+  it("runs with the scheduled poll: at start, then every discoverMs", async () => {
+    let now = 5_000_000
+    const s = discoverSetup()
+    const tracker = new PrTracker({ store: s.store, token: () => "tok", fetch: s.gh.fetch, now: () => now, intervalMs: 5, discoverMs: 60_000 })
+    const id = s.onBranch("fix-lights")
+    s.pr(4, "fix-lights")
+    tracker.start()
+    try {
+      await vi.waitFor(() => expect(s.store.getTask(id)!.prUrl).toBe("https://github.com/acme/site/pull/4"))
+      const late = s.onBranch("later")
+      s.pr(6, "later")
+      // Polls keep coming every 5 ms; branches are looked up again only once discoverMs passed.
+      await new Promise((r) => setTimeout(r, 60))
+      expect(s.store.getTask(late)!.prUrl).toBeNull()
+      now += 60_000
+      await vi.waitFor(() => expect(s.store.getTask(late)!.prUrl).toBe("https://github.com/acme/site/pull/6"))
+    } finally {
+      tracker.stop()
+    }
+  })
+})
+
+describe("pickBranchPr and taskBranches", () => {
+  const at = 10 * 24 * 60 * 60_000
+  const row = (pushed: string | null = null) => ({
+    created_at: at,
+    branch: "own",
+    push_state_json: pushed ? JSON.stringify({ status: "pushed", at, branch: pushed, head: null, wip: null, reason: null }) : null,
+  })
+  const pr = (n: number, state: "open" | "draft" | "merged", createdAt: number, extra: Partial<BranchPr["info"]> = {}): BranchPr => ({
+    url: `https://github.com/acme/site/pull/${n}`,
+    headRefName: "own",
+    createdAt,
+    info: { state, mergedAt: state === "merged" ? createdAt + 1 : null, mergedBy: null, ...extra },
+  })
+
+  it("prefers an open PR over a merged one and the newest of each", () => {
+    expect(pickBranchPr(row(), [pr(1, "merged", at + 5), pr(2, "open", at + 1), pr(3, "draft", at + 2)])?.url).toMatch(/pull\/3$/)
+    expect(pickBranchPr(row(), [pr(1, "merged", at + 1), pr(2, "merged", at + 9)])?.url).toMatch(/pull\/2$/)
+    expect(pickBranchPr(row(), [])).toBeNull()
+  })
+
+  it("counts PRs opened from a minute before the task started, or on the branch its workspace was pushed from", () => {
+    expect(pickBranchPr(row(), [pr(1, "open", at - PR_DISCOVER_SLACK_MS)])?.url).toMatch(/pull\/1$/)
+    expect(pickBranchPr(row(), [pr(1, "open", at - PR_DISCOVER_SLACK_MS - 1)])).toBeNull()
+    expect(pickBranchPr(row("own"), [pr(1, "open", 0)])?.url).toMatch(/pull\/1$/)
+    // A merged one must have merged after the task started, even on its pushed branch.
+    expect(pickBranchPr(row("own"), [pr(1, "merged", 0, { mergedAt: 5 })])).toBeNull()
+  })
+
+  it("taskBranches: the pushed branch and the task's own, never the base branch or a detached HEAD", () => {
+    expect(taskBranches({ branch: "own", push_state_json: row("pushed").push_state_json }, "main")).toEqual(["pushed", "own"])
+    expect(taskBranches({ branch: "own", push_state_json: row("own").push_state_json }, "main")).toEqual(["own"])
+    expect(taskBranches({ branch: "main", push_state_json: row("HEAD").push_state_json }, "main")).toEqual([])
+    expect(taskBranches({ branch: null, push_state_json: "{not json" }, "main")).toEqual([])
   })
 })
