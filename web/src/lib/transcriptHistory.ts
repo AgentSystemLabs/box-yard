@@ -58,6 +58,19 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
       // its timestamp would also make the next page skip the messages between the window and that turn.
       return update.createdAt < firstAt || update.createdAt > lastAt ? [] : [update]
     })
+    // The server cursor is null when this page already reached the newest row. A send and its reply
+    // arrive in the live cache after that and have to show here; otherwise each send only reveals the
+    // previous one, once the view returns to latest. An older page keeps an after cursor, so appending
+    // there would pull the live tail across the gap.
+    if (!page.after) {
+      const seen = new Set(merged.map((m) => m.id))
+      for (const message of live) {
+        if (seen.has(message.id) || message.createdAt < lastAt) continue
+        merged.push(message)
+        seen.add(message.id)
+        moved = true
+      }
+    }
     return moved ? merged.sort((a, b) => a.createdAt - b.createdAt) : merged
   }, [page, live])
   const latest = useRef({ path, page, items })
