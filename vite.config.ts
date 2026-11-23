@@ -47,11 +47,31 @@ function preloadUiFont(): Plugin {
   }
 }
 
+/**
+ * Libraries the first screen needs, in chunks of their own: they change far less often than the app, so an update
+ * leaves them cached, and the app's own code stays under the 500 kB a chunk. Markdown takes its parser's whole tree
+ * (react-markdown's and remark-gfm's dependencies come with them). The icons are those the first load draws (`$initial`),
+ * with Box Yard's own two: an icon only a lazy part uses stays in that part's chunk.
+ */
+const CHUNK_GROUPS = [
+  { name: "react", test: /[\\/]node_modules[\\/](react|react-dom|scheduler|@tanstack[\\/](react-query|query-core)|wouter)[\\/]/, priority: 2 },
+  { name: "markdown", test: /[\\/]node_modules[\\/](react-markdown|remark-gfm)[\\/]/, priority: 1 },
+  { name: "icons", test: /[\\/]node_modules[\\/]lucide-react[\\/]|[\\/]components[\\/]ShipIcons\.tsx$/, tags: ["$initial" as const] },
+]
+
 export default defineConfig({
   root: "web",
   plugins: [react(), tailwindcss(), preloadUiFont(), precompressBuild()],
   define: { __APP_VERSION__: JSON.stringify(version), __APP_COMMIT__: JSON.stringify(commit) },
-  build: { outDir: "../dist/web", emptyOutDir: true },
+  build: {
+    outDir: "../dist/web",
+    emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        codeSplitting: { groups: CHUNK_GROUPS },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
