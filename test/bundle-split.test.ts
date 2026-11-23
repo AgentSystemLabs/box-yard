@@ -154,6 +154,15 @@ describe("web bundle", () => {
     expect(preloads[0]).toContain("crossorigin")
     // The stylesheet asks for the very file that's preloaded.
     expect(css).toContain(`url(${href})`)
+    // That face holds the first paint's text until it's in (block), so the app never paints in a fallback that then
+    // reflows into Inter. Every other face, upright and italic in each script, still comes, and swaps in: none is
+    // preloaded, so blocking on one would hide text.
+    const faces = [...css.matchAll(/@font-face\{([^}]*font-family:Inter Variable[^}]*)\}/g)].map((m) => m[1]!)
+    expect(faces).toHaveLength(14)
+    expect(faces.filter((f) => f.includes("font-style:italic"))).toHaveLength(7)
+    const display = (face: string) => /font-display:(\w+)/.exec(face)?.[1]
+    expect(faces.filter((f) => f.includes(`url(${href})`)).map(display)).toEqual(["block"])
+    expect(faces.filter((f) => !f.includes(`url(${href})`)).map(display)).toEqual(Array(13).fill("swap"))
     expect(css).toMatch(/font-family:Box Yard Wordmark;src:url\(data:font\/woff2;base64,/)
     // The file holds only the SemiBold, so the face must say so: as a 400 face, the browser would draw a fake bold over it.
     expect(css).toMatch(/font-family:Box Yard Wordmark;[^}]*font-weight:600/)

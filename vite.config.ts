@@ -48,6 +48,28 @@ function preloadUiFont(): Plugin {
 }
 
 /**
+ * The preloaded face, Inter's upright latin, holds the first paint's text back until it's in (`font-display: block`
+ * instead of fontsource's `swap`), so the app never paints in a fallback that reflows into Inter. Preloaded with the
+ * page, it's in before the script first renders on any usual connection. Slower than the browser's block period
+ * (about 3 s), the text shows in the fallback and swaps to Inter when it lands; a failed request shows the fallback
+ * at once. Every other face (italic, other scripts) isn't preloaded, so it keeps `swap` rather than hide text.
+ */
+function blockUiFont(): Plugin {
+  const face = /(@font-face\s*\{[^}]*?font-display:\s*)swap(;[^}]*\/inter-latin-wght-normal\.woff2[^}]*\})/
+  return {
+    name: "block-ui-font",
+    enforce: "pre",
+    transform: {
+      filter: { id: /[\\/]@fontsource-variable[\\/]inter[\\/]wght\.css(\?|$)/ },
+      handler(css) {
+        if (!face.test(css)) this.error("Inter's latin @font-face (inter-latin-wght-normal.woff2, font-display: swap) is no longer in wght.css")
+        return css.replace(face, "$1block$2")
+      },
+    },
+  }
+}
+
+/**
  * Libraries the first screen needs, in chunks of their own: they change far less often than the app, so an update
  * leaves them cached, and the app's own code stays under the 500 kB a chunk. Markdown takes its parser's whole tree
  * (react-markdown's and remark-gfm's dependencies come with them). The icons are those the first load draws (`$initial`),
@@ -61,7 +83,7 @@ const CHUNK_GROUPS = [
 
 export default defineConfig({
   root: "web",
-  plugins: [react(), tailwindcss(), preloadUiFont(), precompressBuild()],
+  plugins: [react(), tailwindcss(), blockUiFont(), preloadUiFont(), precompressBuild()],
   define: { __APP_VERSION__: JSON.stringify(version), __APP_COMMIT__: JSON.stringify(commit) },
   build: {
     outDir: "../dist/web",

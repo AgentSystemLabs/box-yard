@@ -11,7 +11,7 @@
 
 /*
  * Type: Inter sets the whole UI (@fontsource-variable/inter, imported in main.tsx; index.html preloads its latin file,
- * vite.config.ts), and Sora SemiBold, a geometric face to match the Y-brace crate, sets the "BOX YARD" wordmark
+ * and the first paint waits for that one face rather than paint a fallback: vite.config.ts), and Sora SemiBold, a geometric face to match the Y-brace crate, sets the "BOX YARD" wordmark
  * (BrandLogo.tsx, whose Y is the crate). The wordmark's file holds only those capitals at that one weight
  * (scripts/wordmark-font.py), so Vite inlines it here.
  */
