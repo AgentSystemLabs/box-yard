@@ -1,10 +1,8 @@
-// The file preview modal: images in a lightbox, markdown rendered, HTML and PDF in iframes, text and code with line
-// numbers (JSON pretty-printed, CSV as a table), video and audio in native players. Mounted once as <FilePreviewHost>;
-// links open it through <FileLink> and lib/preview.ts.
+// What the file preview shows: images in a lightbox, markdown rendered, HTML and PDF in iframes, text and code with line
+// numbers (JSON pretty-printed, CSV as a table), video and audio in native players. A chunk of its own, inside the
+// dialog FilePreviewHost.tsx keeps (mounted once; links open it through <FileLink> and lib/preview.ts).
 import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
-import { useSearchParams } from "wouter"
-import { Check, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Code, Copy, Download, ExternalLink, Eye, FileWarning, Link as LinkIcon, MoreHorizontal, RotateCw, WrapText, ZoomIn, ZoomOut } from "lucide-react"
-import { useArtifacts } from "../lib/queries"
+import { Check, ChevronLeft, ChevronRight, ChevronsDown, ChevronsUp, Code, Copy, Download, ExternalLink, Eye, Link as LinkIcon, MoreHorizontal, WrapText, ZoomIn, ZoomOut } from "lucide-react"
 import {
   CSV_ROW_LIMIT,
   LINE_ROWS_MAX,
@@ -15,83 +13,23 @@ import {
   lineCount,
   lineNumbers,
   parseCsv,
-  parsePreviewKey,
   prettyJson,
-  previewKey,
   previewKind,
   splitLines,
   type PreviewItem,
   type PreviewKind,
 } from "../lib/filePreview"
-import { PREVIEW_PARAM, closePreview, stepPreview, usePreviewState } from "../lib/preview"
+import { closePreview, stepPreview } from "../lib/preview"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
 import { FIT, TAP_SLOP_PX, clampView, isDoubleTap, isStrip, maxScale, pinchView, shownPercent, swipeAction, zoomAt, zoomStep, type Point, type Size, type Tap, type View } from "../lib/imageGestures"
-import { DismissButton, Modal, type ModalSize } from "./Modal"
+import { DismissButton, focusables } from "./Modal"
 import { Loading } from "./Loading"
 import { MessageMenu, type MenuItem } from "./MessageActions"
 import { formatSize } from "./Attachments"
 import { isTyping } from "./TaskFilters"
 import { Markdown, NewTabLink, cx } from "./ui"
-import type { Artifact } from "../../../shared/types"
-
-/** Mounted once in the app: shows the file named by `?preview=`. */
-export function FilePreviewHost() {
-  const [params] = useSearchParams()
-  const key = params.get(PREVIEW_PARAM)
-  const state = usePreviewState()
-  const artifacts = useArtifacts()
-  const parsed = parsePreviewKey(key)
-  if (!key || !parsed) return null
-
-  // Opened by a click: the store has the item and its gallery. Opened from a URL (reload, back/forward): look it up.
-  const fromStore = state && previewKey(state.items[state.index]!.url) === key ? state : null
-  let item: PreviewItem | null = fromStore ? fromStore.items[fromStore.index]! : "url" in parsed ? { url: parsed.url } : null
-  const artifactId = "artifactId" in parsed ? parsed.artifactId : /^\/artifacts\/(art_[^/]+)\//.exec(item?.url ?? "")?.[1]
-  const artifact = artifactId ? artifacts.data?.find((a) => a.id === artifactId) : undefined
-  if (artifact) item = withArtifact(item, artifact)
-
-  if (!item) {
-    return (
-      <Modal size="sm" title="Preview" onClose={closePreview}>
-        {artifacts.isLoading ? <Loading kind="rows" label="Loading file" count={1} /> : <Problem message="This file doesn't exist anymore." />}
-      </Modal>
-    )
-  }
-  const gallery = fromStore && fromStore.items.length > 1 ? fromStore : null
-  return (
-    <FilePreview
-      item={item}
-      position={gallery ? [gallery.index + 1, gallery.items.length] : null}
-      noun={gallery && gallery.items.some((g) => previewKind(g) !== "image") ? "file" : "image"}
-    />
-  )
-}
-
-function withArtifact(item: PreviewItem | null, a: Artifact): PreviewItem {
-  return {
-    url: item?.url ?? a.url,
-    name: item?.name ?? a.filename,
-    size: item?.size ?? a.size,
-    mime: item?.mime ?? a.mime,
-    title: a.title && a.title !== a.filename ? a.title : undefined,
-  }
-}
-
-const SIZE: Record<PreviewKind, ModalSize> = {
-  image: "full",
-  html: "full",
-  pdf: "full",
-  markdown: "xl",
-  json: "xl",
-  csv: "xl",
-  text: "xl",
-  video: "xl",
-  audio: "md",
-}
-
-/** Kinds that fill a fixed-height panel; the rest grow with their content up to the viewport. */
-const TALL: PreviewKind[] = ["image", "html", "pdf"]
+import { PREVIEW_HEADER, Problem, type PreviewProps } from "./FilePreviewHost"
 
 /** Wrap long lines of text or code: on, off, or (null) only where the frame is narrow, until the button says otherwise. */
 type Wrap = boolean | null
@@ -123,7 +61,7 @@ const FLASH_TEXT = { link: ["Link copied", "Couldn't copy the link"], contents: 
  * title and Close, and one bar under the file has the pager on the left and the actions on the right, the rarer ones
  * in its ⋯ menu.
  */
-function FilePreview({ item, position, noun }: { item: PreviewItem; position: [number, number] | null; noun: "image" | "file" }) {
+export function FilePreview({ item, position, noun }: PreviewProps) {
   const kind = previewKind(item)
   const image = kind === "image"
   const name = item.name || fileNameOf(item.url)
@@ -145,6 +83,13 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const box = useRef<HTMLDivElement>(null)
   const [atEnd, setAtEnd] = useState(false)
   const scroll = useMemo<Scroll>(() => ({ box, onEnd: setAtEnd }), [])
+  const header = useRef<HTMLElement>(null)
+  // Opened before this chunk came in, the dialog's loading view had the focus on its Close (FilePreviewHost.tsx), which
+  // is gone now: the first control here takes it, as the dialog's would have, not the page behind.
+  useEffect(() => {
+    const dialog = header.current?.closest<HTMLElement>('[role="dialog"]')
+    if (dialog && !dialog.contains(document.activeElement)) (focusables(dialog)[0] ?? dialog).focus()
+  }, [])
   // An image's own size once it loads, with its URL: the last image's must never show under the next one's name.
   const [pixels, setPixels] = useState<(Size & { url: string }) | null>(null)
   const [flash, setFlash] = useState<Flash | null>(null)
@@ -231,15 +176,8 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
   const views = hasRaw || code || (image && !gone) || (isTextKind(kind) && !failed)
 
   return (
-    <Modal
-      size={position ? "full" : kind ? SIZE[kind] : "md"}
-      label={name}
-      onClose={closePreview}
-      // sm: is Modal's own switch from a phone's full screen to a dialog, so the dialog's height goes with it.
-      className={cx((position || (kind && TALL.includes(kind))) && "sm:h-[85vh]", !position && kind && isTextKind(kind) && "sm:max-h-[85vh]")}
-      bodyClassName="@container/preview relative flex min-h-0 flex-1 flex-col"
-    >
-      <header className="flex shrink-0 items-center gap-1 border-b border-zinc-900 py-2 pr-2 pl-4 @[30rem]/preview:min-h-14 @[30rem]/preview:gap-2 @[30rem]/preview:pr-3 @[30rem]/preview:pl-5">
+    <>
+      <header ref={header} className={PREVIEW_HEADER}>
         <div className="min-w-0 flex-1">
           <h2 className="line-clamp-2 text-sm font-semibold wrap-anywhere text-zinc-50" title={heading}>
             {heading}
@@ -339,7 +277,7 @@ function FilePreview({ item, position, noun }: { item: PreviewItem; position: [n
           </div>
         )}
       </footer>
-    </Modal>
+    </>
   )
 }
 
@@ -412,45 +350,6 @@ function FileLoading({ stage = false }: { stage?: boolean }) {
   return (
     <div className="min-w-0 flex-1 px-4 py-5 @[30rem]/preview:px-5">
       <Loading kind="rows" label="Loading file" className="max-w-3xl" />
-    </div>
-  )
-}
-
-const PROBLEM_ACTION =
-  "inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700 focus-visible:ring-2 focus-visible:ring-yard-500 focus-visible:outline-none pointer-coarse:min-h-11"
-
-/**
- * A file that can't be shown, said to a screen reader as it appears, with what can still be done.
- * `onRetry`: loading it failed, so loading it again may work. `url`: the browser may still open it. A deleted file
- * gets neither. `dark`: on the image stage, which is dark in both themes, so the text is light in both.
- */
-function Problem({ message, url, onRetry, dark }: { message: string; url?: string; onRetry?: () => void; dark?: boolean }) {
-  return (
-    <div className={cx("flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center text-sm", dark ? "text-[#d4d4d8]" : "text-zinc-400")}>
-      <FileWarning className={cx("h-8 w-8", dark ? "text-[#a1a1aa]" : "text-zinc-600")} />
-      <p role="status">{message}</p>
-      {(onRetry || url) && (
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {onRetry && (
-            <button
-              type="button"
-              onClick={(e) => {
-                // The button goes away with the problem: the dialog keeps the focus, not the page behind it.
-                e.currentTarget.closest<HTMLElement>('[role="dialog"]')?.focus({ preventScroll: true })
-                onRetry()
-              }}
-              className={PROBLEM_ACTION}
-            >
-              <RotateCw className="h-3.5 w-3.5" /> Try again
-            </button>
-          )}
-          {url && (
-            <NewTabLink href={url} mark={false} className={PROBLEM_ACTION}>
-              <ExternalLink className="h-3.5 w-3.5" /> Open in new tab
-            </NewTabLink>
-          )}
-        </div>
-      )}
     </div>
   )
 }
