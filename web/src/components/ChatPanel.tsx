@@ -44,12 +44,24 @@ import { CAPTAIN_FIRST_PAINT_ROWS, CAPTAIN_GROW_ROWS } from "./CaptainTab"
 import { COORDINATOR_CHAT } from "../lib/threads"
 import { projectContext, type SelectionTaskSource } from "../lib/selectionTask"
 import { HEAD_CONTAINER } from "../lib/contextVisibility"
-import { SetupCard, SetupReminder, setSetupSkipped, useSetupNeeded, useSetupSkipped } from "./Setup"
+import { SetupReminder, setSetupSkipped, useSetupNeeded, useSetupSkipped } from "./SetupReminder"
+import { LoadFailed, lazyPart } from "./LazyPart"
 import { TryFirst, markTryFirstDone, useTryFirstDone } from "./TryFirst"
 import { Loading } from "./Loading"
 import type { Attachment, ChatMessage } from "../../../shared/types"
+import type { SetupStatus } from "../../../shared/setup"
 
 const NO_MESSAGES: ChatMessage[] = []
+
+type SetupCardProps = { status: SetupStatus; className?: string }
+/** The setup card's own frame, where its Loading and Failed views sit. */
+const SETUP_FRAME = "min-h-0 flex-1 pt-8 sm:pt-12"
+// Loaded only while setup is needed, so it stays out of the background warm-up: a yard that's set up never shows it.
+const SetupCard = lazyPart<SetupCardProps>(() => import("./Setup").then((m) => m.SetupCard), {
+  Loading: ({ className }) => <div className={cx(SETUP_FRAME, className)}><Loading label="Loading setup" /></div>,
+  Failed: ({ className }) => <div className={cx(SETUP_FRAME, className)}><LoadFailed /></div>,
+  warm: false,
+})
 /** The box always talks to the Coordinator: a picked Captain takes the centre with its own (CaptainTab.tsx). */
 const COORDINATOR_TARGET: ChatTarget = { label: "the Coordinator" }
 

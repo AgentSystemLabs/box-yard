@@ -1,14 +1,13 @@
-// First-run setup (the card the chat shows until the required keys are set) and Settings › Credentials. Keys go to the
-// server and never come back: a field shows only whether its key is set and where it comes from.
+// First-run setup (the card the chat shows until the required keys are set) and the credential fields Settings shares
+// with it (Settings › Credentials is CredentialsSettings.tsx). Keys go to the server and never come back: a field shows
+// only whether its key is set and where it comes from. The chat loads this when setup is needed (SetupReminder.tsx).
 import { useEffect, useId, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
 import { Check, Cloud, Container, Copy, Cpu, KeyRound, Laptop, Minus, Play, RefreshCw, Server, ShieldAlert, Undo2, X } from "lucide-react"
 import { useAgentSettings, useCheckLocal, useSaveCredentials, useSaveRunnerChoice, useSaveSettings, useSettings, useSetup, useTestCredential } from "../lib/queries"
 import { AppLink, Button, LineIcon, NewTabLink, TimeAgo, cx, inputClass } from "./ui"
 import { Loading } from "./Loading"
-import { MoreLogins } from "./MoreLogins"
-import type { LoginHarness } from "../../../shared/agentLogins"
 import { ownerNameProblem } from "../lib/settingsValidation"
-import { localFlag } from "../lib/localFlag"
+import { setSetupSkipped } from "./SetupReminder"
 import { Panel, Row, SourceHint } from "./SettingsBlocks"
 import { SearchHighlight } from "../lib/settingsSearch"
 import { useDraft, useInSettingsDraft } from "../lib/settingsDraft"
@@ -27,21 +26,7 @@ import {
   type SetupStatus,
 } from "../../../shared/setup"
 import { LOCAL_UNSANDBOXED, SETUP_RUNNERS, type DefaultProvider } from "../../../shared/runner"
-import { LoginLimitsLine } from "./LoginLimits"
 import { NO_AUTOFILL, SecretInput } from "./SecretInput"
-
-// ------------------------------------------------------------------ "Skip for now" (this browser)
-
-const skip = localFlag("box-yard:setup-skipped")
-export const setSetupSkipped = skip.set
-/** The setup card was put off in this browser: the app shows the chat with a one-line reminder instead. */
-export const useSetupSkipped = skip.use
-
-/** Setup still needs something required (never in mock mode). Undefined while loading. */
-export function useSetupNeeded(): { status: SetupStatus | undefined; needed: boolean } {
-  const setup = useSetup()
-  return { status: setup.data, needed: Boolean(setup.data && !setup.data.ready) }
-}
 
 // ------------------------------------------------------------------ one credential
 
@@ -268,26 +253,7 @@ export function SetupTokenCommand({ command = SETUP_TOKEN_COMMAND }: { command?:
 const linkClass = "text-yard-400 underline decoration-yard-400/40 underline-offset-2 hover:decoration-yard-400"
 
 /** Where to get each credential, in a sentence or two with its link. */
-/** Settings › Credentials › More logins: what the rotation does, and how to make another login. */
-function MoreLoginsHelp({ harness }: { harness: LoginHarness }) {
-  if (harness === "claude")
-    return (
-      <>
-        Several Claude Pro or Max subscriptions: new sessions take these and the token above in turn, round robin, so no one plan runs out first. A session keeps its login for an hour between turns,
-        while its prompt cache is warm. A login that's signed out or at its usage limit sits out until it works again or the limit resets, and a turn it stopped runs again on the next one. Make a
-        token on each account with <span className="font-mono">{SETUP_TOKEN_COMMAND}</span>. A project identity's own Claude login always wins.
-      </>
-    )
-  return (
-    <>
-      Several ChatGPT plans for agents on Codex: new sessions take these and the login above in turn, round robin. A Codex session stays on the account that started it, since its saved turns only
-      open there. To log in to another account without signing out here, run <span className="font-mono">CODEX_HOME=$(mktemp -d) {CODEX_LOGIN_COMMAND}</span> and paste the auth.json it writes in
-      that folder.
-    </>
-  )
-}
-
-function CredentialHelp({ k }: { k: CredentialKey }) {
+export function CredentialHelp({ k }: { k: CredentialKey }) {
   const info = CREDENTIAL_INFO[k]
   const link = (
     <NewTabLink href={info.link.href} className={linkClass}>
@@ -355,7 +321,7 @@ const CODEX_CHOICES: { key: CodexKey; label: string }[] = [
   { key: "codexAuthJson", label: "ChatGPT login" },
   { key: "codexApiKey", label: "API key" },
 ]
-const CODEX_BOTH = "Both are set, so Codex uses the ChatGPT login."
+export const CODEX_BOTH = "Both are set, so Codex uses the ChatGPT login."
 
 function CodexChoice({ status, id }: { status: SetupStatus; id: string }) {
   return <SignInChoice status={status} id={id} label="How Codex signs in" choices={CODEX_CHOICES} start={status.codex?.using ?? "codexAuthJson"} bothNote={CODEX_BOTH} />
@@ -412,7 +378,7 @@ function SignInChoice<K extends CredentialKey>({
 }
 
 /** A credential the server didn't list (an older server) reads as unset. */
-const UNSET: CredentialStatus = { state: "unset", source: null }
+export const UNSET: CredentialStatus = { state: "unset", source: null }
 
 // ------------------------------------------------------------------ where agents run: this computer, Upstash boxes, Docker (first run), Daytona or SSH machines (Settings)
 
@@ -799,19 +765,7 @@ export function SetupCard({ status, className }: { status: SetupStatus; classNam
   )
 }
 
-/** One line over the chat while setup isn't finished: what's missing, and the way back to it. */
-export function SetupReminder({ status, onFinish, className }: { status: SetupStatus; onFinish: () => void; className?: string }) {
-  return (
-    <div className={cx("flex items-center gap-3 border-b border-amber-900/40 bg-amber-950/30 py-2 text-xs text-amber-200", className)} role="status" data-testid="setup-reminder">
-      <span className="min-w-0 flex-1">Needs {status.missing.join(" and ")} before the Coordinator can work.</span>
-      <Button type="button" size="sm" variant="ghost" className="shrink-0 text-amber-200 hover:text-amber-100" onClick={onFinish}>
-        Finish setup
-      </Button>
-    </div>
-  )
-}
-
-// ------------------------------------------------------------------ Settings › Credentials
+// ------------------------------------------------------------------ Settings
 
 /** Settings › Credentials and Identities: projects whose last turn committed as the fallback author (SetupStatus.authorFallbacks). */
 export function AuthorFallbackNotice({ status }: { status: SetupStatus | undefined }) {
@@ -834,123 +788,6 @@ export function AuthorFallbackNotice({ status }: { status: SetupStatus | undefin
         ))}
       </ul>
     </div>
-  )
-}
-
-/** Settings › Credentials › Git author: GIT_USER_NAME / GIT_USER_EMAIL, a draft until the dialog's Save. */
-function GitAuthorField({ id }: { id: string }) {
-  const info = useAgentSettings()
-  const save = useSaveSettings()
-  const saved = { name: info.data?.settings.gitUserName ?? "", email: info.data?.settings.gitUserEmail ?? "" }
-  const [value, set, dirty] = useDraft("git-author", "credentials", saved, (d) => {
-    const name = d.name.trim()
-    const email = d.email.trim()
-    if (Boolean(name) !== Boolean(email)) throw new Error("A git author needs both a name and an email, or neither.")
-    return save.mutateAsync({ gitUserName: name, gitUserEmail: email })
-  })
-  return (
-    <div className="space-y-2">
-      <input
-        id={id}
-        className={inputClass}
-        placeholder="Name"
-        value={value.name}
-        maxLength={200}
-        onChange={(e) => set((p) => ({ ...p, name: e.target.value }))}
-        aria-label="Git author name"
-        data-testid="git-author-name"
-      />
-      <input
-        type="email"
-        className={inputClass}
-        placeholder="Email"
-        value={value.email}
-        maxLength={320}
-        onChange={(e) => set((p) => ({ ...p, email: e.target.value }))}
-        aria-label="Git author email"
-        data-testid="git-author-email"
-      />
-      <SourceHint source={info.data?.sources.gitUserName} env="GIT_USER_NAME" changed={dirty} />
-    </div>
-  )
-}
-
-export function CredentialsPanel({ fid }: { fid: (k: string) => string }) {
-  const setup = useSetup()
-  const s = setup.data
-  return (
-    <Panel section="credentials">
-      {!s ? (
-        <Loading label="Loading credentials" />
-      ) : (
-        <>
-          <AuthorFallbackNotice status={s} />
-          {s.mock && <p className="mb-4 text-xs text-zinc-500">Mock mode: nothing here is needed, and nothing calls a real service.</p>}
-          {(["claudeOauthToken", "anthropicApiKey", "githubToken"] as const).map((k) => (
-            <Row key={k} id={fid(`cred-${k}`)} label={CREDENTIAL_INFO[k].label} help={<CredentialHelp k={k} />}>
-              <CredentialField k={k} status={s.credentials[k]} id={fid(`cred-${k}`)} />
-            </Row>
-          ))}
-          {s.credentials.claudeOauthToken.state === "set" && s.credentials.anthropicApiKey.state === "set" && (
-            <p className="mt-2 text-xs text-zinc-500">Both Claude credentials are set, so Claude Code uses the API key.</p>
-          )}
-          <LoginLimitsLine scope="settings" harness="claude" className="mt-2" />
-          <Row id={fid("logins-claude")} label="More Claude logins" help={<MoreLoginsHelp harness="claude" />}>
-            <MoreLogins harness="claude" id={fid("logins-claude")} />
-          </Row>
-          <Row
-            id={fid("git-author")}
-            label="Git author"
-            help={
-              <>
-                Who commits are by when a project's identity names no author. Blank: on this computer, your own git config (user.name, user.email, and its signing when commit.gpgsign is on); on boxes and GPU pods, the
-                GitHub account behind the token, with its noreply email. Only when none of those is there do commits go out as {FALLBACK_GIT_AUTHOR.name}, and this page says so.
-              </>
-            }
-          >
-            <GitAuthorField id={fid("git-author")} />
-          </Row>
-          <h4 className="mt-6 border-t border-zinc-900 pt-5 text-sm font-semibold text-zinc-100">Codex</h4>
-          <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500" data-testid="codex-credentials-intro">
-            {s.codex?.required
-              ? "The Coordinator runs on Codex, so it needs one of these."
-              : "Only for agents set to run on Codex: the Coordinator, the Captains or a project's agents."}{" "}
-            {s.local?.codexLogin === true && "Agents on this computer can use its codex login; boxes and containers need one of these."}
-          </p>
-          {(["codexAuthJson", "codexApiKey"] as const).map((k) => (
-            <Row key={k} id={fid(`cred-${k}`)} label={CREDENTIAL_INFO[k].label} help={<CredentialHelp k={k} />}>
-              <CredentialField k={k} status={s.credentials[k] ?? UNSET} id={fid(`cred-${k}`)} />
-            </Row>
-          ))}
-          {s.credentials.codexAuthJson?.state === "set" && s.credentials.codexApiKey?.state === "set" && (
-            <p className="mt-2 text-xs text-zinc-500" data-testid="codex-both">
-              {CODEX_BOTH}
-            </p>
-          )}
-          <LoginLimitsLine scope="settings" harness="codex" className="mt-2" />
-          <Row id={fid("logins-codex")} label="More Codex logins" help={<MoreLoginsHelp harness="codex" />}>
-            <MoreLogins harness="codex" id={fid("logins-codex")} />
-          </Row>
-          <h4 className="mt-6 border-t border-zinc-900 pt-5 text-sm font-semibold text-zinc-100">Cursor</h4>
-          <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500" data-testid="cursor-credentials-intro">
-            Only for agents set to run on Cursor (a project's Agent, or Settings › Box agents). {s.local?.cursorLogin === true ? "Agents on this computer can use its cursor-agent login; boxes and containers need this key." : "Boxes and containers need this key."}
-          </p>
-          <Row id={fid("cred-cursorApiKey")} label={CREDENTIAL_INFO.cursorApiKey.label} help={<CredentialHelp k="cursorApiKey" />}>
-            <CredentialField k="cursorApiKey" status={s.credentials.cursorApiKey ?? UNSET} id={fid("cred-cursorApiKey")} />
-          </Row>
-          <h4 className="mt-6 border-t border-zinc-900 pt-5 text-sm font-semibold text-zinc-100">OpenCode</h4>
-          <p className="mt-1 mb-4 text-xs leading-relaxed text-zinc-500">Task agents on OpenCode 1.19.5 use provider API logins. OAuth and manager chats are not supported. Test validates the JSON format without contacting a model provider.</p>
-          <Row id={fid("cred-opencodeAuthJson")} label={CREDENTIAL_INFO.opencodeAuthJson.label} help={<CredentialHelp k="opencodeAuthJson" />}>
-            <CredentialField k="opencodeAuthJson" status={s.credentials.opencodeAuthJson ?? UNSET} id={fid("cred-opencodeAuthJson")} />
-          </Row>
-          {s.restart.map((r) => (
-            <p key={r} className="mt-4 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-xs leading-relaxed text-amber-200">
-              {r}
-            </p>
-          ))}
-        </>
-      )}
-    </Panel>
   )
 }
 
