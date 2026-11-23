@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -8,6 +8,7 @@ import { keys } from "../web/src/lib/queries.js"
 import { paletteIndex, rankPalette } from "../web/src/lib/paletteRank.js"
 import { readPins, setChatProjectFilter } from "../web/src/lib/projectBar.js"
 import type { Artifact, Project, SettingsInfo, Task } from "../shared/types"
+import { warmLazyParts } from "../web/src/components/LazyPart.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -45,6 +46,9 @@ function render(tasks = TASKS) {
   act(() => root.render(createElement(QueryClientProvider, { client: qc }, createElement(CommandPalette))))
   act(() => openPalette())
 }
+
+// The palette's list is a chunk of its own (CommandPalette.tsx): in before a test opens it and checks it in the same render.
+beforeAll(() => warmLazyParts())
 
 beforeEach(() => {
   history.replaceState(null, "", "/")

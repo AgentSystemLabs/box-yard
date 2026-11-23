@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -10,6 +10,7 @@ import { currentToasts, dismiss, isCritical, showsWhenQuiet, toast, type Toast }
 import { setChatProjectFilter } from "../web/src/lib/projectBar.js"
 import type { ChatMessage, Project, Task } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
+import { warmLazyParts } from "../web/src/components/LazyPart.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -101,6 +102,9 @@ const keydown = (init: KeyboardEventInit, target: EventTarget = window) =>
 const oldToggleKey = () => keydown({ key: "Ω", code: "KeyZ", altKey: true, shiftKey: true })
 /** history.back() lands asynchronously (popstate), like in a browser. */
 const settle = () => act(() => new Promise((r) => setTimeout(r, 20)))
+
+// The palette's list is a chunk of its own (CommandPalette.tsx): in before a test opens it and checks it in the same render.
+beforeAll(() => warmLazyParts())
 
 beforeEach(() => {
   localStorage.clear()

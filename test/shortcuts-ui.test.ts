@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The keyboard shortcuts sheet and the composer jump, in the whole app: "?" and its other ways in (the palette's
 // command, the sidebar's button), and ⌥⇧C between the chat's composer and the side panel's.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -14,6 +14,7 @@ import { closeShortcuts } from "../web/src/components/ShortcutsHelp.js"
 import { currentToasts, dismiss } from "../web/src/lib/toast.js"
 import type { Project } from "../shared/types"
 import { APP_HOME } from "../web/src/lib/navigation.js"
+import { warmLazyParts } from "../web/src/components/LazyPart.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -69,6 +70,9 @@ const typeInPalette = (text: string) =>
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text)
     input.dispatchEvent(new Event("input", { bubbles: true }))
   })
+
+// The palette's list is a chunk of its own (CommandPalette.tsx): in before a test opens it and checks it in the same render.
+beforeAll(() => warmLazyParts())
 
 beforeEach(() => {
   localStorage.clear()
