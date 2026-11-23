@@ -8,22 +8,34 @@
 // that aren't showing are strips (Rails.tsx), each just left of the first of its descendants.
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import type { Overlay } from "../lib/overlays"
-import { PanelStackContext, viewOf, type PanelPlace } from "../lib/panelStack"
+import { PanelStackContext, panelsAt, viewOf, type PanelPlace } from "../lib/panelStack"
 import { closePanel, isPinned, useColumnLayout, type Fold } from "../lib/columns"
 import { ResizeHandle, useElementWidth, useResizable } from "../lib/resize"
 import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, STRIP_WIDTH, THREAD_CHAT_ROOM, moveChatEdge, panelLimit, panelWidthCss } from "../lib/layout"
 import { panelWidth, setChatEdge, setPanelWidth, useChatRoom, usePanelWidth, usePanelWidths } from "../lib/panelWidths"
 import { useProjects, useSchedules, useTasks, QUIET } from "../lib/queries"
 import { Modal } from "./Modal"
+import { TaskPanelPending } from "./TaskPanelPending"
 import { LevelStrip, SubtaskBar } from "./Rails"
 import { PanelControls } from "./ColumnControls"
-import { TaskSession } from "./TaskSession"
 import { CaptainTab } from "./CaptainTab"
-import { lazyPart } from "./LazyPart"
+import { LoadFailed, lazyPart } from "./LazyPart"
 import { Button, cx } from "./ui"
+import { appHref } from "../lib/navigation"
 import { Loading } from "./Loading"
 
 // Schedules are a chunk of their own, out of the first load.
+type TaskSessionProps = { id: string; onClose: () => void; backLabel?: string; scrollKey: string }
+// A task's panel (TaskSession.tsx and its transcript, box and header) is a chunk of its own, warmed after the first
+// paint like Settings: the first screen is the chat, and most visits open a task only later. Until it's in, the panel
+// waits as it does for its task's data.
+const TaskSession = lazyPart<TaskSessionProps>(() => import("./TaskSession").then((m) => m.TaskSession), {
+  Loading: ({ onClose, backLabel }) => <TaskPanelPending onClose={onClose} backLabel={backLabel}><Loading kind="chat" label="Loading the task" /></TaskPanelPending>,
+  Failed: ({ onClose, backLabel }) => <TaskPanelPending onClose={onClose} backLabel={backLabel}><LoadFailed /></TaskPanelPending>,
+})
+// Opened by the address (a link, a reload, an old /tasks/ link), the panel's chunk comes with the app's first requests.
+if (typeof location !== "undefined" && panelsAt(appHref(location.href, location.origin) ?? "/").some((ref) => viewOf(ref).kind === "session")) TaskSession.preload()
+
 const SchedulesView = lazyPart(() => import("./Schedules").then((m) => m.SchedulesView), { Loading: () => <Loading label="Loading schedules" /> })
 const ScheduleCard = lazyPart(() => import("./Schedules").then((m) => m.ScheduleCard), { Loading: () => <Loading label="Loading the schedule" /> })
 
