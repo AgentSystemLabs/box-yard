@@ -233,8 +233,8 @@ describe("Settings › Box agents", () => {
     const model = $<HTMLSelectElement>("agent-codex-model")!
     expect(model.tagName).toBe("SELECT")
     expect(model.value).toBe("gpt-6.1-sol")
-    // Independent expected snapshot: installed codex-cli 0.159.2, 2026-11-03.
-    expect([...model.options].map((o) => o.value)).toEqual(["", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
+    // Independent expected snapshot: codex-cli 0.171.0 models cache, fetched 2026-11-23. `latest` stays the stored string.
+    expect([...model.options].map((o) => o.value)).toEqual(["", "latest", "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])
     expect($<HTMLSelectElement>("agent-effort")!.value).toBe("xhigh")
     await choose(model, "gpt-6-luna")
     await choose($<HTMLSelectElement>("agent-effort")!, "low")

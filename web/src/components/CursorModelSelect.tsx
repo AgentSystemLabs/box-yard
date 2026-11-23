@@ -1,5 +1,5 @@
 import { useMemo } from "react"
-import { cursorModelVendor, type CursorModel } from "../../../shared/agentCli"
+import { cursorLatestChoices, cursorLatestFamily, cursorModelVendor, type CursorModel } from "../../../shared/agentCli"
 import { useCursorModels, useRefreshCursorModels } from "../lib/queries"
 import { timeAgo } from "../lib/time"
 import { Loading } from "./Loading"
@@ -40,9 +40,10 @@ export function CursorModelSelect({
   const q = useCursorModels()
   const refresh = useRefreshCursorModels()
   const list = refresh.data ?? q.data
-  const groups = useMemo(() => grouped(list?.models ?? []), [list])
+  const latest = useMemo(() => cursorLatestChoices(list?.models ?? []), [list])
+  const groups = useMemo(() => grouped((list?.models ?? []).filter((m) => !cursorLatestFamily(m.id))), [list])
   if (!list) return q.isError ? <p className="text-xs text-red-300">Couldn't load Cursor's models: {(q.error as Error).message}</p> : <Loading kind="field" label="Loading Cursor's models" />
-  const unlisted = value !== "" && !list.models.some((m) => m.id === value)
+  const unlisted = value !== "" && !list.models.some((m) => m.id === value) && !latest.some((m) => m.id === value)
   const source =
     list.source === "cli"
       ? `Listed by cursor-agent on the server ${list.fetchedAt ? timeAgo(list.fetchedAt) : ""}`.trim()
@@ -54,6 +55,15 @@ export function CursorModelSelect({
       <Select id={id} className="w-full" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId} aria-describedby={compact ? undefined : `${id}-source`}>
         <option value="">{defaultLabel}</option>
         {unlisted && <option value={value}>{value} (saved, not in Cursor's list)</option>}
+        {latest.length > 0 && (
+          <optgroup label="Latest">
+            {latest.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} · {m.id}
+              </option>
+            ))}
+          </optgroup>
+        )}
         {groups.map(([vendor, models]) => (
           <optgroup key={vendor} label={vendor}>
             {models.map((m) => (

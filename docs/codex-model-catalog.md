@@ -1,23 +1,26 @@
 # Codex model catalog verification
 
-Verified 2026-11-03 using the **OpenAI Docs** skill, official documentation first, then read-only installed CLI discovery. Installed version: `codex-cli 0.159.2`. The account's `models_cache.json` reports `client_version: 0.159.2`, fetched **2026-11-03**. Only model metadata was inspected; no credentials, live Settings, or running services were changed.
+Updated 2026-11-23 from this machine's `~/.codex/models_cache.json`. That file reports `client_version: 0.171.0` and `fetched_at` **2026-11-23T17:39:42Z**. Only model metadata was read. No credentials, live Settings, token refresh, or model request was made. The earlier snapshot was codex-cli 0.159.2 on 2026-11-03.
 
-The Settings select contains every `visibility: list` entry from that cache:
+The Settings select lists `latest`, then every `visibility: list` entry from that cache, in the cache's priority order:
 
 | CLI model name | Supported CLI reasoning values |
 | --- | --- |
+| `latest` | low, medium, high, xhigh, max, ultra |
+| `gpt-6.2-sol` | low, medium, high, xhigh, max, ultra |
+| `gpt-6.2-astra` | low, medium, high, xhigh, max, ultra |
+| `gpt-6.1-terra` | low, medium, high, xhigh, max, ultra |
 | `gpt-6.1-sol` | low, medium, high, xhigh, max, ultra |
 | `gpt-6-astra` | low, medium, high, xhigh, max, ultra |
-| `gpt-6.1-terra` | low, medium, high, xhigh, max, ultra |
 | `gpt-6-sol` | low, medium, high, xhigh, max, ultra |
 | `gpt-6-luna` | low, medium, high, xhigh, max |
 | `gpt-5.6-sol` | low, medium, high, xhigh, max, ultra |
 | `gpt-5.6-terra` | low, medium, high, xhigh, max, ultra |
 | `gpt-5.6-luna` | low, medium, high, xhigh, max |
 
-Hidden entries `gpt-reserve` and `codex-auto-review` are excluded. The cache's default reasoning is **low** for 6.1 Sol; Box Yard deliberately defaults task agents on Codex to **gpt-6.1-sol / xhigh**, as requested. Claude's defaults are unchanged.
+Hidden entries `gpt-reserve` and `codex-auto-review` are excluded. `latest` is a Box Yard setting, not a CLI id. Saving it stores the string `latest`. `codexModel` resolves it when a turn launches, to `gpt-6.2-sol`: catalog priority 1, and the Codex CLI's default in this cache. GPT-6.2 Astra stays an explicit pick. There is no environment variable for this. A saved concrete id, including `gpt-6.1-sol`, stays pinned. The built-in default for a Codex task that never picked a model remains **gpt-6.1-sol / xhigh**. Claude's defaults are unchanged.
 
-[Official Codex models documentation](https://learn.chatgpt.com/docs/models) confirms 6.1 Sol, Astra, 6.1 Terra and Luna CLI names, the `--model`/`-m` argument, and model-dependent Max/Ultra availability. Terra requires CLI 0.159.0+. [The public API Sol page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents low, medium, high, xhigh and max. Ultra is a **Codex delegation mode**, not a public API reasoning value.
+[Official Codex models documentation](https://learn.chatgpt.com/docs/models) confirmed 6.1 Sol, Astra, 6.1 Terra and Luna CLI names on 2026-11-03, the `--model`/`-m` argument, and model-dependent Max/Ultra availability. Terra requires CLI 0.159.0+. [The public API Sol page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) documents low, medium, high, xhigh and max. Ultra is a **Codex delegation mode**, not a public API reasoning value. The 6.2 rows above are the 2026-11-23 cache's `gpt-6.2-sol` and `gpt-6.2-astra`, in that priority order. This pass did not re-read the public docs for their effort values; the cache lists low through ultra for both.
 
 The cached 5.6 names are account/CLI catalog entries; this discovery does **not** establish their public API IDs or alias targets. They are labeled as CLI catalog choices. No alias targets are guessed. A cached list is a dated snapshot, not a guarantee of another account's entitlement or a remote box's installed version. No live authenticated model request or token refresh was attempted; this snapshot does not establish the current health of remote authentication. The app ships this snapshot and does not query credentials to refresh it.
 

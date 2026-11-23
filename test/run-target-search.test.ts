@@ -112,8 +112,8 @@ describe("searchRunTargets: harness, model and effort in words", () => {
   })
 
   it("narrows by harness, and finds other harnesses' models from the top", () => {
-    expect(find("codex sol high").slice(0, 2)).toEqual(["codex:gpt-6.1-sol:high", "codex:gpt-6-sol:high"])
-    expect(find("cursor sol")).toEqual(["cursor:gpt-6.1-sol-high"])
+    expect(find("codex sol high").slice(0, 2)).toEqual(["codex:latest:high", "codex:gpt-6.2-sol:high"])
+    expect(find("cursor sol")).toEqual(["cursor:sol%3alatest", "cursor:gpt-6.1-sol-high"])
     expect(find("sol")).toEqual(expect.arrayContaining(["codex:gpt-6.1-sol", "cursor:gpt-6.1-sol-high"]))
     expect(find("claude fable high")[0]).toBe(`${NEWEST}:high`)
     expect(find("codex fable")).toEqual([])
@@ -127,7 +127,7 @@ describe("searchRunTargets: harness, model and effort in words", () => {
   })
 
   it("searches only inside an open level", () => {
-    expect(find("sol", "codex")).toEqual(["codex:gpt-6.1-sol", "codex:gpt-6-sol", "codex:gpt-5.6-sol"])
+    expect(find("sol", "codex")).toEqual(["codex:latest", "codex:gpt-6.2-sol", "codex:gpt-6.1-sol", "codex:gpt-6-sol", "codex:gpt-5.6-sol"])
     expect(find("fable high", "claude")[0]).toBe(`${NEWEST}:high`)
     expect(find("fable", "codex")).toEqual([])
     expect(find("h", "claude:claude-fable-5-1")).toEqual(["claude:claude-fable-5-1:high", "claude:claude-fable-5-1:xhigh"])

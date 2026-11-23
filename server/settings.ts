@@ -298,7 +298,7 @@ export const settingsPatch = z
     agentOpencodeModel: z.string().trim().max(100).refine((v) => !v || isOpenCodeModel(v), "Use provider/model or provider/model#variant").describe("OpenCode provider/model, optionally #variant; empty uses its configured default"),
     agentCursorModel: z
       .union([z.literal(""), model])
-      .describe('Box agents\' model on Cursor: an id from `cursor-agent models` (its effort is part of it, e.g. claude-opus-5-5-high, gpt-5.6-sol-high, composer-2.5), default "auto"; "" is the CLI\'s own default'),
+      .describe('Box agents\' model on Cursor: an id from `cursor-agent models` (its effort is part of it, e.g. claude-opus-5-5-high, gpt-5.6-sol-high, composer-2.5), or a stored family alias (sol:latest) resolved at launch, default "auto"; "" is the CLI\'s own default'),
     agentCodexEffort: z.enum([...CODEX_EFFORTS, "orchestrator"]),
     agentEffort: z.enum([...EFFORTS, "orchestrator"]),
     agentRoutingConfig: z.string().max(50_000),

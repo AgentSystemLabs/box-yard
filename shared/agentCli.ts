@@ -27,14 +27,58 @@ export const isManagerCli = (v: unknown): v is ManagerCli => typeof v === "strin
 /** Claude uses streaming stdin; Codex uses app-server turn/steer. Cursor and OpenCode wait for the next turn. */
 export const canSteer = (cli: AgentCli | null | undefined) => !(["cursor", "opencode"] as AgentCli[]).includes(cli ?? DEFAULT_AGENT_CLI)
 
-/** A Claude model id or alias (claude-opus-5-5, opus, sonnet[1m], haiku, fable…): Codex can't run it. */
-export function isClaudeModel(model: string | null | undefined): boolean {
-  return Boolean(model && /^(claude|opus|sonnet|haiku|fable)\b/i.test(model.trim()))
+/** Families that can be stored as `sol:latest` and resolved from Cursor's held list at launch. */
+export const CURSOR_LATEST_FAMILIES = ["sol", "astra", "terra", "luna", "composer", "opus", "sonnet", "haiku", "fable"] as const
+export type CursorLatestFamily = (typeof CURSOR_LATEST_FAMILIES)[number]
+
+const CURSOR_LATEST_LABEL: Record<CursorLatestFamily, string> = {
+  sol: "Sol",
+  astra: "Astra",
+  terra: "Terra",
+  luna: "Luna",
+  composer: "Composer",
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  fable: "Fable",
 }
 
-/** An OpenAI model id Codex runs (gpt-6.1-sol, gpt-5.6-terra, o3, codex-mini…): Claude Code can't run it. */
+/** `sol:latest` → `sol`. Any other string, including a concrete id, is null. */
+export function cursorLatestFamily(model: string | null | undefined): CursorLatestFamily | null {
+  const m = /^([a-z]+):latest$/i.exec(model?.trim() ?? "")
+  if (!m) return null
+  switch (m[1]!.toLowerCase()) {
+    case "sol": return "sol"
+    case "astra": return "astra"
+    case "terra": return "terra"
+    case "luna": return "luna"
+    case "composer": return "composer"
+    case "opus": return "opus"
+    case "sonnet": return "sonnet"
+    case "haiku": return "haiku"
+    case "fable": return "fable"
+    default: return null
+  }
+}
+
+export const cursorLatestLabel = (family: CursorLatestFamily) => `Latest ${CURSOR_LATEST_LABEL[family]}`
+
+/** A Claude model id or alias (claude-opus-5-5, opus, sonnet[1m], haiku, fable…): Codex can't run it. */
+export function isClaudeModel(model: string | null | undefined): boolean {
+  const id = model?.trim()
+  if (!id || cursorLatestFamily(id)) return false
+  return /^(claude|opus|sonnet|haiku|fable)\b/i.test(id)
+}
+
+/** Stored Codex choice that resolves to the catalog's current default when a turn launches. */
+export const CODEX_LATEST = "latest"
+
+/** An OpenAI model id Codex runs (gpt-6.2-sol, gpt-5.6-terra, o3, codex-mini, or the stored `latest`): Claude Code can't run it. */
 export function isOpenAiModel(model: string | null | undefined): boolean {
-  return Boolean(model && /^(gpt-|o\d|codex)/i.test(model.trim()))
+  const id = model?.trim()
+  if (!id) return false
+  if (id.toLowerCase() === CODEX_LATEST) return true
+  return /^(gpt-|o\d|codex)/i.test(id)
 }
 
 /**
@@ -43,7 +87,10 @@ export function isOpenAiModel(model: string | null | undefined): boolean {
  * (claude-opus-5-5-high), but those names pick Claude Code or Codex unless the task asks for Cursor.
  */
 export function isCursorOnlyModel(model: string | null | undefined): boolean {
-  return Boolean(model && /^(auto$|composer|cursor-|gemini|grok|kimi|glm|deepseek|muse)/i.test(model.trim()))
+  const id = model?.trim()
+  if (!id) return false
+  if (cursorLatestFamily(id)) return true
+  return /^(auto$|composer|cursor-|gemini|grok|kimi|glm|deepseek|muse)/i.test(id)
 }
 
 /** The CLI a model belongs to, when its name says; null for a name no CLI owns (a custom alias). */
@@ -54,20 +101,31 @@ export function cliForModel(model: string | null | undefined): AgentCli | null {
 /**
  * The model a Codex run requests: `chosen` (a task's or the route's) unless it is a Claude model,
  * else the Codex model setting. An explicitly saved empty setting keeps the CLI's own default.
+ * A stored `latest` stays `latest` in Settings and on the task; this resolves it for the launch.
  */
 export function codexModel(chosen: string | null | undefined, setting: string | null | undefined): string | null {
-  if (chosen && !isClaudeModel(chosen) && !isCursorOnlyModel(chosen) && !isOpenCodeModel(chosen)) return chosen.trim()
-  return setting == null ? DEFAULT_CODEX_MODEL : setting.trim() || null
+  const raw = chosen && !isClaudeModel(chosen) && !isCursorOnlyModel(chosen) && !isOpenCodeModel(chosen)
+    ? chosen.trim()
+    : setting == null ? DEFAULT_CODEX_MODEL : setting.trim() || null
+  return raw && raw.toLowerCase() === CODEX_LATEST ? CODEX_LATEST_MODEL : raw
 }
 
 export const DEFAULT_CODEX_MODEL = "gpt-6.1-sol"
 export const DEFAULT_CODEX_EFFORT = "xhigh" as const
 export const CODEX_EFFORTS = [...EFFORTS, "ultra"] as const
+/**
+ * What a stored `latest` launches as: catalog priority 1 in the codex-cli 0.171.0 cache (2026-11-23), which is also
+ * that CLI's default. Astra is the stronger explicit pick. People who already saved a concrete id stay on it.
+ */
+export const CODEX_LATEST_MODEL = "gpt-6.2-sol"
 
-/** Visible account catalog cached by codex-cli 0.159.2 on 2026-11-03; provenance and limits: docs/codex-model-catalog.md. */
+/** Visible account catalog cached by codex-cli 0.171.0 on 2026-11-23, priority order; provenance: docs/codex-model-catalog.md. */
 export const CODEX_MODELS = [
-  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", efforts: CODEX_EFFORTS },
+  { id: CODEX_LATEST, label: "Latest (GPT-6.2 Sol)", efforts: CODEX_EFFORTS },
+  { id: "gpt-6.2-sol", label: "GPT-6.2 Sol", efforts: CODEX_EFFORTS },
+  { id: "gpt-6.2-astra", label: "GPT-6.2 Astra", efforts: CODEX_EFFORTS },
   { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", efforts: CODEX_EFFORTS },
+  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", efforts: CODEX_EFFORTS },
   { id: "gpt-6-astra", label: "GPT-6 Astra", efforts: CODEX_EFFORTS },
   { id: "gpt-6-sol", label: "GPT-6 Sol", efforts: CODEX_EFFORTS },
   { id: "gpt-6-luna", label: "GPT-6 Luna", efforts: EFFORTS },
@@ -106,9 +164,12 @@ export interface CursorModelList {
 }
 
 /**
- * A snapshot of `cursor-agent models` (2026.11.05-86047df, 2026-11-05): what Settings offers when the CLI can't be run
- * on the server. One entry per family at its usual effort; the live list (server/cursor.ts cursorModels) has every
- * variant. Cursor's ids carry the effort (…-low, …-high, …-max) and speed (…-fast).
+ * A snapshot of `cursor-agent models` (2026.11.05-86047df, 2026-11-05), plus newer OpenAI ids added 2026-11-23.
+ * Those ids follow this snapshot's `{base}-high` shape and the Codex catalog names from the same day
+ * (`gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-terra`, `gpt-6-luna`). `cursor-agent models` on this machine required a
+ * login, so the 6.x ids were not confirmed by a live Cursor listing. A later live or cached list replaces them.
+ * One entry per family at its usual effort; the live list (server/cursor.ts) has every variant. Cursor's ids carry
+ * the effort (…-low, …-high, …-max) and speed (…-fast).
  */
 export const CURSOR_FALLBACK_MODELS: readonly CursorModel[] = [
   { id: "auto", label: "Auto" },
@@ -119,6 +180,10 @@ export const CURSOR_FALLBACK_MODELS: readonly CursorModel[] = [
   { id: "claude-sonnet-5-5-high", label: "Claude Sonnet 5.5 High" },
   { id: "claude-fable-5-1-high", label: "Claude Fable 5.1 1M" },
   { id: "claude-haiku-5-5-thinking-high", label: "Claude Haiku 5.5 High" },
+  { id: "gpt-6.2-sol-high", label: "GPT-6.2 Sol High" },
+  { id: "gpt-6.2-astra-high", label: "GPT-6.2 Astra High" },
+  { id: "gpt-6.1-terra-high", label: "GPT-6.1 Terra High" },
+  { id: "gpt-6-luna-high", label: "GPT-6 Luna High" },
   { id: "gpt-5.6-sol-high", label: "GPT-5.6 Sol 1M High" },
   { id: "gpt-5.6-terra-high", label: "GPT-5.6 Terra 1M High" },
   { id: "gpt-5.6-luna-high-fast", label: "GPT-5.6 Luna 1M High Fast" },
@@ -159,14 +224,98 @@ export function cursorModelVendor(id: string): string {
 
 /**
  * The model an inherited Cursor route passes to `cursor-agent --model`: `chosen` when Cursor runs it (a
- * name only Cursor has, or one in its live list `known`), else the Cursor model setting. A route's Claude alias (opus)
- * or Codex name (gpt-6.1-sol) isn't a Cursor id, so it gives way. Explicit task pins bypass this compatibility fallback
- * (the runner CLI validates them). An explicitly saved empty setting keeps the CLI's default.
+ * name only Cursor has, a stored `sol:latest` alias, or one in its live list `known`), else the Cursor model setting.
+ * A route's Claude alias (opus) or Codex name (gpt-6.1-sol) isn't a Cursor id, so it gives way. Explicit task pins
+ * bypass this compatibility fallback. An explicitly saved empty setting keeps the CLI's default. This returns a stored
+ * alias unchanged; `resolveCursorModel` turns it into a concrete id at launch.
  */
 export function cursorModel(chosen: string | null | undefined, setting: string | null | undefined, known?: (id: string) => boolean): string | null {
   const c = chosen?.trim()
   if (c && (isCursorOnlyModel(c) || known?.(c))) return c
   return setting == null ? DEFAULT_CURSOR_MODEL : setting.trim() || null
+}
+
+interface ParsedCursorFamily {
+  family: string
+  version: number[]
+  rest: string
+}
+
+/** The family, version and effort tail of a concrete Cursor id. Aliases and unknown shapes are null. */
+export function cursorFamilyOf(id: string): ParsedCursorFamily | null {
+  const gpt = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|terra|luna)(?:-(.*))?$/i.exec(id)
+  if (gpt) return { family: gpt[2]!.toLowerCase(), version: gpt[1]!.split(".").map(Number), rest: gpt[3] ?? "" }
+  const composer = /^composer-(\d+(?:\.\d+)*)(?:-(.*))?$/i.exec(id)
+  if (composer) return { family: "composer", version: composer[1]!.split(".").map(Number), rest: composer[2] ?? "" }
+  const claude = /^claude-(opus|sonnet|haiku|fable)-(\d+(?:-\d+)*)(?:-(.*))?$/i.exec(id)
+  if (claude) return { family: claude[1]!.toLowerCase(), version: claude[2]!.split("-").map(Number), rest: claude[3] ?? "" }
+  return null
+}
+
+/** Usual effort wins: plain `-high` over fast, thinking, and extra-high. `-xhigh` is not `-high`. */
+function cursorEffortRank(rest: string): number {
+  const parts = rest.toLowerCase().split("-").filter(Boolean)
+  if (parts.length === 0) return 1
+  if (parts.includes("fast")) return 0
+  if (parts.includes("thinking")) return 1
+  if (parts.some((p) => p === "xhigh" || p === "max" || p === "ultra")) return 2
+  if (parts.includes("medium")) return 3
+  if (parts.includes("high")) return 4
+  return 1
+}
+
+function cmpVersion(a: number[], b: number[]): number {
+  const n = Math.max(a.length, b.length)
+  for (let i = 0; i < n; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+/** The newest id of `family` in `models`, preferring usual `-high`. Null when the list has none. */
+export function cursorLatestModel(family: string, models: readonly CursorModel[]): CursorModel | null {
+  let best: { model: CursorModel; version: number[]; rank: number; index: number } | null = null
+  for (let index = 0; index < models.length; index++) {
+    const model = models[index]!
+    const parsed = cursorFamilyOf(model.id)
+    if (!parsed || parsed.family !== family) continue
+    const rank = cursorEffortRank(parsed.rest)
+    if (!best || cmpVersion(parsed.version, best.version) > 0 || (cmpVersion(parsed.version, best.version) === 0 && rank > best.rank)) {
+      best = { model, version: parsed.version, rank, index }
+    }
+  }
+  return best?.model ?? null
+}
+
+/** Picker rows for the families this list can resolve. Not written into cursor-models.json. */
+export function cursorLatestChoices(models: readonly CursorModel[]): CursorModel[] {
+  const out: CursorModel[] = []
+  for (const family of CURSOR_LATEST_FAMILIES) {
+    const hit = cursorLatestModel(family, models)
+    if (!hit) continue
+    out.push({ id: `${family}:latest`, label: `${cursorLatestLabel(family)} (${hit.label})` })
+  }
+  return out
+}
+
+/** Concrete models, with a Latest row in front of each family this list can resolve. */
+export function cursorPickerModels(models: readonly CursorModel[]): CursorModel[] {
+  const choices = cursorLatestChoices(models)
+  const alias = new Set(choices.map((m) => m.id))
+  return [...choices, ...models.filter((m) => !alias.has(m.id))]
+}
+
+/**
+ * The id a Cursor launch passes for a stored model. A concrete id is unchanged. `sol:latest` becomes the newest
+ * matching id in the list held now. With no match, the alias is passed through so the CLI's error names it.
+ */
+export function resolveCursorModel(model: string | null | undefined, models: readonly CursorModel[]): string | null {
+  const id = model?.trim()
+  if (!id) return null
+  const family = cursorLatestFamily(id)
+  if (!family) return id
+  return cursorLatestModel(family, models)?.id ?? id
 }
 
 /** The context window a Cursor model's name states ("Claude Opus 5.5 1M High", "GPT-5.6 Sol 272K"), or null. */

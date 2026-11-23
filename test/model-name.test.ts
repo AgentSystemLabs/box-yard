@@ -46,9 +46,13 @@ describe("a model's name", () => {
 
   it("names Codex and Cursor models by their lists, and shows anything else as it is", () => {
     expect(modelName("gpt-6.1-sol", "codex")).toBe("GPT-6.1 Sol")
+    expect(modelName("latest", "codex")).toBe("Latest")
+    expect(modelName("gpt-6.2-sol", "codex")).toBe("GPT-6.2 Sol")
     expect(modelName("gpt-5.6-terra", "codex")).toBe("GPT-5.6 Terra")
     expect(modelName("gpt-7-nova", "codex")).toBe("gpt-7-nova")
     expect(modelName("claude-opus-5-5-high", "cursor")).toBe("Claude Opus 5.5 1M High")
+    expect(modelName("sol:latest", "cursor")).toBe("Latest Sol")
+    expect(modelName("opus:latest")).toBe("Latest Opus")
     expect(modelName("my-model", "cursor", { cursor: [{ id: "my-model", label: "My Model" }] })).toBe("My Model")
     // Cursor's init names the model by its label already.
     expect(modelName("Claude Opus 5.5 1M High", "cursor")).toBe("Claude Opus 5.5 1M High")

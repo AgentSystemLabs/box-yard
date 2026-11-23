@@ -187,13 +187,17 @@ describe("agent CLI helpers", () => {
     expect(isClaudeModel("claude-opus-5-5")).toBe(true)
     expect(isClaudeModel("sonnet[1m]")).toBe(true)
     expect(cliForModel("gpt-6.1-sol")).toBe("codex")
+    expect(cliForModel("latest")).toBe("codex")
     expect(cliForModel("o3")).toBe("codex")
     expect(cliForModel("my-alias")).toBeNull()
   })
 
-  it("never hands Codex a Claude model", () => {
+  it("never hands Codex a Claude model, and resolves a stored latest when the turn launches", () => {
     expect(codexModel("claude-opus-5-5", "gpt-6-luna")).toBe("gpt-6-luna")
     expect(codexModel("gpt-6.1-sol", "gpt-6-luna")).toBe("gpt-6.1-sol")
+    expect(codexModel("gpt-6.1-sol", "latest")).toBe("gpt-6.1-sol")
+    expect(codexModel(null, "latest")).toBe("gpt-6.2-sol")
+    expect(codexModel("latest", "gpt-6-luna")).toBe("gpt-6.2-sol")
     expect(codexModel(null, "")).toBeNull()
   })
 

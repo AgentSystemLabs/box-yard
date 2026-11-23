@@ -145,6 +145,7 @@ describe("Settings › Box agents › Cursor", () => {
     expect(model.value).toBe("auto")
     expect(model.options[0]!.textContent).toBe("Cursor CLI default")
     expect(groups(model)).toEqual([
+      ["Latest", ["sol:latest", "composer:latest", "opus:latest"]],
       ["Cursor", ["auto", "composer-2.5"]],
       ["Anthropic", ["claude-opus-5-5-high"]],
       ["OpenAI", ["gpt-5.6-sol-high"]],
