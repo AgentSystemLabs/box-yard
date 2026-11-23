@@ -1,23 +1,26 @@
 // Surfaces that open on demand (Settings, a project's settings, schedules) stay out of the first load: each is its own
 // chunk, fetched once the app has painted and its first requests are done (useWarmLazyParts), so opening one is still
-// instant. Opened before that, it shows its Loading view while the chunk comes in.
+// instant. Opened before that, it shows its Loading view while the chunk comes in. Parts most visits never show (the
+// first-run setup card, a file preview, the command palette's list) skip that warm-up: theirs comes when they first
+// show, or when `preload` sees the intent to open one.
 import { useEffect, useState, type ComponentType } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { whenSettled } from "../lib/captainPrefetch"
 import { Button } from "./ui"
 
-const loaders: (() => Promise<unknown>)[] = []
+const parts: { get: () => Promise<unknown>; warm: boolean }[] = []
 
 /**
  * `load`'s component, rendered straight away once its chunk is in, else `Loading` until it is. Not React.lazy and
  * Suspense: React.lazy suspends on its first render even when the chunk is already loaded, and React keeps a Suspense
  * fallback up for at least 300 ms, so even a warmed Settings would open slowly. If the chunk can't load (most often the
- * app was updated since this page opened, so the old chunk is gone), `Failed` renders in its place.
+ * app was updated since this page opened, so the old chunk is gone), `Failed` renders in its place. `warm: false`
+ * leaves it out of the background warm-up (useWarmLazyParts); `preload()` fetches it ahead of a likely open.
  */
 export function lazyPart<P extends object>(
   load: () => Promise<ComponentType<P>>,
-  { Loading, Failed = LoadFailed }: { Loading: ComponentType<P>; Failed?: ComponentType<P> },
-): ComponentType<P> {
+  { Loading, Failed = LoadFailed, warm = true }: { Loading: ComponentType<P>; Failed?: ComponentType<P>; warm?: boolean },
+): ComponentType<P> & { preload: () => void } {
   let Loaded: ComponentType<P> | undefined
   let failed = false
   let pending: Promise<unknown> | undefined
@@ -26,8 +29,8 @@ export function lazyPart<P extends object>(
     pending = undefined
     throw err
   }))
-  loaders.push(get)
-  return function LazyPart(props: P) {
+  parts.push({ get, warm })
+  function LazyPart(props: P) {
     const [, setSettled] = useState(false)
     useEffect(() => {
       if (Loaded || failed) return
@@ -45,19 +48,23 @@ export function lazyPart<P extends object>(
     if (failed) return <Failed {...props} />
     return <Loading {...props} />
   }
+  return Object.assign(LazyPart, { preload: () => void get().catch(() => {}) })
 }
 
-/** Fetch every lazy part's chunk now; resolves once all are in. Failing is fine: a part then loads when it opens. */
-export async function warmLazyParts() {
-  await Promise.all(loaders.map((load) => load().catch(() => {})))
+/**
+ * Fetch every lazy part's chunk now (`background`: only those the app warms on its own); resolves once all are in.
+ * Failing is fine: a part then loads when it opens.
+ */
+export async function warmLazyParts(background = false) {
+  await Promise.all(parts.filter((p) => p.warm || !background).map((p) => p.get().catch(() => {})))
 }
 
-/** Mounted once (App), signed in: fetch every lazy part in the background after the first paint. */
+/** Mounted once (App), signed in: fetch the lazy parts that warm in the background, after the first paint. */
 export function useWarmLazyParts(enabled: boolean) {
   const qc = useQueryClient()
   useEffect(() => {
     if (!enabled) return
-    return whenSettled(qc, warmLazyParts)
+    return whenSettled(qc, () => void warmLazyParts(true))
   }, [enabled, qc])
 }
 

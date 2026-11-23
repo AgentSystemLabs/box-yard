@@ -66,6 +66,29 @@ describe("lazyPart", () => {
     expect(host.textContent).toBe("Schedules panel")
   })
 
+  it("leaves a part made with warm: false to its first showing or a preload, while warmLazyParts() still fetches it", async () => {
+    const c = chunk()
+    const Part = lazyPart(c.load, { Loading, warm: false })
+    // The app's background warm-up (useWarmLazyParts) passes it by.
+    void warmLazyParts(true)
+    expect(c.calls()).toBe(0)
+    // A test's warm-up fetches every part, so one can open it and check it in the same render.
+    const other = chunk()
+    lazyPart(other.load, { Loading, warm: false })
+    void warmLazyParts()
+    expect(other.calls()).toBe(1)
+    // Pointed at: fetched once, and then it opens with no Loading view.
+    Part.preload()
+    Part.preload()
+    expect(c.calls()).toBe(1)
+    await act(async () => {
+      c.resolve()
+      await c.settled()
+    })
+    act(() => root.render(createElement(Part, { name: "Preview" })))
+    expect(host.textContent).toBe("Preview panel")
+  })
+
   it("says it couldn't load instead of throwing when the chunk is gone, and a failed warm-up is retried on open", async () => {
     const c = chunk()
     const Part = lazyPart(c.load, { Loading, Failed })
