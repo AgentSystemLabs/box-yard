@@ -84,6 +84,24 @@ beforeEach(() => {
     },
   })
   setTtsInfo({ settings: TTS_DEFAULTS, defaults: TTS_DEFAULTS, sources: { provider: "default", elevenlabs: "default", openai: "default" }, keys: { elevenlabs: { state: "unset", source: "default" }, openai: { state: "unset", source: "default" } } })
+  // A flip of `enabled` goes to the server (speech.ts's saveAnnouncements): stub it so that round trip succeeds here too.
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url === "/api/tts/settings" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body)) as { announcements?: boolean }
+      return new Response(
+        JSON.stringify({
+          settings: TTS_DEFAULTS,
+          defaults: TTS_DEFAULTS,
+          sources: { provider: "default", elevenlabs: "default", openai: "default" },
+          keys: { elevenlabs: { state: "unset", source: "default" }, openai: { state: "unset", source: "default" } },
+          announcements: body.announcements,
+          announcementsSource: "ui",
+        }),
+        { status: 200 },
+      )
+    }
+    return new Response("not found", { status: 404 })
+  })
   setVoiceSettings(VOICE_DEFAULTS)
   client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(keys.captainMessages("prj_voice001"), [])
