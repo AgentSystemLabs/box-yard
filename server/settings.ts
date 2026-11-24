@@ -629,6 +629,8 @@ export function autocompactFlag(ac: AutoCompact, window: number | null): string 
 const TTS_KEY = "tts_settings"
 /** API keys live in their own kv entry, so nothing that returns settings can include them by accident. */
 const TTS_SECRETS_KEY = "tts_keys"
+/** The announcements switch: its own entry, so Reset (which forgets voice choices) never turns voice back on. */
+const VOICE_ANNOUNCEMENTS_KEY = "voice_announcements"
 
 const apiKey = z
   .string()
@@ -662,6 +664,8 @@ export const ttsPatch = z
     /** A new key, or null to forget the saved one (an env var then applies again). */
     elevenlabsApiKey: apiKey.nullable(),
     openaiApiKey: apiKey.nullable(),
+    /** Voice announcements on or off in every browser (TtsInfo.announcements). */
+    announcements: z.boolean(),
   })
   .partial()
   .strict()
@@ -741,6 +745,8 @@ export class TtsSettingsStore {
       },
       keys: { elevenlabs: keyStatus("elevenlabs"), openai: keyStatus("openai") },
       defaults: TTS_DEFAULTS,
+      announcements: this.store.getKv(VOICE_ANNOUNCEMENTS_KEY) !== "off",
+      announcementsSource: this.store.getKv(VOICE_ANNOUNCEMENTS_KEY) === null ? "default" : "ui",
     }
   }
 
@@ -751,7 +757,8 @@ export class TtsSettingsStore {
   update(patch: unknown): TtsInfo {
     const parsed = ttsPatch.safeParse(patch)
     if (!parsed.success) throw new BadRequestError(parsed.error.issues.map((i) => i.message).join("; "))
-    const { elevenlabsApiKey, openaiApiKey, ...prefs } = parsed.data
+    const { elevenlabsApiKey, openaiApiKey, announcements, ...prefs } = parsed.data
+    if (announcements !== undefined) this.store.setKv(VOICE_ANNOUNCEMENTS_KEY, announcements ? "on" : "off")
     const saved = this.saved()
     this.store.setKv(
       TTS_KEY,

@@ -135,6 +135,14 @@ describe("TTS settings", () => {
     expect(tts.update({ openai: { model: "gpt-realtime-2.1" } }).settings.openai.model).toBe("gpt-realtime-2.1")
   })
 
+  it("keep voice announcements off for every browser, through Reset", () => {
+    const tts = new TtsSettingsStore(memStore(), {})
+    expect(tts.info()).toMatchObject({ announcements: true, announcementsSource: "default" })
+    tts.update({ announcements: false })
+    // Reset forgets voice choices; it must not start every browser talking again.
+    expect(tts.reset()).toMatchObject({ announcements: false, announcementsSource: "ui" })
+  })
+
   it("preview lines use the owner's name", () => {
     expect(previewLine("Marin", undefined)).toBe("Hi, this is Marin.")
     expect(previewLine("Marin", "Sam")).toBe("Hi Sam, this is Marin.")

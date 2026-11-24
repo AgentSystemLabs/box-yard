@@ -183,6 +183,7 @@ export class SettingsTools {
       out.set(`docker.${k}`, { key: `docker.${k}`, group: "docker", schema: dockerSettingsPatch.shape[k], value, default: def, source: same(value, def) ? "default" : "ui" })
     }
     const tts = this.d.tts.info()
+    out.set("voice.announcements", { key: "voice.announcements", group: "voice", schema: ttsPatch.shape.announcements, value: tts.announcements, default: true, source: tts.announcementsSource })
     out.set("voice.provider", { key: "voice.provider", group: "voice", schema: ttsPatch.shape.provider, value: tts.settings.provider, default: TTS_DEFAULTS.provider, source: tts.sources.provider, envVar: "TTS_PROVIDER" })
     for (const p of ["elevenlabs", "openai"] as const) {
       const fields = ttsPatch.shape[p].unwrap().shape as Record<string, z.ZodType>
