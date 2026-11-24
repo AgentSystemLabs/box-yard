@@ -58,7 +58,7 @@ export function Slider({ id, label, value, min, max, step, disabled, onChange, f
 
 /**
  * Settings → Voice. What to speak, the browser voice and volume are saved per browser (localStorage);
- * the provider, its voice and keys are server settings (TtsSection). All of it is a draft until the
+ * on/off, the provider, its voice and keys are server settings (lib/speech.ts, TtsSection). All of it is a draft until the
  * dialog's Save; Test voice and the voice previews use the draft.
  */
 export function VoicePanel({ fid }: { fid: (k: string) => string }) {
@@ -90,7 +90,7 @@ export function VoicePanel({ fid }: { fid: (k: string) => string }) {
           Voice isn't supported in this browser.
         </p>
       )}
-      <Row id={fid("ve")} label="Voice announcements" help="Box Yard says short updates out loud: Coordinator replies, direct Captain replies, and task events. On in a new browser until you turn it off.">
+      <Row id={fid("ve")} label="Voice announcements" help="Box Yard says short updates out loud: Coordinator replies, direct Captain replies, and task events. One switch for every tab, browser and phone on this Box Yard: off here is off everywhere.">
         <Check
           id={fid("ve")}
           disabled={!supported}
