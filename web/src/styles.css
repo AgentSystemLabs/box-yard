@@ -161,9 +161,12 @@ body {
 /* A solid indicator supplements the many translucent focus rings. The offset separates it
    from gold primary actions; both themes meet 3:1 on the adjacent app surfaces.
    Text focus outlines the whole rounded composer, including its attachments and toolbar.
-   Scope :has() to the text row's direct child so transcript updates don't affect this match. */
+   Scope :has() to the text row's direct child so transcript updates don't affect this match.
+   A chat's scroller (StickyScroll's [data-scroller]) is focusable (tabindex=-1) only so the keyboard scrolls it after
+   Jump to end. It is the whole panel, so a ring there reads as a stray frame, and Chrome draws one once a key is
+   pressed after a click or text selection in the chat. Its rows and controls keep their own indicators. */
 [data-composer-box]:has(> div > [data-chat-composer]:focus),
-:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+:where(button, a, input, textarea, select, [tabindex]:not([data-scroller])):focus-visible {
   outline: 2px solid var(--focus-ink);
   outline-offset: 2px;
 }
@@ -171,6 +174,11 @@ body {
 /* The composer's indicator lies over its 1px border: one ring, not a gold line around a gray one. */
 [data-composer-box]:has(> div > [data-chat-composer]:focus) {
   outline-offset: -1px;
+}
+
+/* Nor the browser's default ring. Keep this out of the list above: a minifier may fold it into the same :is(). */
+[data-scroller]:focus-visible {
+  outline: none;
 }
 
 /* The box supplies the textarea's indicator. Other composer controls keep their own outlines. */
