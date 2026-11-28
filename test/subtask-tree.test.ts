@@ -680,12 +680,18 @@ describe("the tree and panel helpers", () => {
     const { shown } = sidebarGroups([YARD], [doneTop, CLASSIC, RATIOS, PANS, CHEFS, FRENCH, AMERICAN], {}, { now })
     const rows = shown[0]!.rows
     expect(rows.map((r) => r.task.id)).toEqual([OMELETTE.id])
-    expect(rows[0]!.tree).toEqual({ running: 3, total: 6, asks: 1 })
+    // The finished parent is a dim container of its open branches: its finished sub-task (Ratios) stays out, while an
+    // open sub-task (Classic) still shows its whole tree, finished ones too.
+    expect(rows[0]!.dim).toBe(true)
+    expect(rows[0]!.tree).toEqual({ running: 3, total: 5, asks: 1 })
     expect(rows[0]!.kids!.map((r) => [r.task.id, r.dim])).toEqual([
       [CLASSIC.id, false],
-      [RATIOS.id, true],
       [PANS.id, false],
       [CHEFS.id, false],
+    ])
+    expect(rows[0]!.kids![0]!.kids!.map((r) => [r.task.id, r.dim])).toEqual([
+      [FRENCH.id, false],
+      [AMERICAN.id, true],
     ])
     // Once nothing below it runs, a finished tree leaves the list like any finished task.
     const settled = [doneTop, ...[CLASSIC, RATIOS, PANS, CHEFS, FRENCH, AMERICAN].map((t) => ({ ...t, status: "done" }) as Task)]
