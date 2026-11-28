@@ -16,10 +16,12 @@ import {
   voiceAllowed,
   type VoiceSettings,
 } from "./voice"
-import { CloudSynth, clipVoice, fetchTts, getTtsInfo, knownProvider, loadTtsInfo, logVoice, reportFailure, subscribeTtsInfo } from "./tts"
+import { CloudSynth, clipVoice, fetchTts, getTtsInfo, knownProvider, loadTtsInfo, logVoice, reportFailure, setTtsInfo, subscribeTtsInfo } from "./tts"
+import type { TtsInfo } from "../../../shared/tts"
 import { PcmPlayer, audioContext } from "./pcm"
 import { audioElement, noteAudioBlocked, noteAudioPlayed, onActivation, unlockAudio } from "./audioUnlock"
 import { setSpeakingProbe } from "./sendSound"
+import { toast } from "./toast"
 
 // ------------------------------------------------------------------ speech queue
 
@@ -412,10 +414,26 @@ const synth = (): (SynthLike & { getVoices(): SpeechSynthesisVoice[] }) | null =
 /** Something can speak: the browser's engine, or a cloud voice played through an <audio> element. */
 export const voiceSupported = () => synth() !== null || (knownProvider() !== "browser" && audioElement() !== null)
 
-// Settings: one cached copy, shared by every component and kept in sync across tabs.
+// Settings: one cached copy, shared by every component and kept in sync across tabs. What to speak, the voice and
+// quiet hours are this browser's (localStorage); on/off is the server's (TtsInfo.announcements), so turning voice
+// off in one tab silences every tab, window, browser profile and phone on this Box Yard. localStorage keeps the
+// last switch the server sent, for the moment before it answers.
 type Listener = () => void
 const settingsListeners = new Set<Listener>()
 let settingsCache: VoiceSettings | null = null
+
+/**
+ * Whether this browser speaks, given its own stored switch: the server's, once it has loaded. Until someone sets
+ * the server's switch (it was per browser before), a browser that had voice off stays off rather than start
+ * talking again, and tells the server (adoptLocalOff), so it goes quiet everywhere.
+ */
+function effectiveEnabled(local: boolean): boolean {
+  const info = getTtsInfo()
+  const on = info?.announcements
+  if (typeof on !== "boolean") return local
+  if (on && !local && info!.announcementsSource !== "ui") return false
+  return on
+}
 
 export function getVoiceSettings(): VoiceSettings {
   if (!settingsCache) {
@@ -423,19 +441,58 @@ export function getVoiceSettings(): VoiceSettings {
     try {
       raw = browser ? localStorage.getItem(VOICE_KEY) : null
     } catch {}
-    settingsCache = parseVoiceSettings(raw)
+    const local = parseVoiceSettings(raw)
+    const enabled = effectiveEnabled(local.enabled)
+    settingsCache = enabled === local.enabled ? local : { ...local, enabled }
   }
   return settingsCache
 }
 
-export function setVoiceSettings(patch: Partial<VoiceSettings>) {
-  settingsCache = { ...getVoiceSettings(), ...patch }
+function storeSettings(next: VoiceSettings) {
+  settingsCache = next
   try {
-    localStorage.setItem(VOICE_KEY, JSON.stringify(settingsCache))
+    localStorage.setItem(VOICE_KEY, JSON.stringify(next))
   } catch {}
-  if (!settingsCache.enabled) queue()?.stop()
+  if (!next.enabled) queue()?.stop()
   emit(settingsListeners)
 }
+
+/** Save this browser's choices; a change to `enabled` goes to the server, which tells every other browser. */
+export function setVoiceSettings(patch: Partial<VoiceSettings>): Promise<void> | undefined {
+  const prev = getVoiceSettings()
+  storeSettings({ ...prev, ...patch })
+  if (patch.enabled === undefined || patch.enabled === (getTtsInfo()?.announcements ?? prev.enabled)) return undefined
+  return saveAnnouncements(patch.enabled)
+}
+
+async function saveAnnouncements(enabled: boolean): Promise<void> {
+  if (!browser || typeof fetch === "undefined") return
+  const res = await fetch("/api/tts/settings", {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ announcements: enabled }),
+  }).catch(() => null)
+  if (res?.ok) return setTtsInfo((await res.json()) as TtsInfo)
+  // Not saved: show the server's switch again rather than a choice only this tab believes.
+  await loadTtsInfo(true)
+  throw new Error(`Couldn't save voice ${enabled ? "on" : "off"} on the server.`)
+}
+
+let adopting = false
+// The server's switch changed (here, in another browser, or by the Coordinator): follow it.
+subscribeTtsInfo(() => {
+  const info = getTtsInfo()
+  const cur = getVoiceSettings()
+  const enabled = effectiveEnabled(cur.enabled)
+  if (enabled !== cur.enabled) storeSettings({ ...cur, enabled })
+  else if (info?.announcements === true && info.announcementsSource !== "ui" && !cur.enabled && !adopting) {
+    adopting = true
+    saveAnnouncements(false)
+      .catch(() => {})
+      .finally(() => (adopting = false))
+  }
+})
 
 const emit = (set: Set<Listener>) => set.forEach((l) => l())
 const subscribeSettings = (l: Listener) => {
@@ -621,7 +678,7 @@ export function holdSpeech(held: boolean) {
 export function toggleVoice() {
   const on = getVoiceSettings().enabled
   stopSpeech()
-  setVoiceSettings({ enabled: !on })
+  setVoiceSettings({ enabled: !on })?.catch((err: Error) => toast.error(err.message))
   if (!on) speakNow("Voice on.")
 }
 

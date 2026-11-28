@@ -120,6 +120,13 @@ export interface TtsInfo {
   sources: Record<keyof TtsSettings, SettingSource>
   keys: Record<CloudProvider, KeyStatus>
   defaults: TtsSettings
+  /**
+   * Voice announcements on or off, for every browser and tab on this server: one switch, so turning it off once
+   * silences them all. Missing from servers that predate it; the browser then keeps its own.
+   */
+  announcements?: boolean
+  /** "ui" once someone has set the switch; "default" while it's never been set (voice used to be per browser). */
+  announcementsSource?: SettingSource
 }
 
 /** Env vars for each key, shown next to "from env". */
