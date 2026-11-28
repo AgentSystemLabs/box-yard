@@ -299,6 +299,8 @@ describe("the sidebar", () => {
     expect(links[0]!.dataset.prState).toBe("open")
     expect(links[0]!.querySelector("svg.lucide-eye")).toBeNull()
     expect(links[1]!.className).toContain("@max-[13rem]/side:hidden")
+    // Under 20rem it folds to its eye: no number, no ↗.
+    expect(links[1]!.className).toContain("@max-[20rem]/side:[&>[data-pr-number]]:hidden")
   })
 
   it("a task with sub-tasks (a tree row) shows the PR it reviews too", () => {

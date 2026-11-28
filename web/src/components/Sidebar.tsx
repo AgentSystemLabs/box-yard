@@ -1033,15 +1033,20 @@ function PrName({ task }: { task: Task }) {
 /**
  * The PR a task reviews (never its own), after its own PR's number: an eye and "#7 ↗" in its state's colour. It gives
  * the title its room first: where its own PR link yields (ROW_PR_YIELDS) it yields too when the row has another target
- * (its own PR, Mark done), and in a sidebar under 13rem it yields to its own PR. ReviewName says it then.
+ * (its own PR, Mark done), and beside its own PR it folds to its eye, then yields (REVIEW_PR_YIELDS). ReviewName says
+ * it where it's hidden.
  */
 const reviewYields = (task: Task, closable: boolean) => cx((closable || Boolean(task.prUrl)) && ROW_PR_YIELDS, task.prUrl && REVIEW_PR_YIELDS)
-const REVIEW_PR_YIELDS = "@max-[13rem]/side:hidden"
+/**
+ * Beside its own PR's number: its eye alone under 20rem (its colour says the state, its name the number), and nothing
+ * under 13rem, or under 20rem to a finger (three 44px targets). Two numbers and two ↗ left a title two letters there.
+ */
+const REVIEW_PR_YIELDS = "@max-[20rem]/side:[&>[data-external-mark]]:hidden @max-[20rem]/side:[&>[data-pr-number]]:hidden @max-[13rem]/side:hidden pointer-coarse:@max-[20rem]/side:hidden"
 /** ", reviewing PR #7" at the end of a row's name, where its link is hidden (reviewYields). */
 function ReviewName({ task, closable }: { task: Task; closable: boolean }) {
   const label = reviewPrLabel(task)
   if (!label || (!closable && !task.prUrl)) return null
-  return <span className={cx("sr-only", ROW_PR_YIELDED, task.prUrl && "@max-[13rem]/side:block")}>, {label.replace(/^Reviewing/, "reviewing")}</span>
+  return <span className={cx("sr-only", ROW_PR_YIELDED, task.prUrl && "@max-[13rem]/side:block pointer-coarse:@max-[20rem]/side:block")}>, {label.replace(/^Reviewing/, "reviewing")}</span>
 }
 
 /**
