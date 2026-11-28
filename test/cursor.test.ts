@@ -4,7 +4,7 @@ import path from "node:path"
 import { CURSOR_MODELS_TTL_MS, cursorAgentArgs, cursorErrorText, cursorKeyCheck, CursorModels, cursorUsageOf } from "../server/cursor.js"
 import { cursorTurnLogin } from "../server/turnCredentials.js"
 import { checkLocal } from "../server/localCheck.js"
-import { canSteer, cliForModel, cursorContextWindow, cursorModel, cursorModelVendor, CURSOR_FALLBACK_MODELS, DEFAULT_CURSOR_MODEL, isCursorOnlyModel, isManagerCli, parseCursorModels } from "../shared/agentCli.js"
+import { canSteer, cliForModel, cursorContextWindow, cursorLatestChoices, cursorModel, cursorModelVendor, CURSOR_FALLBACK_MODELS, DEFAULT_CURSOR_MODEL, isCursorOnlyModel, isManagerCli, parseCursorModels, resolveCursorModel } from "../shared/agentCli.js"
 import { FAKE_CURSOR, tmpDir } from "./helpers.js"
 
 // Cursor's CLI as a task agent (docs/cursor.md): its model list, the model a run gets, its flags, its token counts and
@@ -86,7 +86,41 @@ describe("the model a Cursor run gets", () => {
     expect(cliForModel("opus")).toBe("claude")
     expect(cliForModel("claude-opus-5-5-high")).toBe("claude")
     expect(cliForModel("gpt-6.1-sol")).toBe("codex")
+    expect(cliForModel("sol:latest")).toBe("cursor")
+    expect(cliForModel("opus:latest")).toBe("cursor")
     expect(cliForModel("autopilot")).toBeNull()
+  })
+
+  it("keeps a family alias stored and resolves it to the newest usual-effort id at launch", () => {
+    const models = [
+      { id: "gpt-5.6-sol-high", label: "GPT-5.6 Sol 1M High" },
+      { id: "gpt-6.2-sol-xhigh", label: "GPT-6.2 Sol Extra High" },
+      { id: "gpt-6.2-sol-high-fast", label: "GPT-6.2 Sol High Fast" },
+      { id: "gpt-6.2-sol-high", label: "GPT-6.2 Sol High" },
+      { id: "claude-opus-5-5-xhigh", label: "Claude Opus 5.5 Extra High" },
+      { id: "claude-opus-5-5-high", label: "Claude Opus 5.5 High" },
+      { id: "composer-2.5-fast", label: "Composer 2.5 Fast" },
+      { id: "composer-2.5", label: "Composer 2.5" },
+    ]
+    expect(cursorModel("sol:latest", "auto", () => false)).toBe("sol:latest")
+    expect(resolveCursorModel("sol:latest", models)).toBe("gpt-6.2-sol-high")
+    expect(resolveCursorModel("opus:latest", models)).toBe("claude-opus-5-5-high")
+    expect(resolveCursorModel("composer:latest", models)).toBe("composer-2.5")
+    expect(resolveCursorModel("gpt-5.6-sol-high", models)).toBe("gpt-5.6-sol-high")
+    expect(resolveCursorModel("astra:latest", models)).toBe("astra:latest")
+    expect(cursorLatestChoices(CURSOR_FALLBACK_MODELS).map((m) => m.id)).toEqual([
+      "sol:latest",
+      "astra:latest",
+      "terra:latest",
+      "luna:latest",
+      "composer:latest",
+      "opus:latest",
+      "sonnet:latest",
+      "haiku:latest",
+      "fable:latest",
+    ])
+    expect(resolveCursorModel("sol:latest", CURSOR_FALLBACK_MODELS)).toBe("gpt-6.2-sol-high")
+    expect(resolveCursorModel("luna:latest", CURSOR_FALLBACK_MODELS)).toBe("gpt-6-luna-high")
   })
 
   it("can't be steered, and doesn't run the Coordinator or Captains", () => {

@@ -14,7 +14,7 @@
 
 import { normalizeLabel, THIS_COMPUTER, type MachineState } from "./machines.js"
 import { RUNNER_LABEL, type Runner } from "./runner.js"
-import { AGENT_CLI_LABEL, AGENT_CLIS, cliForModel, CODEX_MODEL_SUGGESTIONS, isAgentCli, type AgentCli } from "./agentCli.js"
+import { AGENT_CLI_LABEL, AGENT_CLIS, cliForModel, CODEX_LATEST, CODEX_MODEL_SUGGESTIONS, isAgentCli, type AgentCli } from "./agentCli.js"
 import { GPU_PROVIDER_LABEL, GPU_PROVIDERS, type GpuProvider } from "./gpu.js"
 import { gpuChoices, gpuTypesWords } from "./gpuCatalog.js"
 import { BOX_SIZE_ORDER, BOX_SIZE_SPECS, sizeSpecLine } from "./boxSizes.js"
@@ -224,10 +224,10 @@ export interface HarnessSources {
   blocked?: Partial<Record<AgentCli, string>>
 }
 
-/** Model names each harness takes, for its second line in the "!" list. */
+/** Model names each harness takes, for its second line in the "!" list. Two concrete Codex ids, so `latest` is not the hint. */
 export const HARNESS_MODELS: Record<AgentCli, string> = {
   claude: "opus · sonnet · haiku",
-  codex: CODEX_MODEL_SUGGESTIONS.slice(0, 2).join(" · "),
+  codex: CODEX_MODEL_SUGGESTIONS.filter((id) => id !== CODEX_LATEST).slice(0, 2).join(" · "),
   cursor: "auto · composer · any lab's",
   opencode: "provider/model · optional #variant",
 }

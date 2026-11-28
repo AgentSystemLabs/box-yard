@@ -253,7 +253,7 @@ describe("Composer button picker panels", () => {
     key("Enter")
     expect(input().value).toBe("!cursor:")
     key("Escape")
-    expect(choices()).toEqual(["cursor", "cursor:auto", "cursor:gpt-6.1-sol-high"])
+    expect(choices()).toEqual(["cursor", "cursor:sol%3alatest", "cursor:auto", "cursor:gpt-6.1-sol-high"])
     expect(input().value).toBe("!cursor:")
     key("Backspace")
     expect(choices()).toEqual(["claude", "codex", "cursor"])
@@ -313,9 +313,9 @@ describe("Composer button picker panels", () => {
     await find("fable")
     expect(choices()).toEqual([])
     await find("sol ultra")
-    expect(active()).toBe("codex:gpt-6.1-sol:ultra")
+    expect(active()).toBe("codex:latest:ultra")
     key("Enter")
-    expect(input().value).toBe("!codex:gpt-6.1-sol:ultra ")
+    expect(input().value).toBe("!codex:latest:ultra ")
   })
 
   it("the pointer moves the same highlight the keys do, so Enter picks the row under it", async () => {

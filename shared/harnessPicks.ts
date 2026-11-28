@@ -1,6 +1,6 @@
 // Reusable harness → model → effort choices for typed tags and button drill-downs. The harness's value stays
 // its CLI; the token carries the optional choices. Cursor's full live model id already includes its effort.
-import { CODEX_MODELS, type AgentCli, type CursorModel } from "./agentCli.js"
+import { CODEX_MODELS, cursorPickerModels, type AgentCli, type CursorModel } from "./agentCli.js"
 import { BUILTIN_MODELS, EFFORT_LABEL, MODEL_GROUP_LABEL, type ClaudeModel } from "./models.js"
 import type { HarnessDefaults } from "./harnessDefaults.js"
 import type { RunTarget } from "./runTargets.js"
@@ -22,7 +22,7 @@ export function harnessModelTargets(harnesses: RunTarget[], sources: HarnessPick
     const effortWords = saved.effort === "orchestrator" ? "Automatic effort" : saved.effort ? `${EFFORT_LABEL[saved.effort]} effort` : null
     const defaultDetail = [saved.model || "CLI default", effortWords].filter(Boolean).join(" · ")
     const root = { ...h, defaultLabel: "Settings default", detail: defaultDetail }
-    const models = cli === "opencode" ? (saved.model ? [{ id: saved.model, label: saved.model, efforts: [] as Effort[] }] : []) : cli === "codex" ? CODEX_MODELS : cli === "cursor" ? sources.cursor.map((m) => ({ ...m, efforts: [] as Effort[] })) : sources.claude ?? BUILTIN_MODELS
+    const models = cli === "opencode" ? (saved.model ? [{ id: saved.model, label: saved.model, efforts: [] as Effort[] }] : []) : cli === "codex" ? CODEX_MODELS : cli === "cursor" ? cursorPickerModels(sources.cursor).map((m) => ({ ...m, efforts: [] as Effort[] })) : sources.claude ?? BUILTIN_MODELS
     return [root, ...models.flatMap((m): RunTarget[] => {
       const token = `${h.token}:${modelToken(m.id)}`
       const { group, note }: Partial<ClaudeModel> = m

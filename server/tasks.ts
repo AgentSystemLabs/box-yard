@@ -92,7 +92,7 @@ import { NO_SESSION_CONNECTORS, type SessionConnectors } from "./connectors/sess
 import type { SessionRef } from "./connectors/connectors.js"
 import { claudeLoginRef, codexLoginRef, limitsOf, recordLimits, type LoginRef } from "./loginLimits.js"
 import { authorEnv, chooseAuthor, fallbackWarning, GithubAuthors, hostGitScript, parseHostGit, readHostGit, recordAuthorSource, type HostGit, type TurnAuthor } from "./gitAuthor.js"
-import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, pinProblem, type AgentCli } from "../shared/agentCli.js"
+import { AGENT_CLI_LABEL, DEFAULT_CODEX_EFFORT, canSteer, cliForModel, codexModel, cursorModel, isOpenCodeModel, isCursorOnlyModel, isOpenAiModel, pinProblem, resolveCursorModel, type AgentCli } from "../shared/agentCli.js"
 import { CursorModels } from "./cursor.js"
 import type { Identities, TurnSigning } from "./identity/identities.js"
 import type { AgentLogins, PickedLogin } from "./agentLogins.js"
@@ -6678,10 +6678,11 @@ export class TaskManager {
       return { model, effort: null, autocompact: null, route }
     }
     if (cursor) {
-      // A task pin is an exact CLI request, even when the server's cached catalog doesn't know it. Only inherited
-      // routes may give way to Settings (e.g. a shared Claude alias). The runner CLI accepts or rejects the pin;
-      // replacing it here would silently run another model on both first and resumed turns.
-      const model = route.modelFrom === "task" ? route.model : cursorModel(route.modelFrom === "builtin" ? null : route.model, s.agentCursorModel, (id) => this.cursorModels.has(id))
+      // A concrete task pin is an exact CLI request, even when the server's cached catalog doesn't know it. Only
+      // inherited routes may give way to Settings (e.g. a shared Claude alias). A stored family alias (sol:latest)
+      // stays on the task; the launch id is the newest match in the list held now.
+      const picked = route.modelFrom === "task" ? route.model : cursorModel(route.modelFrom === "builtin" ? null : route.model, s.agentCursorModel, (id) => this.cursorModels.has(id))
+      const model = resolveCursorModel(picked, this.cursorModels.peek().models)
       return { model, effort: null, autocompact: autocompactFlag(s.agentAutoCompact, row.context_window), route }
     }
     // Codex runs OpenAI models: a Claude model from Settings, routing or the built-in default gives way to the Codex model.

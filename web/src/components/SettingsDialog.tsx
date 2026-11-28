@@ -1072,13 +1072,13 @@ export function SettingsDialog({
                     <Row
                       id={fid("acu")}
                       label="Cursor model"
-                      help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has." more="Auto lets Cursor pick per request. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
+                      help="The model tasks on Cursor run on, unless the task or its project's Routing YAML entry picks one Cursor has." more="Auto lets Cursor pick per request. Latest Sol and the other family rows (sol:latest) stay saved and resolve to the newest matching id when a turn starts. Cursor's ids carry the effort, so there's no separate Effort here, and Cursor compacts its context on its own."
                       {...row("agentCursorModel")}
                     >
                       <CursorModelSelect id={fid("acu")} value={s.agentCursorModel} onChange={(v) => set("agentCursorModel", v)} testId="agent-cursor-model" />
                     </Row>
                   ) : s.agentCli === "codex" ? (
-                    <Row id={fid("acm")} label="Codex model" help="The model tasks on Codex run on, unless the task or its project's Routing YAML entry picks one. Options depend on your Codex account and CLI version." {...row("agentCodexModel")}>
+                    <Row id={fid("acm")} label="Codex model" help="The model tasks on Codex run on, unless the task or its project's Routing YAML entry picks one. Latest is stored as latest and resolves to GPT-6.2 Sol when a turn starts. A saved id stays pinned." {...row("agentCodexModel")}>
                       <CodexModelSelect id={fid("acm")} value={s.agentCodexModel} onChange={(v) => set("agentCodexModel", v)} testId="agent-codex-model" />
                     </Row>
                   ) : (

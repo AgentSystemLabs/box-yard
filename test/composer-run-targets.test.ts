@@ -322,7 +322,7 @@ describe('Composer "!" harness', () => {
       source: "cli",
     }))
     await settle()
-    expect(options()).toEqual(["cursor", "cursor:auto", "cursor:deepseek-v3", "cursor:gpt-6.1-sol-high"])
+    expect(options()).toEqual(["cursor", "cursor:sol%3alatest", "cursor:auto", "cursor:deepseek-v3", "cursor:gpt-6.1-sol-high"])
     // Exact !cursor + Tab advances into models (trailing ":"); Enter would have picked Settings default.
     const tab = key("Tab")
     expect(tab.defaultPrevented).toBe(true)

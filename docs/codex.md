@@ -81,7 +81,7 @@ Codex tasks also run on [SSH machines](machines.md#codex). Install the CLI as th
 
 | | Claude Code | Codex |
 | --- | --- | --- |
-| Model | Settings › Model, routing, the task's model | Settings › Codex model select (task default: gpt-6.1-sol; an explicitly saved empty choice retains Codex's default). A task's or routing's model is used when it's an OpenAI one; a Claude model gives way to the Codex model |
+| Model | Settings › Model, routing, the task's model | Settings › Codex model select (task default when nothing was picked: gpt-6.1-sol; an explicitly saved empty choice retains Codex's default). `latest` is stored as `latest` and resolves to GPT-6.2 Sol when a turn starts. A task's or routing's model is used when it's an OpenAI one; a Claude model gives way to the Codex model |
 | Effort | `--effort` | `model_reasoning_effort` (task default: xhigh; independent from Claude's effort). Ultra is offered only for Codex models that support it |
 | Context meter | from each API call | from the session's rollout file, at the end of each turn |
 | Subscription limits ([limits.md](limits.md)) | `rate_limit_event`, while it runs | the rollout file's `rate_limits`, at the end of each turn |

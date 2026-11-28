@@ -1,6 +1,6 @@
 // A model named for people, wherever a task says what it ran on (its details, turn timings, a PR's agents):
 // "Opus 5.5", not "claude-opus-5-5", and an alias by the model it runs ("opus" is "Opus 5.5") when that's known.
-import { CODEX_MODELS, CURSOR_FALLBACK_MODELS, type AgentCli, type CursorModel } from "./agentCli.js"
+import { CODEX_MODELS, CURSOR_FALLBACK_MODELS, cursorLatestFamily, cursorLatestLabel, type AgentCli, type CursorModel } from "./agentCli.js"
 import { BUILTIN_MODELS, claudeIdLabel, findModel, type ClaudeModel } from "./models.js"
 import type { Effort, TaskModel } from "./types.js"
 
@@ -39,6 +39,8 @@ function claudeLabel(id: string, models: readonly ClaudeModel[]): string | null 
 export function modelName(id: string, harness?: AgentCli | null, lists: ModelNameLists = {}): string {
   const v = id.trim()
   if (!v) return v
+  const family = cursorLatestFamily(v)
+  if (family && harness !== "codex" && harness !== "claude" && harness !== "opencode") return cursorLatestLabel(family)
   const claude = () => claudeLabel(v, lists.claude ?? BUILTIN_MODELS)
   if (harness === "codex") return codexLabel(v) ?? v
   if (harness === "cursor") return cursorLabel(v, lists) ?? v

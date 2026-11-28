@@ -53,6 +53,8 @@ describe("Codex task defaults", () => {
         expect(() => settings.update(patch)).toThrow()
         expect(settings.get().agentCodexModel).toBe("org/gateway-model")
       }
+      expect(settings.update({ agentCodexModel: "latest" }).settings.agentCodexModel).toBe("latest")
+      expect(settings.update({ agentCursorModel: "sol:latest" }).settings.agentCursorModel).toBe("sol:latest")
     } finally { db.close() }
   })
 

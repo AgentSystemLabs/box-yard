@@ -19,7 +19,7 @@ import { CursorModelSelect } from "./CursorModelSelect"
 import { titleFromPrompt } from "../../../shared/taskTitle"
 import { type Effort, type Project } from "../../../shared/types"
 import { LOCAL_UNSANDBOXED, RUNNER_LABEL, RUNNER_PHRASE, type Runner } from "../../../shared/runner"
-import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODEL_SUGGESTIONS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
+import { AGENT_CLIS, AGENT_CLI_LABEL, hasSeparateEffort, CODEX_MODELS, DEFAULT_AGENT_CLI, type AgentCli } from "../../../shared/agentCli"
 import { Modal, focusables } from "./Modal"
 import { Kbd } from "./Kbd"
 import { formatSize } from "./Attachments"
@@ -723,9 +723,9 @@ export function NewTaskDialog({
               ) : agentCli === "codex" ? (
                 <Select className="w-full" value={model} onChange={(e) => setModel(e.target.value)} data-testid="new-task-model">
                   <option value="">Default ({settings?.agentCodexModel || "Codex's default"})</option>
-                  {CODEX_MODEL_SUGGESTIONS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+                  {CODEX_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
                     </option>
                   ))}
                 </Select>
