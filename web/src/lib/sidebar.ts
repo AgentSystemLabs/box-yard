@@ -15,10 +15,12 @@ export interface SidebarRow {
   dim: boolean
   /** The row's PR, in short: "#253", "merged #253", or nothing. Never its state: the icon says that. */
   meta: string
-  /** Its sub-tasks (server/subtasks.ts), nested under it in spawn order, finished ones too. Only under a project. */
+  /** Its sub-tasks (server/subtasks.ts), nested under it in spawn order: finished ones too, except under a finished container. Only under a project. */
   kids?: SidebarRow[]
   /** Over every sub-task below it, nested ones too: how many are still on their way to a report, of how many. */
   tree?: TreeCount
+  /** In "Waiting on you", a flat list: the title of the task a sub-task's row belongs under, for its tooltip. */
+  under?: string
 }
 
 export interface TreeCount {
@@ -75,7 +77,8 @@ export function rowMeta(t: Task): string {
   }
 }
 
-const byAttention = (a: Task, b: Task) => ORDER[a.status] - ORDER[b.status] || b.createdAt - a.createdAt
+/** Most urgent first (`rank`: a task's place in ORDER), then newest. */
+const byAttention = (rank: (t: Task) => number) => (a: Task, b: Task) => rank(a) - rank(b) || b.createdAt - a.createdAt
 
 /** Cody gave it a place among its siblings (lib/sidebarOrder.ts). */
 const placed = (t: Task) => typeof t.sortOrder === "number"
@@ -83,8 +86,11 @@ const placed = (t: Task) => typeof t.sortOrder === "number"
  * A project's tasks: the ones Cody placed keep his order whatever their state, below the ones he hasn't, which stay in
  * the automatic order. So a list nobody rearranged is as it was, and a new task shows on top of one somebody did.
  */
-const byPlace = (a: Task, b: Task) =>
-  placed(a) && placed(b) ? a.sortOrder! - b.sortOrder! || b.createdAt - a.createdAt : placed(a) || placed(b) ? (placed(a) ? 1 : -1) : byAttention(a, b)
+const byPlace = (rank: (t: Task) => number) => {
+  const attention = byAttention(rank)
+  return (a: Task, b: Task) =>
+    placed(a) && placed(b) ? a.sortOrder! - b.sortOrder! || b.createdAt - a.createdAt : placed(a) || placed(b) ? (placed(a) ? 1 : -1) : attention(a, b)
+}
 /** A task's sub-tasks: the ones Cody placed first, in his order, then the rest in spawn order, so a new one goes last. */
 const bySpawn = (a: Task, b: Task) =>
   placed(a) && placed(b) ? a.sortOrder! - b.sortOrder! || a.createdAt - b.createdAt : placed(a) || placed(b) ? (placed(a) ? -1 : 1) : a.createdAt - b.createdAt
@@ -94,43 +100,52 @@ const SUBTASK_RUNNING: ReadonlySet<TaskStatus> = new Set(["queued", "starting", 
 
 /**
  * The project list's sub-task trees: which tasks nest under a parent instead of being rows of their own, and each
- * shown task's row with its sub-tasks below it. A tree shows while its top task would (live, or resting for review) or
- * while anything in it still runs; every sub-task of a shown task shows with it, finished ones dim, so the whole tree
- * stays in view until Cody marks it done.
+ * shown task's row with its sub-tasks below it. A sub-task is never a row of its own while its parent is in the list:
+ * it nests under it at any depth. An open task (live, or resting for review) shows with its whole tree, finished
+ * sub-tasks dim, so the tree stays in view until Cody marks it done. A finished task (done, or a quiet run) with
+ * something open below it shows too, dim, as the container of its open branches only: a parent whose PR merged (and
+ * moved it to done) while a sub-task was still working, or done before Box Yard closed sub-tasks with a merge.
  */
-function subtaskTrees(tasks: readonly Task[], shownAlone: (t: Task) => boolean) {
+function subtaskTrees(tasks: readonly Task[], open: (t: Task) => boolean) {
   const byId = new Map(tasks.map((t) => [t.id, t]))
+  const parentOf = (t: Task) => (t.parentTaskId && t.parentTaskId !== t.id ? byId.get(t.parentTaskId) : undefined)
   const kidsOf = new Map<string, Task[]>()
   for (const t of tasks) {
-    if (!t.parentTaskId || !byId.has(t.parentTaskId)) continue
-    const list = kidsOf.get(t.parentTaskId) ?? []
+    const parent = parentOf(t)
+    if (!parent) continue
+    const list = kidsOf.get(parent.id) ?? []
     list.push(t)
-    kidsOf.set(t.parentTaskId, list)
+    kidsOf.set(parent.id, list)
   }
   for (const list of kidsOf.values()) list.sort(bySpawn)
-  const liveBelow = new Map<string, boolean>()
-  const running = (id: string, seen = new Set<string>()): boolean => {
-    const known = liveBelow.get(id)
+  /** The most urgent open task below it (ORDER), or Infinity when nothing below it is open. */
+  const urgentBelow = new Map<string, number>()
+  const below = (id: string, seen = new Set<string>()): number => {
+    const known = urgentBelow.get(id)
     if (known !== undefined) return known
-    if (seen.has(id)) return false
+    if (seen.has(id) || seen.size > 12) return Infinity
     seen.add(id)
-    const live = (kidsOf.get(id) ?? []).some((k) => LIVE.has(k.status) || running(k.id, seen))
-    liveBelow.set(id, live)
-    return live
+    let rank = Infinity
+    for (const k of kidsOf.get(id) ?? []) rank = Math.min(rank, open(k) ? ORDER[k.status] : Infinity, below(k.id, seen))
+    seen.delete(id)
+    urgentBelow.set(id, rank)
+    return rank
   }
-  const visible = (t: Task, depth = 0): boolean => {
-    if (shownAlone(t) || running(t.id)) return true
-    const parent = t.parentTaskId ? byId.get(t.parentTaskId) : undefined
-    return Boolean(parent && depth < 12 && visible(parent, depth + 1))
+  /** Under an open task (or open itself): its whole tree shows. */
+  const whole = (t: Task, depth = 0): boolean => {
+    if (open(t)) return true
+    const parent = parentOf(t)
+    return Boolean(parent && depth < 12 && whole(parent, depth + 1))
   }
-  /** Shown, and not nested under a parent that's shown. */
-  const top = (t: Task) => {
-    const parent = t.parentTaskId ? byId.get(t.parentTaskId) : undefined
-    return !(parent && visible(parent)) && (shownAlone(t) || running(t.id))
-  }
+  /** Quiet runs show only as a container: never on their own, nor as a finished part of a tree. */
+  const visible = (t: Task) => (whole(t) && !isQuietRun(t)) || below(t.id) < Infinity
+  /** Shown, with no parent in the list to nest under. */
+  const top = (t: Task) => !parentOf(t) && visible(t)
+  /** Where a top task sorts among its project's: by its own state, or a container by its most urgent open sub-task. */
+  const rank = (t: Task) => (open(t) ? ORDER[t.status] : Math.min(ORDER[t.status], below(t.id)))
   const row = (t: Task, depth: number, seen: Set<string>): SidebarRow => {
-    const kids = depth < 12 ? (kidsOf.get(t.id) ?? []).filter((k) => !seen.has(k.id)) : []
-    const base: SidebarRow = { task: t, dim: t.status === "idle" || (depth > 0 && t.status === "done"), meta: rowMeta(t) }
+    const kids = depth < 12 ? (kidsOf.get(t.id) ?? []).filter((k) => !seen.has(k.id) && visible(k)) : []
+    const base: SidebarRow = { task: t, dim: t.status === "idle" || t.status === "done", meta: rowMeta(t) }
     if (!kids.length) return base
     for (const k of kids) seen.add(k.id)
     const rows = kids.map((k) => row(k, depth + 1, seen))
@@ -142,7 +157,7 @@ function subtaskTrees(tasks: readonly Task[], shownAlone: (t: Task) => boolean) 
     }
     return { ...base, kids: rows, tree }
   }
-  return { top, row: (t: Task) => row(t, 0, new Set([t.id])) }
+  return { top, rank, row: (t: Task) => row(t, 0, new Set([t.id])) }
 }
 
 /**
@@ -165,14 +180,17 @@ export function sidebarGroups(
   /** Being marked done here, or under a task that is: Mark done on a parent closes its tree, so it all leaves at once. */
   const closing = (t: Task | undefined, depth = 0): boolean =>
     Boolean(t && opts.closing?.size && depth < 12 && (opts.closing.has(t.id) || closing(t.parentTaskId ? byId.get(t.parentTaskId) : undefined, depth + 1)))
-  const listed = tasks.filter((t) => groups.has(t.projectId) && !isQuietRun(t) && !closing(t))
-  const shownAlone = (t: Task) => LIVE.has(t.status) || t.status === "idle"
-  const trees = subtaskTrees(listed, shownAlone)
+  // Quiet runs stay in the trees, so one can hold an open sub-task, but are never shown or counted on their own.
+  const listed = tasks.filter((t) => groups.has(t.projectId) && !closing(t))
+  const open = (t: Task) => (LIVE.has(t.status) || t.status === "idle") && !isQuietRun(t)
+  const trees = subtaskTrees(listed, open)
   for (const t of listed) {
     const g = groups.get(t.projectId)!
-    if (t.status === "needs_input") g.needs++
-    if (t.status === "failed") g.failed++
-    if (t.status === "working" || t.status === "starting") g.running++
+    if (!isQuietRun(t)) {
+      if (t.status === "needs_input") g.needs++
+      if (t.status === "failed") g.failed++
+      if (t.status === "working" || t.status === "starting") g.running++
+    }
     if (!trees.top(t)) continue
     const list = byProject.get(t.projectId) ?? []
     list.push(t)
@@ -181,7 +199,7 @@ export function sidebarGroups(
   const shown: SidebarGroup[] = []
   const others: SidebarGroup[] = []
   for (const g of groups.values()) {
-    g.rows = (byProject.get(g.project.id) ?? []).sort(byPlace).map(trees.row)
+    g.rows = (byProject.get(g.project.id) ?? []).sort(byPlace(trees.rank)).map(trees.row)
     if (g.project.id === opts.current || g.pin === "pinned" || (g.pin === null && g.rows.length > 0)) shown.push(g)
     else others.push(g)
   }
@@ -190,10 +208,14 @@ export function sidebarGroups(
 
 /** "Waiting on you": tasks asking, failed or with a PR to review, in that order, newest first within each. */
 export function inboxRows(tasks: readonly Task[], inInbox: (t: Task) => boolean): SidebarRow[] {
+  const titles = new Map(tasks.map((t) => [t.id, t.title]))
   return tasks
     .filter(inInbox)
     .sort((a, b) => ORDER[a.status] - ORDER[b.status] || lastActive(b) - lastActive(a))
-    .map((t) => ({ task: t, dim: false, meta: rowMeta(t) }))
+    .map((t) => {
+      const under = t.parentTaskId ? titles.get(t.parentTaskId) : undefined
+      return { task: t, dim: false, meta: rowMeta(t), ...(under !== undefined && { under }) }
+    })
 }
 
 // --- Keeping what didn't change: a task update re-renders only its own row ------------------------------------------
@@ -212,7 +234,7 @@ export function keepRows(prev: readonly SidebarRow[] | undefined, next: SidebarR
     // A tree's rows are kept the same way, so a sub-task's update re-renders its own row and its parents' counts.
     const kids = r.kids && o?.kids ? keepRows(o.kids, r.kids) : r.kids
     const sameTree = o?.kids === kids && sameCount(o?.tree, r.tree)
-    const kept = o && o.task === r.task && o.dim === r.dim && o.meta === r.meta && sameTree ? o : kids === r.kids ? r : { ...r, kids }
+    const kept = o && o.task === r.task && o.dim === r.dim && o.meta === r.meta && o.under === r.under && sameTree ? o : kids === r.kids ? r : { ...r, kids }
     if (kept !== prev[i]) same = false
     return kept
   })

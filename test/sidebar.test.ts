@@ -21,6 +21,7 @@ import {
   withFold,
   type SelectionInput,
 } from "../web/src/lib/sidebar.js"
+import { chatRailGroups, railTreeGroups } from "../web/src/lib/rails.js"
 import type { Project, Task, TaskStatus } from "../shared/types.js"
 
 const NOW = 1_800_000_000_000
@@ -103,6 +104,70 @@ describe("sidebarGroups", () => {
   })
 })
 
+describe("sub-tasks never stand at a task's level", () => {
+  const tree = (rows: { task: Task; dim: boolean; kids?: unknown[] }[]): unknown =>
+    rows.map((r) => (r.kids ? [r.task.id, r.dim, tree(r.kids as typeof rows)] : [r.task.id, r.dim]))
+
+  it("a done parent (its PR merged) with idle sub-tasks is their dim container, never leaving them as top rows", () => {
+    const parent = task("p", YARD.id, "done", { prUrl: "https://github.com/acme/app/pull/7", prMergedAt: NOW - HOUR })
+    const a = task("a", YARD.id, "idle", { parentTaskId: "p", createdAt: NOW - 3 * HOUR })
+    const b = task("b", YARD.id, "idle", { parentTaskId: "p", createdAt: NOW - 2 * HOUR })
+    const closed = task("c", YARD.id, "done", { parentTaskId: "p" })
+    const other = task("o", YARD.id, "idle", { createdAt: NOW - 10 * HOUR })
+    const [g] = sidebarGroups([YARD], [parent, a, b, closed, other], {}, opts).shown
+    // Only its open sub-tasks show under it: the one already done stays out.
+    expect(tree(g!.rows)).toEqual([["p", true, [["a", true], ["b", true]]], ["o", true]])
+    expect(g!.rows[0]!.meta).toBe("merged #7")
+    expect(g!.rows[0]!.tree).toEqual({ running: 0, total: 2, asks: 0 })
+  })
+
+  it("nests through done ancestors at any depth, and only along the branches that lead to something open", () => {
+    const top = task("top", YARD.id, "done")
+    const mid = task("mid", YARD.id, "done", { parentTaskId: "top" })
+    const leaf = task("leaf", YARD.id, "working", { parentTaskId: "mid" })
+    const doneBranch = task("dead", YARD.id, "done", { parentTaskId: "top" })
+    const doneLeaf = task("deadLeaf", YARD.id, "done", { parentTaskId: "dead" })
+    const [g] = sidebarGroups([YARD], [top, mid, leaf, doneBranch, doneLeaf], {}, opts).shown
+    expect(tree(g!.rows)).toEqual([["top", true, [["mid", true, [["leaf", false]]]]]])
+  })
+
+  it("an open task's whole tree shows, finished parts dim, even under a done ancestor", () => {
+    const top = task("top", YARD.id, "done")
+    const open = task("open", YARD.id, "pr_ready", { parentTaskId: "top" })
+    const finished = task("fin", YARD.id, "done", { parentTaskId: "open" })
+    const [g] = sidebarGroups([YARD], [top, open, finished], {}, opts).shown
+    expect(tree(g!.rows)).toEqual([["top", true, [["open", false, [["fin", true]]]]]])
+  })
+
+  it("a quiet run holding an open sub-task is its container, though never a row on its own", () => {
+    const quiet = task("q", YARD.id, "idle", { outcome: "noop", scheduleId: "s1" })
+    const kid = task("k", YARD.id, "idle", { parentTaskId: "q" })
+    expect(tree(sidebarGroups([YARD], [quiet, kid], {}, opts).shown[0]!.rows)).toEqual([["q", true, [["k", true]]]])
+    expect(sidebarGroups([YARD], [quiet], {}, { ...opts, current: YARD.id }).shown[0]!.rows).toEqual([])
+  })
+
+  it("a container sorts by its most urgent open sub-task, not last as a done task would", () => {
+    const parent = task("p", YARD.id, "done", { createdAt: NOW - 5 * HOUR })
+    const asking = task("k", YARD.id, "needs_input", { parentTaskId: "p" })
+    const working = task("w", YARD.id, "working")
+    const idle = task("i", YARD.id, "idle")
+    expect(ids(sidebarGroups([YARD], [working, idle, parent, asking], {}, opts).shown[0]!)).toEqual(["p", "w", "i"])
+  })
+
+  it("a sub-task whose parent the list doesn't have at all is the only one shown as a row of its own", () => {
+    const orphan = task("k", YARD.id, "idle", { parentTaskId: "gone" })
+    expect(ids(sidebarGroups([YARD], [orphan], {}, opts).shown[0]!)).toEqual(["k"])
+  })
+
+  it("the chat rails list the container, with the sub-tasks nested in it, never as their own rows", () => {
+    const parent = task("p", YARD.id, "done")
+    const kid = task("k", YARD.id, "idle", { parentTaskId: "p" })
+    const { shown } = sidebarGroups([YARD], [parent, kid], {}, opts)
+    expect(chatRailGroups(shown, YARD.id, []).map((g) => g.tasks.map((t) => t.id))).toEqual([["p"]])
+    expect(tree(railTreeGroups(shown, YARD.id, [])[0]!.rows)).toEqual([["p", true, [["k", true]]]])
+  })
+})
+
 describe("a project's running count (its blue badge)", () => {
   const running = (tasks: Task[], extra: Partial<Parameters<typeof sidebarGroups>[3]> = {}) =>
     sidebarGroups([YARD, SITE], tasks, { [YARD.id]: "pinned", [SITE.id]: "pinned" }, { ...opts, ...extra }).shown.map((g) => g.running)
@@ -173,6 +238,16 @@ describe("inboxRows", () => {
     const tasks = [task("pr", YARD.id, "pr_ready"), task("w", YARD.id, "working"), task("f", SITE.id, "failed"), task("a", SITE.id, "needs_input")]
     const rows = inboxRows(tasks, (t) => ["needs_input", "failed", "pr_ready"].includes(t.status))
     expect(rows.map((r) => r.task.id)).toEqual(["a", "f", "pr"])
+  })
+
+  it("stays a flat attention list, but a sub-task's row names the task it belongs under, done or not", () => {
+    const parent = { ...task("p", YARD.id, "done"), title: "Plan the launch" } as Task
+    const tasks = [parent, task("k", YARD.id, "needs_input", { parentTaskId: "p" }), task("t", YARD.id, "failed")]
+    const rows = inboxRows(tasks, (t) => ["needs_input", "failed", "pr_ready"].includes(t.status))
+    expect(rows.map((r) => [r.task.id, r.under])).toEqual([["k", "Plan the launch"], ["t", undefined]])
+    // A renamed parent is a new row, so its tooltip follows.
+    const renamed = inboxRows([{ ...parent, title: "Ship it" } as Task, ...tasks.slice(1)], (t) => t.status !== "done")
+    expect(keepRows(rows, renamed)[0]).not.toBe(rows[0])
   })
 })
 

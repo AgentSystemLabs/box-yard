@@ -1057,12 +1057,14 @@ function ReviewName({ task, closable }: { task: Task; closable: boolean }) {
  * so each action has its own keyboard target.
  */
 export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, project }: { row: SidebarRow; spot: RowSpot; selected: boolean; onPick: Pick["task"]; project?: { name: string; color: Parameters<typeof projectColorStyle>[0]; icon?: string | null } }) {
-  const { task, dim, meta } = row
+  const { task, dim, meta, under } = row
   const label = stateLabel(task)
   const prMeta = Boolean(task.prUrl)
   const tree = useContext(InTree)
   const id = useId()
   const closable = readyForReview(task.status) || task.status === "failed"
+  // A sub-task in a flat list ("Waiting on you") says which task it belongs under.
+  const parent = under !== undefined ? ` · sub-task of ${under}` : ""
   return (
     <div
       {...(tree ? treeItem(taskKey(task.id, spot), 2, id, { current: selected, action: closable }) : undefined)}
@@ -1074,7 +1076,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         onMouseDown={keepFocusForPick}
         data-open-task={task.id}
         {...(tree ? openPart(id) : { "aria-current": selected ? ("page" as const) : undefined })}
-        title={`${task.title} · ${label}${project ? ` · ${project.name}` : ""}`}
+        title={`${task.title} · ${label}${parent}${project ? ` · ${project.name}` : ""}`}
         className={cx(
           // One line at every width; the title gives space to the separate PR and check targets.
           ROW_BOX,
@@ -1087,6 +1089,7 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
       >
         <TaskRowTitle title={task.title} status={task.status} />
         <RowIcon task={task} label={label} dim={dim} />
+        {parent && <span className="sr-only">, sub-task of {under}</span>}
         {project?.name && <span className="sr-only">, {project.name}</span>}
         {prMeta && closable && <PrName task={task} />}
         <ReviewName task={task} closable={closable} />

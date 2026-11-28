@@ -1939,9 +1939,10 @@ export class TaskManager {
    * Its sub-tasks close with it, at any depth (closeSubtasks): Mark done in the app, POST /api/tasks/:id/close and
    * Cody's "close task_…" in a chat all come here. One already done stays as it was: closing it again changes nothing
    * but the open sub-tasks under it, so a second close (or one racing a merge that moved it to done) is harmless.
-   * `by`: closed with its parent (`parent`); `root`, the task Mark done was on, when that parent was done already.
+   * `by`: closed with its parent (`parent`); `root`, the task Mark done was on, when that parent was done already;
+   * `merged`, the parent moved to done because its PR merged (mergedDone): then sub-tasks still running are spared.
    */
-  async closeTask(taskId: string, by?: { parent: TaskRow; root?: TaskRow }): Promise<Task> {
+  async closeTask(taskId: string, by?: { parent: TaskRow; root?: TaskRow; merged?: boolean }): Promise<Task> {
     const row = this.requireRow(taskId)
     if (row.status !== "done") {
       // stopTask settles a queued or starting task before its first await; only a working turn's kill is left running.
@@ -1953,13 +1954,14 @@ export class TaskManager {
       const doneFrom = { status: row.status, question: row.question, ...(questions && { questions }), parent: by?.parent.id ?? null }
       this.store.updateTask(row.id, { status: "done", question: null, doneFrom }, { quiet: true })
       this.addEvent(row.id, isLocalRunnerBox(row.box_id) ? "Closed. Its folder stays on this computer until the task is deleted or this computer's cleanup archives it (Settings › Boxes & limits › This computer and SSH machines)." : "Closed. Its workspace was archived and its box slot freed.")
-      if (by) this.addEvent(row.id, by.root ? `Closed with ${by.root.title}, a task above it (its parent task, ${by.parent.title}, was done already).` : `Closed with its parent task, ${by.parent.title}.`, { kind: "subtasks" })
+      const why = by?.merged ? `, whose PR merged` : ""
+      if (by) this.addEvent(row.id, by.root ? `Closed with ${by.root.title}${why}, a task above it (its parent task, ${by.parent.title}, was done already).` : `Closed with its parent task, ${by.parent.title}${why}.`, { kind: "subtasks" })
       this.emitTask(row.id)
       void this.evictWhenSettled(row.id)
       this.publishDirectory()
     }
     // Its sub-tasks close with it: nobody is left to read their reports.
-    await this.closeSubtasks(row, by?.root ?? row, new Set([row.id]))
+    await this.closeSubtasks(row, by?.root ?? row, new Set([row.id]), false, Boolean(by?.merged))
     return this.store.getTask(row.id)!
   }
 
@@ -1968,16 +1970,20 @@ export class TaskManager {
    * one that finished (or was deleted) while the ones before it closed is taken as it is now. An open one closes as
    * its parent did (closeTask: its running turn stopped, its queue dropped, archived) and closes its own in turn; a
    * done one is left as it was, but the open ones under it (reopened on their own) still close.
+   * `merged`: for a parent that moved to done because its PR merged (mergedDone). A sub-task still running (working,
+   * starting, waiting, queued, or with a turn or messages pending, a failed one's too) is never stopped then: it and its own tree stay
+   * open, and the sidebar keeps its done parent as their dim container.
    */
-  private async closeSubtasks(row: TaskRow, root: TaskRow, seen: Set<string>, wasDone = false) {
+  private async closeSubtasks(row: TaskRow, root: TaskRow, seen: Set<string>, wasDone = false, merged = false) {
     await this.cascadeSubtasks(row, async (kid) => {
-      if (seen.has(kid.id)) return
+      if (seen.has(kid.id) || (merged && this.stopped)) return
       seen.add(kid.id)
       const now = this.store.getTaskRow(kid.id)
       if (!now) return
-      if (now.status === "done") return this.closeSubtasks(now, root, seen, true)
+      if (now.status === "done") return this.closeSubtasks(now, root, seen, true, merged)
+      if (merged && (now.current_turn_id || this.liveSubtask(now) || this.store.hasInputs(now.id))) return
       // It closes with its own parent (Reopen on that one brings it back), naming `root` when that parent was done already.
-      return this.closeTask(now.id, { parent: row, ...(wasDone ? { root } : {}) })
+      return this.closeTask(now.id, { parent: row, ...(wasDone ? { root } : {}), ...(merged ? { merged } : {}) })
     })
   }
 
@@ -2089,6 +2095,8 @@ export class TaskManager {
     this.addEvent(row.id, `Moved to done: its pull request #${prNumber(row.pr_url) ?? "?"} is merged (${this.autoDoneSource(row)} › Done when its PR merges).${where}`, { kind: "auto_done" })
     this.emitTask(row.id)
     void this.evictWhenSettled(row.id)
+    // Its resting sub-tasks close with it, as Mark done's do (closeSubtasks); running ones are left to finish.
+    void this.closeSubtasks(row, row, new Set([row.id]), false, true).catch((err) => console.warn(`[box-yard] closing the sub-tasks of ${row.id} after its PR merged: ${errorMessage(err)}`))
   }
 
   /**
