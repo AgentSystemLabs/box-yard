@@ -87,7 +87,7 @@ function defaultCursorBin(): string {
   return !onPath && fs.existsSync(installed) ? installed : "cursor-agent"
 }
 
-export type ProviderName = "upstash" | "local"
+export type ProviderName = "upstash" | "local" | "boxd"
 
 export const config = {
   port: int("PORT", 3000),
@@ -120,10 +120,11 @@ export const config = {
     ...(env.BOXYARD_DOMAIN ? [`https://${env.BOXYARD_DOMAIN}`] : []),
   ],
 
-  provider: (env.BOX_PROVIDER ?? (env.UPSTASH_BOX_API_KEY && !mock ? "upstash" : "local")) as ProviderName,
+  provider: (env.BOX_PROVIDER ?? (env.UPSTASH_BOX_API_KEY && !mock ? "upstash" : env.BOXD_API_KEY && !mock ? "boxd" : "local")) as ProviderName,
   /** BOX_PROVIDER as set; empty means new boxes are Upstash boxes once a key is set (env or Settings › Credentials). */
   boxProvider: env.BOX_PROVIDER?.trim() ?? "",
   upstashBoxApiKey: env.UPSTASH_BOX_API_KEY ?? "",
+  boxdApiKey: env.BOXD_API_KEY ?? "",
   workerSnapshotId: env.WORKER_SNAPSHOT_ID ?? "",
   workerRuntime: env.WORKER_RUNTIME ?? "node",
   workerSize: size,
@@ -291,6 +292,9 @@ export function configProblems(c: Config = config, opts: { claudeLogin?: boolean
   }
   if (c.provider === "upstash" && !c.upstashBoxApiKey) {
     problems.push("BOX_PROVIDER is upstash but there's no Upstash Box API key: add one in Settings › Box providers › Upstash boxes, or set UPSTASH_BOX_API_KEY.")
+  }
+  if (c.provider === "boxd" && !c.boxdApiKey) {
+    problems.push("BOX_PROVIDER is boxd but there's no boxd API key: add one in Settings › Box providers, or set BOXD_API_KEY.")
   }
   if (c.qstashToken && !qstashEnabled(c)) {
     problems.push("QSTASH_TOKEN is set but schedules still use the local timer: QStash also needs BOXYARD_PUBLIC_URL and QSTASH_CURRENT_SIGNING_KEY.")

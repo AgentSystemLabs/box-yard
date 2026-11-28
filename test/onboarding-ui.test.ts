@@ -38,7 +38,7 @@ class FakeEventSource {
 const unset: CredentialStatus = { state: "unset", source: null }
 const saved: CredentialStatus = { state: "set", source: "saved" }
 function setup(creds: Partial<Record<CredentialKey, CredentialStatus>> = {}): SetupStatus {
-  const credentials = { upstashBoxApiKey: unset, claudeOauthToken: unset, anthropicApiKey: unset, codexAuthJson: unset, codexApiKey: unset, githubToken: unset, runpodApiKey: unset, ...creds }
+  const credentials = { upstashBoxApiKey: unset, boxdApiKey: unset, claudeOauthToken: unset, anthropicApiKey: unset, codexAuthJson: unset, codexApiKey: unset, githubToken: unset, runpodApiKey: unset, ...creds }
   const boxes = credentials.upstashBoxApiKey.state === "set"
   const claude = credentials.claudeOauthToken.state === "set" || credentials.anthropicApiKey.state === "set"
   const missing = [...(boxes ? [] : ["Upstash Box API key"]), ...(claude ? [] : ["Claude sign-in"])]

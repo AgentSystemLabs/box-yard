@@ -754,7 +754,7 @@ export function SetupCard({ status, className }: { status: SetupStatus; classNam
           </Step>
         )}
         {choice === "box" && status.boxes.required && (
-          <Step n={++n} done={set("upstashBoxApiKey")} title={CREDENTIAL_INFO.upstashBoxApiKey.label} help={<CredentialHelp k="upstashBoxApiKey" />}>
+          <Step n={++n} done={set("upstashBoxApiKey") || set("boxdApiKey")} title={CREDENTIAL_INFO.upstashBoxApiKey.label} help={<CredentialHelp k="upstashBoxApiKey" />}>
             <CredentialField k="upstashBoxApiKey" status={status.credentials.upstashBoxApiKey} id={`${id}-box`} />
           </Step>
         )}
@@ -967,6 +967,15 @@ export function UpstashPanel({ fid, children }: { fid: (k: string) => string; ch
       <CredentialField k="upstashBoxApiKey" section="upstash" status={s.credentials.upstashBoxApiKey} id={fid("cred-upstashBoxApiKey")} />
       {optional && s.credentials.upstashBoxApiKey.state === "set" && <p className="text-xs leading-relaxed text-zinc-500" data-testid="upstash-ready">
         Upstash boxes are ready: pick Upstash box in a project's Settings › Runs on, or change the default in Box providers.
+      </p>}
+    </Row>}
+    {!s ? <Loading count={1} label="Loading the boxd key" /> : <Row id={fid("cred-boxdApiKey")} label={CREDENTIAL_INFO.boxdApiKey.label} help={<>
+      {optional && "Optional: boxd machines instead of Upstash boxes, once a boxd key is set. "}
+      <CredentialHelp k="boxdApiKey" />
+    </>}>
+      <CredentialField k="boxdApiKey" section="upstash" status={s.credentials.boxdApiKey} id={fid("cred-boxdApiKey")} />
+      {optional && s.credentials.boxdApiKey.state === "set" && <p className="text-xs leading-relaxed text-zinc-500" data-testid="boxd-ready">
+        boxd machines are ready: with BOX_PROVIDER unset (and no Upstash key), new boxes are boxd machines; set BOX_PROVIDER=boxd to force it.
       </p>}
     </Row>}
     {children}

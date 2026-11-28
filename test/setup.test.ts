@@ -5,15 +5,18 @@ import type { Server } from "node:http"
 import { createBoxYard, makeProvider, type BoxYard } from "../server/app.js"
 import { CredentialStore, redact } from "../server/credentials.js"
 import { AutoProvider } from "../server/providers/auto.js"
+import { BoxdProvider } from "../server/providers/boxd.js"
 import { LocalProvider } from "../server/providers/local.js"
 import { providerOf, type BoxProvider } from "../server/providers/types.js"
 import { openDb } from "../server/db.js"
 import { Store } from "../server/store.js"
 import type { Config } from "../server/config.js"
-import type { CredentialTest, SetupStatus } from "../shared/setup.js"
+import { Setup, type SetupDeps } from "../server/setup.js"
+import type { CredentialKey, CredentialTest, SetupStatus } from "../shared/setup.js"
 import { FAKE_CLAUDE, freePort, testConfig, tmpDir } from "./helpers.js"
 
 const BOX_KEY = "box_key_secret_0123456789"
+const BOXD_KEY = "bxd_secret_test_key_0123456789"
 const OAUTH = "sk-ant-oat01-secret-oauth-token-abcdef"
 const API_KEY = "sk-ant-api03-secret-api-key-123456"
 const GH = "github_pat_11SECRETSECRETSECRET_abcdef"
@@ -73,6 +76,7 @@ describe("GET /api/setup", () => {
     expect(body.missing).toEqual(["a choice of where agents run", "Claude sign-in"])
     expect(body.credentials).toEqual({
       upstashBoxApiKey: { state: "unset", source: null },
+      boxdApiKey: { state: "unset", source: null },
       claudeOauthToken: { state: "unset", source: null },
       anthropicApiKey: { state: "unset", source: null },
       codexAuthJson: { state: "unset", source: null },
@@ -250,6 +254,29 @@ describe("POST /api/setup/test/:key", () => {
     expect((await test(json, "upstashBoxApiKey", BOX_KEY)).message).toBe("Upstash didn't answer within 0 s.")
   })
 
+  it("boxd: lists machines with the key, and says a rejection and a hang plainly", async () => {
+    let mode: "ok" | "bad" | "hang" = "ok"
+    const seen: string[] = []
+    const { json } = await boot(testConfig({ port: await freePort(), mock: false, claudeBin: FAKE_CLAUDE, boxProvider: "" }), {
+      setup: {
+        timeoutMs: 200,
+        listBoxdMachines: async (k) => {
+          seen.push(k)
+          if (mode === "ok") return [{ status: "running" }, { status: "destroyed" }, { status: "suspended" }]
+          if (mode === "bad") throw new Error("Unauthenticated: invalid API key")
+          return new Promise(() => {}) as Promise<{ status?: string }[]>
+        },
+      },
+    })
+    expect(await test(json, "boxdApiKey")).toMatchObject({ ok: false, message: "Nothing to test yet: paste the boxd API key first." })
+    expect(await test(json, "boxdApiKey", BOXD_KEY)).toMatchObject({ ok: true, message: "Works: boxd accepted the key and listed 2 machines on the account." })
+    mode = "bad"
+    expect((await test(json, "boxdApiKey", BOXD_KEY)).message).toBe("boxd rejected the key: Unauthenticated: invalid API key")
+    mode = "hang"
+    expect((await test(json, "boxdApiKey", BOXD_KEY)).message).toBe("boxd didn't answer within 0 s.")
+    expect(seen).toEqual([BOXD_KEY, BOXD_KEY, BOXD_KEY])
+  })
+
   it("Anthropic API key: GET /v1/models, with the API's own error", async () => {
     const calls: { url: string; key: string | null }[] = []
     const fetch = (async (url: string, init?: RequestInit) => {
@@ -421,17 +448,62 @@ describe("box provider", () => {
     expect((await json<SetupStatus>("PUT", "/api/setup/credentials", { upstashBoxApiKey: null })).body.boxes.provider).toBe("local")
   })
 
+  it("a boxd key moves new boxes to boxd with no restart, and an Upstash key saved later still wins over it", async () => {
+    // FAKE_CLAUDE by its own name: /api/health and the credentials PUT don't care about the stand-in rename.
+    const c = testConfig({ port: await freePort(), mock: false, claudeBin: FAKE_CLAUDE, boxProvider: "" })
+    const { json } = await boot(c)
+    expect((await json<{ provider: string }>("GET", "/api/health")).body.provider).toBe("local")
+    expect((await json<SetupStatus>("PUT", "/api/setup/credentials", { boxdApiKey: BOXD_KEY })).body.boxes.provider).toBe("boxd")
+    expect((await json<{ provider: string }>("GET", "/api/health")).body.provider).toBe("boxd")
+    // Upstash first: saving it on a boxd install moves new boxes back, still with no restart…
+    expect((await json<SetupStatus>("PUT", "/api/setup/credentials", { upstashBoxApiKey: BOX_KEY })).body.boxes.provider).toBe("upstash")
+    expect((await json<{ provider: string }>("GET", "/api/health")).body.provider).toBe("upstash")
+    // …and removing it hands new boxes back to boxd.
+    expect((await json<SetupStatus>("PUT", "/api/setup/credentials", { upstashBoxApiKey: null })).body.boxes.provider).toBe("boxd")
+    expect((await json<{ provider: string }>("GET", "/api/health")).body.provider).toBe("boxd")
+    expect((await json<SetupStatus>("PUT", "/api/setup/credentials", { boxdApiKey: null })).body.boxes.provider).toBe("local")
+  })
+
+  it("a task asked to run on a box starts with only a boxd key: the gate counts either cloud", async () => {
+    // The boxes behind the "box" runner are folders driven by the fake claude, under the boxd provider's name:
+    // what's under test is the gate, not the machine. tmpDir (not dir): its fake-claude children wind down
+    // after the tests, so the folder is removed by the file-end cleanup, not raced by this file's afterEach.
+    const boxes = new (class extends LocalProvider {
+      override readonly name = "boxd"
+    })(tmpDir("boxes-"), FAKE_CLAUDE)
+    const { json } = await boot(testConfig({ port: await freePort(), mock: false, claudeBin: FAKE_CLAUDE, boxProvider: "" }), { provider: boxes })
+    const project = (await json<{ id: string }>("POST", "/api/projects", { name: "Boxd gate" })).body
+    // Before any key: the box runner refuses, saying what to add.
+    const refused = await json<{ error: string }>("POST", "/api/tasks", { projectId: project.id, title: "No key", prompt: "hi", runsOn: "box" })
+    expect(refused.status).toBe(400)
+    expect(refused.body.error).toContain("Cloud boxes aren't set up")
+    // With only a boxd key saved, the same task is made and lands on a boxd box.
+    await json("PUT", "/api/setup/credentials", { boxdApiKey: BOXD_KEY })
+    const made = await json<{ id: string }>("POST", "/api/tasks", { projectId: project.id, title: "Boxd box", prompt: "hi", runsOn: "box" })
+    expect(made.status).toBe(201)
+    expect(made.body.id).toBeTruthy()
+    // Wind the task down here, so the afterEach folder cleanup doesn't race its fake-claude child (Windows).
+    await yard!.tasks.stopTask(made.body.id).catch(() => {})
+    await new Promise((r) => setTimeout(r, 300))
+  })
+
   it("AutoProvider routes each box by its id, and makeProvider keeps env-configured setups as they were", () => {
     const local = new LocalProvider(dir("boxes-"), FAKE_CLAUDE)
     const upstash = { name: "upstash", nodeBin: "node", claudeBin: "claude", root: () => "/workspace/home" } as unknown as BoxProvider
-    let on = false
-    const auto = new AutoProvider(local, upstash, () => on)
+    const boxd = { name: "boxd", nodeBin: "node", claudeBin: "claude", root: () => "/home/boxd/yard" } as unknown as BoxProvider
+    let cloud: BoxProvider
+    const auto = new AutoProvider(local, upstash, boxd, () => cloud, () => [upstash, boxd])
+    cloud = local
     expect(auto.name).toBe("local")
-    on = true
+    cloud = boxd
+    expect(auto.name).toBe("boxd")
+    cloud = upstash
     expect(auto.name).toBe("upstash")
     expect(providerOf(auto, "local-abcd1234")).toBe(local)
+    expect(providerOf(auto, "boxd-m0001")).toBe(boxd)
     expect(providerOf(auto, "box_123")).toBe(upstash)
     expect(auto.root("box_123")).toBe("/workspace/home")
+    expect(auto.root("boxd-m0001")).toBe("/home/boxd/yard")
     expect(providerOf(local, "box_123")).toBe(local)
 
     const c = testConfig()
@@ -439,10 +511,47 @@ describe("box provider", () => {
     const db = openDb(c.dataDir)
     const creds = new CredentialStore(new Store(db), {})
     expect(makeProvider({ ...c, provider: "upstash", mock: false }, creds).name).toBe("upstash")
+    expect(makeProvider({ ...c, provider: "boxd", mock: false }, creds)).toBeInstanceOf(BoxdProvider)
     expect(makeProvider({ ...c, mock: true }, creds)).toBeInstanceOf(LocalProvider)
     expect(makeProvider({ ...c, mock: false, boxProvider: "local" }, creds)).toBeInstanceOf(LocalProvider)
     expect(makeProvider({ ...c, mock: false, boxProvider: "" }, creds)).toBeInstanceOf(AutoProvider)
     expect(makeProvider({ ...c, mock: false, boxProvider: "" })).toBeInstanceOf(LocalProvider)
     db.close()
+  })
+})
+
+describe("the box runner gate (Setup.runnerProblem)", () => {
+  /** The gate on a config and saved keys, without booting the server. */
+  const gate = (c: Partial<Config>, env: Partial<Record<CredentialKey, string>> = {}) => {
+    const db = openDb(tmpDir("gate-"))
+    try {
+      // Only the fields runnerProblem("box") reads are real here; the rest are never touched.
+      const setup = new Setup({
+        c: testConfig({ mock: false, boxProvider: "", ...c }),
+        store: new Store(db),
+        credentials: new CredentialStore(new Store(db), env),
+      } as unknown as SetupDeps)
+      return setup.runnerProblem("box")
+    } finally {
+      db.close()
+    }
+  }
+
+  it("counts either cloud's key: an install with only a boxd key can run box tasks", async () => {
+    expect(await gate({})).toBe("Cloud boxes aren't set up: add an Upstash Box API key or a boxd API key in Settings › Box providers")
+    expect(await gate({}, { boxdApiKey: BOXD_KEY })).toBeNull()
+    expect(await gate({}, { upstashBoxApiKey: BOX_KEY })).toBeNull()
+    expect(await gate({}, { boxdApiKey: BOXD_KEY, upstashBoxApiKey: BOX_KEY })).toBeNull()
+  })
+
+  it("BOX_PROVIDER=boxd needs the boxd key, and BOX_PROVIDER=local needs none", async () => {
+    expect(await gate({ boxProvider: "boxd" })).toBe("boxd machines aren't set up: add a boxd API key in Settings › Box providers › boxd machines (docs/boxd.md)")
+    expect(await gate({ boxProvider: "boxd" }, { boxdApiKey: BOXD_KEY })).toBeNull()
+    // An Upstash key doesn't help a boxd-pinned install.
+    expect(await gate({ boxProvider: "boxd" }, { upstashBoxApiKey: BOX_KEY })).toContain("boxd machines aren't set up")
+    expect(await gate({ boxProvider: "local" })).toBeNull()
+    expect(await gate({ boxProvider: "upstash" }, { boxdApiKey: BOXD_KEY })).toContain("Cloud boxes aren't set up")
+    // Mock mode needs nothing.
+    expect(await gate({ mock: true })).toBeNull()
   })
 })

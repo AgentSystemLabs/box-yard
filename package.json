@@ -30,6 +30,7 @@
     "smoke:runpod": "tsx scripts/smoke-runpod.ts",
     "smoke:vast": "tsx scripts/smoke-vast.ts",
     "smoke:daytona": "tsx scripts/smoke-daytona.ts",
+    "smoke:boxd": "tsx scripts/smoke-boxd.ts",
     "smoke:models": "tsx scripts/smoke-models.ts",
     "test:docker": "BOXYARD_DOCKER_E2E=1 vitest run test/docker-real.e2e.test.ts",
     "test:detect": "BOXYARD_DETECT_E2E=1 vitest run test/identity-detect-here.e2e.test.ts --silent=false",
@@ -39,6 +40,7 @@
     "test:contrast:interactions": "node scripts/a11y/contrast-interactions.mjs"
   },
   "dependencies": {
+    "@boxd-sh/sdk": "^0.3.2",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@upstash/box": "^0.7.10",
     "better-sqlite3": "^13.0.3",
