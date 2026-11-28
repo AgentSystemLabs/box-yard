@@ -191,6 +191,41 @@ describe("TaskHeader", () => {
     expect(document.querySelector('[data-testid="agent-cli-chip"]')).toBeNull()
   })
 
+  it("shows the PR a task reviews after its own PR: a link to GitHub in its state's colour, never the PR sheet or Merge PR", () => {
+    const reviewed = "https://github.com/acme/box-yard/pull/90"
+    render(task({ reviewPrUrl: reviewed, reviewPrState: "merged" }))
+    const text = metaText()
+    expect(text.indexOf("PR #76")).toBeGreaterThanOrEqual(0)
+    expect(text.indexOf("Reviewing PR #90")).toBeGreaterThan(text.indexOf("PR #76"))
+    const chip = document.querySelector<HTMLAnchorElement>('[data-testid="review-pr"]')!
+    expect(chip.tagName).toBe("A")
+    expect(chip.getAttribute("href")).toBe(reviewed)
+    expect(chip.getAttribute("target")).toBe("_blank")
+    expect(chip.querySelector("[data-external-mark]")).not.toBeNull()
+    expect(chip.dataset.reviewPrState).toBe("merged")
+    expect(chip.className).toContain("border-dashed")
+    expect(chip.className).toContain("text-merged-fg")
+    expect(chip.getAttribute("aria-label")).toBe("Reviewing PR #90, merged, on GitHub (opens in a new tab)")
+    expect(chip.title).toContain("not its own")
+    // Only the task's own PR opens the PR sheet.
+    expect(document.querySelectorAll('[aria-haspopup="dialog"][data-pr-state]')).toHaveLength(1)
+    expect(document.querySelector<HTMLElement>('[aria-haspopup="dialog"][data-pr-state]')!.textContent).toContain("PR #76")
+
+    // A review task with no PR of its own: the reviewed PR alone, still no PR chip, no Merge PR.
+    render(task({ prUrl: null, prState: null, reviewPrUrl: reviewed, reviewPrState: null }))
+    expect(document.querySelector("[data-pr-state]")).toBeNull()
+    expect(document.querySelector<HTMLElement>('[data-testid="review-pr"]')!.dataset.reviewPrState).toBe("open")
+    expect(document.body.textContent).not.toMatch(/Merge PR/)
+  })
+
+  it("folds the reviewed PR to its eye and number when narrow, its words kept for screen readers", () => {
+    renderInPanel(task({ reviewPrUrl: "https://github.com/acme/box-yard/pull/90", reviewPrState: "open" }))
+    const chip = document.querySelector<HTMLAnchorElement>('[data-testid="review-pr"]')!
+    expect([...chip.querySelectorAll("span")].find((el) => el.textContent === "Reviewing PR ")!.className).toBe(FOLDED)
+    expect(chip.textContent).toContain("Reviewing PR #90")
+    expect(chip.className).toContain("pointer-coarse:@max-[36rem]/head:min-w-11")
+  })
+
   it("opens the details from the title: the state in words, the full title and where it runs; Esc returns to the title", async () => {
     renderInPanel(task({ boxId: "this-computer", pendingCount: 2 }))
     const title = document.querySelector<HTMLButtonElement>('[data-testid="task-title"]')!

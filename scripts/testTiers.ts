@@ -129,6 +129,7 @@ export const SLOW_TESTS: Record<string, string> = {
   "test/restart.e2e.test.ts": "End-to-end runner/server integration",
   "test/restart.process.e2e.test.ts": "End-to-end runner/server integration",
   "test/retention.e2e.test.ts": "End-to-end runner/server integration",
+  "test/review-pr.e2e.test.ts": "End-to-end runner/server integration",
   "test/run-targets.e2e.test.ts": "End-to-end runner/server integration",
   "test/runner-install.test.ts": "Full Box Yard server/task-manager fixture",
   "test/runpod-pods.e2e.test.ts": "End-to-end runner/server integration",

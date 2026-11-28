@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm"
 import type { PluggableList } from "unified"
 import { useLocation } from "wouter"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowUpRight, Box, Check, ChevronDown, ChevronUp, ChevronsUp, Copy, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, HardDrive, Loader2, MessageSquare, type LucideIcon } from "lucide-react"
+import { ArrowUpRight, Box, Check, ChevronDown, ChevronUp, ChevronsUp, Copy, GitMerge, GitPullRequest, GitPullRequestClosed, Eye, GitPullRequestDraft, HardDrive, Loader2, MessageSquare, type LucideIcon } from "lucide-react"
 import { hintForHref, useEntityIndex } from "../lib/entities"
 import {
   entityLookupsKey,
@@ -37,7 +37,7 @@ import { previewKind } from "../lib/filePreview"
 import { fetchTasks, keys } from "../lib/queries"
 import { copyText } from "../lib/clipboard"
 import { toast } from "../lib/toast"
-import { prLabel, prNewCommentsOf, prNumber, prStateOf, prTooltip, type BadgeStatus, type PrTask } from "../lib/prState"
+import { prLabel, prNewCommentsOf, prNumber, prStateOf, prTooltip, reviewPrAriaLabel, reviewPrLabel, reviewPrStateOf, reviewPrTooltip, type BadgeStatus, type PrTask, type ReviewPrTask } from "../lib/prState"
 import { notePrView } from "../lib/prViews"
 import { prCommentsLabel, prCommentsText } from "../../../shared/prComments"
 import { absoluteTime, elapsedLabel, isoTime, timeAgo } from "../lib/time"
@@ -296,6 +296,47 @@ export function PrChip({
       <span data-pr-number={variant === "number" ? "" : undefined} className={cx(fold && HEADER_FOLD.label)}>{variant === "number" && number ? `#${number}` : verb ? `${verb} ${prLabel(task)}` : prLabel(task)}</span>
       {activity && <span className={cx("font-normal", fold && HEADER_FOLD.label)}>· {activity.label}</span>}
       <PrComments task={task} named={variant === "number"} />
+    </NewTabLink>
+  )
+}
+
+/**
+ * The pull request a task reviews (Task.reviewPrUrl), never its own: an eye, then "Reviewing PR #7" (`chip`, the task
+ * header) or "#7" (`number`, compact task rows), and the ↗, in its GitHub state's colour. The chip's dashed border sets
+ * it apart from the task's own PR chip beside it. Renders nothing when the task reviews none.
+ */
+export function ReviewPrChip({ task, variant = "chip", className, fold }: { task: ReviewPrTask; variant?: "chip" | "number"; className?: string; fold?: boolean }) {
+  const state = reviewPrStateOf(task)
+  if (!state || !task.reviewPrUrl) return null
+  const s = PR_STYLE[state]
+  const number = prNumber(task.reviewPrUrl)
+  return (
+    <NewTabLink
+      href={task.reviewPrUrl}
+      mark="end"
+      markClassName={fold ? HEADER_FOLD.label : undefined}
+      title={reviewPrTooltip(task) ?? undefined}
+      aria-label={reviewPrAriaLabel(task) ?? undefined}
+      data-review-pr-state={state}
+      data-testid="review-pr"
+      className={cx(
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap",
+        variant === "chip" ? cx("rounded-md border border-dashed px-1.5 py-0.5 font-medium transition", s.chip) : cx("hover:underline", s.link),
+        className,
+        fold && HEADER_FOLD.chip,
+      )}
+    >
+      <Eye aria-hidden className={cx("shrink-0", variant === "chip" ? "h-3 w-3" : "h-3.5 w-3.5", fold && HEADER_FOLD.icon)} />
+      {variant === "number" ? (
+        <span data-pr-number="">{number ? `#${number}` : "PR"}</span>
+      ) : number ? (
+        // Folded (the task header, narrow), "#7" stays beside the eye: which PR, not just that there is one.
+        <span className="tabular-nums @max-[36rem]/head:ml-0.5">
+          <span className={cx(fold && HEADER_FOLD.label)}>Reviewing PR </span>#{number}
+        </span>
+      ) : (
+        <span className={cx(fold && HEADER_FOLD.label)}>{reviewPrLabel(task)}</span>
+      )}
     </NewTabLink>
   )
 }

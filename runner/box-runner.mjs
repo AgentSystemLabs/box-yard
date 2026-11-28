@@ -2904,6 +2904,12 @@ async function hostArtifacts(gh, slug, body) {
   return { body: out, notes }
 }
 
+/** "owner/name/number", lower case, of a github.com PR URL (shared/reviewPr.ts reviewPrKey), or null. */
+function prKeyOf(url) {
+  const m = /^https?:\/\/(?:www\.)?github\.com\/([^/?#\s]+)\/([^/?#\s]+)\/pull\/(\d+)(?:[/?#]|$)/i.exec(String(url ?? ""))
+  return m ? `${m[1]}/${m[2]}/${Number(m[3])}`.toLowerCase() : null
+}
+
 async function createPullRequest(args) {
   const slug = task.github?.slug
   const token = task.env?.GITHUB_TOKEN
@@ -2915,17 +2921,32 @@ async function createPullRequest(args) {
   if (branch === task.baseBranch) return text(`You're on ${task.baseBranch}. Create a new branch following this repository's naming convention and commit there; never add a boxyard prefix.`, true)
   const dirty = (await sh("git", ["status", "--porcelain"])).stdout.trim()
   if (dirty) return text(`You have uncommitted changes:\n${clip(dirty, 1500)}\nCommit them first.`, true)
+  // The PR this task reviews (task.json reviewPr) is someone else's: never push to its branch or update it.
+  const reviewed = task.reviewPr?.url ? String(task.reviewPr.url) : null
+  const notReviewed = (url) => !reviewed || prKeyOf(url) !== prKeyOf(reviewed)
+  const refuseReviewed = () => text(`This branch (${branch}) is the head of ${reviewed}, the pull request this task reviews. Box Yard never pushes to it or updates it. Put a change of your own on a new branch (git switch -c <name>) and call create_pull_request again.`, true)
+  if (reviewed && task.reviewPr?.head && branch === task.reviewPr.head) return refuseReviewed()
+
+  const gh = githubApi(token)
+  const ghOwner = slug.split("/")[0]
+  if (reviewed) {
+    // Its head branch may not be known yet: ask GitHub which PR is open on this branch before pushing anything.
+    try {
+      const open = await gh("GET", `/repos/${slug}/pulls?state=open&head=${encodeURIComponent(`${ghOwner}:${branch}`)}`)
+      if (Array.isArray(open) && open.some((pr) => !notReviewed(pr?.html_url))) return refuseReviewed()
+    } catch (err) {
+      return text(`Couldn't check that this branch isn't the reviewed PR's: ${String(err.message)}`, true)
+    }
+  }
 
   const push = await sh("git", ["push", "-u", "origin", branch])
   if (push.code !== 0) return text(`git push failed:\n${clip(push.stderr || push.stdout, 2000)}`, true)
 
-  const gh = githubApi(token)
   try {
     const { body, notes } = await hostArtifacts(gh, slug, String(args.body ?? ""))
     const fields = { title: String(args.title), body }
-    const owner = slug.split("/")[0]
-    const open = await gh("GET", `/repos/${slug}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`)
-    let pr = Array.isArray(open) ? open[0] : null
+    const open = await gh("GET", `/repos/${slug}/pulls?state=open&head=${encodeURIComponent(`${ghOwner}:${branch}`)}`)
+    let pr = Array.isArray(open) ? open.find((p) => notReviewed(p?.html_url)) ?? null : null
     let created = false
     if (pr) {
       // Calling it again updates the PR: the new title and body replace the old ones.

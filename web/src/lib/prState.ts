@@ -55,3 +55,31 @@ export function prTooltip(task: PrTask, now = Date.now()): string | null {
 export type BadgeStatus = TaskStatus | "merged"
 export const badgeStatus = (task: Pick<Task, "status" | "prUrl" | "prState">): BadgeStatus =>
   task.status === "done" && task.prUrl && task.prState === "merged" ? "merged" : task.status
+
+/** The pull request a task reviews (Task.reviewPrUrl): never its own, so it never counts for its status or Merge PR. */
+export type ReviewPrTask = Pick<Task, "reviewPrUrl" | "reviewPrState">
+
+/** Its state, open until the server has checked. */
+export const reviewPrStateOf = (task: ReviewPrTask): PrState | null => (task.reviewPrUrl ? (task.reviewPrState ?? "open") : null)
+
+const REVIEW_STATE: Record<PrState, string> = { open: "open", draft: "draft", merged: "merged", closed: "closed" }
+
+/** "Reviewing PR #7", for the task header's chip and a row's name. */
+export function reviewPrLabel(task: ReviewPrTask): string | null {
+  if (!task.reviewPrUrl) return null
+  const n = prNumber(task.reviewPrUrl)
+  return n ? `Reviewing PR #${n}` : "Reviewing a PR"
+}
+
+/** Tooltip: what it is, its state and its URL, and that it isn't the task's own PR. */
+export function reviewPrTooltip(task: ReviewPrTask): string | null {
+  const state = reviewPrStateOf(task)
+  if (!state || !task.reviewPrUrl) return null
+  return `${reviewPrLabel(task)} (${REVIEW_STATE[state]})\nThe pull request this task reviews, not its own.\n${task.reviewPrUrl}`
+}
+
+/** A screen reader's name for its link: "Reviewing PR #7, merged, on GitHub (opens in a new tab)". */
+export function reviewPrAriaLabel(task: ReviewPrTask): string | null {
+  const state = reviewPrStateOf(task)
+  return state ? `${reviewPrLabel(task)}, ${REVIEW_STATE[state]}, on GitHub (opens in a new tab)` : null
+}

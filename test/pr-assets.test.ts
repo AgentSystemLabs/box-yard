@@ -103,7 +103,7 @@ afterEach(() => {
 })
 
 /** A task folder whose work/ is a clone with a local origin, on a feature branch with one commit. */
-async function taskFolder() {
+async function taskFolder(extra: Record<string, unknown> = {}) {
   gh = fakeGitHub()
   await new Promise<void>((r) => gh!.server.listen(0, "127.0.0.1", r))
   const dir = tmpDir()
@@ -127,9 +127,9 @@ async function taskFolder() {
   const port = (gh.server.address() as AddressInfo).port
   fs.writeFileSync(
     path.join(dir, "task.json"),
-    JSON.stringify({ taskId: "task_abc", baseBranch: "main", env: { GITHUB_TOKEN: "t0ken" }, github: { slug: SLUG, apiUrl: `http://127.0.0.1:${port}` } }),
+    JSON.stringify({ taskId: "task_abc", baseBranch: "main", env: { GITHUB_TOKEN: "t0ken" }, github: { slug: SLUG, apiUrl: `http://127.0.0.1:${port}` }, ...extra }),
   )
-  return { dir, work }
+  return { dir, work, origin, git }
 }
 
 /** Write a file and log it as published, the way publish_artifact does. */
@@ -278,5 +278,52 @@ describe("create_pull_request's title and body", () => {
     expect(updated.text).toContain("Updated (pushed to, with this title and body) PR #1")
     expect(gh!.pulls).toHaveLength(1)
     expect(gh!.pulls[0]).toMatchObject({ title: "Fix the thing, take two", body: "Second draft of the body." })
+  })
+})
+
+// A review task's task.json names the PR it reviews (reviewPr). That PR is someone else's: create_pull_request never
+// pushes to its branch or updates it, whether Box Yard knows its head branch yet or only its URL.
+describe("create_pull_request on a task that reviews a PR", () => {
+  const remoteTip = (origin: string, branch: string) => {
+    try {
+      return execFileSync("git", ["rev-parse", `refs/heads/${branch}`], { cwd: origin, stdio: "pipe" }).toString().trim()
+    } catch {
+      return null
+    }
+  }
+
+  it("refuses on the reviewed PR's head branch before pushing anything", async () => {
+    const { dir, origin } = await taskFolder({ reviewPr: { url: `https://github.com/${SLUG}/pull/1`, head: "boxyard/shots" } })
+    const r = await createPr(dir, "Fixes.")
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain("the pull request this task reviews")
+    expect(remoteTip(origin, "boxyard/shots")).toBeNull()
+    expect(gh!.pulls).toEqual([])
+  })
+
+  it("with only the reviewed PR's URL known, asks GitHub which PR the branch has and refuses when it's that one", async () => {
+    const { dir, origin, git } = await taskFolder()
+    // The PR under review, opened on this branch by someone else.
+    expect((await createPr(dir, "The author's body.", "The author's PR")).text).toContain("Opened PR #1")
+    const tip = remoteTip(origin, "boxyard/shots")
+    const task = JSON.parse(fs.readFileSync(path.join(dir, "task.json"), "utf8"))
+    fs.writeFileSync(path.join(dir, "task.json"), JSON.stringify({ ...task, reviewPr: { url: `https://github.com/${SLUG}/pull/1`, head: null } }))
+    fs.writeFileSync(path.join(dir, "work", "review.txt"), "the reviewer's change\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "reviewer's change")
+
+    const r = await createPr(dir, "The reviewer's body.", "Reviewer's title")
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain("the pull request this task reviews")
+    expect(remoteTip(origin, "boxyard/shots")).toBe(tip)
+    expect(gh!.pulls).toEqual([expect.objectContaining({ number: 1, title: "The author's PR", body: "The author's body." })])
+  })
+
+  it("opens the review task's own PR from a branch of its own", async () => {
+    const { dir, origin } = await taskFolder({ reviewPr: { url: `https://github.com/${SLUG}/pull/9`, head: "someone-elses-branch" } })
+    const r = await createPr(dir, "A fix the review found.")
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain("Opened PR #1")
+    expect(remoteTip(origin, "boxyard/shots")).not.toBeNull()
   })
 })
