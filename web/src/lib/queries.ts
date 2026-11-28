@@ -1757,19 +1757,21 @@ export function useSendChat() {
   return useMutation({
     mutationFn: (input: ChatSend) => confirmedSend(qc, keys.chat, input.id, () => api<ChatMessage>("/api/chat", { body: sendBody(input) })),
     onMutate: async (input) => {
-      await qc.cancelQueries({ queryKey: keys.chat })
       const undo = () => qc.setQueryData<ChatMessage[]>(keys.chat, (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
       // Mid-turn it shows as queued right away; the server's answer says for sure.
       const queued = Boolean(qc.getQueryData<boolean>(keys.chatBusy) ?? qc.getQueryData<OrchestratorState>(keys.orchestrator)?.busy)
-      qc.setQueryData<ChatMessage[]>(keys.chat, (list) =>
-        upsert(list, {
-          id: input.id,
-          role: "user",
-          content: input.content,
-          meta: { pending: true, ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...pickMeta(input), ...(queued ? { queued: true } : {}) },
-          createdAt: Date.now(),
-        }),
-      )
+      const pending: ChatMessage = {
+        id: input.id,
+        role: "user",
+        content: input.content,
+        meta: { pending: true, ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...pickMeta(input), ...(queued ? { queued: true } : {}) },
+        createdAt: Date.now(),
+      }
+      // Before the first await. Sending scrolls to the latest in the same turn, and that read has to
+      // include this row; waiting for in-flight fetches to cancel left the send one message behind.
+      qc.setQueryData<ChatMessage[]>(keys.chat, (list) => upsert(list, pending))
+      await qc.cancelQueries({ queryKey: keys.chat })
+      qc.setQueryData<ChatMessage[]>(keys.chat, (list) => upsert(list, pending))
       return { undo }
     },
     onError: (err, _v, ctx) => {
@@ -1791,19 +1793,20 @@ export function useSendCaptainMessage(projectId: string) {
     mutationFn: (input: ChatSend & { projectId?: string }) => confirmedSend(qc, keys.captainMessages(input.projectId ?? projectId), input.id, () => api<CaptainMessage>(`/api/projects/${input.projectId ?? projectId}/captain/messages`, { body: sendBody(input) })),
     onMutate: async (input) => {
       const destinationId = input.projectId ?? projectId
-      await qc.cancelQueries({ queryKey: keys.captainMessages(destinationId) })
       const undo = () => qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => list?.filter((m) => m.id !== input.id || !m.meta?.pending))
       const queued = Boolean(qc.getQueryData<CaptainState>(keys.captain(destinationId))?.busy)
-      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) =>
-        upsert(list, {
-          id: input.id,
-          projectId: destinationId,
-          role: "user",
-          content: input.content,
-          meta: { pending: true, source: "cody", ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...pickMeta(input), ...(queued ? { queued: true } : {}) },
-          createdAt: Date.now(),
-        }),
-      )
+      const pending: CaptainMessage = {
+        id: input.id,
+        projectId: destinationId,
+        role: "user",
+        content: input.content,
+        meta: { pending: true, source: "cody", ...(input.attachments?.length ? { attachments: input.attachments } : {}), ...pickMeta(input), ...(queued ? { queued: true } : {}) },
+        createdAt: Date.now(),
+      }
+      // Same turn as the thread's scroll-to-latest: the row has to be in the cache before the first await.
+      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => upsert(list, pending))
+      await qc.cancelQueries({ queryKey: keys.captainMessages(destinationId) })
+      qc.setQueryData<CaptainMessage[]>(keys.captainMessages(destinationId), (list) => upsert(list, pending))
       return { undo }
     },
     onError: (err, _v, ctx) => {

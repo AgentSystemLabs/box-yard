@@ -192,12 +192,34 @@ describe("bounded retained history", () => {
     vi.mocked(api).mockResolvedValueOnce({ messages: Array.from({ length: 100 }, (_, i) => item(i + 800)), before: "old", after: "new" } as never)
     act(() => state.earlier()); await settle()
     expect(api).toHaveBeenLastCalledWith("/api/chat/history?before=saved-start")
-    vi.mocked(api).mockResolvedValueOnce({ messages: [{ ...item(950), createdAt: item(1000).createdAt }, item(1001)], before: "older", after: null } as never)
+    // Still an older page: a null after cursor would mean this window had reached the live end.
+    vi.mocked(api).mockResolvedValueOnce({ messages: [{ ...item(950), createdAt: item(1000).createdAt }, item(1001)], before: "older", after: "h:more" } as never)
     act(() => state.later()); await settle()
     expect(api).toHaveBeenLastCalledWith("/api/chat/history?after=saved-end")
     expect(state.items.filter((m) => m.id === "m-950")).toHaveLength(1)
     expect(state.items.find((m) => m.id === "m-950")?.createdAt).toBe(item(1000).createdAt)
     expect(state.items).toHaveLength(200)
+  })
+
+  it("shows a message that arrives after a history page already reached the newest row", async () => {
+    const recent = [item(1498), item(1499)]
+    render(undefined, recent); await settle()
+    vi.mocked(api).mockResolvedValueOnce({ messages: recent, before: "m-1497", after: null } as never)
+    act(() => state.later()); await settle()
+    expect(state.browsing).toBe(true)
+    expect(state.moreAfter).toBe(false)
+    const sent = { ...item(1499), id: "m-sent", createdAt: item(1499).createdAt + 1, role: "user", content: "Can you add the repo?" }
+    render(undefined, [...recent, sent])
+    expect(state.items.map((m) => m.id)).toEqual(["m-1498", "m-1499", "m-sent"])
+    expect(state.browsing).toBe(true)
+  })
+
+  it("leaves a later live message off an older page that still has newer history", async () => {
+    render(); await settle()
+    act(() => state.earlier()); await settle()
+    expect(state.moreAfter).toBe(true)
+    render(undefined, [...live, item(1600)])
+    expect(state.items.some((m) => m.id === "m-1600")).toBe(false)
   })
 
   it("keeps a new conversation live after its first message has nothing before it", async () => {
