@@ -1684,7 +1684,8 @@ export function createBoxYard(
   api.post("/setup/test/:key", async (req, res) => {
     const key = String(req.params.key)
     if (!(CREDENTIAL_KEYS as readonly string[]).includes(key)) throw new BadRequestError(`Unknown credential: ${key}`)
-    const { value } = parse(z.object({ value: z.string().max(4000).optional() }).strict(), req.body ?? {})
+    // A login file (Codex auth.json, OpenCode auth.json) is several tokens, far past a key. setup.test applies each credential's own limit.
+    const { value } = parse(z.object({ value: z.string().optional() }).strict(), req.body ?? {})
     res.json(await setup.test(key as CredentialKey, value))
   })
 

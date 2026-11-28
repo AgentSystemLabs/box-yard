@@ -326,6 +326,41 @@ describe("POST /api/setup/test/:key", () => {
     expect((await json("POST", "/api/setup/test/password", {})).status).toBe(400)
     expect((await json<{ error: string }>("POST", "/api/setup/test/githubToken", { value: "a b c d e f g h" })).body.error).toMatch(/no spaces/)
   })
+
+  it("tests and saves a Codex auth.json longer than 4000 characters", async () => {
+    // A ChatGPT login file is several JWTs, so it runs well past a few thousand characters.
+    const script = path.join(dir("box-yard-codex-"), "codex-ok.mjs")
+    fs.writeFileSync(script, 'console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"OK"}}))\nconsole.log(JSON.stringify({type:"turn.completed"}))\n')
+    const token = (prefix: string) => prefix + "x".repeat(2000)
+    const auth = JSON.stringify({
+      auth_mode: "chatgpt",
+      OPENAI_API_KEY: null,
+      tokens: { id_token: token("id_"), access_token: token("at_"), refresh_token: token("rt_"), account_id: "acct-long" },
+      last_refresh: "2026-11-01T00:00:00Z",
+    })
+    expect(auth.length).toBeGreaterThan(4000)
+    const { json } = await boot(firstRun({ port: await freePort(), codexBin: `${process.execPath} ${script}` }))
+    const tested = await json<CredentialTest>("POST", "/api/setup/test/codexAuthJson", { value: auth })
+    expect(tested.status).toBe(200)
+    expect(tested.body).toMatchObject({ ok: true, message: "Works: Codex answered using this ChatGPT login." })
+    expect(tested.body.message).not.toContain(token("id_"))
+    const saved = await json<SetupStatus>("PUT", "/api/setup/credentials", { codexAuthJson: auth })
+    expect(saved.status).toBe(200)
+    expect(saved.body.credentials.codexAuthJson).toEqual({ state: "set", source: "saved" })
+    expect(JSON.stringify(saved.body)).not.toContain(token("rt_"))
+  })
+
+  it("still refuses a Codex auth.json over 50,000 characters", async () => {
+    const auth = JSON.stringify({
+      auth_mode: "chatgpt",
+      tokens: { id_token: "id_token", access_token: "at_" + "x".repeat(60_000), refresh_token: "rt_token", account_id: "acct-huge" },
+      last_refresh: "2026-11-01T00:00:00Z",
+    })
+    const { json } = await boot(firstRun({ port: await freePort() }))
+    const res = await json<{ error: string }>("POST", "/api/setup/test/codexAuthJson", { value: auth })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/too long to be a Codex auth\.json/)
+  })
 })
 
 describe("GET /api/setup/repos", () => {
