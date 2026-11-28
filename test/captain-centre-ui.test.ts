@@ -4,7 +4,7 @@
 // hides, as it was, until the task closes or a chat is picked (test/pins.test.ts has the pins). On a phone a task
 // panel covers the chat, and with a Captain in the centre a task brings its own project's Captain; another project's
 // Captain closes the task. The Coordinator keeps whatever task opens beside it.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -22,6 +22,7 @@ import { currentToasts, dismiss } from "../web/src/lib/toast.js"
 import { resetScrollMemory } from "../web/src/lib/scrollMemory.js"
 import type { CaptainMessage, ChatMessage, Project, Task, TaskStatus } from "../shared/types"
 import { sidebarGroup } from "./sidebarTree.js"
+import { warmLazyParts } from "../web/src/components/LazyPart.js"
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -115,6 +116,9 @@ function startOnYardTask() {
   expect(centre()).toBe("box-yard Captain")
   expect(shownTask()).toBe(BUILD.id)
 }
+
+// The palette's list is a chunk of its own (CommandPalette.tsx): in before a test opens it and checks it in the same render.
+beforeAll(() => warmLazyParts())
 
 beforeEach(() => {
   localStorage.clear()
