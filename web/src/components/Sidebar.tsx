@@ -83,8 +83,8 @@ import { BrandLogo } from "./BrandLogo"
 import { SearchButton } from "./CommandPalette"
 import { CUE_DOT, CueDot, ProjectAvatar, TaskStatusIcon, WORKING_PULSE, agentIconCue, agentIconLabel, projectColorStyle } from "./TaskIcon"
 import { TaskRowTitle } from "./TaskRowTitle"
-import { AgentIcon, PR_STYLE, PrChip, PrComments, STATUS, TAP_AREA, cx } from "./ui"
-import { prLabel, prNewCommentsOf, prStateOf } from "../lib/prState"
+import { AgentIcon, PR_STYLE, PrChip, PrComments, ReviewPrChip, STATUS, TAP_AREA, cx } from "./ui"
+import { prLabel, prNewCommentsOf, prStateOf, reviewPrLabel } from "../lib/prState"
 import { prCommentsLabel } from "../../../shared/prComments"
 
 /**
@@ -1031,6 +1031,20 @@ function PrName({ task }: { task: Task }) {
 }
 
 /**
+ * The PR a task reviews (never its own), after its own PR's number: an eye and "#7 ↗" in its state's colour. It gives
+ * the title its room first: where its own PR link yields (ROW_PR_YIELDS) it yields too when the row has another target
+ * (its own PR, Mark done), and in a sidebar under 13rem it yields to its own PR. ReviewName says it then.
+ */
+const reviewYields = (task: Task, closable: boolean) => cx((closable || Boolean(task.prUrl)) && ROW_PR_YIELDS, task.prUrl && REVIEW_PR_YIELDS)
+const REVIEW_PR_YIELDS = "@max-[13rem]/side:hidden"
+/** ", reviewing PR #7" at the end of a row's name, where its link is hidden (reviewYields). */
+function ReviewName({ task, closable }: { task: Task; closable: boolean }) {
+  const label = reviewPrLabel(task)
+  if (!label || (!closable && !task.prUrl)) return null
+  return <span className={cx("sr-only", ROW_PR_YIELDED, task.prUrl && "@max-[13rem]/side:block")}>, {label.replace(/^Reviewing/, "reviewing")}</span>
+}
+
+/**
  * A task: opens it in the side panel. `spot` says which list it's in (a task can be in "Waiting on you" and under its
  * project), so the copy Cody clicked is the one drawn selected. `project` (a "Waiting on you" row's) ends its name
  * and its tooltip with its project. One ready for Cody's review, or failed, ends with Mark done's ✓. Its icon alone
@@ -1070,10 +1084,12 @@ export const TaskRow = memo(function TaskRow({ row, spot, selected, onPick, proj
         <RowIcon task={task} label={label} dim={dim} />
         {project?.name && <span className="sr-only">, {project.name}</span>}
         {prMeta && closable && <PrName task={task} />}
+        <ReviewName task={task} closable={closable} />
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("col-start-3 row-start-1 text-xs leading-5 tabular-nums @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </button>
       {prMeta && <PrChip task={task} variant="number" className={cx(rowPr(task), "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0", closable && ROW_PR_YIELDS)} />}
       {prMeta && closable && <PrMark task={task} />}
+      <ReviewPrChip task={task} variant="number" className={cx(ROW_PR, "mr-2 text-xs leading-5 @max-[15rem]/side:mr-1 pointer-coarse:mr-0", reviewYields(task, closable))} />
       {closable && <DoneButton task={task} />}
     </div>
   )
@@ -1281,9 +1297,11 @@ const TreeRow = memo(function TreeRow({ row, depth, folded, controls, selected, 
           <RowIcon task={task} label={label} dim={dim} />
           {folded && tree && <span className="col-start-3 row-start-1"><TreeCountChip tree={tree} /></span>}
           {prMeta && closable && <PrName task={task} />}
+          <ReviewName task={task} closable={closable} />
         </button>
         {prMeta && <PrChip task={task} variant="number" className={cx(rowPr(task), "text-[11px]", closable && ROW_PR_YIELDS)} />}
         {prMeta && closable && <PrMark task={task} />}
+        <ReviewPrChip task={task} variant="number" className={cx(ROW_PR, "text-[11px]", reviewYields(task, closable))} />
         {!prMeta && meta && <span aria-hidden={saysState(meta, label)} className={cx("shrink-0 text-[11px] @max-[13rem]/side:hidden", (!dim && META_TONE[task.status]) || "text-zinc-500")}>{meta}</span>}
       </div>
       {closable && <DoneButton task={task} subtasks={tree?.total} />}

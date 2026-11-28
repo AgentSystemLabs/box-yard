@@ -263,6 +263,56 @@ describe("the sidebar", () => {
     expect(new URLSearchParams(location.search).get("session")).toBe(PR.id)
   })
 
+  it("shows the PR a task reviews inline, after its own: an eye and its number in its state's colour, apart from the task's PR", () => {
+    const reviewed = "https://github.com/acme/site/pull/7"
+    const review = task("task_rev001", SITE.id, "Review PR #7 (Pick Latest) and leave a verdict comment", "idle", { reviewPrUrl: reviewed, reviewPrState: "merged" })
+    const both = { ...PR, status: "working" as const, reviewPrUrl: reviewed, reviewPrState: "open" as const }
+    render(APP_HOME, [review, both])
+    const row = button(section("marketing-site")!, review.title).parentElement!
+    const link = row.querySelector<HTMLAnchorElement>('[data-testid="review-pr"]')!
+    expect(link.getAttribute("href")).toBe(reviewed)
+    expect(link.closest("button")).toBeNull()
+    expect(link.target).toBe("_blank")
+    expect(link.textContent).toBe("#7")
+    expect(link.querySelector("svg.lucide-eye")).not.toBeNull()
+    expect(link.querySelector("[data-external-mark]")).not.toBeNull()
+    expect(link.dataset.reviewPrState).toBe("merged")
+    expect(link.className).toContain("text-merged-fg")
+    expect(link.getAttribute("aria-label")).toBe("Reviewing PR #7, merged, on GitHub (opens in a new tab)")
+    expect(link.className).toContain("pointer-coarse:min-h-11")
+    // It isn't the task's PR: no PR link of its own, and the row's ✓ and title stay.
+    expect(row.querySelector("a[data-pr-state]")).toBeNull()
+    expect(row.querySelector('[data-testid="sidebar-mark-done"]')).not.toBeNull()
+    // Where a zoomed phone's drawer leaves one target, Mark done keeps it; the row's name says the review.
+    expect(link.className).toContain("pointer-coarse:@max-[15rem]/side:hidden")
+    expect(button(row, review.title).textContent).toContain(", reviewing PR #7")
+    // A link click opens GitHub, never the task.
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+    act(() => void link.dispatchEvent(click))
+    expect(click.defaultPrevented).toBe(false)
+    expect(new URLSearchParams(location.search).get("session")).toBeNull()
+
+    // With a PR of its own too: both, its own first; in the narrowest sidebar the reviewed one yields to it.
+    const two = button(section("marketing-site")!, PR.title).parentElement!
+    const links = [...two.querySelectorAll<HTMLAnchorElement>("a")]
+    expect(links.map((a) => a.getAttribute("href"))).toEqual([PR.prUrl, reviewed])
+    expect(links[0]!.dataset.prState).toBe("open")
+    expect(links[0]!.querySelector("svg.lucide-eye")).toBeNull()
+    expect(links[1]!.className).toContain("@max-[13rem]/side:hidden")
+  })
+
+  it("a task with sub-tasks (a tree row) shows the PR it reviews too", () => {
+    const reviewed = "https://github.com/acme/site/pull/7"
+    const parent = task("task_revtr1", SITE.id, "Review the picker PR", "working", { reviewPrUrl: reviewed, reviewPrState: "open" })
+    const kid = task("task_revkd1", SITE.id, "Run its tests", "working", { parentTaskId: parent.id, rootTaskId: parent.id })
+    render(APP_HOME, [parent, kid])
+    const link = section("marketing-site")!.querySelector<HTMLAnchorElement>(`a[href="${reviewed}"]`)!
+    expect(link.dataset.testid).toBe("review-pr")
+    expect(link.textContent).toBe("#7")
+    expect(link.closest("button")).toBeNull()
+    expect(link.closest('[role="treeitem"]')!.textContent).toContain(parent.title)
+  })
+
   it("keeps a working title and its PR inline without a visible status word", () => {
     render(APP_HOME, [{ ...PR, status: "working" }])
     const row = button(section("marketing-site")!, PR.title).parentElement!

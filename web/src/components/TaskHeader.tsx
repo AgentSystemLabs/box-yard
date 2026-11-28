@@ -22,7 +22,7 @@ import { ContinueTask } from "./ContinueTask"
 import { api } from "../lib/api"
 import { primaryAction, readyForReview } from "../lib/taskActions"
 import { toast } from "../lib/toast"
-import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, STATUS, TimeAgo, cx, timeAgo } from "./ui"
+import { Button, HEADER_CHIP, HEADER_FOLD, NewTabLink, PriorityPill, ReviewPrChip, STATUS, TimeAgo, cx, timeAgo } from "./ui"
 import { DeleteFailedTaskButton } from "./DeleteFailedTaskButton"
 import { TaskStatusIcon } from "./TaskIcon"
 import { FilesChip } from "./TaskFiles"
@@ -105,12 +105,14 @@ export function TaskHeader({
   const ready = readyForReview(task.status)
   // A preview's chip goes once its server stops answering: the server looks while this page shows one.
   usePreviewCheck(task.id, task.previews.length > 0)
-  // Its PR, files or a preview: chips that share the header with the title.
-  const crowded = Boolean(task.prUrl) || task.previews.length > 0 || files.length > 0
+  // Its PR, the PR it reviews, files or a preview: chips that share the header with the title.
+  const crowded = Boolean(task.prUrl) || Boolean(task.reviewPrUrl) || task.previews.length > 0 || files.length > 0
   const chips = (
     <div data-testid="task-chips" className="flex items-center gap-0.5 @min-[36rem]/head:gap-1.5">
       <TaskStateMore task={task} />
       {task.prUrl && <PrStatusChip task={task} />}
+      {/* The PR it reviews: a plain link to GitHub, never Merge PR (it isn't this task's PR). */}
+      <ReviewPrChip task={task} fold className={HEADER_CHIP} />
       {files.length > 0 && <FilesChip taskId={task.id} projectId={task.projectId} files={files} quiet fold />}
       {task.previews.map((p) => <PreviewChip key={p.port} preview={p} port={task.previews.length > 1} />)}
     </div>

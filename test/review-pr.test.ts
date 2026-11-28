@@ -6,6 +6,7 @@ import { Store } from "../server/store.js"
 import { PrTracker, taskBranches, type PrChange } from "../server/prs.js"
 import { detectReviewedPr, parsePrRef, reviewPrKey, samePr } from "../shared/reviewPr.js"
 import type { TaskStatus } from "../shared/types.js"
+import { reviewPrAriaLabel, reviewPrLabel, reviewPrStateOf, reviewPrTooltip } from "../web/src/lib/prState.js"
 import { tmpDir } from "./helpers.js"
 
 const PR90 = "https://github.com/acme/site/pull/90"
@@ -206,5 +207,16 @@ describe("a reviewed PR is never the task's own (lookup by branch)", () => {
     const push = JSON.stringify({ status: "pushed", at: 1, branch: "picker", head: "abc", wip: null, reason: null })
     expect(taskBranches({ branch: "own", push_state_json: push, review_pr_head: "picker" }, "main")).toEqual(["own"])
     expect(taskBranches({ branch: "own", push_state_json: push, review_pr_head: null }, "main")).toEqual(["picker", "own"])
+  })
+})
+
+describe("how the reviewed PR reads in the UI (web/src/lib/prState.ts)", () => {
+  it("is open until the server has checked, and says it isn't the task's own PR", () => {
+    expect(reviewPrStateOf({ reviewPrUrl: null, reviewPrState: null })).toBeNull()
+    expect(reviewPrStateOf({ reviewPrUrl: PR90, reviewPrState: null })).toBe("open")
+    expect(reviewPrLabel({ reviewPrUrl: PR90, reviewPrState: "closed" })).toBe("Reviewing PR #90")
+    expect(reviewPrAriaLabel({ reviewPrUrl: PR90, reviewPrState: "closed" })).toBe("Reviewing PR #90, closed, on GitHub (opens in a new tab)")
+    expect(reviewPrTooltip({ reviewPrUrl: PR90, reviewPrState: "merged" })).toBe(`Reviewing PR #90 (merged)\nThe pull request this task reviews, not its own.\n${PR90}`)
+    expect(reviewPrTooltip({ reviewPrUrl: null, reviewPrState: "merged" })).toBeNull()
   })
 })
