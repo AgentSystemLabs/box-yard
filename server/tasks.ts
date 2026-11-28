@@ -1971,7 +1971,7 @@ export class TaskManager {
    * its parent did (closeTask: its running turn stopped, its queue dropped, archived) and closes its own in turn; a
    * done one is left as it was, but the open ones under it (reopened on their own) still close.
    * `merged`: for a parent that moved to done because its PR merged (mergedDone). A sub-task still running (working,
-   * starting, waiting, queued, or with a turn or messages pending) is never stopped then: it and its own tree stay
+   * starting, waiting, queued, or with a turn or messages pending, a failed one's too) is never stopped then: it and its own tree stay
    * open, and the sidebar keeps its done parent as their dim container.
    */
   private async closeSubtasks(row: TaskRow, root: TaskRow, seen: Set<string>, wasDone = false, merged = false) {
@@ -1981,7 +1981,7 @@ export class TaskManager {
       const now = this.store.getTaskRow(kid.id)
       if (!now) return
       if (now.status === "done") return this.closeSubtasks(now, root, seen, true, merged)
-      if (merged && (now.current_turn_id || this.liveSubtask(now))) return
+      if (merged && (now.current_turn_id || this.liveSubtask(now) || this.store.hasInputs(now.id))) return
       // It closes with its own parent (Reopen on that one brings it back), naming `root` when that parent was done already.
       return this.closeTask(now.id, { parent: row, ...(wasDone ? { root } : {}), ...(merged ? { merged } : {}) })
     })
