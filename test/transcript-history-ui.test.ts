@@ -222,6 +222,22 @@ describe("bounded retained history", () => {
     expect(state.items.some((m) => m.id === "m-1600")).toBe(false)
   })
 
+  it("keeps a new conversation live after its first message has nothing before it", async () => {
+    // A brand-new task: its dates were read before its first message, and the short thread asks for earlier rows.
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (String(path).includes("days=1")) return { days: [], oldestId: null } as never
+      return { messages: [], before: null, after: null } as never
+    })
+    render(undefined, [item(0)]); await settle()
+    expect(state.moreBefore).toBe(true)
+    act(() => state.earlier()); await settle()
+    expect(api).toHaveBeenLastCalledWith("/api/chat/history?before=m-0")
+    expect(state.moreBefore).toBe(false)
+    render(undefined, [item(0), item(1)])
+    expect(state.browsing).toBe(false)
+    expect(state.items.map((m) => m.id)).toEqual(["m-0", "m-1"])
+  })
+
   it("adds a newly streamed date to the complete rail without another transcript request", async () => {
     render(); await settle()
     const count = vi.mocked(api).mock.calls.length

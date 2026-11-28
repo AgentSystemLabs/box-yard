@@ -30,6 +30,8 @@ async function historyDates(path: string): Promise<HistoryDates> {
 export function useTranscriptHistory<M extends Message>(path: string, live: M[]) {
   const [window, setWindow] = useState<{ path: string; page: HistoryPage<M> } | null>(null)
   const [loading, setLoading] = useState(false)
+  /** The live list's first message, once the server said nothing comes before it (an empty "before" page). */
+  const [start, setStart] = useState<{ path: string; id: string } | null>(null)
   const serial = useRef(0)
   const inFlight = useRef(false)
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -92,6 +94,12 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
       if (token !== serial.current) return false
       let messages = answer.messages
       const previous = page?.messages ?? items
+      // Nothing before the live list's first message: the whole conversation is live. Stay on it rather than open a
+      // reading window over a copy of it, which would stop showing what streams in (a new task's reply).
+      if (!page && query.before && !messages.length) {
+        if (previous[0]) setStart({ path, id: previous[0].id })
+        return true
+      }
       const fresh = new Set(messages.map((m) => m.id))
       const kept = previous.filter((m) => !fresh.has(m.id))
       if (query.before) messages = [...messages, ...kept.slice(0, HISTORY_WINDOW_SIZE - messages.length)]
@@ -133,7 +141,9 @@ export function useTranscriptHistory<M extends Message>(path: string, live: M[])
     setLoading(false)
     setWindow(null)
   }, [])
-  const moreBefore = page ? !!page.before : !!items.length && (!metadata.data || metadata.data.oldestId !== items[0]?.id)
+  const first = items[0]?.id
+  const moreBefore = page ? !!page.before
+    : !!first && !(start?.path === path && start.id === first) && (!metadata.data || metadata.data.oldestId !== first)
   const days = useMemo<ChatDay[] | undefined>(() => {
     if (!metadata.data?.days) return undefined
     const byDay = new Map<string, ChatDay>()
