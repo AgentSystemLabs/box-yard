@@ -242,3 +242,49 @@ describe("a task's PR shows however it was opened", () => {
     expect(r.gh.branchLookups.filter((b) => b.endsWith(`@${first.branch}`))).toHaveLength(2)
   }, 60_000)
 })
+
+describe("a merged PR closes its task's resting sub-tasks, as Mark done does", () => {
+  it("moving the parent to done closes its idle sub-tasks, never stops a running one, and Reopen brings them back", async () => {
+    const r = await start()
+    const p = await repoProject(r)
+    const parent = await call<Task>(r, "POST", "/api/tasks", { projectId: p.id, title: "Compare pans", prompt: "spawn subtasks: Cast iron | Nonstick\n[wait]" })
+    // The sub-tasks report and finish; the parent answers from their reports. The whole tree rests idle.
+    await resting(r, parent.id, ["idle"])
+    const [castIron, nonstick] = r.yard.store.listTasks().filter((t) => t.parentTaskId === parent.id)
+    expect([castIron!.title, nonstick!.title]).toEqual(["Cast iron", "Nonstick"])
+    await resting(r, castIron!.id, ["idle"])
+    await resting(r, nonstick!.id, ["idle"])
+
+    // The parent opens PR #12; Cody sends the Nonstick sub-task more work, which is still running when the PR merges.
+    r.gh.prs.push({ number: 12, branch: "unknown", state: "OPEN", createdAt: new Date().toISOString() })
+    const turns = async (id: string) => (await getTask(r, id)).turnCount
+    const before = await turns(parent.id)
+    await call<Task>(r, "POST", `/api/tasks/${parent.id}/messages`, { content: "Open a PR. [gh-pr:acme/site#12]" })
+    await resting(r, parent.id, ["pr_ready"], before + 1)
+    await call<Task>(r, "POST", `/api/tasks/${nonstick!.id}/messages`, { content: "Test one more pan. [hang]" })
+    const busy = await waitFor(() => (r.yard.store.getTaskRow(nonstick!.id)?.status === "working" ? r.yard.store.getTaskRow(nonstick!.id) : null), "the Nonstick sub-task to work")
+    const busyTurn = busy.current_turn_id
+
+    // The Merge PR message runs the mock `gh pr merge`; GitHub says merged, so the parent moves to done.
+    await call<Task>(r, "POST", `/api/tasks/${parent.id}/messages`, { content: "Merge your pull request #12" })
+    await resting(r, parent.id, ["done"], before + 2)
+    expect(events(r, parent.id).some((e) => e.startsWith("Moved to done: its pull request #12 is merged"))).toBe(true)
+    // Its resting sub-task closed with it, as Mark done closes one.
+    await waitFor(() => (r.yard.store.getTaskRow(castIron!.id)?.status === "done" ? true : null), "the resting sub-task to close with its parent")
+    expect(events(r, castIron!.id)).toContain("Closed with its parent task, Compare pans, whose PR merged.")
+    // The running one was left alone: still working, on the same turn, and nothing stopped it.
+    await new Promise((res) => setTimeout(res, 500))
+    const still = r.yard.store.getTaskRow(nonstick!.id)!
+    expect([still.status, still.current_turn_id]).toEqual(["working", busyTurn])
+    expect(events(r, nonstick!.id).some((e) => /Closed|Stopped/.test(e))).toBe(false)
+
+    // Once it's stopped, it rests for review on its own; its parent stays done.
+    await call(r, "POST", `/api/tasks/${nonstick!.id}/stop`)
+    await resting(r, nonstick!.id, ["idle"], (await turns(nonstick!.id)))
+    expect(r.yard.store.getTaskRow(parent.id)!.status).toBe("done")
+
+    // Reopen on the parent brings back the sub-task that closed with it; the one that was running isn't touched.
+    await call(r, "POST", `/api/tasks/${parent.id}/reopen`)
+    expect([parent.id, castIron!.id, nonstick!.id].map((id) => r.yard.store.getTaskRow(id)!.status)).toEqual(["idle", "idle", "idle"])
+  }, 120_000)
+})
