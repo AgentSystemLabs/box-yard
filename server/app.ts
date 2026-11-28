@@ -256,6 +256,8 @@ const schemas = {
     gpu: gpuPickSchema,
     /** Run on Claude Code, Codex or Cursor over the project's Agent (Task.agentCli). */
     agentCli: z.enum(AGENT_CLIS).nullish(),
+    /** The PR it reviews (Task.reviewPrUrl): a URL, owner/repo#N or #N; omitted: read from its title and prompt; "" or null: none. */
+    reviewsPr: z.string().trim().max(300).nullish(),
   }),
   message: z.object({
     id: idSchema,

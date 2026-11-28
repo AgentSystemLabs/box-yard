@@ -237,6 +237,10 @@ export interface TaskRow {
   pr_labels_json: string | null
   /** Comments on its open PR since the PR was last opened from Box Yard (shared/prComments.ts); null: not counted yet. */
   pr_new_comments?: number | null
+  /** The PR it reviews (Task.reviewPrUrl), its state and head branch; never its own PR. */
+  review_pr_url?: string | null
+  review_pr_state?: PrState | null
+  review_pr_head?: string | null
   merge_request_json: string | null
   push_state_json: string | null
   /** Its icon (shared/taskIcons.ts); null picks one from its title. */
@@ -664,6 +668,9 @@ type TaskPatch = Partial<{
   prHeadSha: string | null
   prLabels: string[]
   prNewComments: number | null
+  reviewPrUrl: string | null
+  reviewPrState: PrState | null
+  reviewPrHead: string | null
   mergeRequest: StoredMergeRequest | null
   pushState: PushState | null
   placedHow: BoxPick | null
@@ -731,6 +738,9 @@ const TASK_COLUMNS: Record<keyof TaskPatch, string> = {
   prHeadSha: "pr_head_sha",
   prLabels: "pr_labels_json",
   prNewComments: "pr_new_comments",
+  reviewPrUrl: "review_pr_url",
+  reviewPrState: "review_pr_state",
+  reviewPrHead: "review_pr_head",
   mergeRequest: "merge_request_json",
   pushState: "push_state_json",
   placedHow: "placed_how",
@@ -1618,6 +1628,8 @@ export class Store {
       prMergedAt: row.pr_merged_at ?? null,
       prMergedBy: row.pr_merged_by ?? null,
       prNewComments: row.pr_new_comments ?? null,
+      reviewPrUrl: row.review_pr_url || null,
+      reviewPrState: row.review_pr_url ? (row.review_pr_state ?? null) : null,
       previews: json<PreviewLink[]>(row.previews_json, []),
       question: row.question,
       questions: this.taskQuestions(row),
@@ -1798,6 +1810,19 @@ export class Store {
   }
 
   /**
+   * Tasks whose reviewed PR (Task.reviewPrUrl) may still change: it isn't merged or closed yet, and the task isn't
+   * done or was active since `since` (an old done review's PR isn't asked about forever).
+   */
+  listOpenReviewPrRows(opts: { ids?: string[]; since?: number } = {}): TaskRow[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM tasks WHERE review_pr_url IS NOT NULL AND review_pr_url != '' AND (review_pr_state IS NULL OR review_pr_state IN ('open', 'draft')) AND (status != 'done' OR last_active_at >= ?) ORDER BY created_at ASC",
+      )
+      .all(opts.since ?? 0) as TaskRow[]
+    return opts.ids ? rows.filter((r) => opts.ids!.includes(r.id)) : rows
+  }
+
+  /**
    * Tasks with no PR that may have one on GitHub (PrTracker.discover): they have a branch (their own, or the one their
    * turn-end push found checked out) and aren't done. `ids`: only these; else those updated since `since`, newest
    * first, at most `limit`.
@@ -1897,6 +1922,8 @@ export class Store {
     priority?: TaskPriority | null
     /** Never moved to done when its PR merges (TaskRow.stay_open_on_merge). */
     stayOpenOnMerge?: boolean
+    /** The pull request it reviews (TaskRow.review_pr_url, a canonical URL); never its own PR. */
+    reviewPrUrl?: string | null
     /** A sub-task's place in its tree (TaskRow.parent_task_id, root_task_id, subtask_depth, with_parent). */
     subtask?: { parentId: string; rootId: string; depth: number; withParent: boolean } | null
   }): Task {
@@ -1938,6 +1965,7 @@ export class Store {
     if (input.batchId) this.db.prepare("UPDATE tasks SET batch_id = ? WHERE id = ?").run(input.batchId, id)
     if (input.priority === "high") this.db.prepare("UPDATE tasks SET priority = 'high' WHERE id = ?").run(id)
     if (input.stayOpenOnMerge) this.db.prepare("UPDATE tasks SET stay_open_on_merge = 1 WHERE id = ?").run(id)
+    if (input.reviewPrUrl) this.db.prepare("UPDATE tasks SET review_pr_url = ? WHERE id = ?").run(input.reviewPrUrl, id)
     if (input.subtask) {
       const { parentId, rootId, depth, withParent } = input.subtask
       this.db.prepare("UPDATE tasks SET parent_task_id = ?, root_task_id = ?, subtask_depth = ?, with_parent = ? WHERE id = ?").run(parentId, rootId, depth, withParent ? 1 : 0, id)

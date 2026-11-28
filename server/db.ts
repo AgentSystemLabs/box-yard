@@ -1341,6 +1341,14 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE tasks ADD COLUMN parked_at INTEGER;
   ALTER TABLE tasks ADD COLUMN park_resume INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- The pull request a task reviews (shared/reviewPr.ts), never its own PR (pr_url): review_pr_url its canonical URL,
+  -- review_pr_state its state as GitHub last said (NULL until asked), review_pr_head its head branch, which Box Yard
+  -- never pushes to or takes the task's own PR from.
+  ALTER TABLE tasks ADD COLUMN review_pr_url TEXT;
+  ALTER TABLE tasks ADD COLUMN review_pr_state TEXT;
+  ALTER TABLE tasks ADD COLUMN review_pr_head TEXT;
+  `,
 ]
 
 export function openDb(dataDir: string, file = "box-yard.sqlite"): DB {

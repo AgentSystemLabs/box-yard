@@ -54,6 +54,7 @@ import { isUploadTooBig, putFile, uploadSize } from "./upload.js"
 import { capReply, preview } from "./replies.js"
 import { MAX_REPORT_CHARS, REPORTING, isLiveSubtask, parseSpawn, pinsLabel, reportText, spawnProblem, subtaskPins, type SubtaskAsk, type SubtaskLimits, type SubtaskPins, type SubtaskReport, type SubtaskRunsOn, type SubtasksFile } from "./subtasks.js"
 import { AUTO_DONE_FROM, PrTracker, parsePrUrl, prNumber, restingStatus, type FoundPr, type PrChange } from "./prs.js"
+import { detectReviewedPr, parsePrRef, samePr } from "../shared/reviewPr.js"
 import { PrDetailsSource } from "./prDetails.js"
 import { PrCommentTracker } from "./prComments.js"
 import { GithubRest, IssueCloser, restPrState } from "./mergeFollowUp.js"
@@ -482,6 +483,11 @@ export interface NewTask {
   priority?: TaskPriority | null
   /** Never moved to done when its PR merges (a long-running runner); omitted: the settings decide. */
   stayOpenOnMerge?: boolean
+  /**
+   * The pull request it reviews (Task.reviewPrUrl): a PR URL, owner/repo#N, or #N for its project's repo. Omitted: read
+   * from its title and prompt (shared/reviewPr.ts); "" or null: none.
+   */
+  reviewsPr?: string | null
   /** A sub-task's place under the task that started it (spawn_subtasks, server/subtasks.ts). */
   subtask?: { parentId: string; rootId: string; depth: number; withParent: boolean } | null
 }
@@ -898,6 +904,7 @@ export class TaskManager {
       fetch: deps.github?.fetch,
       onChange: (change) => this.prChanged(change),
       onFound: (found) => this.prFound(found),
+      onReview: (taskId) => this.emitTask(taskId),
       autoDone: (row) => this.autoDoneOnMerge(row) && !this.mergeDoneBlocker(row),
       log: (msg) => console.warn(msg),
     })
@@ -1333,6 +1340,7 @@ export class TaskManager {
       const cli = this.agentCliFor(input, project)
       if (cli === "opencode" && input.model && !isOpenCodeModel(input.model)) throw new BadRequestError("OpenCode models use provider/model or provider/model#variant; run opencode models on the runner.")
       if (cli === "opencode" && input.effort) throw new BadRequestError("OpenCode uses provider-specific variants: omit effort and use provider/model#variant.")
+      this.reviewedPrOf(input, project)
       return project
     })
     const batchId = inputs.length > 1 ? `batch_${randomUUID().replace(/-/g, "").slice(0, 12)}` : null
@@ -1352,6 +1360,7 @@ export class TaskManager {
           machineLabel: input.runsOn === "ssh" ? (input.machineLabel ?? null) : null,
           gpu: input.runsOn === "gpu" && input.gpu ? this.gpuPickOf(input.gpu) : null,
           branch: projects[i]!.repo ? branchName({ title: input.title, prompt: input.prompt, occupied: this.taskBranches(projects[i]!.repo!) }) : null,
+          reviewPrUrl: this.reviewedPrOf(input, projects[i]!),
         })
         const inherited = environments[i]
         if (inherited) this.store.db.prepare("UPDATE tasks SET environment_type = ? WHERE id = ?").run(inherited, task.id)
@@ -1365,9 +1374,45 @@ export class TaskManager {
       }),
     )()
     for (const id of ids) this.emitTask(id)
+    // A review's PR: its state shows soon, in one request for the whole batch.
+    for (const id of ids) if (this.store.getTaskRow(id)?.review_pr_url) this.prs.refresh(id)
     this.publishDirectory()
     this.schedule()
     return ids.map((id) => this.store.getTask(id)!)
+  }
+
+  /**
+   * The canonical URL of the PR a new task reviews: the one it asked for (reviewsPr: a 400 when that isn't a PR), else
+   * the one its title and prompt name as the PR to review (shared/reviewPr.ts), else null.
+   */
+  private reviewedPrOf(input: Pick<NewTask, "title" | "prompt" | "reviewsPr">, project: Project): string | null {
+    const slug = githubSlug(project.repo)
+    if (input.reviewsPr === null || input.reviewsPr?.trim() === "") return null
+    if (input.reviewsPr !== undefined) {
+      const url = parsePrRef(input.reviewsPr, slug)
+      if (!url) throw new BadRequestError(`reviews_pr "${input.reviewsPr}" isn't a pull request: give its github.com URL, owner/repo#N${slug ? `, or #N for ${slug}` : ""}.`)
+      return url
+    }
+    return detectReviewedPr(input.title, input.prompt, slug)
+  }
+
+  /**
+   * Set or correct the PR a task reviews (set_reviewed_pr), or clear it (null or ""). It can't be the task's own PR.
+   * Its state shows after the next check (soon).
+   */
+  setReviewedPr(taskId: string, ref: string | null, by: string): Task {
+    const row = this.requireRow(taskId)
+    const project = this.store.getProject(row.project_id)
+    const slug = githubSlug(project?.repo ?? null)
+    const url = ref?.trim() ? parsePrRef(ref, slug) : null
+    if (ref?.trim() && !url) throw new BadRequestError(`"${ref}" isn't a pull request: give its github.com URL, owner/repo#N${slug ? `, or #N for ${slug}` : ""}.`)
+    if (url && samePr(url, row.pr_url)) throw new BadRequestError(`${url} is this task's own PR, so it can't also be the PR it reviews.`)
+    if ((row.review_pr_url ?? null) === url) return this.store.getTask(row.id)!
+    this.store.updateTask(row.id, { reviewPrUrl: url, reviewPrState: null, reviewPrHead: null }, { touch: false })
+    this.addEvent(row.id, url ? `Reviews pull request ${url} (set by ${by}); it isn't this task's own PR.` : `No longer marked as reviewing ${row.review_pr_url} (cleared by ${by}).`)
+    this.emitTask(row.id)
+    if (url) this.prs.refresh(row.id)
+    return this.store.getTask(row.id)!
   }
 
   /**
@@ -7006,6 +7051,8 @@ export class TaskManager {
       redis: this.redis ? { url: this.c.redisUrl, token: this.c.redisToken, key: redisEventsKey(row.id) } : null,
       // A sub-task's runner offers message_parent (server/subtasks.ts).
       parentTaskId: row.parent_task_id ?? null,
+      // The PR it reviews: create_pull_request never pushes to its branch or updates it (runner/box-runner.mjs).
+      reviewPr: row.review_pr_url ? { url: row.review_pr_url, head: row.review_pr_head ?? null } : null,
       // Its connectors: MCP servers naming each secret as ${VAR} (the runner adds them to mcp.json), and the values,
       // which reach only the `claude` process's env (docs/connectors.md › Sessions). Like env, gone with task.json.
       connectors: Object.keys(connectors.servers).length ? { servers: connectors.servers, env: connectors.env } : null,
@@ -7688,6 +7735,11 @@ export class TaskManager {
         const parsed = shell ? parsePrUrl(String(ev.url ?? "")) : null
         if (shell && !parsed) return
         const url = parsed ? `https://github.com/${parsed.owner}/${parsed.name}/pull/${parsed.number}` : String(ev.url ?? "")
+        // The PR this task reviews is never its own (a `gh pr create` on its checked-out branch prints it as "already exists").
+        if (samePr(url, row.review_pr_url)) {
+          say("event", `Didn't take ${url} as this task's own pull request: it's the PR this task reviews.`, { kind: "review_pr_refused", url })
+          return
+        }
         const first = row.pr_url !== url
         const headSha = typeof ev.headSha === "string" && /^[0-9a-f]{7,64}$/i.test(ev.headSha) ? ev.headSha : null
         const branch = String(ev.branch ?? row.branch ?? "") || row.branch
@@ -8888,7 +8940,8 @@ export class TaskManager {
       root: this.provider.root(boxId),
       work: `${this.taskDir(boxId, row.id)}/work`,
       taskId: row.id,
-      branch: row.branch,
+      // Never the head branch of the PR it reviews: that's someone else's PR (the WIP ref still carries the work).
+      branch: row.branch && row.branch === row.review_pr_head ? null : row.branch,
       baseBranch: project.baseBranch,
       lastWip: last,
       packMaxBytes: o.packMaxBytes,

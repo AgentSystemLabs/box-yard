@@ -219,6 +219,11 @@ const iconSchema = z
 /** When a task's turns are pulled from the queue (shared/priority.ts); TASK_OPTIONS explains it. */
 const prioritySchema = z.enum(TASK_PRIORITIES).optional()
 /** A task that stays open when its PR merges (TaskManager.autoDoneOnMerge). */
+const reviewsPrBase = z
+  .string()
+  .max(300)
+  .optional()
+  .describe('The PR this task reviews (a URL, owner/repo#N, or #N): shown beside the task, never treated as its own PR. Omitted: read from the title and prompt; "": none.')
 const stayOpenSchema = z
   .boolean()
   .optional()
@@ -554,6 +559,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     pr: t.prUrl ?? undefined,
     prState: t.prUrl ? (t.prState ?? undefined) : undefined,
     ...prFreshness(t),
+    reviewsPr: t.reviewPrUrl ?? undefined,
+    reviewsPrState: t.reviewPrUrl ? (t.reviewPrState ?? undefined) : undefined,
     mergeRequested: t.mergeRequest
       ? t.mergeRequest.requestedBy
         ? `The ${t.mergeRequest.requestedBy} asked for a merge of #${t.mergeRequest.prNumber} (${t.mergeRequest.deliveredAt ? "the agent is on it" : "queued behind its current turn"}); don't start another merge of this PR`
@@ -1343,7 +1350,8 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     {
       description:
         "Start a NEW agent (a fresh session) on new, independent work in a project, in its own folder on the project's box (repo cloned). For follow-ups on work an agent already did, use send_to_task so it keeps its context. " +
-        "Write a self-contained prompt, and pass files it needs (a screenshot, a spec) in attachments. Two or more tasks at once: create_tasks.",
+        "Write a self-contained prompt, and pass files it needs (a screenshot, a spec) in attachments. Two or more tasks at once: create_tasks. " +
+        "A PR review task: pass reviews_pr (the PR it reviews), so it shows beside the task and is never taken for the task's own PR.",
       inputSchema: {
         project: z.string().describe("Project id or name"),
         title: z.string().min(1).max(120),
@@ -1357,10 +1365,11 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         icon: iconSchema,
         priority: prioritySchema.describe('"high" or "normal" (the default): Task options'),
         stay_open_on_merge: stayOpenSchema,
+        reviews_pr: reviewsPrBase,
         ...routeParams,
       },
     },
-    safe(async (a: { project: string; title: string; prompt: string; env?: Record<string, string>; related_tasks?: string[]; attachments?: string[]; runs_on?: RunsOn; machine_label?: string; agent?: AgentCli; icon?: TaskIconName; priority?: TaskPriority; stay_open_on_merge?: boolean; model?: string; effort?: Effort; routing_rule?: string; routing_reason?: string }) => {
+    safe(async (a: { project: string; title: string; prompt: string; env?: Record<string, string>; related_tasks?: string[]; attachments?: string[]; runs_on?: RunsOn; machine_label?: string; agent?: AgentCli; icon?: TaskIconName; priority?: TaskPriority; stay_open_on_merge?: boolean; reviews_pr?: string; model?: string; effort?: Effort; routing_rule?: string; routing_reason?: string }) => {
       const projectId = project(a.project).id
       const prompt = a.related_tasks?.length ? `${a.prompt}\n\n${relatedWork(a.related_tasks, projectId)}` : a.prompt
       const pin = picked(a.runs_on, a.machine_label)
@@ -1386,6 +1395,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
         icon: a.icon ?? null,
         priority: a.priority ?? null,
         stayOpenOnMerge: a.stay_open_on_merge,
+        reviewsPr: a.reviews_pr,
       })
       const own = overrides(projectId, {
         ...(turnPick() ? {} : { runsOn: askedRunsOn(a.runs_on, a.machine_label), runner: where.runner, machineLabel: where.machineLabel }),
@@ -1406,6 +1416,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     agent: agentBase,
     icon: iconSchema,
     priority: prioritySchema,
+    reviews_pr: reviewsPrBase,
     model: modelBase,
     effort: effortBase,
     routing_rule: routingRuleBase,
@@ -1418,7 +1429,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
     {
       description:
         `Start 1 to ${MAX_TASK_BATCH} new agents in one project in one call (fan-out), each like create_task. Use it whenever you start two or more tasks at once: every create_task call costs a whole step, while this queues them all and Box Yard makes their boxes in parallel. ` +
-        "Write what they share once, in common_prompt. The top-level options apply to every task: an item's own attachments, related_tasks and env are added to them, and its own runs_on, agent, priority, model, effort and routing_* win (an item's runs_on or machine_label replaces the shared pair). " +
+        "Write what they share once, in common_prompt. A PR review item: give it reviews_pr. The top-level options apply to every task: an item's own attachments, related_tasks and env are added to them, and its own runs_on, agent, priority, model, effort and routing_* win (an item's runs_on or machine_label replaces the shared pair). " +
         "All or nothing: every item is checked first (scope, non-empty title and prompt, unique titles, attachment and task ids, runners). On any problem NO task is created and the error lists each by item number (#1 first): fix them and send the whole list again. " +
         "Returns the new ids in order.",
       inputSchema: {
@@ -1542,6 +1553,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
             agentCli: cli.agent ?? null,
             icon: item.icon ?? null,
             priority: item.priority ?? a.priority ?? null,
+            reviewsPr: item.reviews_pr,
           }
         })
         const created = tasks.createTasks(inputs)
@@ -1566,6 +1578,7 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
               status: t.status,
               agent: t.agentCli,
               ...(t.priority === "high" ? { priority: t.priority } : {}),
+              ...(t.reviewPrUrl ? { reviewsPr: t.reviewPrUrl } : {}),
               ...overrides(p.id, {
                 ...(pick ? {} : { runsOn: asked, runner: places[i]!.runner, machineLabel: places[i]!.machineLabel }),
                 ...(agentPick ? {} : { agent: item.agent ?? a.agent, model: item.model ?? a.model }),
@@ -1797,6 +1810,16 @@ export function buildMcpServer(deps: McpDeps, caller: McpCaller = { kind: "coord
       inputSchema: { task: z.string(), stay_open_on_merge: stayOpenSchema.unwrap() },
     },
     safe(async (a: { task: string; stay_open_on_merge: boolean }) => ok(brief(tasks.setStayOpenOnMerge(task(a.task).id, a.stay_open_on_merge, prioritySetter)))),
+  )
+
+  server.registerTool(
+    "set_reviewed_pr",
+    {
+      description:
+        "Set or correct the PR a task reviews (shown beside it, never treated as its own PR), or clear it with \"\".",
+      inputSchema: { task: z.string(), pr: z.string().max(300).describe('A PR URL, owner/repo#N, #N for the project\'s repo, or "" to clear') },
+    },
+    safe(async (a: { task: string; pr: string }) => ok(brief(tasks.setReviewedPr(task(a.task).id, a.pr, prioritySetter)))),
   )
 
   server.registerTool(

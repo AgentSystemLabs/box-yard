@@ -224,6 +224,13 @@ export interface Task {
    * Null or absent: GitHub hasn't been asked yet, or Settings › New PR comments is off.
    */
   prNewComments?: number | null
+  /**
+   * The pull request this task reviews (shared/reviewPr.ts), from its create call or its title and prompt. It is never
+   * the task's own PR: no Merge PR, hooks, pr_ready or Done-on-merge, and Box Yard never pushes to it. Null: none.
+   */
+  reviewPrUrl?: string | null
+  /** Its state on GitHub (the PR poll); null until asked, or when there's none. */
+  reviewPrState?: PrState | null
   previews: PreviewLink[]
   question: string | null
   /**

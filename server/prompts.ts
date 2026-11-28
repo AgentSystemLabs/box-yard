@@ -19,7 +19,7 @@ export interface DirectoryEntry {
 /** Appended to the agent's system prompt on every worker turn (Claude Code's, or Codex's developer instructions). */
 export function workerSystemPrompt(input: {
   project: Project
-  task: Pick<Task, "id" | "title">
+  task: Pick<Task, "id" | "title"> & { review_pr_url?: string | null }
   branch: string | null
   port: number
   /** Settings.ownerName; "the owner" when unset. */
@@ -98,6 +98,9 @@ export function workerSystemPrompt(input: {
       own(`If Cody gives feedback later, push more commits to the same branch and call create_pull_request again to update it.`),
       `Never push to ${project.baseBranch} directly and never force-push.`,
       `Never claim a pull request's status (open, waiting for review, merged) from memory. When you resume, Box Yard ends your message with a "Pull request status" line read from GitHub as the turn started; without it, check with \`gh pr view <number> --json state,mergedAt,headRefOid\`. If the PR is merged, never say it's waiting for review, and never push to its branch again: base any new work on ${project.baseBranch} (a new branch and a new PR).`,
+      task.review_pr_url
+        ? `This task reviews pull request ${task.review_pr_url}. It isn't your PR: never push to its branch, never call create_pull_request while it's checked out, and never merge it. To try a fix of your own, put it on a new branch.`
+        : ``,
       input.pushAtTurnEnd
         ? `Box Yard pushes your branch, and any uncommitted work to a hidden ref, at the end of every turn. So add new commits rather than amending or rebasing ones from earlier turns.`
         : ``,

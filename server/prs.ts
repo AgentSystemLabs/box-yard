@@ -1,6 +1,7 @@
 import { githubSlug, type Store, type TaskRow } from "./store.js"
 import type { PrState, PushState, TaskStatus } from "../shared/types.js"
 import { errorMessage } from "./util/retry.js"
+import { samePr } from "../shared/reviewPr.js"
 
 /**
  * Live pull request state. Every task with a PR that isn't merged or closed yet, in any status, is polled
@@ -23,6 +24,10 @@ import { errorMessage } from "./util/retry.js"
  * branch on GitHub: their own task when a turn ends, and every PR_DISCOVER_MS the ones active in the last
  * PR_DISCOVER_MAX_AGE_MS. That is one more batched query per token (PR_BATCH branches each, about 1 point), sharing
  * the same token health, so a paused or backing-off token isn't asked.
+ *
+ * Reviewed PRs (Task.reviewPrUrl, shared/reviewPr.ts): the PR a review task reviews is asked about in the same batched
+ * queries, for its state and head branch only. It never moves the task's status and never reaches onChange (hooks,
+ * Done when its PR merges); a lookup by branch never takes it, or any PR on its head branch, as the task's own.
  */
 
 export const PR_POLL_MS = 60_000
@@ -53,6 +58,8 @@ export interface PrInfo {
   /** The head commit and label names, for hooks (left as they were when GitHub didn't say). */
   headSha?: string | null
   labels?: string[]
+  /** The head branch's name, when GitHub said (a reviewed PR's is kept, so Box Yard never pushes there). */
+  headRef?: string | null
 }
 
 export interface PrChange {
@@ -90,9 +97,13 @@ function pushedBranch(row: Pick<TaskRow, "push_state_json">): string | null {
   }
 }
 
-/** The branches a PR-less task may have a PR on: the one its workspace was on at its last turn end, and its own. */
-export function taskBranches(row: Pick<TaskRow, "branch" | "push_state_json">, baseBranch: string): string[] {
-  return [...new Set([pushedBranch(row), row.branch])].filter((b): b is string => Boolean(b) && b !== baseBranch && b !== "HEAD")
+/**
+ * The branches a PR-less task may have a PR on: the one its workspace was on at its last turn end, and its own. Never
+ * the head branch of the PR it reviews: a reviewer that checked that branch out doesn't own its PR.
+ */
+export function taskBranches(row: Pick<TaskRow, "branch" | "push_state_json" | "review_pr_head">, baseBranch: string): string[] {
+  const reviewed = row.review_pr_head || null
+  return [...new Set([pushedBranch(row), row.branch])].filter((b): b is string => Boolean(b) && b !== baseBranch && b !== "HEAD" && b !== reviewed)
 }
 
 /**
@@ -158,6 +169,8 @@ export interface PrTrackerDeps {
   onChange?: (change: PrChange) => void
   /** A lookup by branch found a PR for a task that had none, and saved it on the task (its state follows, as a change). */
   onFound?: (found: FoundPr) => void
+  /** The PR a task reviews changed state (or GitHub first said its head branch); saved already. Nothing else follows. */
+  onReview?: (taskId: string) => void
   /** How often the poll also looks up PRs by branch (discover); default PR_DISCOVER_MS. */
   discoverMs?: number
   /**
@@ -263,6 +276,7 @@ interface PrAnswer {
 }
 
 interface GqlPr {
+  headRefName?: string
   state?: "OPEN" | "CLOSED" | "MERGED"
   isDraft?: boolean
   mergedAt?: string | null
@@ -286,6 +300,17 @@ interface GqlBranchRepo {
   parent?: { pullRequests?: { nodes?: (GqlBranchPr | null)[] | null } | null } | null
 }
 
+/** One PR to ask GitHub about: a task's own (key: its id) or the one it reviews (key: reviewKey). */
+interface PrAsk {
+  key: string
+  row: TaskRow
+  url: string
+  save: (info: PrInfo) => void
+}
+
+/** The key of a task's reviewed PR in PrTracker's checks, apart from its own PR's (the task's id). */
+const reviewKey = (taskId: string) => `review:${taskId}`
+
 /** One branch of one repo to look up, and the tasks that may have their PR on it. */
 interface BranchLookup {
   owner: string
@@ -306,6 +331,7 @@ const toInfo = (pr: GqlPr): PrInfo | null => {
     mergedBy: pr.mergedBy?.login ?? null,
     ...(typeof pr.headRefOid === "string" ? { headSha: pr.headRefOid } : {}),
     ...(labels ? { labels } : {}),
+    ...(typeof pr.headRefName === "string" && pr.headRefName ? { headRef: pr.headRefName } : {}),
   }
 }
 
@@ -425,9 +451,30 @@ export class PrTracker {
     clearTimeout(timer)
   }
 
-  /** One round over every PR that may still change. Merged and closed PRs are never asked about again. */
+  /**
+   * One round over every PR that may still change, tasks' own and the ones they review, in the same batches. Merged
+   * and closed PRs are never asked about again.
+   */
   pollAll(): Promise<void> {
-    return this.exclusive(() => this.poll(this.store.listOpenPrRows(), true))
+    return this.exclusive(() => this.ask([...this.ownAsks(this.store.listOpenPrRows()), ...this.reviewAsks(this.reviewRows())], true))
+  }
+
+  /** Reviews whose PR may still change: of tasks not done, or active within PR_DISCOVER_MAX_AGE_MS. */
+  private reviewRows(ids?: string[]): TaskRow[] {
+    return this.store.listOpenReviewPrRows({ ids, since: this.now() - PR_DISCOVER_MAX_AGE_MS })
+  }
+
+  private ownAsks(rows: TaskRow[]): PrAsk[] {
+    return rows.map((row) => ({ key: row.id, row, url: row.pr_url ?? "", save: (info) => this.apply(row.id, row.pr_url!, info) }))
+  }
+
+  private reviewAsks(rows: TaskRow[]): PrAsk[] {
+    return rows.map((row) => ({ key: reviewKey(row.id), row, url: row.review_pr_url ?? "", save: (info) => this.applyReview(row.id, row.review_pr_url!, info) }))
+  }
+
+  /** What Box Yard knows about how current the state of the PR a task reviews is. */
+  reviewCheck(taskId: string): PrCheck {
+    return this.checks.get(reviewKey(taskId)) ?? { checkedAt: null, error: null }
   }
 
   /**
@@ -450,7 +497,10 @@ export class PrTracker {
     clearTimeout(timer)
   }
 
-  /** Check a task's PR shortly (an agent just opened or pushed to it). Calls within the delay share one request. */
+  /**
+   * Check a task's PR, and the one it reviews, shortly (an agent just opened or pushed to it; a review task was just
+   * created). Calls within the delay share one request.
+   */
   refresh(taskId: string, delayMs = 2_000) {
     if (this.stopped) return
     this.soon.add(taskId)
@@ -459,7 +509,7 @@ export class PrTracker {
       this.soonTimer = null
       const ids = [...this.soon]
       this.soon.clear()
-      void this.exclusive(() => this.poll(this.store.listOpenPrRows(ids), false))
+      void this.exclusive(() => this.ask([...this.ownAsks(this.store.listOpenPrRows(ids)), ...this.reviewAsks(this.reviewRows(ids))], false))
     }, delayMs)
     this.soonTimer.unref?.()
   }
@@ -521,57 +571,62 @@ export class PrTracker {
    * A try about a task's PR got no answer: keep the last known state and say why. `log`: for an answer about this PR
    * alone (a token that can't see its repo), once per reason; a whole request that failed is logged per token instead.
    */
-  private missed(row: TaskRow, error: string, log = false) {
-    const prev = this.checks.get(row.id)
-    this.checks.set(row.id, { checkedAt: prev?.checkedAt ?? null, error })
-    if (!log || this.logged.get(row.id) === error) return
-    this.logged.set(row.id, error)
-    this.deps.log?.(`[box-yard] Can't check PR ${row.pr_url} (task ${row.id}): ${error}`)
+  private missed(item: Pick<PrAsk, "key" | "row" | "url">, error: string, log = false) {
+    const prev = this.checks.get(item.key)
+    this.checks.set(item.key, { checkedAt: prev?.checkedAt ?? null, error })
+    if (!log || this.logged.get(item.key) === error) return
+    this.logged.set(item.key, error)
+    this.deps.log?.(`[box-yard] Can't check PR ${item.url} (task ${item.row.id}${item.key === item.row.id ? "" : ", which reviews it"}): ${error}`)
+  }
+
+  /** Ask about these tasks' own PRs (see ask). */
+  private poll(rows: TaskRow[], scheduled: boolean) {
+    return this.ask(this.ownAsks(rows), scheduled)
   }
 
   /**
    * Ask about these rows, one batched query per token. A scheduled round skips a token that is backing off after
    * errors; any round skips one that is rate limited. Either way the other tokens are still asked.
    */
-  private async poll(rows: TaskRow[], scheduled: boolean) {
-    if (this.stopped || !rows.length) return
-    const byToken = new Map<string, TaskRow[]>()
-    for (const row of rows) {
-      if (!parsePrUrl(row.pr_url)) {
-        this.missed(row, "not a github.com pull request URL", true)
+  private async ask(items: PrAsk[], scheduled: boolean) {
+    if (this.stopped || !items.length) return
+    const byToken = new Map<string, PrAsk[]>()
+    for (const item of items) {
+      if (!parsePrUrl(item.url)) {
+        this.missed(item, "not a github.com pull request URL", true)
         continue
       }
-      const token = this.deps.token(row.project_id)
+      const token = this.deps.token(item.row.project_id)
       if (!token) {
-        this.missed(row, "no GitHub token for this project")
+        this.missed(item, "no GitHub token for this project")
         continue
       }
-      byToken.set(token, [...(byToken.get(token) ?? []), row])
+      byToken.set(token, [...(byToken.get(token) ?? []), item])
     }
     for (const [token, list] of byToken) {
       const h = this.tokenHealth(token)
       if (this.now() < h.pausedUntil) {
-        for (const row of list) this.missed(row, `GitHub rate limit; paused until ${new Date(h.pausedUntil).toISOString()}`)
+        for (const item of list) this.missed(item, `GitHub rate limit; paused until ${new Date(h.pausedUntil).toISOString()}`)
         continue
       }
       if (scheduled && this.now() < h.retryAt) continue
       for (let i = 0; i < list.length; i += PR_BATCH) {
         const batch = list.slice(i, i + PR_BATCH)
         try {
-          const answers = await this.query(token, h, batch)
-          batch.forEach((row, j) => {
+          const answers = await this.query(token, h, batch.map((item) => item.url))
+          batch.forEach((item, j) => {
             const { info, error } = answers[j] ?? { info: null, error: null }
-            if (!info) return this.missed(row, error ?? "GitHub returned no pull request", true)
-            this.checks.set(row.id, { checkedAt: this.now(), error: null })
-            this.logged.delete(row.id)
-            this.apply(row.id, row.pr_url!, info)
+            if (!info) return this.missed(item, error ?? "GitHub returned no pull request", true)
+            this.checks.set(item.key, { checkedAt: this.now(), error: null })
+            this.logged.delete(item.key)
+            item.save(info)
           })
           this.worked(h)
         } catch (err) {
-          for (const row of batch) this.missed(row, errorMessage(err))
+          for (const item of batch) this.missed(item, errorMessage(err))
           this.failed(h, err)
           // This token's other batches wait for its next try; other tokens go on.
-          for (const row of list.slice(i + PR_BATCH)) this.missed(row, errorMessage(err))
+          for (const item of list.slice(i + PR_BATCH)) this.missed(item, errorMessage(err))
           break
         }
       }
@@ -646,7 +701,8 @@ export class PrTracker {
           }
         })
         for (const { row, prs } of byRow.values()) {
-          const pr = pickBranchPr(row, prs)
+          // The PR it reviews is never its own, even on a branch it checked out.
+          const pr = pickBranchPr(row, prs.filter((p) => !samePr(p.url, row.review_pr_url)))
           if (pr && this.found(row.id, pr)) found++
         }
       }
@@ -693,7 +749,7 @@ fragment pr on PullRequest { url state isDraft createdAt mergedAt mergedBy { log
    */
   private found(taskId: string, pr: BranchPr): boolean {
     const row = this.store.getTaskRow(taskId)
-    if (!row || row.pr_url || row.status === "done") return false
+    if (!row || row.pr_url || row.status === "done" || samePr(pr.url, row.review_pr_url)) return false
     const ready = !row.current_turn_id && row.status === "idle"
     this.store.updateTask(
       row.id,
@@ -707,18 +763,18 @@ fragment pr on PullRequest { url state isDraft createdAt mergedAt mergedBy { log
   }
 
   /** One GraphQL request for a batch of PRs; entry i is PR i's state, or why GitHub didn't return it. */
-  private async query(token: string, h: TokenHealth, rows: TaskRow[]): Promise<PrAnswer[]> {
+  private async query(token: string, h: TokenHealth, urls: string[]): Promise<PrAnswer[]> {
     const variables: Record<string, string | number> = {}
     const defs: string[] = []
     const fields: string[] = []
-    rows.forEach((row, i) => {
-      const pr = parsePrUrl(row.pr_url)!
+    urls.forEach((url, i) => {
+      const pr = parsePrUrl(url)!
       Object.assign(variables, { [`o${i}`]: pr.owner, [`n${i}`]: pr.name, [`p${i}`]: pr.number })
       defs.push(`$o${i}: String!, $n${i}: String!, $p${i}: Int!`)
       fields.push(`p${i}: repository(owner: $o${i}, name: $n${i}) { pullRequest(number: $p${i}) { ...pr } }`)
     })
     const query = `query(${defs.join(", ")}) { rateLimit { remaining resetAt } ${fields.join(" ")} }
-fragment pr on PullRequest { state isDraft mergedAt mergedBy { login } headRefOid labels(first: 30) { nodes { name } } }`
+fragment pr on PullRequest { state isDraft mergedAt mergedBy { login } headRefName headRefOid labels(first: 30) { nodes { name } } }`
 
     this.requests++
     const { data, errors, rate } = await githubGraphql<Record<string, { pullRequest?: GqlPr | null } | null>>(this.fetch, token, query, variables, this.now)
@@ -726,7 +782,7 @@ fragment pr on PullRequest { state isDraft mergedAt mergedBy { login } headRefOi
     if (rate.remaining !== null && rate.remaining < RATE_FLOOR && rate.resetAt !== null) h.pausedUntil = rate.resetAt
     // A missing repo or PR (or one the token can't see: GitHub says NOT_FOUND for those too) comes back as null next
     // to an error for that field; the others still count.
-    return rows.map((_, i) => {
+    return urls.map((_, i) => {
       const pr = data[`p${i}`]?.pullRequest
       const info = pr ? toInfo(pr) : null
       if (info) return { info, error: null }
@@ -768,5 +824,18 @@ fragment pr on PullRequest { state isDraft mergedAt mergedBy { login } headRefOi
       this.store.addNotification(task, `PR #${prNumber(prUrl) ?? "?"} merged${info.mergedBy ? ` by ${info.mergedBy}` : ""}`)
     }
     this.deps.onChange?.({ taskId: row.id, prev: row.pr_state, info, status })
+  }
+
+  /**
+   * Save the state (and head branch) of the PR a task reviews. Only that: it never moves the task's status, notifies,
+   * or reaches onChange (hooks, Done when its PR merges), since it isn't the task's PR.
+   */
+  applyReview(taskId: string, prUrl: string, info: PrInfo) {
+    const row = this.store.getTaskRow(taskId)
+    if (!row || row.review_pr_url !== prUrl) return // it was set to another PR meanwhile
+    const head = info.headRef ?? row.review_pr_head ?? null
+    if (row.review_pr_state === info.state && (row.review_pr_head ?? null) === head) return
+    this.store.updateTask(row.id, { reviewPrState: info.state, reviewPrHead: head }, { quiet: true, touch: false })
+    this.deps.onReview?.(row.id)
   }
 }
